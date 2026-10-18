@@ -15035,7 +15035,7 @@ function qbMissingScopeColumns() {
   if (!has(['grade_id','grade'])) missing.push('grade');
   return missing;
 }
-// The type / difficulty / chapter / search filters stay locked until board, subject and grade are all chosen.
+// No questions are listed, and the type / difficulty / chapter / search filters stay locked, until board, subject and grade are all chosen.
 // If the table has no such columns yet, don't lock them (that would leave the bank unfilterable).
 function qbScopeChosen() {
   return !!(qbFilterBoard && qbFilterSubject && qbFilterGrade) || qbMissingScopeColumns().length > 0;
@@ -15052,7 +15052,7 @@ function qbClearDetailFilters() { qbFilterType=''; qbFilterDifficulty=''; qbFilt
 
 function qbFilteredQuestions(approved) {
   let qs = qbScopeQuestions(approved);
-  if (!qbScopeChosen()) return qs;
+  if (!qbScopeChosen()) return [];
   if (qbFilterType) qs = qs.filter(q => q.question_type === qbFilterType);
   if (qbFilterDifficulty) qs = qs.filter(q => q.difficulty === qbFilterDifficulty);
   if (qbFilterChapter) qs = qs.filter(q => q.chapter_id === qbFilterChapter);
@@ -15212,6 +15212,7 @@ function qbQuestionRowHtml(q, isAdmin) {
 }
 
 function qbTableHtml(qs, isAdmin) {
+  if (!qbScopeChosen()) return '<div class="empty">Choose Board, Subject and Grade to see questions.</div>';
   if (!qs.length) return '<div class="empty">No questions match these filters.</div>';
   return `${QB_CARD_CSS}<div class="qb-list">${qs.map(q => qbQuestionRowHtml(q, isAdmin)).join('')}</div>`;
 }
@@ -15256,7 +15257,7 @@ function renderAdminQuestionBank() {
       : `<p class="hint" style="margin-bottom:12px">Approved questions available for building practice papers.</p>`
     }
     ${qbFiltersHtml(true)}
-    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">${viewQs.length} question${viewQs.length===1?'':'s'}</div>
+    ${qbScopeChosen() ? `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">${viewQs.length} question${viewQs.length===1?'':'s'}</div>` : ''}
     ${qbTableHtml(viewQs, true)}
   </div>`;
 }
@@ -15300,7 +15301,7 @@ function renderTeacherQuestionBank(teacher) {
       : `<p class="hint" style="margin-bottom:12px">Your complete approved question bank — use this to build practice papers.</p>`
     }
     ${qbFiltersHtml(false)}
-    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">${viewQs.length} question${viewQs.length===1?'':'s'}</div>
+    ${qbScopeChosen() ? `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">${viewQs.length} question${viewQs.length===1?'':'s'}</div>` : ''}
     ${qbTableHtml(viewQs, false)}
   </div>`;
 }
