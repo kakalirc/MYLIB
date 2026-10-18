@@ -2996,10 +2996,11 @@ async function loadQBQuestions() {
   render();
   try {
     // Load chapters for filter dropdowns
-    // select('*') so any board / subject / grade link columns on chapters come through for the filters
-    const { data: chaps, error: chapErr } = await sb.from('qb_chapters').select('*').order('sort_order');
+    // select('*') so any board / subject / grade link columns on chapters come through for the filters.
+    // qb_chapters has no sort_order column, so sort by title here instead of in the query.
+    const { data: chaps, error: chapErr } = await sb.from('qb_chapters').select('*');
     if (chapErr) { qbMsg = 'Chapter load error: ' + chapErr.message; }
-    else if (chaps) qbChapters = chaps;
+    else if (chaps) qbChapters = chaps.sort((a,b) => String(a.title||'').localeCompare(String(b.title||''), undefined, { numeric:true }));
     // Load questions (no FK join — avoids PostgREST FK lookup issues)
     const { data: rows, error } = await sb
       .from('qb_questions')
@@ -14996,7 +14997,7 @@ function qbLinkedVal(q, keys) {
 function qbNameFrom(list, v) { const r = list.find(x => x.id === v.val); return r ? r.name : (/_id$/.test(v.key) ? '' : String(v.val).trim()); }
 function qbBoardOf(q) { const v = qbLinkedVal(q, ['board_id','board']); return v ? qbNameFrom(boards, v) : ''; }
 function qbSubjectOf(q) {
-  const v = qbLinkedVal(q, ['subject_name_id','subject_id','subject']);
+  const v = qbLinkedVal(q, ['subject_name','subject_name_id','subject_id','subject']);
   if (!v) return '';
   return qbNameFrom(subjectNames, v) || qbNameFrom(data.subjects || [], v);
 }
@@ -15007,7 +15008,7 @@ function qbMissingScopeColumns() {
   const has = keys => [...qbQuestions, ...qbChapters].some(r => keys.some(k => k in r));
   const missing = [];
   if (!has(['board_id','board'])) missing.push('board');
-  if (!has(['subject_name_id','subject_id','subject'])) missing.push('subject');
+  if (!has(['subject_name','subject_name_id','subject_id','subject'])) missing.push('subject');
   if (!has(['grade_id','grade'])) missing.push('grade');
   return missing;
 }
