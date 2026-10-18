@@ -900,7 +900,7 @@ let qbPicker = null;            // { section, pqId|null, search } while swapping
 let qbAssignOpen = false;
 let qbAssignIds = new Set();    // students ticked in the assign panel
 let qbAssignUntil = '';         // due date (yyyy-mm-dd) for new assignments
-let qbAssignAllGrades = false;  // also list the teacher's students in other grades
+let qbAssignAllGrades = false;  // also list the teacher's students who don't match the paper's board / grade / subject
 
 let teacherAttendanceViewMonth = monthStr;
 let teacherAttendanceViewMode = 'day'; // 'day' | 'month' - which scope the attendance list below the form uses
@@ -15706,20 +15706,39 @@ function qbPickerHtml(p, sec) {
   </div>`;
 }
 
+// Why a student doesn't fit a paper: different board or grade, or not enrolled with this teacher in the paper's subject.
+// A board or grade missing on either side isn't counted as a mismatch.
+function qbAssignMismatch(p, s) {
+  const why = [];
+  if (p.board_id && s.boardId && s.boardId !== p.board_id) why.push(`${qbByName(boards, s.boardId) || 'other'} board`);
+  if (p.grade_id && s.gradeId !== p.grade_id) why.push(qbByName(grades, s.gradeId) || 'no grade set');
+  if (p.subject_name) {
+    const subjIds = new Set(data.subjects.filter(x => x.teacherId === currentLinkedId && qbSameSubject(x.name, p.subject_name)).map(x => x.id));
+    if (!data.studentSubjects.some(m => m.studentId === s.id && subjIds.has(m.subjectId))) why.push(`not in your ${p.subject_name} class`);
+  }
+  return why;
+}
+
 function qbAssignHtml(p) {
   const assigned = new Map(qbPaperAssignments.map(a => [a.student_id, a]));
-  const mine = studentsForTeacher(currentLinkedId).filter(s => !s.archived);
-  const students = mine.filter(s => qbAssignAllGrades || !p.grade_id || s.gradeId === p.grade_id).sort((a, b) => a.name.localeCompare(b.name));
-  const list = students.map(s => {
+  const mine = studentsForTeacher(currentLinkedId).filter(s => !s.archived)
+    .map(s => ({ s, why: qbAssignMismatch(p, s) }))
+    .sort((a, b) => a.s.name.localeCompare(b.s.name));
+  const matching = mine.filter(x => !x.why.length);
+  const others = mine.filter(x => x.why.length);
+  const row = ({ s, why }) => {
     const a = assigned.get(s.id);
+    const note = [why.length ? '⚠ ' + why.join(', ') : qbByName(grades, s.gradeId), a ? 'already assigned' : ''].filter(Boolean).join(' · ');
     return `<label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:13px">
       <input type="checkbox" ${a ? 'checked disabled' : (qbAssignIds.has(s.id) ? 'checked' : '')} onchange="qbToggleAssignStudent('${s.id}',this.checked)">
-      ${esc(s.name)} <span style="color:var(--muted);font-size:11px">${esc(qbByName(grades, s.gradeId))}${a ? ' · already assigned' : ''}</span></label>`;
-  }).join('');
+      ${esc(s.name)} <span style="color:${why.length ? 'var(--brick)' : 'var(--muted)'};font-size:11px">${esc(note)}</span></label>`;
+  };
+  const scope = [p.subject_name, qbByName(grades, p.grade_id), qbByName(boards, p.board_id)].filter(Boolean).join(' · ');
   return `<div class="qb-block" style="white-space:normal;border:1px solid var(--gold)">
-    <div class="qb-block-label">Assign to students</div>
-    ${list || `<div class="hint">None of your students are in ${esc(qbByName(grades, p.grade_id) || 'this grade')}.</div>`}
-    <label style="display:block;font-size:12px;margin:6px 0"><input type="checkbox" ${qbAssignAllGrades ? 'checked' : ''} onchange="qbAssignAllGrades=this.checked;render()"> Show my students in other grades</label>
+    <div class="qb-block-label">Assign to students${scope ? ' — ' + esc(scope) : ''}</div>
+    ${matching.map(row).join('') || `<div class="hint">None of your students match ${esc(scope || 'this paper')}.</div>`}
+    ${others.length ? `<label style="display:block;font-size:12px;margin:6px 0"><input type="checkbox" ${qbAssignAllGrades ? 'checked' : ''} onchange="qbAssignAllGrades=this.checked;render()"> Show my ${others.length} other student${others.length === 1 ? '' : 's'} (different board, grade or subject)</label>
+      ${qbAssignAllGrades ? others.map(row).join('') : ''}` : ''}
     <div class="row-form" style="gap:8px;align-items:center;flex-wrap:wrap">
       <label style="font-size:12px">Due date</label><input type="date" value="${escAttr(qbAssignUntil)}" onchange="qbAssignUntil=this.value">
       <button class="btn-primary" onclick="qbAssignPaper()" ${qbPaperSaving || !qbAssignIds.size ? 'disabled' : ''}>Assign${qbAssignIds.size ? ' to ' + qbAssignIds.size : ''}</button>
