@@ -2996,7 +2996,8 @@ async function loadQBQuestions() {
   render();
   try {
     // Load chapters for filter dropdowns
-    const { data: chaps, error: chapErr } = await sb.from('qb_chapters').select('id, title, chapter_type').order('sort_order');
+    // select('*') so any board / subject / grade link columns on chapters come through for the filters
+    const { data: chaps, error: chapErr } = await sb.from('qb_chapters').select('*').order('sort_order');
     if (chapErr) { qbMsg = 'Chapter load error: ' + chapErr.message; }
     else if (chaps) qbChapters = chaps;
     // Load questions (no FK join — avoids PostgREST FK lookup issues)
@@ -14985,27 +14986,29 @@ const QB_TYPES = ['mcq','very_short','short','long','grammar_fill','grammar_tran
 const QB_TYPE_LABELS = { mcq:'MCQ', very_short:'Very Short', short:'Short', long:'Long', grammar_fill:'Grammar (Fill)', grammar_transform:'Grammar (Transform)', unseen_passage:'Unseen Passage', writing:'Writing', translation:'Translation', extract_based:'Extract Based' };
 const QB_DIFF_COLORS = { easy:'var(--forest)', medium:'var(--gold)', hard:'var(--brick)' };
 
-// Board / subject / grade are read straight off each qb_questions row. Subject and grade
-// may be stored as text or as an id into subjects / grades — both are shown by name.
-function qbBoardOf(q) { return String(q.board || '').trim(); }
+// Board / subject / grade live in the linked lookup tables (boards, subject_names, grades).
+// The link ids are read from the question row, falling back to its qb_chapters row.
+function qbLinkedVal(q, keys) {
+  const ch = qbChapters.find(c => c.id === q.chapter_id) || {};
+  for (const src of [q, ch]) for (const k of keys) if (src[k] != null && src[k] !== '') return { key: k, val: src[k] };
+  return null;
+}
+function qbNameFrom(list, v) { const r = list.find(x => x.id === v.val); return r ? r.name : (/_id$/.test(v.key) ? '' : String(v.val).trim()); }
+function qbBoardOf(q) { const v = qbLinkedVal(q, ['board_id','board']); return v ? qbNameFrom(boards, v) : ''; }
 function qbSubjectOf(q) {
-  if (q.subject) return String(q.subject).trim();
-  if (q.subject_id) { const s = (data.subjects||[]).find(x=>x.id===q.subject_id); return s ? s.name : String(q.subject_id); }
-  return '';
+  const v = qbLinkedVal(q, ['subject_name_id','subject_id','subject']);
+  if (!v) return '';
+  return qbNameFrom(subjectNames, v) || qbNameFrom(data.subjects || [], v);
 }
-function qbGradeOf(q) {
-  if (q.grade != null && q.grade !== '') return String(q.grade).trim();
-  if (q.grade_id) { const g = grades.find(x=>x.id===q.grade_id); return g ? g.name : String(q.grade_id); }
-  return '';
-}
+function qbGradeOf(q) { const v = qbLinkedVal(q, ['grade_id','grade']); return v ? qbNameFrom(grades, v) : ''; }
 // Which of board / subject / grade the loaded rows don't carry at all (column missing in qb_questions).
 function qbMissingScopeColumns() {
   if (!qbQuestions.length) return [];
-  const has = k => qbQuestions.some(q => k in q);
+  const has = keys => [...qbQuestions, ...qbChapters].some(r => keys.some(k => k in r));
   const missing = [];
-  if (!has('board')) missing.push('board');
-  if (!has('subject') && !has('subject_id')) missing.push('subject');
-  if (!has('grade') && !has('grade_id')) missing.push('grade');
+  if (!has(['board_id','board'])) missing.push('board');
+  if (!has(['subject_name_id','subject_id','subject'])) missing.push('subject');
+  if (!has(['grade_id','grade'])) missing.push('grade');
   return missing;
 }
 // The type / difficulty / chapter / search filters stay locked until board, subject and grade are all chosen.
@@ -15083,7 +15086,7 @@ function qbFiltersHtml(showAll) {
     ${anyFilter?`<button class="btn-small" onclick="qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbClearDetailFilters();render()">✕ Clear</button>`:''}
   </div>
   ${missing.length
-    ? `<div class="hint" style="color:var(--brick);margin:-6px 0 12px">Question Bank has no ${missing.join(' / ')} column yet, so ${missing.length>1?'those filters are':'that filter is'} empty and the other filters are left unlocked.</div>`
+    ? `<div class="hint" style="color:var(--brick);margin:-6px 0 12px">Question Bank questions/chapters have no ${missing.join(' / ')} link yet, so ${missing.length>1?'those filters are':'that filter is'} empty and the other filters are left unlocked.</div>`
     : (!unlocked ? `<div class="hint" style="margin:-6px 0 12px">Choose Board, Subject and Grade to unlock the other filters.</div>` : '')}`;
 }
 
