@@ -2999,7 +2999,7 @@ async function loadQBQuestions() {
     // Load questions (no FK join — avoids PostgREST FK lookup issues)
     const { data: rows, error } = await sb
       .from('qb_questions')
-      .select('id, question_text, question_type, marks, difficulty, approved, section, section_label, source_year, source_exam_type, answer_text, chapter_id, subject_name, created_at')
+      .select('*')
       .order('created_at', { ascending: false });
     if (error) { qbMsg = 'Load error: ' + error.message; }
     else if (rows) qbQuestions = rows;
