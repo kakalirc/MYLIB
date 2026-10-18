@@ -872,6 +872,9 @@ let qbFilterType = '';          // question_type filter
 let qbFilterDifficulty = '';    // difficulty filter
 let qbFilterChapter = '';       // chapter_id filter
 let qbFilterSearch = '';        // text search in question_text
+let qbFilterBoard = '';         // board filter — must be set (with subject + grade) before the filters above unlock
+let qbFilterSubject = '';       // subject filter (label from qbSubjectOf)
+let qbFilterGrade = '';         // grade filter (label from qbGradeOf)
 let qbEditId = null;            // question id being edited inline
 let qbEditDraft = {};           // { question_text, question_type, marks, difficulty }
 let qbSaving = false;
@@ -891,7 +894,7 @@ function setTeacherPortalTab(t) {
   if (t === 'report') { loadTeacherPayrollRecords().then(() => render()); return; }
   if (t === 'studyplans') { studyPlanTeacherStudentId = ''; studyPlanTeacherSubjectId = ''; studyPlanDraftItems = []; studyPlanMsg = ''; studyPlanViewMode = 'report'; studyPlanFilterStatus = 'all'; studyPlanFilterSubjectId = ''; studyPlanFilterStudent = ''; loadStudyPlans().then(() => render()); return; }
   if (t === 'homework') { hwShowForm = false; hwMsg = ''; hwFilterStudentId = ''; hwFilterStatus = 'assigned'; loadHomework().then(() => render()); return; }
-  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch=''; qbEditId=null; loadQBQuestions(); return; }
+  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); return; }
   render();
 }
 function setTeacherAttendanceViewMonth(v) { teacherAttendanceViewMonth = v; render(); }
@@ -8745,7 +8748,7 @@ async function actuallySaveSessionEdit(id, count, date) {
 }
 
 function setTab(t) { currentTab = t; location.hash = t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; loadStudyPlans().then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
-  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch=''; qbEditId=null; loadQBQuestions(); } }
+  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); } }
 function setPayrollMonth(v) { payrollMonth = v; render(); }
 function setNetProfitMonth(v) { netProfitMonth = v; render(); }
 function setNetProfitViewMode(v) { netProfitViewMode = v; render(); }
@@ -14982,8 +14985,47 @@ const QB_TYPES = ['mcq','very_short','short','long','grammar_fill','grammar_tran
 const QB_TYPE_LABELS = { mcq:'MCQ', very_short:'Very Short', short:'Short', long:'Long', grammar_fill:'Grammar (Fill)', grammar_transform:'Grammar (Transform)', unseen_passage:'Unseen Passage', writing:'Writing', translation:'Translation', extract_based:'Extract Based' };
 const QB_DIFF_COLORS = { easy:'var(--forest)', medium:'var(--gold)', hard:'var(--brick)' };
 
-function qbFilteredQuestions(approved) {
+// Board / subject / grade are read straight off each qb_questions row. Subject and grade
+// may be stored as text or as an id into subjects / grades — both are shown by name.
+function qbBoardOf(q) { return String(q.board || '').trim(); }
+function qbSubjectOf(q) {
+  if (q.subject) return String(q.subject).trim();
+  if (q.subject_id) { const s = (data.subjects||[]).find(x=>x.id===q.subject_id); return s ? s.name : String(q.subject_id); }
+  return '';
+}
+function qbGradeOf(q) {
+  if (q.grade != null && q.grade !== '') return String(q.grade).trim();
+  if (q.grade_id) { const g = grades.find(x=>x.id===q.grade_id); return g ? g.name : String(q.grade_id); }
+  return '';
+}
+// Which of board / subject / grade the loaded rows don't carry at all (column missing in qb_questions).
+function qbMissingScopeColumns() {
+  if (!qbQuestions.length) return [];
+  const has = k => qbQuestions.some(q => k in q);
+  const missing = [];
+  if (!has('board')) missing.push('board');
+  if (!has('subject') && !has('subject_id')) missing.push('subject');
+  if (!has('grade') && !has('grade_id')) missing.push('grade');
+  return missing;
+}
+// The type / difficulty / chapter / search filters stay locked until board, subject and grade are all chosen.
+// If the table has no such columns yet, don't lock them (that would leave the bank unfilterable).
+function qbScopeChosen() {
+  return !!(qbFilterBoard && qbFilterSubject && qbFilterGrade) || qbMissingScopeColumns().length > 0;
+}
+function qbScopeQuestions(approved) {
   let qs = qbQuestions.filter(q => !!q.approved === approved);
+  if (qbFilterBoard) qs = qs.filter(q => qbBoardOf(q) === qbFilterBoard);
+  if (qbFilterSubject) qs = qs.filter(q => qbSubjectOf(q) === qbFilterSubject);
+  if (qbFilterGrade) qs = qs.filter(q => qbGradeOf(q) === qbFilterGrade);
+  return qs;
+}
+function qbDistinct(qs, fn) { return [...new Set(qs.map(fn).filter(Boolean))].sort((a,b)=>a.localeCompare(b, undefined, { numeric:true })); }
+function qbClearDetailFilters() { qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch=''; }
+
+function qbFilteredQuestions(approved) {
+  let qs = qbScopeQuestions(approved);
+  if (!qbScopeChosen()) return qs;
   if (qbFilterType) qs = qs.filter(q => q.question_type === qbFilterType);
   if (qbFilterDifficulty) qs = qs.filter(q => q.difficulty === qbFilterDifficulty);
   if (qbFilterChapter) qs = qs.filter(q => q.chapter_id === qbFilterChapter);
@@ -14995,24 +15037,54 @@ function qbFilteredQuestions(approved) {
 }
 
 function qbFiltersHtml(showAll) {
-  return `<div class="row-form" style="flex-wrap:wrap;gap:8px;margin-bottom:14px">
-    <select onchange="qbFilterType=this.value;render()">
+  const approved = qbSubTab !== 'review';
+  const base = qbQuestions.filter(q => !!q.approved === approved);
+  // Options cascade: subjects for the chosen board, grades for the chosen board + subject.
+  const boards = qbDistinct(base, qbBoardOf);
+  const subjects = qbDistinct(base.filter(q => !qbFilterBoard || qbBoardOf(q) === qbFilterBoard), qbSubjectOf);
+  const gradeOpts = qbDistinct(base.filter(q => (!qbFilterBoard || qbBoardOf(q) === qbFilterBoard) && (!qbFilterSubject || qbSubjectOf(q) === qbFilterSubject)), qbGradeOf);
+  const unlocked = qbScopeChosen();
+  const dis = unlocked ? '' : 'disabled';
+  // Only offer chapters that occur in the chosen board / subject / grade.
+  const scopeChapterIds = new Set(qbScopeQuestions(approved).map(q => q.chapter_id));
+  const chapters = qbChapters.filter(c => scopeChapterIds.has(c.id));
+  const missing = qbMissingScopeColumns();
+  const anyFilter = qbFilterBoard||qbFilterSubject||qbFilterGrade||qbFilterType||qbFilterDifficulty||qbFilterChapter||qbFilterSearch;
+  return `<div class="row-form" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">
+    <select onchange="qbFilterBoard=this.value;qbFilterSubject='';qbFilterGrade='';qbClearDetailFilters();render()">
+      <option value="">Board…</option>
+      ${boards.map(b=>`<option value="${escAttr(b)}" ${b===qbFilterBoard?'selected':''}>${esc(b)}</option>`).join('')}
+    </select>
+    <select onchange="qbFilterSubject=this.value;qbFilterGrade='';qbClearDetailFilters();render()">
+      <option value="">Subject…</option>
+      ${subjects.map(x=>`<option value="${escAttr(x)}" ${x===qbFilterSubject?'selected':''}>${esc(x)}</option>`).join('')}
+    </select>
+    <select onchange="qbFilterGrade=this.value;qbClearDetailFilters();render()">
+      <option value="">Grade…</option>
+      ${gradeOpts.map(g=>`<option value="${escAttr(g)}" ${g===qbFilterGrade?'selected':''}>${esc(g)}</option>`).join('')}
+    </select>
+  </div>
+  <div class="row-form" style="flex-wrap:wrap;gap:8px;margin-bottom:14px">
+    <select ${dis} onchange="qbFilterType=this.value;render()">
       <option value="">All types</option>
       ${QB_TYPES.map(t=>`<option value="${t}" ${t===qbFilterType?'selected':''}>${QB_TYPE_LABELS[t]||t}</option>`).join('')}
     </select>
-    <select onchange="qbFilterDifficulty=this.value;render()">
+    <select ${dis} onchange="qbFilterDifficulty=this.value;render()">
       <option value="">All difficulties</option>
       <option value="easy" ${qbFilterDifficulty==='easy'?'selected':''}>Easy</option>
       <option value="medium" ${qbFilterDifficulty==='medium'?'selected':''}>Medium</option>
       <option value="hard" ${qbFilterDifficulty==='hard'?'selected':''}>Hard</option>
     </select>
-    <select onchange="qbFilterChapter=this.value;render()">
+    <select ${dis} onchange="qbFilterChapter=this.value;render()">
       <option value="">All chapters</option>
-      ${qbChapters.map(c=>`<option value="${c.id}" ${c.id===qbFilterChapter?'selected':''}>${esc(c.title)}</option>`).join('')}
+      ${chapters.map(c=>`<option value="${c.id}" ${c.id===qbFilterChapter?'selected':''}>${esc(c.title)}</option>`).join('')}
     </select>
-    <input type="text" value="${esc(qbFilterSearch)}" placeholder="Search question text…" oninput="qbFilterSearch=this.value;render()" style="min-width:180px">
-    ${(qbFilterType||qbFilterDifficulty||qbFilterChapter||qbFilterSearch)?`<button class="btn-small" onclick="qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';render()">✕ Clear</button>`:''}
-  </div>`;
+    <input type="text" ${dis} value="${esc(qbFilterSearch)}" placeholder="Search question text…" oninput="qbFilterSearch=this.value;render()" style="min-width:180px">
+    ${anyFilter?`<button class="btn-small" onclick="qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbClearDetailFilters();render()">✕ Clear</button>`:''}
+  </div>
+  ${missing.length
+    ? `<div class="hint" style="color:var(--brick);margin:-6px 0 12px">Question Bank has no ${missing.join(' / ')} column yet, so ${missing.length>1?'those filters are':'that filter is'} empty and the other filters are left unlocked.</div>`
+    : (!unlocked ? `<div class="hint" style="margin:-6px 0 12px">Choose Board, Subject and Grade to unlock the other filters.</div>` : '')}`;
 }
 
 function qbQuestionRowHtml(q, isAdmin) {
@@ -15092,10 +15164,10 @@ function renderAdminQuestionBank() {
   </div>`;
 
   const subTabsHtml = `<div class="tabs" style="margin-bottom:16px">
-    <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Review Queue ${pending.length?`<span style="background:var(--brick);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${pending.length}</span>`:''}
     </div>
-    <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Approved Bank ${approved.length?`<span style="background:var(--forest);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${approved.length}</span>`:''}
     </div>
   </div>`;
@@ -15136,10 +15208,10 @@ function renderTeacherQuestionBank(teacher) {
   </div>`;
 
   const subTabsHtml = `<div class="tabs" style="margin-bottom:16px">
-    <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Review Queue ${pending.length?`<span style="background:var(--brick);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${pending.length}</span>`:''}
     </div>
-    <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Full Question Bank ${approved.length?`<span style="background:var(--forest);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${approved.length}</span>`:''}
     </div>
   </div>`;
