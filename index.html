@@ -3030,9 +3030,11 @@ async function loadQBQuestions() {
 async function qbApprove(id) {
   if (!sb) return;
   qbSaving = true; render();
-  const { error } = await sb.from('qb_questions').update({ approved: true }).eq('id', id);
+  const stamp = { approved: true, approved_by: currentUserId || null, approved_at: new Date().toISOString() };
+  const { error } = await sb.from('qb_questions').update(stamp).eq('id', id);
   if (error) { qbMsg = 'Error: ' + error.message; qbSaving = false; render(); return; }
-  qbQuestions = qbQuestions.map(q => q.id === id ? { ...q, approved: true } : q);
+  qbQuestions = qbQuestions.map(q => q.id === id ? { ...q, ...stamp } : q);
+  if (currentUserId) qbApprovers[currentUserId] = currentUsername;
   qbMsg = '✓ Approved';
   qbSaving = false; render();
   setTimeout(() => { qbMsg = ''; render(); }, 2000);
@@ -15176,7 +15178,9 @@ function qbQuestionRowHtml(q, isAdmin) {
     if (q.confidence_score != null) facts.push(`Confidence: ${Math.round(Number(q.confidence_score) * (Number(q.confidence_score) <= 1 ? 100 : 1))}%`);
     facts.push(`Used: ${q.usage_count || 0}`);
     facts.push(`Flagged: ${q.flag_count || 0}`);
-    if (q.approved) facts.push(`Approved${q.approved_by && qbApprovers[q.approved_by] ? ' by ' + esc(qbApprovers[q.approved_by]) : ''}${q.approved_at ? ' on ' + esc(qbFmtDate(q.approved_at)) : ''}`);
+    if (q.approved) facts.push(q.approved_by || q.approved_at
+      ? `Approved${q.approved_by ? ' by ' + esc(qbApprovers[q.approved_by] || 'unknown user') : ''}${q.approved_at ? ' on ' + esc(qbFmtDate(q.approved_at)) : ''}`
+      : 'Approved (approver not recorded)');
   }
 
   return `<div class="qb-card ${open?'open':''}">
