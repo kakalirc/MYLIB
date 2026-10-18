@@ -901,6 +901,16 @@ let qbAssignOpen = false;
 let qbAssignIds = new Set();    // students ticked in the assign panel
 let qbAssignUntil = '';         // due date (yyyy-mm-dd) for new assignments
 let qbAssignAllGrades = false;  // also list the teacher's students who don't match the paper's board / grade / subject
+// Practice papers (student / parent side)
+let spAssignments = [];         // qb_student_assignments visible to this student (or parent's children)
+let spPapers = {};              // paper id -> qb_practice_papers row
+let spOpen = null;              // paper being answered / viewed: { assignmentId, section, assignment, paper, sections, answers }
+let spLoading = false;
+let spSubmitting = false;
+let spPhotoUrls = {};           // storage path -> signed URL
+let spUploadingQid = null;
+let spSaveTimer = null;
+let spPendingQids = new Set();  // typed answers not yet saved
 
 let teacherAttendanceViewMonth = monthStr;
 let teacherAttendanceViewMode = 'day'; // 'day' | 'month' - which scope the attendance list below the form uses
@@ -976,6 +986,7 @@ async function load() {
     loadSupportTickets(),
     loadStudyPlans(),
     loadHomework(),
+    loadPracticeAssignments(),
   ]);
 
   loaded = true;
@@ -4941,6 +4952,7 @@ async function refreshAllData(silent) {
       loadChatConversations(),
       loadExpiryConfig(),
       loadHomework(),
+      loadPracticeAssignments(),
     ]);
     await Promise.all([
       loadMyPhoto(),
@@ -5065,7 +5077,7 @@ async function logout() {
       sb.auth.signOut(),
     ]);
   }
-  isLoggedIn = false; currentUsername = ''; currentRole = ''; currentLinkedId = ''; currentUserId = ''; parentSelectedChildId = ''; userMsg.changePw = '';
+  isLoggedIn = false; currentUsername = ''; currentRole = ''; currentLinkedId = ''; currentUserId = ''; parentSelectedChildId = ''; userMsg.changePw = ''; spAssignments = []; spPapers = {}; spOpen = null; spPhotoUrls = {};
   biometricOfferShown = false; // allow the enrollment banner on the next password login
   dangerZoneUnlocked = false; unlockPasswordAttempt = ''; unlockMsg = '';
   // Financial records shouldn't linger in memory once someone has signed out.
@@ -5138,7 +5150,7 @@ async function removeChildFromParent(mappingId) {
   data.parentStudents = data.parentStudents.filter(m=>m.id!==mappingId);
   render();
 }
-function setParentSelectedChild(v) { parentSelectedChildId = v; render(); }
+function setParentSelectedChild(v) { parentSelectedChildId = v; spOpen = null; render(); }
 
 function selectParentFromDropdown(userId) {
   selectedParentUserId = userId;
@@ -13163,6 +13175,7 @@ function renderStudentPortal() {
   if (!student) {
     return `<div class="card"><div class="empty">Your student record could not be found. Contact the admin.</div></div>`;
   }
+  if (spOpen) return spPaperHtml();
   const _mySubjs = byName(subjectsForStudent(student.id));
   const _subjLabel = _mySubjs.length ? _mySubjs.map(s=>esc(s.name)).join(' · ') : '';
   const _firstName = esc(student.name.split(' ')[0]);
@@ -13189,6 +13202,7 @@ function renderStudentPortal() {
     + studentTodayClassHtml(student)
     + renderStudyPlanReadOnly(student)
     + renderStudentHomeworkSection(student)
+    + renderStudentPracticeSection(student)
     + aiHowAmIDoingHtml(student.id)
     + studentTeacherNoteHtml()
     + myPhotoUploadHtml()
@@ -13222,7 +13236,8 @@ function renderParentPortal() {
       </div>
     </div>` : `<div class="card"><div class="hint">Viewing: <b>${esc(child.name)}</b>${child.archived?' <span class="tag cat">Archived</span>':''}</div></div>`;
 
-  return studentFeeOverdueBanner(child) + switcher + studentDashboardStatsHtml(child) + renderStudyPlanReadOnly(child) + renderStudentHomeworkSection(child) + myPhotoUploadHtml() + renderStudentReportCards(child, studentViewMonth, 'setStudentViewMonth', esc(child.name) + "'s")
+  if (spOpen) return switcher + spPaperHtml();
+  return studentFeeOverdueBanner(child) + switcher + studentDashboardStatsHtml(child) + renderStudyPlanReadOnly(child) + renderStudentHomeworkSection(child) + renderStudentPracticeSection(child) + myPhotoUploadHtml() + renderStudentReportCards(child, studentViewMonth, 'setStudentViewMonth', esc(child.name) + "'s")
     + studentFeeCalculatorHtml(child);
 }
 
@@ -15018,6 +15033,295 @@ function renderStudentHomeworkSection(student) {
     <h2 style="font-family:'Zilla Slab',serif;margin:0 0 4px">📚 Homework</h2>
     <div style="font-size:13px;color:var(--muted);margin-bottom:14px">${pending.length} pending · ${done.length} completed</div>
     ${rows3}
+  </div>`;
+}
+
+// ─────────────────────────────────────────────────────────────
+// QUESTION BANK — Practice papers (Student / Parent)
+// Students never read qb_questions directly: the paper comes from qb_paper_for_student (answers hidden
+// until reviewed), answers are saved with qb_save_answer and the attempt is locked and MCQs are marked
+// on the server by qb_submit_attempt. Answer photos go to the private 'practice-answers' bucket as
+// <assignment_id>/<question_id>/<file> and are shown through signed URLs.
+// ─────────────────────────────────────────────────────────────
+const SP_PHOTO_FIRST = ['long', 'writing', 'translation'];   // answered on paper; the text box is the fallback
+
+async function loadPracticeAssignments() {
+  if (!sb || (currentRole !== 'Student' && currentRole !== 'Parent')) return;
+  try {
+    const { data: rows, error } = await sb.from('qb_student_assignments').select('*').order('assigned_at', { ascending: false });
+    if (error) return;
+    spAssignments = rows || [];
+    const ids = [...new Set(spAssignments.map(a => a.paper_id))];
+    if (ids.length) {
+      const { data: papers } = await sb.from('qb_practice_papers').select('id, title, subject_name, total_marks, duration_minutes, instructions').in('id', ids);
+      spPapers = {}; (papers || []).forEach(p => { spPapers[p.id] = p; });
+    }
+  } catch (e) { /* tables not set up yet — nothing to show */ }
+}
+
+function spStatus(a) {
+  if (a.status === 'reviewed') return { label: '✅ Reviewed', color: 'var(--forest)' };
+  if (a.status === 'submitted') return { label: '📤 Submitted — waiting for teacher', color: 'var(--gold)' };
+  if (a.available_from && new Date(a.available_from) > new Date()) return { label: '🔒 Opens ' + qbFmtDate(a.available_from), color: 'var(--muted)' };
+  if (a.available_until && new Date(a.available_until) < new Date()) return { label: '⚠️ Overdue', color: 'var(--brick)' };
+  if (a.status === 'in_progress') return { label: '✏️ In progress', color: 'var(--gold)' };
+  return { label: '📋 Not started', color: 'var(--muted)' };
+}
+
+function renderStudentPracticeSection(student) {
+  const mine = spAssignments.filter(a => a.student_id === student.id);
+  if (!mine.length) return '';
+  const open = mine.filter(a => a.status !== 'submitted' && a.status !== 'reviewed');
+  const rows = mine.slice().sort((a, b) => {
+    const ad = a.status === 'submitted' || a.status === 'reviewed' ? 1 : 0, bd = b.status === 'submitted' || b.status === 'reviewed' ? 1 : 0;
+    if (ad !== bd) return ad - bd;
+    return String(a.available_until || '9999').localeCompare(String(b.available_until || '9999'));
+  }).map(a => {
+    const p = spPapers[a.paper_id] || {};
+    const st = spStatus(a);
+    const locked = a.available_from && new Date(a.available_from) > new Date();
+    const done = a.status === 'submitted' || a.status === 'reviewed';
+    const btn = locked ? '' : currentRole === 'Student' && !done
+      ? `<button class="btn-small btn-primary" onclick="spOpenPaper('${a.id}')">${a.status === 'in_progress' ? 'Continue' : 'Start'}</button>`
+      : `<button class="btn-small" onclick="spOpenPaper('${a.id}')">View</button>`;
+    const score = a.status === 'reviewed' && a.total_score != null
+      ? `<div style="font-size:13px;color:var(--forest);margin-top:3px">⭐ Score: <b>${esc(String(a.total_score))}${p.total_marks ? ' / ' + esc(String(p.total_marks)) : ''}</b></div>`
+      : (a.status === 'submitted' && a.mcq_score != null && Number(a.mcq_score) > 0 ? `<div style="font-size:12.5px;color:var(--muted);margin-top:3px">MCQ score so far: <b>${esc(String(a.mcq_score))}</b></div>` : '');
+    return `<div style="border:1px solid var(--line);border-left:4px solid ${st.color};border-radius:8px;padding:12px 14px;margin-bottom:8px">
+      <div style="font-weight:600">${esc(p.title || 'Practice paper')}</div>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:2px">${esc([p.subject_name, p.total_marks ? p.total_marks + ' marks' : '', p.duration_minutes ? p.duration_minutes + ' min' : ''].filter(Boolean).join(' · '))}${a.available_until ? ' · Due <b>' + esc(qbFmtDate(a.available_until)) + '</b>' : ''}</div>
+      ${score}
+      ${a.status === 'reviewed' && a.teacher_feedback ? `<div style="margin-top:6px;font-size:13px;background:rgba(60,94,66,0.08);border-left:3px solid var(--forest);padding:6px 10px;border-radius:0 6px 6px 0">💬 ${esc(a.teacher_feedback)}</div>` : ''}
+      <div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:12px;font-weight:600;color:${st.color}">${st.label}</span>${btn}
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="card">
+    <h2 style="font-family:'Zilla Slab',serif;margin:0 0 4px">📝 Practice Papers</h2>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px">${open.length} to do · ${mine.length - open.length} done</div>
+    ${rows}
+  </div>`;
+}
+
+async function spOpenPaper(assignmentId) {
+  spLoading = true; spOpen = { assignmentId, section: 0 }; render(); window.scrollTo(0, 0);
+  const { data: res, error } = await sb.rpc('qb_paper_for_student', { p_assignment_id: assignmentId });
+  spLoading = false;
+  if (error || !res) { spOpen = null; alert('Could not open the paper: ' + (error ? error.message : 'no data')); render(); return; }
+  const sections = [];
+  (res.questions || []).forEach(q => {
+    let s = sections.find(x => x.name === (q.section_name || ''));
+    if (!s) { s = { name: q.section_name || '', questions: [] }; sections.push(s); }
+    s.questions.push(q);
+  });
+  const answers = {};
+  (res.answers || []).forEach(r => { answers[r.question_id] = { answer_text: r.answer_text || '', photo_urls: r.photo_urls || [], marks_awarded: r.marks_awarded, is_correct: r.is_correct, teacher_comment: r.teacher_comment }; });
+  spOpen = { assignmentId, section: 0, assignment: res.assignment || {}, paper: res.paper || {}, sections, answers };
+  await spLoadPhotoUrls();
+  render();
+}
+
+function spClosePaper() {
+  clearTimeout(spSaveTimer);
+  spFlushPending().then(() => { spOpen = null; loadPracticeAssignments().then(render); });
+}
+
+function spReadOnly() {
+  const st = spOpen && spOpen.assignment && spOpen.assignment.status;
+  return currentRole !== 'Student' || st === 'submitted' || st === 'reviewed';
+}
+
+async function spLoadPhotoUrls() {
+  const paths = Object.values(spOpen.answers).flatMap(a => a.photo_urls || []).filter(p => !spPhotoUrls[p]);
+  if (!paths.length) return;
+  const { data: rows } = await sb.storage.from('practice-answers').createSignedUrls(paths, 3600);
+  (rows || []).forEach(r => { if (r && r.signedUrl) spPhotoUrls[r.path] = r.signedUrl; });
+}
+
+function spAnswer(qid) { return spOpen.answers[qid] || (spOpen.answers[qid] = { answer_text: '', photo_urls: [] }); }
+function spIsAnswered(qid) { const a = spOpen.answers[qid]; return !!(a && ((a.answer_text || '').trim() || (a.photo_urls || []).length)); }
+
+function spSetSaveNote(text) { const el = document.getElementById('spSaveNote'); if (el) el.textContent = text; }
+
+async function spSaveAnswer(qid) {
+  const a = spAnswer(qid);
+  spSetSaveNote('Saving…');
+  const { error } = await sb.rpc('qb_save_answer', { p_assignment_id: spOpen.assignmentId, p_question_id: qid, p_answer_text: a.answer_text || null, p_photo_urls: a.photo_urls || [] });
+  if (error) { spSetSaveNote('⚠️ Not saved: ' + error.message); return false; }
+  if (spOpen.assignment.status === 'assigned') spOpen.assignment.status = 'in_progress';
+  spSetSaveNote('✓ Saved');
+  return true;
+}
+
+// Typing autosaves a moment after the student stops; leaving the box or the paper saves straight away.
+function spTyped(qid, value) {
+  spAnswer(qid).answer_text = value;
+  spPendingQids.add(qid);
+  spSetSaveNote('Editing…');
+  clearTimeout(spSaveTimer);
+  spSaveTimer = setTimeout(spFlushPending, 1500);
+}
+async function spFlushPending() {
+  const qids = [...spPendingQids]; spPendingQids.clear();
+  for (const qid of qids) await spSaveAnswer(qid);
+}
+
+async function spPickOption(qid, letter) {
+  if (spReadOnly()) return;
+  spAnswer(qid).answer_text = letter;
+  render();
+  await spSaveAnswer(qid);
+}
+
+// Shrink phone photos before upload so answer sheets stay quick to send and to mark.
+function spShrinkImage(file) {
+  return new Promise(resolve => {
+    if (!/^image\//.test(file.type)) return resolve(file);
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      c.toBlob(b => resolve(b || file), 'image/jpeg', 0.82);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+
+async function spAddPhotos(qid, files) {
+  if (!files || !files.length || spReadOnly()) return;
+  spUploadingQid = qid; render();
+  const a = spAnswer(qid);
+  for (const file of files) {
+    const blob = await spShrinkImage(file);
+    const ext = blob.type === 'image/jpeg' ? 'jpg' : (file.name.split('.').pop() || 'jpg').toLowerCase();
+    const path = `${spOpen.assignmentId}/${qid}/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
+    const { error } = await sb.storage.from('practice-answers').upload(path, blob, { contentType: blob.type || file.type, upsert: false });
+    if (error) { spUploadingQid = null; render(); spSetSaveNote('⚠️ Photo not uploaded: ' + error.message); return; }
+    a.photo_urls = [...(a.photo_urls || []), path];
+  }
+  await spLoadPhotoUrls();
+  spUploadingQid = null; render();
+  await spSaveAnswer(qid);
+}
+
+async function spRemovePhoto(qid, path) {
+  if (spReadOnly() || !confirm('Remove this photo?')) return;
+  const a = spAnswer(qid);
+  a.photo_urls = (a.photo_urls || []).filter(p => p !== path);
+  render();
+  await spSaveAnswer(qid);
+  sb.storage.from('practice-answers').remove([path]);
+}
+
+function spGoSection(i) {
+  clearTimeout(spSaveTimer);
+  spFlushPending();
+  spOpen.section = i; render(); window.scrollTo(0, 0);
+}
+
+async function spSubmit() {
+  clearTimeout(spSaveTimer);
+  await spFlushPending();
+  const all = spOpen.sections.flatMap(s => s.questions);
+  const missing = all.filter(q => !spIsAnswered(q.question_id)).length;
+  if (!confirm((missing ? `${missing} question${missing === 1 ? ' is' : 's are'} not answered yet.\n\n` : '') + 'Submit this paper? You can\'t change your answers after submitting.')) return;
+  spSubmitting = true; render();
+  const { error } = await sb.rpc('qb_submit_attempt', { p_assignment_id: spOpen.assignmentId });
+  spSubmitting = false;
+  if (error) { alert('Could not submit: ' + error.message); render(); return; }
+  const id = spOpen.assignmentId;
+  await spOpenPaper(id);
+  loadPracticeAssignments();
+  render();
+}
+
+function spMcqMax() { return spOpen.sections.flatMap(s => s.questions).filter(q => q.question_type === 'mcq').reduce((s, q) => s + (Number(q.marks) || 0), 0); }
+
+function spQuestionHtml(q, n, prevPassage) {
+  const a = spOpen.answers[q.question_id] || { answer_text: '', photo_urls: [] };
+  const ro = spReadOnly();
+  const reviewed = spOpen.assignment.status === 'reviewed';
+  const passage = q.passage_id && q.passage_id !== prevPassage && q.passage_text
+    ? `<div class="qb-block" style="margin:0 0 10px"><div class="qb-block-label">Read the passage</div>${esc(q.passage_text)}</div>` : '';
+  let answerHtml;
+  if (q.question_type === 'mcq') {
+    const opts = Array.isArray(q.options) && q.options.length ? q.options : ['', '', '', ''];
+    const letters = 'abcdefgh';
+    answerHtml = `<div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">${opts.map((o, i) => {
+      const L = letters[i], sel = (a.answer_text || '').toLowerCase() === L, right = reviewed && q.correct_option && q.correct_option.toLowerCase() === L;
+      return `<button class="btn-small" ${ro ? 'disabled' : ''} onclick="spPickOption('${q.question_id}','${L}')" style="text-align:left;padding:8px 12px;font-size:14px;${sel ? 'background:var(--gold);color:#fff;border-color:var(--gold);' : ''}${right ? 'outline:2px solid var(--forest);' : ''}">(${L}) ${esc(o)}${right ? ' ✓' : ''}</button>`;
+    }).join('')}</div>`;
+  } else {
+    const photoFirst = SP_PHOTO_FIRST.includes(q.question_type);
+    const photos = (a.photo_urls || []).map(p => `<div style="position:relative;display:inline-block;margin:6px 6px 0 0">
+      <a href="${escAttr(spPhotoUrls[p] || '#')}" target="_blank"><img src="${escAttr(spPhotoUrls[p] || '')}" alt="Answer photo" style="height:90px;border-radius:6px;border:1px solid var(--line)"></a>
+      ${ro ? '' : `<button class="btn-small" style="position:absolute;top:2px;right:2px;padding:0 6px" onclick="spRemovePhoto('${q.question_id}','${escAttr(p)}')">✕</button>`}</div>`).join('');
+    const photoBtn = ro ? '' : `<label style="cursor:pointer;font-size:13px;background:${photoFirst ? 'var(--gold)' : 'var(--line)'};color:${photoFirst ? '#fff' : 'inherit'};padding:6px 12px;border-radius:6px;font-weight:600;display:inline-block;margin-top:8px">
+        ${spUploadingQid === q.question_id ? '⏳ Uploading…' : '📷 ' + (photoFirst ? 'Add photo of your answer' : 'Answer with a photo')}
+        <input type="file" accept="image/*" multiple style="display:none" onchange="spAddPhotos('${q.question_id}',this.files)" ${spUploadingQid ? 'disabled' : ''}></label>`;
+    const textBox = ro
+      ? (a.answer_text ? `<div class="qb-block" style="margin-top:8px"><div class="qb-block-label">Your answer</div>${esc(a.answer_text)}</div>` : '')
+      : `<textarea rows="${photoFirst ? 2 : 3}" placeholder="${photoFirst ? 'Or type your answer here (optional)' : 'Type your answer (Sanskrit or English)'}" oninput="spTyped('${q.question_id}',this.value)" onblur="spFlushPending()"
+          style="width:100%;box-sizing:border-box;margin-top:8px;font-family:inherit;font-size:14px;line-height:1.5;padding:8px;border:1px solid var(--line);border-radius:6px;resize:vertical">${esc(a.answer_text || '')}</textarea>`;
+    answerHtml = photoFirst ? `${photoBtn}<div>${photos}</div>${textBox}` : `${textBox}${photoBtn}<div>${photos}</div>`;
+    if (ro && !a.answer_text && !(a.photo_urls || []).length) answerHtml = `<div class="hint" style="margin-top:8px">Not answered.</div>`;
+  }
+  const marksLine = reviewed && a.marks_awarded != null
+    ? `<div style="margin-top:8px;font-size:13px;color:var(--forest);font-weight:600">${esc(String(a.marks_awarded))} / ${esc(String(q.marks || 0))} marks</div>` : '';
+  const comment = reviewed && a.teacher_comment ? `<div style="margin-top:6px;font-size:13px;background:rgba(60,94,66,0.08);border-left:3px solid var(--forest);padding:6px 10px;border-radius:0 6px 6px 0">💬 ${esc(a.teacher_comment)}</div>` : '';
+  const model = reviewed && q.answer_text && q.question_type !== 'mcq' ? `<details style="margin-top:6px;font-size:13px"><summary style="cursor:pointer;color:var(--muted)">Model answer</summary><div class="qb-block">${esc(q.answer_text)}</div></details>` : '';
+  return `${passage}<div class="qb-card" style="margin-bottom:10px">
+    <div class="qb-meta"><span class="qb-sec">Q${n}</span><span class="qb-marks">${esc(String(q.marks || 0))} mark${Number(q.marks) === 1 ? '' : 's'}</span>
+      ${!ro && spIsAnswered(q.question_id) ? '<span style="color:var(--forest)">· answered</span>' : ''}</div>
+    <div class="qb-text" style="cursor:default">${esc(q.question_text || '')}</div>
+    ${q.question_image_url ? `<img class="qb-img" src="${escAttr(q.question_image_url)}" alt="" loading="lazy">` : ''}
+    ${answerHtml}${marksLine}${comment}${model}
+  </div>`;
+}
+
+function spPaperHtml() {
+  if (spLoading || !spOpen.sections) return `<div class="card"><div class="empty">Opening paper…</div></div>`;
+  const { paper, assignment, sections } = spOpen;
+  const ro = spReadOnly();
+  const sec = sections[spOpen.section] || { name: '', questions: [] };
+  const all = sections.flatMap(s => s.questions);
+  const answered = all.filter(q => spIsAnswered(q.question_id)).length;
+  let num = sections.slice(0, spOpen.section).reduce((s, x) => s + x.questions.length, 0);
+  let prevPassage = null;
+  const qsHtml = sec.questions.map(q => { const h = spQuestionHtml(q, ++num, prevPassage); prevPassage = q.passage_id; return h; }).join('');
+  const secMarks = sec.questions.reduce((s, q) => s + (Number(q.marks) || 0), 0);
+  const st = spStatus(assignment);
+  const resultHtml = assignment.status === 'reviewed'
+    ? `<div class="qb-block" style="white-space:normal;border-left:4px solid var(--forest)"><b style="font-size:16px;color:var(--forest)">Score: ${esc(String(assignment.total_score ?? '–'))} / ${esc(String(paper.total_marks || ''))}</b>
+        ${assignment.teacher_feedback ? `<div style="margin-top:6px">💬 ${esc(assignment.teacher_feedback)}</div>` : ''}</div>`
+    : assignment.status === 'submitted'
+      ? `<div class="qb-block" style="white-space:normal">📤 Submitted${spMcqMax() ? ` · MCQ score <b>${esc(String(assignment.mcq_score ?? 0))} / ${spMcqMax()}</b>` : ''} · waiting for your teacher to mark the written answers.</div>` : '';
+  const tabs = sections.map((s, i) => {
+    const done = s.questions.every(q => spIsAnswered(q.question_id));
+    return `<div class="tab ${i === spOpen.section ? 'active' : ''}" onclick="spGoSection(${i})">${esc(s.name || 'Section ' + (i + 1))}${!ro && done ? ' ✓' : ''}</div>`;
+  }).join('');
+  return `${QB_CARD_CSS}<div class="card">
+    <div style="margin-bottom:10px"><button class="btn-small" onclick="spClosePaper()">← Back</button></div>
+    <h2 style="font-family:'Zilla Slab',serif;margin:0 0 4px">${esc(paper.title || 'Practice paper')}</h2>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:8px">${esc([paper.subject_name, paper.total_marks ? paper.total_marks + ' marks' : '', paper.duration_minutes ? paper.duration_minutes + ' min' : ''].filter(Boolean).join(' · '))}${assignment.available_until ? ' · Due ' + esc(qbFmtDate(assignment.available_until)) : ''}
+      · <span style="color:${st.color};font-weight:600">${st.label}</span></div>
+    ${resultHtml}
+    ${paper.instructions ? `<div class="qb-block" style="white-space:pre-wrap">${esc(paper.instructions)}</div>` : ''}
+    ${!ro ? `<div style="font-size:12.5px;color:var(--muted);margin:8px 0">${answered} of ${all.length} answered · <span id="spSaveNote">Answers save automatically</span></div>` : ''}
+    <div class="tabs" style="margin:12px 0">${tabs}</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:10px"><b style="color:var(--ink)">${esc(sec.name)}</b> · ${sec.questions.length} question${sec.questions.length === 1 ? '' : 's'} · ${secMarks} marks</div>
+    ${qsHtml || '<div class="empty">No questions in this section.</div>'}
+    <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:12px">
+      <button class="btn-small" onclick="spGoSection(${spOpen.section - 1})" ${spOpen.section === 0 ? 'disabled' : ''}>← Previous section</button>
+      ${spOpen.section < sections.length - 1
+        ? `<button class="btn-primary" onclick="spGoSection(${spOpen.section + 1})">Next section →</button>`
+        : (!ro ? `<button class="btn-primary" onclick="spSubmit()" ${spSubmitting ? 'disabled' : ''}>${spSubmitting ? 'Submitting…' : 'Submit paper'}</button>` : '')}
+    </div>
   </div>`;
 }
 
