@@ -880,6 +880,9 @@ let qbEditDraft = {};           // { question_text, question_type, marks, diffic
 let qbSaving = false;
 let qbMsg = '';
 let qbChapters = [];            // cached from qb_chapters
+let qbPassages = {};            // passage_id -> qb_passages row, for unseen-passage questions
+let qbApprovers = {};           // profile id -> username, for "approved by"
+let qbExpandedIds = new Set();  // question ids whose details are open in the list
 
 let teacherAttendanceViewMonth = monthStr;
 let teacherAttendanceViewMode = 'day'; // 'day' | 'month' - which scope the attendance list below the form uses
@@ -3008,6 +3011,17 @@ async function loadQBQuestions() {
       .order('created_at', { ascending: false });
     if (error) { qbMsg = 'Load error: ' + error.message; }
     else if (rows) qbQuestions = rows;
+    // Passages and approver names are only needed for the expanded view; failures here are non-fatal.
+    const passageIds = [...new Set(qbQuestions.map(q => q.passage_id).filter(Boolean))];
+    if (passageIds.length) {
+      const { data: ps } = await sb.from('qb_passages').select('id, passage_text, passage_type, source').in('id', passageIds);
+      qbPassages = {}; (ps || []).forEach(p => { qbPassages[p.id] = p; });
+    }
+    const approverIds = [...new Set(qbQuestions.map(q => q.approved_by).filter(Boolean))];
+    if (approverIds.length) {
+      const { data: profs } = await sb.from('profiles').select('id, username, admin_name').in('id', approverIds);
+      qbApprovers = {}; (profs || []).forEach(p => { qbApprovers[p.id] = p.admin_name || p.username; });
+    }
   } catch(e) { qbMsg = 'Error: ' + e.message; }
   qbLoading = false;
   render();
@@ -3036,9 +3050,16 @@ async function qbDelete(id) {
   setTimeout(() => { qbMsg = ''; render(); }, 2000);
 }
 
-function qbStartEdit(q) {
+function qbStartEdit(id) {
+  const q = qbQuestions.find(x => x.id === id);
+  if (!q) return;
   qbEditId = q.id;
   qbEditDraft = { question_text: q.question_text, question_type: q.question_type, marks: q.marks, difficulty: q.difficulty, answer_text: q.answer_text || '' };
+  render();
+}
+
+function qbToggleExpand(id) {
+  if (qbExpandedIds.has(id)) qbExpandedIds.delete(id); else qbExpandedIds.add(id);
   render();
 }
 
@@ -15091,65 +15112,104 @@ function qbFiltersHtml(showAll) {
     : (!unlocked ? `<div class="hint" style="margin:-6px 0 12px">Choose Board, Subject and Grade to unlock the other filters.</div>` : '')}`;
 }
 
-function qbQuestionRowHtml(q, isAdmin) {
-  const chapterTitle = q.qb_chapters ? q.qb_chapters.title : (qbChapters.find(c=>c.id===q.chapter_id)||{}).title || '—';
-  const typeLabel = QB_TYPE_LABELS[q.question_type] || q.question_type;
-  const diffColor = QB_DIFF_COLORS[q.difficulty] || 'var(--muted)';
+const QB_CARD_CSS = `<style>
+  .qb-list { display:flex; flex-direction:column; gap:10px; }
+  .qb-card { border:1px solid var(--line); border-radius:10px; background:var(--paper); padding:12px 14px; }
+  .qb-card.open { border-color:var(--gold); }
+  .qb-meta { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:12px; color:var(--muted); margin-bottom:8px; }
+  .qb-meta .tag { margin-left:0; }
+  .qb-meta .qb-sec { font-weight:700; color:var(--ink); }
+  .qb-marks { font-weight:700; color:var(--ink); }
+  .qb-text { font-size:14px; line-height:1.55; white-space:pre-wrap; word-break:break-word; color:var(--ink); cursor:pointer; }
+  .qb-text.clamp { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+  .qb-img { display:block; max-width:100%; max-height:360px; margin-top:8px; border:1px solid var(--line); border-radius:6px; }
+  .qb-block { margin-top:10px; padding:10px 12px; background:var(--bg); border-radius:8px; font-size:13px; line-height:1.5; white-space:pre-wrap; word-break:break-word; }
+  .qb-block-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin-bottom:4px; white-space:normal; }
+  .qb-foot { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:8px; margin-top:10px; }
+  .qb-facts { font-size:11px; color:var(--muted); display:flex; flex-wrap:wrap; gap:4px 12px; }
+  .qb-actions { display:flex; gap:6px; flex-wrap:wrap; }
+  .qb-actions .btn-small { font-size:12px; padding:4px 10px; }
+</style>`;
 
-  if (qbEditId === q.id) {
-    return `<tr style="background:var(--soft)">
-      <td colspan="${isAdmin?7:6}">
-        <div style="padding:8px">
-          <div style="font-size:12px;font-weight:600;margin-bottom:6px">Editing question</div>
-          <textarea rows="4" style="width:100%;font-family:inherit;font-size:13px;padding:6px;border:1px solid var(--line);border-radius:4px;box-sizing:border-box;resize:vertical"
-            oninput="qbEditDraft.question_text=this.value">${esc(qbEditDraft.question_text||'')}</textarea>
-          <div class="row-form" style="gap:8px;margin-top:8px;flex-wrap:wrap">
-            <select onchange="qbEditDraft.question_type=this.value">
-              ${QB_TYPES.map(t=>`<option value="${t}" ${t===(qbEditDraft.question_type||q.question_type)?'selected':''}>${QB_TYPE_LABELS[t]||t}</option>`).join('')}
-            </select>
-            <input type="number" value="${qbEditDraft.marks!==undefined?qbEditDraft.marks:q.marks}" min="1" max="10" style="width:70px" placeholder="Marks" oninput="qbEditDraft.marks=this.value">
-            <select onchange="qbEditDraft.difficulty=this.value">
-              ${['easy','medium','hard'].map(d=>`<option value="${d}" ${d===(qbEditDraft.difficulty||q.difficulty)?'selected':''}>${d}</option>`).join('')}
-            </select>
-            <button class="btn-small btn-primary" onclick="qbSaveEdit('${q.id}')" ${qbSaving?'disabled':''}>Save</button>
-            <button class="btn-small" onclick="qbCancelEdit()">Cancel</button>
-          </div>
-          ${q.answer_text ? `<div style="margin-top:8px"><label style="font-size:12px;font-weight:600">Answer/Key</label>
-            <textarea rows="2" style="width:100%;font-family:inherit;font-size:12px;padding:6px;border:1px solid var(--line);border-radius:4px;box-sizing:border-box;resize:vertical;color:var(--muted)"
-              oninput="qbEditDraft.answer_text=this.value">${esc(qbEditDraft.answer_text!==undefined?qbEditDraft.answer_text:q.answer_text)}</textarea></div>` : ''}
-        </div>
-      </td>
-    </tr>`;
+function qbFmtDate(ts) { return ts ? formatDate(String(ts).slice(0,10)) : ''; }
+
+function qbEditFormHtml(q) {
+  return `<div class="qb-card open">
+    <div style="font-size:12px;font-weight:700;margin-bottom:6px">Editing question</div>
+    <textarea rows="6" style="width:100%;font-family:inherit;font-size:14px;line-height:1.5;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box;resize:vertical"
+      oninput="qbEditDraft.question_text=this.value">${esc(qbEditDraft.question_text||'')}</textarea>
+    <div class="row-form" style="gap:8px;margin-top:8px;flex-wrap:wrap">
+      <select onchange="qbEditDraft.question_type=this.value">
+        ${QB_TYPES.map(t=>`<option value="${t}" ${t===(qbEditDraft.question_type||q.question_type)?'selected':''}>${QB_TYPE_LABELS[t]||t}</option>`).join('')}
+      </select>
+      <input type="number" value="${qbEditDraft.marks!==undefined?qbEditDraft.marks:q.marks}" min="1" max="10" style="width:70px" placeholder="Marks" oninput="qbEditDraft.marks=this.value">
+      <select onchange="qbEditDraft.difficulty=this.value">
+        ${['easy','medium','hard'].map(d=>`<option value="${d}" ${d===(qbEditDraft.difficulty||q.difficulty)?'selected':''}>${d}</option>`).join('')}
+      </select>
+    </div>
+    <div style="margin-top:8px"><label style="font-size:12px;font-weight:600">Answer / key</label>
+      <textarea rows="3" style="width:100%;font-family:inherit;font-size:13px;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box;resize:vertical"
+        oninput="qbEditDraft.answer_text=this.value">${esc(qbEditDraft.answer_text!==undefined?qbEditDraft.answer_text:(q.answer_text||''))}</textarea></div>
+    <div class="qb-actions" style="margin-top:8px">
+      <button class="btn-small btn-primary" onclick="qbSaveEdit('${q.id}')" ${qbSaving?'disabled':''}>Save</button>
+      <button class="btn-small" onclick="qbCancelEdit()">Cancel</button>
+    </div>
+  </div>`;
+}
+
+function qbQuestionRowHtml(q, isAdmin) {
+  if (qbEditId === q.id) return qbEditFormHtml(q);
+  const chapterTitle = q.qb_chapters ? q.qb_chapters.title : (qbChapters.find(c=>c.id===q.chapter_id)||{}).title || '';
+  const typeLabel = QB_TYPE_LABELS[q.question_type] || q.question_type || '';
+  const diffColor = QB_DIFF_COLORS[q.difficulty] || 'var(--muted)';
+  const open = qbExpandedIds.has(q.id);
+  const section = q.section_label || q.section || '';
+  const source = [q.source_year, q.source_exam_type].filter(Boolean).join(' · ');
+  const passage = q.passage_id ? qbPassages[q.passage_id] : null;
+  const block = (label, body) => body ? `<div class="qb-block"><div class="qb-block-label">${label}</div>${body}</div>` : '';
+  const img = url => url ? `<img class="qb-img" src="${escAttr(url)}" alt="" loading="lazy">` : '';
+
+  const facts = [];
+  if (q.language) facts.push(`Language: ${esc(q.language)}`);
+  if (q.syllabus_status) facts.push(`Syllabus: ${esc(q.syllabus_status)}`);
+  if (isAdmin) {
+    if (q.confidence_score != null) facts.push(`Confidence: ${Math.round(Number(q.confidence_score) * (Number(q.confidence_score) <= 1 ? 100 : 1))}%`);
+    facts.push(`Used: ${q.usage_count || 0}`);
+    facts.push(`Flagged: ${q.flag_count || 0}`);
+    if (q.approved) facts.push(`Approved${q.approved_by && qbApprovers[q.approved_by] ? ' by ' + esc(qbApprovers[q.approved_by]) : ''}${q.approved_at ? ' on ' + esc(qbFmtDate(q.approved_at)) : ''}`);
   }
 
-  const textPreview = q.question_text.length > 120 ? q.question_text.slice(0,120)+'…' : q.question_text;
-  return `<tr>
-    <td style="font-size:13px;max-width:340px;word-break:break-word">${esc(textPreview)}</td>
-    <td><span class="tag" style="font-size:11px">${typeLabel}</span></td>
-    <td style="text-align:center"><b>${q.marks}</b></td>
-    <td style="color:${diffColor};font-weight:600;font-size:12px">${q.difficulty||'—'}</td>
-    <td style="font-size:12px;color:var(--muted)">${esc(chapterTitle)}</td>
-    ${isAdmin?`<td style="font-size:11px;color:var(--muted)">${q.source_year||''}${q.source_exam_type?' ('+q.source_exam_type+')':''}</td>`:''}
-    <td>
-      <div class="row-form" style="gap:4px;flex-wrap:nowrap">
-        ${!q.approved ? `<button class="btn-small btn-primary" style="font-size:11px;padding:3px 8px" onclick="qbApprove('${q.id}')" ${qbSaving?'disabled':''}>✓ Approve</button>` : ''}
-        <button class="btn-small" style="font-size:11px;padding:3px 8px" onclick="qbStartEdit(${JSON.stringify(q).replace(/"/g,'&quot;')})">Edit</button>
-        ${isAdmin ? `<button class="btn-small" style="font-size:11px;padding:3px 8px;background:var(--brick);border-color:var(--brick);color:#fff" onclick="qbDelete('${q.id}')" ${qbSaving?'disabled':''}>Delete</button>` : ''}
+  return `<div class="qb-card ${open?'open':''}">
+    <div class="qb-meta">
+      ${section ? `<span class="qb-sec">${esc(section)}</span>` : ''}
+      ${typeLabel ? `<span class="tag">${esc(typeLabel)}</span>` : ''}
+      <span class="qb-marks">${q.marks != null ? q.marks + ' mark' + (q.marks == 1 ? '' : 's') : ''}</span>
+      ${q.difficulty ? `<span style="color:${diffColor};font-weight:700">${esc(q.difficulty)}</span>` : ''}
+      ${chapterTitle ? `<span>· ${esc(chapterTitle)}</span>` : ''}
+      ${source ? `<span>· ${esc(source)}</span>` : ''}
+    </div>
+    <div class="qb-text ${open?'':'clamp'}" onclick="qbToggleExpand('${q.id}')" title="${open?'Click to collapse':'Click to show full question'}">${esc(q.question_text || '')}</div>
+    ${open ? `
+      ${img(q.question_image_url)}
+      ${passage ? block('Passage' + (passage.passage_type ? ' · ' + esc(passage.passage_type) : ''), esc(passage.passage_text || '')) : ''}
+      ${(q.answer_text || q.answer_image_url) ? block('Answer', esc(q.answer_text || '') + img(q.answer_image_url)) : ''}
+      ${block('Explanation', esc(q.explanation_text || ''))}
+    ` : ''}
+    <div class="qb-foot">
+      <div class="qb-facts">${open ? facts.map(f=>`<span>${f}</span>`).join('') : ''}</div>
+      <div class="qb-actions">
+        <button class="btn-small" onclick="qbToggleExpand('${q.id}')">${open ? 'Hide details' : 'Show details'}</button>
+        ${!q.approved ? `<button class="btn-small btn-primary" onclick="qbApprove('${q.id}')" ${qbSaving?'disabled':''}>✓ Approve</button>` : ''}
+        <button class="btn-small" onclick="qbStartEdit('${q.id}')">Edit</button>
+        ${isAdmin ? `<button class="btn-small" style="background:var(--brick);border-color:var(--brick);color:#fff" onclick="qbDelete('${q.id}')" ${qbSaving?'disabled':''}>Delete</button>` : ''}
       </div>
-    </td>
-  </tr>`;
+    </div>
+  </div>`;
 }
 
 function qbTableHtml(qs, isAdmin) {
   if (!qs.length) return '<div class="empty">No questions match these filters.</div>';
-  return `<div class="table-scroll"><table>
-    <tr>
-      <th>Question</th><th>Type</th><th>Marks</th><th>Difficulty</th><th>Chapter</th>
-      ${isAdmin?'<th>Source</th>':''}
-      <th>Actions</th>
-    </tr>
-    ${qs.map(q => qbQuestionRowHtml(q, isAdmin)).join('')}
-  </table></div>`;
+  return `${QB_CARD_CSS}<div class="qb-list">${qs.map(q => qbQuestionRowHtml(q, isAdmin)).join('')}</div>`;
 }
 
 // ─────────────────────────────────────────────────────────────
