@@ -901,6 +901,7 @@ let qbAssignOpen = false;
 let qbAssignIds = new Set();    // students ticked in the assign panel
 let qbAssignUntil = '';         // due date (yyyy-mm-dd) for new assignments
 let qbAssignAllGrades = false;  // also list the teacher's students who don't match the paper's board / grade / subject
+let qbAdminPaperFilter = { teacherId: '', subject: '', gradeId: '', waiting: false };  // admin's view of all teachers' papers
 let qbPaperTab = null;          // 'students' | 'questions' on the open paper; null = pick by whether it's assigned
 let qbStudentFilter = null;     // 'all' | an assignment status; null = 'submitted' when any need marking
 let qbReviewId = null;          // assignment being marked by the teacher
@@ -8811,7 +8812,7 @@ async function actuallySaveSessionEdit(id, count, date) {
 }
 
 function setTab(t) { currentTab = t; location.hash = t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; loadStudyPlans().then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
-  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); } }
+  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); } }
 function setPayrollMonth(v) { payrollMonth = v; render(); }
 function setNetProfitMonth(v) { netProfitMonth = v; render(); }
 function setNetProfitViewMode(v) { netProfitViewMode = v; render(); }
@@ -15569,6 +15570,18 @@ function renderAdminQuestionBank() {
     <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Approved Bank ${approved.length?`<span style="background:var(--forest);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${approved.length}</span>`:''}
     </div>
+    <div class="tab ${qbSubTab==='papers'?'active':''}" onclick="qbSubTab='papers';qbPaperView='list';qbPaperId=null;qbReviewId=null;loadQbPapers()">
+      Practice Papers ${(() => { const n = Object.values(qbPaperCounts).reduce((t, c) => t + (c.submitted || 0), 0); return n ? `<span style="background:var(--gold);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px" title="Submitted papers waiting for the teacher to mark">${n}</span>` : ''; })()}
+    </div>
+  </div>`;
+
+  if (qbSubTab === 'papers') return `<div class="card">
+    <div class="row-form" style="justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h2 style="font-family:'Zilla Slab',serif;margin:0">Question Bank</h2>
+      <button class="btn-small" onclick="${qbPaperView === 'edit' && qbPaperId ? `qbOpenPaper('${qbPaperId}')` : 'loadQbPapers()'}">↻ Refresh</button>
+    </div>
+    ${subTabsHtml}
+    ${qbPapersHtml()}
   </div>`;
 
   const isReview = qbSubTab === 'review';
@@ -15762,7 +15775,10 @@ async function loadQbPapers() {
   try {
     const [bp, pp] = await Promise.all([
       sb.from('qb_paper_blueprints').select('*'),
-      sb.from('qb_practice_papers').select('*').eq('created_by_teacher_id', currentLinkedId).order('created_at', { ascending: false }),
+      // Admin sees every teacher's papers (read only); a teacher sees their own.
+      currentRole === 'Admin'
+        ? sb.from('qb_practice_papers').select('*').order('created_at', { ascending: false })
+        : sb.from('qb_practice_papers').select('*').eq('created_by_teacher_id', currentLinkedId).order('created_at', { ascending: false }),
     ]);
     if (bp.error) qbPaperMsg = 'Blueprint load error: ' + bp.error.message; else qbBlueprints = bp.data || [];
     if (pp.error) qbPaperMsg = 'Paper load error: ' + pp.error.message; else qbPapers = pp.data || [];
@@ -15771,11 +15787,15 @@ async function loadQbPapers() {
     if (ids.length) {
       const [pq, sa] = await Promise.all([
         sb.from('qb_paper_questions').select('paper_id, question_id, marks_override').in('paper_id', ids),
-        sb.from('qb_student_assignments').select('paper_id, status').in('paper_id', ids),
+        sb.from('qb_student_assignments').select('paper_id, status, total_score, submitted_at').in('paper_id', ids),
       ]);
-      ids.forEach(id => { qbPaperCounts[id] = { questions: 0, assigned: 0, submitted: 0 }; });
+      ids.forEach(id => { qbPaperCounts[id] = { questions: 0, assigned: 0, submitted: 0, reviewed: 0, scoreSum: 0, oldestSubmitted: null }; });
       (pq.data || []).forEach(r => { qbPaperCounts[r.paper_id].questions++; });
-      (sa.data || []).forEach(r => { const c = qbPaperCounts[r.paper_id]; c.assigned++; if (r.status === 'submitted') c.submitted++; });
+      (sa.data || []).forEach(r => {
+        const c = qbPaperCounts[r.paper_id]; c.assigned++;
+        if (r.status === 'submitted') { c.submitted++; if (r.submitted_at && (!c.oldestSubmitted || r.submitted_at < c.oldestSubmitted)) c.oldestSubmitted = r.submitted_at; }
+        if (r.status === 'reviewed') { c.reviewed++; c.scoreSum += Number(r.total_score) || 0; }
+      });
     }
   } catch (e) { qbPaperMsg = 'Error: ' + e.message; }
   qbPapersLoading = false; render();
@@ -15968,6 +15988,57 @@ function qbPapersListHtml() {
     ${qbPapers.length ? `<div class="qb-list">${rows}</div>` : '<div class="empty">No practice papers yet.</div>'}`;
 }
 
+// Admin: every teacher's practice papers at a glance, read only.
+function qbDaysSince(iso) { return iso ? Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)) : 0; }
+function qbAdminPapersListHtml() {
+  if (qbPapersLoading) return `<div class="empty">Loading papers…</div>`;
+  const f = qbAdminPaperFilter;
+  const teacherName = id => (data.teachers.find(t => t.id === id) || {}).name || 'Unknown teacher';
+  const cOf = p => qbPaperCounts[p.id] || { questions: 0, assigned: 0, submitted: 0, reviewed: 0, scoreSum: 0, oldestSubmitted: null };
+  const all = Object.values(qbPaperCounts);
+  const waiting = all.reduce((t, c) => t + c.submitted, 0);
+  const oldest = all.map(c => c.oldestSubmitted).filter(Boolean).sort()[0];
+  const statsHtml = `<div class="stat-grid" style="margin-bottom:14px">
+    <div class="stat-card"><div class="num ${qbPapers.length ? '' : 'zero'}">${qbPapers.length}</div><div class="label">Papers made</div></div>
+    <div class="stat-card"><div class="num ${all.some(c => c.assigned) ? '' : 'zero'}">${all.reduce((t, c) => t + c.assigned, 0)}</div><div class="label">Times assigned</div></div>
+    <div class="stat-card" ${waiting ? 'style="border-color:var(--gold)"' : ''}><div class="num ${waiting ? '' : 'zero'}">${waiting}</div><div class="label">Waiting for marking</div></div>
+    <div class="stat-card"><div class="num ${oldest ? '' : 'zero'}">${oldest ? qbDaysSince(oldest) + 'd' : '–'}</div><div class="label">Longest wait</div></div>
+  </div>`;
+  const teacherIds = [...new Set(qbPapers.map(p => p.created_by_teacher_id).filter(Boolean))];
+  const subjects = [...new Set(qbPapers.map(p => p.subject_name).filter(Boolean))].sort();
+  const gradeIds = [...new Set(qbPapers.map(p => p.grade_id).filter(Boolean))];
+  const filtersHtml = `<div class="row-form" style="flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center">
+    <select onchange="qbAdminPaperFilter.teacherId=this.value;render()"><option value="">All teachers</option>
+      ${teacherIds.map(id => [id, teacherName(id)]).sort((a, b) => a[1].localeCompare(b[1])).map(([id, n]) => `<option value="${escAttr(id)}" ${f.teacherId === id ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
+    <select onchange="qbAdminPaperFilter.subject=this.value;render()"><option value="">All subjects</option>
+      ${subjects.map(x => `<option value="${escAttr(x)}" ${f.subject === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+    <select onchange="qbAdminPaperFilter.gradeId=this.value;render()"><option value="">All classes</option>
+      ${gradeIds.map(id => `<option value="${escAttr(id)}" ${f.gradeId === id ? 'selected' : ''}>${esc(qbByName(grades, id) || id)}</option>`).join('')}</select>
+    <label style="display:inline-flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" ${f.waiting ? 'checked' : ''} onchange="qbAdminPaperFilter.waiting=this.checked;render()">Waiting for marking only</label>
+  </div>`;
+  const list = qbPapers.filter(p => (!f.teacherId || p.created_by_teacher_id === f.teacherId) && (!f.subject || p.subject_name === f.subject)
+    && (!f.gradeId || p.grade_id === f.gradeId) && (!f.waiting || cOf(p).submitted));
+  const rows = list.map(p => {
+    const c = cOf(p);
+    const avg = c.reviewed ? Math.round(c.scoreSum / c.reviewed) : null;
+    return `<tr style="cursor:pointer" onclick="qbOpenPaper('${p.id}')">
+      <td>${esc(teacherName(p.created_by_teacher_id))}</td>
+      <td style="font-weight:600">${esc(p.title || 'Untitled paper')}</td>
+      <td>${esc([p.subject_name, qbByName(grades, p.grade_id)].filter(Boolean).join(' · '))}</td>
+      <td>${esc(qbFmtDate(p.created_at))}</td>
+      <td>${qbPaperStatusLabel(p.status)}</td>
+      <td>${c.assigned}</td>
+      <td>${c.submitted ? `<b style="color:var(--gold)">${c.submitted}</b>${c.oldestSubmitted ? ` <span style="font-size:11px;color:var(--muted)">(${qbDaysSince(c.oldestSubmitted)}d)</span>` : ''}` : '0'}</td>
+      <td>${c.reviewed}</td>
+      <td>${avg != null ? `${avg} / ${esc(String(p.total_marks || ''))}` : '–'}</td>
+    </tr>`;
+  }).join('');
+  return `${statsHtml}${filtersHtml}
+    ${list.length ? `<div style="overflow-x:auto"><table><thead><tr><th>Teacher</th><th>Paper</th><th>Subject · Class</th><th>Created</th><th>Status</th><th>Assigned</th><th>To mark</th><th>Reviewed</th><th>Average</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      : `<div class="empty">${qbPapers.length ? 'No papers match these filters.' : 'No teacher has made a practice paper yet.'}</div>`}
+    <p class="hint" style="margin-top:10px">View only. Teachers build, assign and mark their own papers.</p>`;
+}
+
 function qbNewPaperHtml() {
   const groups = qbBlueprintGroups().filter(g => qbBankFor(g.board_id, g.grade_id, g.subject_name).length);
   const g = groups.find(x => x.key === qbPaperDraft.blueprintKey);
@@ -16150,6 +16221,7 @@ function qbReviewHtml() {
   const a = qbPaperAssignments.find(x => x.id === qbReviewId) || {};
   const s = data.students.find(x => x.id === a.student_id);
   if (qbReviewLoading) return `<div class="empty">Loading answers…</div>`;
+  const ro = currentRole === 'Admin';
   const sections = [...new Set(qbPaperQs.map(x => x.section_name || ''))].sort((x, y) => String(x).localeCompare(String(y), undefined, { numeric: true }));
   let n = 0;
   const body = sections.map(name => {
@@ -16173,7 +16245,7 @@ function qbReviewHtml() {
             ${(att.photo_urls || []).map(ph => `<a href="${escAttr(qbReviewPhotoUrls[ph] || '#')}" target="_blank"><img src="${escAttr(qbReviewPhotoUrls[ph] || '')}" alt="Answer photo" style="max-width:100%;max-height:420px;margin:6px 6px 0 0;border:1px solid var(--line);border-radius:6px"></a>`).join('')}`;
         }
         const d = qbReviewDraft[pq.question_id] || { marks: '', comment: '' };
-        const marking = q.question_type === 'mcq' || !att ? '' : `<div class="row-form" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
+        const marking = q.question_type === 'mcq' || !att ? '' : ro ? `<div style="margin-top:8px;font-size:13px"><b>Marks: ${d.marks !== '' ? esc(d.marks) : '–'} / ${max}</b>${d.comment ? ` · ${esc(d.comment)}` : ''}</div>` : `<div class="row-form" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
             <label style="font-size:13px;font-weight:600">Marks</label>
             <input type="number" min="0" max="${max}" step="1" value="${escAttr(d.marks)}" oninput="qbReviewSetMarks('${pq.question_id}',this.value,${max})" onchange="this.value=(qbReviewDraft['${pq.question_id}']||{}).marks||''" style="width:70px"> <span style="font-size:13px">/ ${max}</span>
             <input type="text" value="${escAttr(d.comment)}" placeholder="Comment (optional)" oninput="qbReviewSetComment('${pq.question_id}',this.value)" style="flex:1;min-width:160px">
@@ -16191,15 +16263,16 @@ function qbReviewHtml() {
   return `<div style="margin-bottom:12px"><button class="btn-small" onclick="qbCloseReview()">← ${esc(p.title || 'Paper')}</button></div>
     <h3 style="margin:0 0 4px">${esc(s ? s.name : 'Student')} — ${esc(p.title || '')}</h3>
     <div style="font-size:13px;color:var(--muted);margin-bottom:8px">Submitted ${esc(qbFmtDate(a.submitted_at))}${reviewed ? ' · reviewed ' + esc(qbFmtDate(a.reviewed_at)) : ''}
-      ${(() => { const left = qbPaperAssignments.filter(x => x.status === 'submitted' && x.id !== a.id).length; return left ? `<span style="color:var(--gold);font-weight:700">· ${left} more to mark</span> ` : ''; })()}· MCQ ${esc(String(Number(a.mcq_score) || 0))} · Total <b style="color:var(--ink)"><span id="qbReviewTotal">${qbReviewTotal()}</span> / ${esc(String(p.total_marks || ''))}</b></div>
+      ${ro ? '' : (() => { const left = qbPaperAssignments.filter(x => x.status === 'submitted' && x.id !== a.id).length; return left ? `<span style="color:var(--gold);font-weight:700">· ${left} more to mark</span> ` : ''; })()}· MCQ ${esc(String(Number(a.mcq_score) || 0))} · Total <b style="color:var(--ink)"><span id="qbReviewTotal">${qbReviewTotal()}</span> / ${esc(String(p.total_marks || ''))}</b></div>
     ${body}
-    <div class="qb-block" style="white-space:normal;margin-top:16px"><div class="qb-block-label">Overall feedback</div>
+    ${ro ? `<div class="qb-block" style="white-space:normal;margin-top:16px"><div class="qb-block-label">Teacher's feedback</div>${qbReviewFeedback ? esc(qbReviewFeedback) : '<span class="hint">None yet.</span>'}</div>
+      ${reviewed ? '' : '<div class="hint" style="margin-top:8px">The teacher hasn’t finished marking this paper yet.</div>'}` : `<div class="qb-block" style="white-space:normal;margin-top:16px"><div class="qb-block-label">Overall feedback</div>
       <textarea rows="3" oninput="qbReviewFeedback=this.value" placeholder="What went well, what to revise…" style="width:100%;box-sizing:border-box;font-family:inherit;font-size:14px;padding:8px;border:1px solid var(--line);border-radius:6px;resize:vertical">${esc(qbReviewFeedback)}</textarea></div>
     <div class="qb-actions" style="margin-top:10px">
       <button class="btn-primary" onclick="qbSaveReview(true)" ${qbPaperSaving ? 'disabled' : ''}>${reviewed ? 'Update review' : 'Mark as reviewed'}</button>
       ${!reviewed && qbNextToMark(a.id) ? `<button class="btn-primary" onclick="qbSaveReview(true,true)" ${qbPaperSaving ? 'disabled' : ''}>Mark as reviewed &amp; next</button>` : ''}
       ${reviewed ? '' : `<button class="btn-small" onclick="qbSaveReview(false)" ${qbPaperSaving ? 'disabled' : ''}>Save marks for later</button>`}
-    </div>`;
+    </div>`}`;
 }
 
 function qbPaperEditorHtml() {
@@ -16207,7 +16280,8 @@ function qbPaperEditorHtml() {
   if (!p) return `<div class="empty">Paper not found.</div>`;
   if (qbReviewId) return qbReviewHtml();
   const g = qbBlueprintForPaper(p);
-  const locked = qbPaperAssignments.length > 0;   // once students have it, the questions stay fixed
+  const ro = currentRole === 'Admin';              // admin looks at teachers' papers without changing them
+  const locked = ro || qbPaperAssignments.length > 0;   // once students have it, the questions stay fixed
   const sectionNames = [...new Set([...(g ? g.sections.map(s => s.section_name) : []), ...qbPaperQs.map(x => x.section_name || '')])]
     .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
   const total = qbPaperQs.reduce((s, pq) => s + qbPqMarks(pq), 0);
@@ -16256,13 +16330,14 @@ function qbPaperEditorHtml() {
     .map(([k, label]) => `<button class="btn-small${filter === k ? ' btn-primary' : ''}" onclick="qbStudentFilter='${k}';render()" ${!counts[k] ? 'disabled' : ''}>${label} (${counts[k] || 0})</button>`).join('');
   const shown = qbSortedAssignments(filter === 'all' ? qbPaperAssignments : qbPaperAssignments.filter(a => a.status === filter));
   const studentsHtml = !qbPaperAssignments.length
-    ? `<div class="empty">Not assigned to any students yet.${p.status === 'published' ? ' Use “Assign to students” above.' : ' Mark the paper ready first.'}</div>`
+    ? `<div class="empty">Not assigned to any students yet.${ro ? '' : p.status === 'published' ? ' Use “Assign to students” above.' : ' Mark the paper ready first.'}</div>`
     : `<div class="qb-actions" style="margin-bottom:8px;flex-wrap:wrap">${chips}</div>
     ${shown.length ? `<div class="qb-block" style="white-space:normal;margin-top:0">${shown.map(a => {
       const s = data.students.find(x => x.id === a.student_id);
       const due = a.available_until ? ' · due ' + qbFmtDate(a.available_until) : '';
       const label = { assigned: 'not started', in_progress: 'in progress', submitted: 'needs marking · submitted ' + qbFmtDate(a.submitted_at), reviewed: `reviewed · ${a.total_score ?? '–'} / ${p.total_marks || ''}` }[a.status] || a.status || 'assigned';
-      const btn = a.status === 'assigned' ? `<button class="btn-small" onclick="qbUnassign('${a.id}')">Remove</button>`
+      const btn = ro ? (a.status === 'submitted' || a.status === 'reviewed' ? `<button class="btn-small" onclick="qbOpenReview('${a.id}')">View answers</button>` : '')
+        : a.status === 'assigned' ? `<button class="btn-small" onclick="qbUnassign('${a.id}')">Remove</button>`
         : a.status === 'submitted' ? `<button class="btn-small btn-primary" onclick="qbOpenReview('${a.id}')">Review</button>`
         : a.status === 'reviewed' ? `<button class="btn-small" onclick="qbOpenReview('${a.id}')">View / edit marks</button>` : '';
       return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;font-size:13px;border-bottom:1px solid var(--line)">
@@ -16276,13 +16351,13 @@ function qbPaperEditorHtml() {
 
   return `<div style="margin-bottom:12px"><button class="btn-small" onclick="qbBackToPapers()">← Papers</button></div>
     <div class="row-form" style="gap:8px;align-items:center;flex-wrap:wrap">
-      <input type="text" value="${escAttr(p.title || '')}" onchange="qbUpdatePaper({title:this.value.trim()||'Untitled paper'})" style="flex:1;min-width:220px;font-weight:600;font-size:15px">
+      ${ro ? `<h3 style="margin:0;flex:1">${esc(p.title || 'Untitled paper')}</h3>` : `<input type="text" value="${escAttr(p.title || '')}" onchange="qbUpdatePaper({title:this.value.trim()||'Untitled paper'})" style="flex:1;min-width:220px;font-weight:600;font-size:15px">`}
       <span class="tag" style="${p.status === 'published' ? '' : 'background:rgba(0,0,0,.06);color:var(--muted)'}">${qbPaperStatusLabel(p.status)}</span>
     </div>
-    <div style="font-size:13px;color:var(--muted);margin:6px 0 10px">${esc([p.subject_name, qbByName(grades, p.grade_id), qbByName(boards, p.board_id)].filter(Boolean).join(' · '))}
+    <div style="font-size:13px;color:var(--muted);margin:6px 0 10px">${ro ? `By <b style="color:var(--ink)">${esc((data.teachers.find(t => t.id === p.created_by_teacher_id) || {}).name || 'Unknown teacher')}</b> · ` : ''}${esc([p.subject_name, qbByName(grades, p.grade_id), qbByName(boards, p.board_id)].filter(Boolean).join(' · '))}
       · <b style="color:${total === target ? 'var(--forest)' : 'var(--brick)'}">${total} / ${target} marks</b> · ${qbPaperQs.length} questions${p.duration_minutes ? ' · ' + esc(String(p.duration_minutes)) + ' min' : ''}</div>
     ${qbPaperWarnings.length ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${qbPaperWarnings.map(esc).join('<br>')}</div>` : ''}
-    <div class="qb-actions">
+    ${ro ? '' : `<div class="qb-actions">
       ${p.status === 'published'
         ? `${!locked ? `<button class="btn-small" onclick="qbUpdatePaper({status:'draft'})">Back to draft</button>` : ''}
            <button class="btn-small btn-primary" onclick="qbAssignOpen=!qbAssignOpen;qbAssignIds=new Set();render()">Assign to students</button>`
@@ -16292,13 +16367,13 @@ function qbPaperEditorHtml() {
     </div>
     ${p.status !== 'published' ? '<div class="hint" style="margin-top:6px">Mark the paper ready to assign it to students.</div>' : ''}
     ${locked ? '<div class="hint" style="margin-top:6px">Questions are fixed now that the paper is assigned.</div>' : ''}
-    ${qbAssignOpen && p.status === 'published' ? qbAssignHtml(p) : ''}
+    ${qbAssignOpen && p.status === 'published' ? qbAssignHtml(p) : ''}`}
     ${tabsHtml}
     ${tab === 'students' ? studentsHtml : (sectionsHtml || '<div class="empty">No questions on this paper yet.</div>')}`;
 }
 
 function qbPapersHtml() {
-  const body = qbPaperView === 'new' ? qbNewPaperHtml() : qbPaperView === 'edit' ? qbPaperEditorHtml() : qbPapersListHtml();
+  const body = qbPaperView === 'new' ? qbNewPaperHtml() : qbPaperView === 'edit' ? qbPaperEditorHtml() : currentRole === 'Admin' ? qbAdminPapersListHtml() : qbPapersListHtml();
   return `${QB_CARD_CSS}${qbPaperMsg ? `<div class="hint" style="color:${/^✓/.test(qbPaperMsg) ? 'var(--forest)' : 'var(--brick)'};margin-bottom:8px">${esc(qbPaperMsg)}</div>` : ''}${body}`;
 }
 
