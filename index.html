@@ -876,10 +876,13 @@ let qbFilterBoard = '';         // board filter — must be set (with subject + 
 let qbFilterSubject = '';       // subject filter (label from qbSubjectOf)
 let qbFilterGrade = '';         // grade filter (label from qbGradeOf)
 let qbEditId = null;            // question id being edited inline
-let qbEditDraft = {};           // { question_text, question_type, marks, difficulty }
+let qbEditDraft = {};           // { question_text, question_type, marks, difficulty, answer_text, chapter_id }
 let qbSaving = false;
 let qbMsg = '';
 let qbChapters = [];            // cached from qb_chapters
+let qbTextbooks = [];           // cached from qb_textbooks (board / grade / subject of each chapter)
+let qbSelectedIds = new Set();  // question ids ticked for "Set chapter"
+let qbBulkChapterId = '';       // chapter chosen in the "Set chapter" bar
 let qbPassages = {};            // passage_id -> qb_passages row, for unseen-passage questions
 let qbApprovers = {};           // profile id -> username, for "approved by"
 let qbExpandedIds = new Set();  // question ids whose details are open in the list
@@ -3046,6 +3049,8 @@ async function loadQBQuestions() {
     const { data: chaps, error: chapErr } = await sb.from('qb_chapters').select('*');
     if (chapErr) { qbMsg = 'Chapter load error: ' + chapErr.message; }
     else if (chaps) qbChapters = chaps.sort((a,b) => String(a.title||'').localeCompare(String(b.title||''), undefined, { numeric:true }));
+    const { data: tbs } = await sb.from('qb_textbooks').select('*');
+    qbTextbooks = tbs || [];
     // Load questions (no FK join — avoids PostgREST FK lookup issues)
     const { data: rows, error } = await sb
       .from('qb_questions')
@@ -3098,7 +3103,7 @@ function qbStartEdit(id) {
   const q = qbQuestions.find(x => x.id === id);
   if (!q) return;
   qbEditId = q.id;
-  qbEditDraft = { question_text: q.question_text, question_type: q.question_type, marks: q.marks, difficulty: q.difficulty, answer_text: q.answer_text || '' };
+  qbEditDraft = { question_text: q.question_text, question_type: q.question_type, marks: q.marks, difficulty: q.difficulty, answer_text: q.answer_text || '', chapter_id: q.chapter_id || '' };
   render();
 }
 
@@ -3118,14 +3123,35 @@ async function qbSaveEdit(id) {
     marks: parseInt(qbEditDraft.marks) || 1,
     difficulty: qbEditDraft.difficulty,
     answer_text: qbEditDraft.answer_text || null,
+    chapter_id: qbEditDraft.chapter_id || null,
   }).eq('id', id);
   if (error) { qbMsg = 'Error: ' + error.message; qbSaving = false; render(); return; }
-  qbQuestions = qbQuestions.map(q => q.id === id ? { ...q, ...qbEditDraft, marks: parseInt(qbEditDraft.marks)||1 } : q);
+  qbQuestions = qbQuestions.map(q => q.id === id ? { ...q, ...qbEditDraft, marks: parseInt(qbEditDraft.marks)||1, chapter_id: qbEditDraft.chapter_id || null } : q);
   qbMsg = '✓ Saved';
   qbEditId = null; qbEditDraft = {};
   qbSaving = false; render();
   setTimeout(() => { qbMsg = ''; render(); }, 2000);
 }
+
+// Link every ticked question that is still on screen to one chapter (or unlink with '').
+async function qbBulkSetChapter(visibleIds) {
+  if (!sb) return;
+  const ids = visibleIds.filter(id => qbSelectedIds.has(id));
+  if (!ids.length) return;
+  const chapterId = qbBulkChapterId === '__none__' ? null : qbBulkChapterId;
+  if (!chapterId && qbBulkChapterId !== '__none__') return;
+  qbSaving = true; render();
+  const { error } = await sb.from('qb_questions').update({ chapter_id: chapterId }).in('id', ids);
+  if (error) { qbMsg = 'Error: ' + error.message; qbSaving = false; render(); return; }
+  const done = new Set(ids);
+  qbQuestions = qbQuestions.map(q => done.has(q.id) ? { ...q, chapter_id: chapterId } : q);
+  qbSelectedIds = new Set();
+  qbMsg = `✓ ${chapterId ? 'Chapter set' : 'Chapter removed'} on ${ids.length} question${ids.length===1?'':'s'}`;
+  qbSaving = false; render();
+  setTimeout(() => { qbMsg = ''; render(); }, 2500);
+}
+function qbToggleSelect(id, on) { if (on) qbSelectedIds.add(id); else qbSelectedIds.delete(id); render(); }
+function qbSelectAll(ids, on) { ids.forEach(id => on ? qbSelectedIds.add(id) : qbSelectedIds.delete(id)); render(); }
 
 function hwIsLate(hw) {
   if (!hw.dueDate) return false;
@@ -15360,6 +15386,30 @@ function qbSubjectOf(q) {
   return qbNameFrom(subjectNames, v) || qbNameFrom(data.subjects || [], v);
 }
 function qbGradeOf(q) { const v = qbLinkedVal(q, ['grade_id','grade']); return v ? qbNameFrom(grades, v) : ''; }
+// Chapters come from the textbook for a board + grade + subject. Matching is on names, so it works from the filter labels too.
+function qbChapterLabel(c) { return (c.chapter_number != null && c.chapter_number !== '' ? c.chapter_number + '. ' : '') + (c.title || ''); }
+function qbSortChapters(list) { return [...list].sort((a, b) => (Number(a.chapter_number) || 0) - (Number(b.chapter_number) || 0) || String(a.title||'').localeCompare(String(b.title||''), undefined, { numeric:true })); }
+function qbChaptersForNames(board, subject, grade) {
+  const lc = x => String(x || '').trim().toLowerCase();
+  const tbIds = new Set(qbTextbooks.filter(t =>
+    lc(qbByName(boards, t.board_id)) === lc(board) &&
+    lc(qbByName(grades, t.grade_id)) === lc(grade) &&
+    lc(t.subject_name) === lc(subject)).map(t => t.id));
+  return qbSortChapters(qbChapters.filter(c => tbIds.has(c.textbook_id)));
+}
+function qbChaptersForQuestion(q) {
+  const list = qbChaptersForNames(qbBoardOf(q), qbSubjectOf(q), qbGradeOf(q));
+  // Keep the question's current chapter in the list even if it belongs to another textbook.
+  const cur = q.chapter_id && !list.some(c => c.id === q.chapter_id) ? qbChapters.find(c => c.id === q.chapter_id) : null;
+  return cur ? [cur, ...list] : list;
+}
+// Chapters for the chosen board / subject / grade, plus any already linked to questions in that scope.
+function qbChaptersForScope(approved) {
+  const list = qbChaptersForNames(qbFilterBoard, qbFilterSubject, qbFilterGrade);
+  const ids = new Set(list.map(c => c.id));
+  const used = new Set(qbScopeQuestions(approved).map(q => q.chapter_id).filter(id => id && !ids.has(id)));
+  return qbSortChapters([...list, ...qbChapters.filter(c => used.has(c.id))]);
+}
 // Which of board / subject / grade the loaded rows don't carry at all (column missing in qb_questions).
 function qbMissingScopeColumns() {
   if (!qbQuestions.length) return [];
@@ -15383,14 +15433,15 @@ function qbScopeQuestions(approved) {
   return qs;
 }
 function qbDistinct(qs, fn) { return [...new Set(qs.map(fn).filter(Boolean))].sort((a,b)=>a.localeCompare(b, undefined, { numeric:true })); }
-function qbClearDetailFilters() { qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch=''; }
+function qbClearDetailFilters() { qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch=''; qbSelectedIds = new Set(); qbBulkChapterId = ''; }
 
 function qbFilteredQuestions(approved) {
   let qs = qbScopeQuestions(approved);
   if (!qbScopeChosen()) return [];
   if (qbFilterType) qs = qs.filter(q => q.question_type === qbFilterType);
   if (qbFilterDifficulty) qs = qs.filter(q => q.difficulty === qbFilterDifficulty);
-  if (qbFilterChapter) qs = qs.filter(q => q.chapter_id === qbFilterChapter);
+  if (qbFilterChapter === '__none__') qs = qs.filter(q => !q.chapter_id);
+  else if (qbFilterChapter) qs = qs.filter(q => q.chapter_id === qbFilterChapter);
   if (qbFilterSearch) {
     const lc = qbFilterSearch.toLowerCase();
     qs = qs.filter(q => q.question_text.toLowerCase().includes(lc));
@@ -15407,9 +15458,9 @@ function qbFiltersHtml(showAll) {
   const gradeOpts = qbDistinct(base.filter(q => (!qbFilterBoard || qbBoardOf(q) === qbFilterBoard) && (!qbFilterSubject || qbSubjectOf(q) === qbFilterSubject)), qbGradeOf);
   const unlocked = qbScopeChosen();
   const dis = unlocked ? '' : 'disabled';
-  // Only offer chapters that occur in the chosen board / subject / grade.
-  const scopeChapterIds = new Set(qbScopeQuestions(approved).map(q => q.chapter_id));
-  const chapters = qbChapters.filter(c => scopeChapterIds.has(c.id));
+  // Only offer chapters of the chosen board / subject / grade.
+  const chapters = qbChaptersForScope(approved);
+  const unlinked = qbScopeQuestions(approved).filter(q => !q.chapter_id).length;
   const missing = qbMissingScopeColumns();
   const anyFilter = qbFilterBoard||qbFilterSubject||qbFilterGrade||qbFilterType||qbFilterDifficulty||qbFilterChapter||qbFilterSearch;
   return `<div class="row-form" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">
@@ -15439,7 +15490,8 @@ function qbFiltersHtml(showAll) {
     </select>
     <select ${dis} onchange="qbFilterChapter=this.value;render()">
       <option value="">All chapters</option>
-      ${chapters.map(c=>`<option value="${c.id}" ${c.id===qbFilterChapter?'selected':''}>${esc(c.title)}</option>`).join('')}
+      ${unlinked ? `<option value="__none__" ${qbFilterChapter==='__none__'?'selected':''}>No chapter yet (${unlinked})</option>` : ''}
+      ${chapters.map(c=>`<option value="${c.id}" ${c.id===qbFilterChapter?'selected':''}>${esc(qbChapterLabel(c))}</option>`).join('')}
     </select>
     <input type="text" ${dis} value="${esc(qbFilterSearch)}" placeholder="Search question text…" oninput="qbFilterSearch=this.value;render()" style="min-width:180px">
     ${anyFilter?`<button class="btn-small" onclick="qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbClearDetailFilters();render()">✕ Clear</button>`:''}
@@ -15471,6 +15523,7 @@ const QB_CARD_CSS = `<style>
 function qbFmtDate(ts) { return ts ? formatDate(String(ts).slice(0,10)) : ''; }
 
 function qbEditFormHtml(q) {
+  const chapters = qbChaptersForQuestion(q);
   return `<div class="qb-card open">
     <div style="font-size:12px;font-weight:700;margin-bottom:6px">Editing question</div>
     <textarea rows="6" style="width:100%;font-family:inherit;font-size:14px;line-height:1.5;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box;resize:vertical"
@@ -15483,6 +15536,10 @@ function qbEditFormHtml(q) {
       <select onchange="qbEditDraft.difficulty=this.value">
         ${['easy','medium','hard'].map(d=>`<option value="${d}" ${d===(qbEditDraft.difficulty||q.difficulty)?'selected':''}>${d}</option>`).join('')}
       </select>
+      ${chapters.length ? `<select onchange="qbEditDraft.chapter_id=this.value" style="max-width:280px">
+        <option value="">No chapter</option>
+        ${chapters.map(c=>`<option value="${c.id}" ${c.id===qbEditDraft.chapter_id?'selected':''}>${esc(qbChapterLabel(c))}</option>`).join('')}
+      </select>` : `<span class="hint" style="align-self:center">No chapters set up for this board, class and subject yet.</span>`}
     </div>
     <div style="margin-top:8px"><label style="font-size:12px;font-weight:600">Answer / key</label>
       <textarea rows="3" style="width:100%;font-family:inherit;font-size:13px;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box;resize:vertical"
@@ -15520,11 +15577,12 @@ function qbQuestionRowHtml(q, isAdmin) {
 
   return `<div class="qb-card ${open?'open':''}">
     <div class="qb-meta">
+      <input type="checkbox" title="Tick to set the chapter for several questions" ${qbSelectedIds.has(q.id)?'checked':''} onchange="qbToggleSelect('${q.id}',this.checked)" style="margin:0 2px 0 0">
       ${section ? `<span class="qb-sec">${esc(section)}</span>` : ''}
       ${typeLabel ? `<span class="tag">${esc(typeLabel)}</span>` : ''}
       <span class="qb-marks">${q.marks != null ? q.marks + ' mark' + (q.marks == 1 ? '' : 's') : ''}</span>
       ${q.difficulty ? `<span style="color:${diffColor};font-weight:700">${esc(q.difficulty)}</span>` : ''}
-      ${chapterTitle ? `<span>· ${esc(chapterTitle)}</span>` : ''}
+      ${chapterTitle ? `<span>· ${esc(chapterTitle)}</span>` : `<span style="color:var(--brick)">· No chapter</span>`}
       ${source ? `<span>· ${esc(source)}</span>` : ''}
     </div>
     <div class="qb-text ${open?'':'clamp'}" onclick="qbToggleExpand('${q.id}')" title="${open?'Click to collapse':'Click to show full question'}">${esc(q.question_text || '')}</div>
@@ -15546,10 +15604,31 @@ function qbQuestionRowHtml(q, isAdmin) {
   </div>`;
 }
 
+// "Set chapter" bar: tick questions in the list, pick a chapter, apply to all ticked at once.
+function qbBulkBarHtml(qs) {
+  const chapters = qbChaptersForScope(qbSubTab !== 'review');
+  const ids = qs.map(q => q.id);
+  const n = ids.filter(id => qbSelectedIds.has(id)).length;
+  const all = n === ids.length;
+  const idList = escAttr(JSON.stringify(ids));
+  const pick = qbBulkChapterId && (qbBulkChapterId === '__none__' || chapters.some(c => c.id === qbBulkChapterId));
+  return `<div class="row-form" style="flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;padding:8px 10px;background:var(--bg);border-radius:8px">
+    <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" ${all?'checked':''} onchange="qbSelectAll(${idList},this.checked)">Select all ${ids.length}</label>
+    <span style="font-size:12px;color:var(--muted)">${n} selected</span>
+    ${chapters.length ? `<select onchange="qbBulkChapterId=this.value;render()" style="max-width:280px">
+        <option value="">Choose chapter…</option>
+        ${chapters.map(c=>`<option value="${c.id}" ${c.id===qbBulkChapterId?'selected':''}>${esc(qbChapterLabel(c))}</option>`).join('')}
+        <option value="__none__" ${qbBulkChapterId==='__none__'?'selected':''}>Remove chapter</option>
+      </select>
+      <button class="btn-small btn-primary" onclick="qbBulkSetChapter(${idList})" ${(!n || !pick || qbSaving)?'disabled':''}>Set chapter</button>`
+      : `<span class="hint">No chapters set up for this board, class and subject yet.</span>`}
+  </div>`;
+}
+
 function qbTableHtml(qs, isAdmin) {
   if (!qbScopeChosen()) return '<div class="empty">Choose Board, Subject and Grade to see questions.</div>';
   if (!qs.length) return '<div class="empty">No questions match these filters.</div>';
-  return `${QB_CARD_CSS}<div class="qb-list">${qs.map(q => qbQuestionRowHtml(q, isAdmin)).join('')}</div>`;
+  return `${QB_CARD_CSS}${qbBulkBarHtml(qs)}<div class="qb-list">${qs.map(q => qbQuestionRowHtml(q, isAdmin)).join('')}</div>`;
 }
 
 // ─────────────────────────────────────────────────────────────
