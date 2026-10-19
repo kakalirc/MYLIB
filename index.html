@@ -3124,13 +3124,13 @@ async function qbSaveEdit(id) {
   const { error } = await sb.from('qb_questions').update({
     question_text: qbEditDraft.question_text,
     question_type: qbEditDraft.question_type,
-    marks: parseInt(qbEditDraft.marks) || 1,
+    marks: Number(qbEditDraft.marks) || 1,
     difficulty: qbEditDraft.difficulty,
     answer_text: qbEditDraft.answer_text || null,
     chapter_id: qbEditDraft.chapter_id || null,
   }).eq('id', id);
   if (error) { qbMsg = 'Error: ' + error.message; qbSaving = false; render(); return; }
-  qbQuestions = qbQuestions.map(q => q.id === id ? { ...q, ...qbEditDraft, marks: parseInt(qbEditDraft.marks)||1, chapter_id: qbEditDraft.chapter_id || null } : q);
+  qbQuestions = qbQuestions.map(q => q.id === id ? { ...q, ...qbEditDraft, marks: Number(qbEditDraft.marks)||1, chapter_id: qbEditDraft.chapter_id || null } : q);
   qbMsg = '✓ Saved';
   qbEditId = null; qbEditDraft = {};
   qbSaving = false; render();
@@ -15602,7 +15602,7 @@ function qbEditFormHtml(q) {
       <select onchange="qbEditDraft.question_type=this.value">
         ${QB_TYPES.map(t=>`<option value="${t}" ${t===(qbEditDraft.question_type||q.question_type)?'selected':''}>${QB_TYPE_LABELS[t]||t}</option>`).join('')}
       </select>
-      <input type="number" value="${qbEditDraft.marks!==undefined?qbEditDraft.marks:q.marks}" min="1" max="10" style="width:70px" placeholder="Marks" oninput="qbEditDraft.marks=this.value">
+      <input type="number" value="${qbEditDraft.marks!==undefined?qbEditDraft.marks:q.marks}" min="0.5" max="10" step="0.5" style="width:70px" placeholder="Marks" oninput="qbEditDraft.marks=this.value">
       <select onchange="qbEditDraft.difficulty=this.value">
         ${['easy','medium','hard'].map(d=>`<option value="${d}" ${d===(qbEditDraft.difficulty||q.difficulty)?'selected':''}>${d}</option>`).join('')}
       </select>
