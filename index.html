@@ -903,7 +903,8 @@ let qbAssignUntil = '';         // due date (yyyy-mm-dd) for new assignments
 let qbAssignAllGrades = false;  // also list the teacher's students who don't match the paper's board / grade / subject
 let qbSourcePapers = [];        // qb_source_papers rows (original exam PDFs) this user may read
 let qbSourceLoading = false;
-let qbSourceFilter = { boardId: '', gradeId: '', subject: '', year: '', examType: '' };
+let qbSourceFilter = { boardId: '', gradeId: '', subject: '', year: '' };
+let qbSourceApplied = null;
 let qbAdminPaperFilter = { teacherId: '', subject: '', gradeId: '', waiting: false };  // admin's view of all teachers' papers
 let qbPaperTab = null;          // 'students' | 'questions' on the open paper; null = pick by whether it's assigned
 let qbStudentFilter = null;     // 'all' | an assignment status; null = 'submitted' when any need marking
@@ -16451,26 +16452,26 @@ async function qbOpenSourcePdf(id) {
 function qbSourcePapersHtml() {
   if (qbSourceLoading) return `<div class="empty">Loading past papers…</div>`;
   if (!qbSourcePapers.length) return `<div class="empty">No past papers stored yet.</div>`;
-  const f = qbSourceFilter;
-  // Each dropdown offers only values that exist in the papers matching the other filters.
-  const match = (sp, skip) => (skip === 'boardId' || !f.boardId || sp.board_id === f.boardId) && (skip === 'gradeId' || !f.gradeId || sp.grade_id === f.gradeId)
-    && (skip === 'subject' || !f.subject || sp.subject_name === f.subject) && (skip === 'year' || !f.year || String(sp.year) === f.year)
-    && (skip === 'examType' || !f.examType || sp.exam_type === f.examType);
-  const opts = (key, val, label) => [...new Map(qbSourcePapers.filter(sp => match(sp, key)).map(sp => [String(val(sp) ?? ''), label(sp)])).entries()]
-    .filter(([v]) => v).sort((a, b) => key === 'year' ? b[0].localeCompare(a[0]) : String(a[1]).localeCompare(String(b[1]), undefined, { numeric: true }));
-  const sel = (key, all, val, label) => `<select onchange="qbSourceFilter.${key}=this.value;render()"><option value="">${all}</option>
+  // The dropdowns edit a draft; nothing is listed until Apply copies it into qbSourceApplied.
+  // Each filter is independent: every dropdown lists all values, and "All" (empty) doesn't narrow.
+  const f = qbSourceFilter, a = qbSourceApplied;
+  const opts = (key, val, label) => [...new Map(qbSourcePapers.map(sp => [String(val(sp) ?? ''), label(sp)])).entries()]
+    .filter(([v]) => v).sort((x, y) => key === 'year' ? y[0].localeCompare(x[0]) : String(x[1]).localeCompare(String(y[1]), undefined, { numeric: true }));
+  const sel = (key, all, val, label) => `<select onchange="qbSourceFilter.${key}=this.value"><option value="">${all}</option>
     ${opts(key, val, label).map(([v, l]) => `<option value="${escAttr(v)}" ${f[key] === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
   const filtersHtml = `<div class="row-form" style="flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center">
     ${sel('boardId', 'All boards', sp => sp.board_id, sp => qbByName(boards, sp.board_id) || 'Unknown board')}
     ${sel('gradeId', 'All classes', sp => sp.grade_id, sp => qbByName(grades, sp.grade_id) || 'Unknown class')}
     ${sel('subject', 'All subjects', sp => sp.subject_name, sp => sp.subject_name)}
     ${sel('year', 'All years', sp => sp.year, sp => String(sp.year))}
-    ${Object.values(f).some(Boolean) ? `<button class="btn-small" onclick="qbSourceFilter={boardId:'',gradeId:'',subject:'',year:'',examType:''};render()">Clear</button>` : ''}
+    <button class="btn-small" onclick="qbSourceApplied={...qbSourceFilter};render()">Apply filter</button>
+    ${a ? `<button class="btn-small" onclick="qbSourceFilter={boardId:'',gradeId:'',subject:'',year:''};qbSourceApplied=null;render()">Clear</button>` : ''}
   </div>`;
-  // Nothing is listed until a board and class are chosen; subject, year and exam type can stay on "All".
-  if (!f.boardId || !f.gradeId) return `<p class="hint" style="margin-bottom:12px">Original board question papers the question bank was built from.</p>
-    ${filtersHtml}<div class="empty">Pick a board and class to see the papers.</div>`;
-  const list = qbSourcePapers.filter(sp => match(sp));
+  if (!a) return `<p class="hint" style="margin-bottom:12px">Original board question papers the question bank was built from.</p>
+    ${filtersHtml}<div class="empty">Choose filters and press Apply filter to see the papers.</div>`;
+  const match = sp => (!a.boardId || sp.board_id === a.boardId) && (!a.gradeId || sp.grade_id === a.gradeId)
+    && (!a.subject || sp.subject_name === a.subject) && (!a.year || String(sp.year) === a.year);
+  const list = qbSourcePapers.filter(match);
   if (!list.length) return `${filtersHtml}<div class="empty">No past papers match these filters.</div>`;
   const groups = new Map();
   list.forEach(sp => {
