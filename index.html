@@ -872,6 +872,7 @@ let qbFilterType = '';          // question_type filter
 let qbFilterDifficulty = '';    // difficulty filter
 let qbFilterChapter = '';       // chapter_id filter
 let qbFilterSearch = '';        // text search in question_text
+let qbFilterDup = false;        // show only questions that have a duplicate copy
 let qbFilterBoard = '';         // board filter — must be set (with subject + grade) before the filters above unlock
 let qbFilterSubject = '';       // subject filter (label from qbSubjectOf)
 let qbFilterGrade = '';         // grade filter (label from qbGradeOf)
@@ -941,7 +942,7 @@ function setTeacherPortalTab(t) {
   if (t === 'report') { loadTeacherPayrollRecords().then(() => render()); return; }
   if (t === 'studyplans') { studyPlanTeacherStudentId = ''; studyPlanTeacherSubjectId = ''; studyPlanDraftItems = []; studyPlanMsg = ''; studyPlanViewMode = 'report'; studyPlanFilterStatus = 'all'; studyPlanFilterSubjectId = ''; studyPlanFilterStudent = ''; loadStudyPlans().then(() => render()); return; }
   if (t === 'homework') { hwShowForm = false; hwMsg = ''; hwFilterStudentId = ''; hwFilterStatus = 'assigned'; loadHomework().then(() => render()); return; }
-  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); return; }
+  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); return; }
   render();
 }
 function setTeacherAttendanceViewMonth(v) { teacherAttendanceViewMonth = v; render(); }
@@ -3076,6 +3077,9 @@ async function loadQBQuestions() {
 
 async function qbApprove(id) {
   if (!sb) return;
+  const q = qbQuestions.find(x => x.id === id);
+  if (q && qbDuplicatesOf(q).some(x => x.approved)
+      && !confirm('This question is already approved in the bank. Approve a second copy anyway?')) return;
   qbSaving = true; render();
   const stamp = { approved: true, approved_by: currentUserId || null, approved_at: new Date().toISOString() };
   const { error } = await sb.from('qb_questions').update(stamp).eq('id', id);
@@ -8874,7 +8878,7 @@ async function actuallySaveSessionEdit(id, count, date) {
 }
 
 function setTab(t) { currentTab = t; location.hash = t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; loadStudyPlans().then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
-  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); } }
+  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); } }
 function setPayrollMonth(v) { payrollMonth = v; render(); }
 function setNetProfitMonth(v) { netProfitMonth = v; render(); }
 function setNetProfitViewMode(v) { netProfitViewMode = v; render(); }
@@ -15467,7 +15471,36 @@ function qbScopeQuestions(approved) {
   return qs;
 }
 function qbDistinct(qs, fn) { return [...new Set(qs.map(fn).filter(Boolean))].sort((a,b)=>a.localeCompare(b, undefined, { numeric:true })); }
-function qbClearDetailFilters() { qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch=''; qbSelectedIds = new Set(); qbBulkChapterId = ''; }
+function qbClearDetailFilters() { qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false; qbSelectedIds = new Set(); qbBulkChapterId = ''; }
+
+// Duplicate check. Same clean-up as question-bank/sql/08-check-duplicates.sql: ignore case, spaces,
+// punctuation, danda, digits and quote marks. A question under a passage only matches one under the
+// same passage text. Groups span both tabs, so the Review Queue can show "already in the bank".
+const QB_NORM_RE = /[\s ​-‍!-@\[-`{-~।-९‘-”–—…]/g;
+function qbNormText(t) { return String(t || '').toLowerCase().replace(QB_NORM_RE, ''); }
+let qbDupCache = { src: null, passages: null, groups: null };
+function qbDupKey(q) {
+  const qn = qbNormText(q.question_text);
+  if (!qn) return '';
+  const p = q.passage_id ? qbPassages[q.passage_id] : null;
+  return [qbBoardOf(q), qbSubjectOf(q), qbGradeOf(q), qn, qbNormText(p && p.passage_text)].join('|');
+}
+// key -> questions sharing it (only keys with 2+ questions). Rebuilt when the loaded rows change.
+function qbDupGroups() {
+  if (qbDupCache.src !== qbQuestions || qbDupCache.passages !== qbPassages) {
+    const all = new Map();
+    qbQuestions.forEach(q => { const k = qbDupKey(q); if (k) { if (!all.has(k)) all.set(k, []); all.get(k).push(q); } });
+    const groups = new Map();
+    all.forEach((qs, k) => { if (qs.length > 1) groups.set(k, qs); });
+    qbDupCache = { src: qbQuestions, passages: qbPassages, groups };
+  }
+  return qbDupCache.groups;
+}
+// The other copies of q (empty when q has no duplicate).
+function qbDuplicatesOf(q) {
+  const g = qbDupGroups().get(qbDupKey(q));
+  return g ? g.filter(x => x.id !== q.id) : [];
+}
 
 function qbFilteredQuestions(approved) {
   let qs = qbScopeQuestions(approved);
@@ -15480,6 +15513,7 @@ function qbFilteredQuestions(approved) {
     const lc = qbFilterSearch.toLowerCase();
     qs = qs.filter(q => q.question_text.toLowerCase().includes(lc));
   }
+  if (qbFilterDup) qs = qs.filter(q => qbDuplicatesOf(q).length);
   return qs;
 }
 
@@ -15496,7 +15530,8 @@ function qbFiltersHtml(showAll) {
   const chapters = qbChaptersForScope(approved);
   const unlinked = qbScopeQuestions(approved).filter(q => !q.chapter_id).length;
   const missing = qbMissingScopeColumns();
-  const anyFilter = qbFilterBoard||qbFilterSubject||qbFilterGrade||qbFilterType||qbFilterDifficulty||qbFilterChapter||qbFilterSearch;
+  const anyFilter = qbFilterBoard||qbFilterSubject||qbFilterGrade||qbFilterType||qbFilterDifficulty||qbFilterChapter||qbFilterSearch||qbFilterDup;
+  const dupCount = qbScopeQuestions(approved).filter(q => qbDuplicatesOf(q).length).length;
   return `<div class="row-form" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">
     <select onchange="qbFilterBoard=this.value;qbFilterSubject='';qbFilterGrade='';qbClearDetailFilters();render()">
       <option value="">Board…</option>
@@ -15528,6 +15563,7 @@ function qbFiltersHtml(showAll) {
       ${chapters.map(c=>`<option value="${c.id}" ${c.id===qbFilterChapter?'selected':''}>${esc(qbChapterLabel(c))}</option>`).join('')}
     </select>
     <input type="text" ${dis} value="${esc(qbFilterSearch)}" placeholder="Search question text…" oninput="qbFilterSearch=this.value;render()" style="min-width:180px">
+    ${unlocked && (dupCount || qbFilterDup) ? `<label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--brick)"><input type="checkbox" ${qbFilterDup?'checked':''} onchange="qbFilterDup=this.checked;render()">Duplicates only (${dupCount})</label>` : ''}
     ${anyFilter?`<button class="btn-small" onclick="qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbClearDetailFilters();render()">✕ Clear</button>`:''}
   </div>
   ${missing.length
@@ -15609,6 +15645,11 @@ function qbQuestionRowHtml(q, isAdmin) {
       : 'Approved (approver not recorded)');
   }
 
+  const dups = qbDuplicatesOf(q);
+  const dupInBank = dups.some(x => x.approved);
+  const dupBadge = !dups.length ? '' : `<span style="color:var(--brick);font-weight:700" title="Same question text${q.passage_id ? ' and passage' : ''} as ${dups.length} other question${dups.length===1?'':'s'}">⚠ ${
+    !q.approved && dupInBank ? 'Already in bank' : 'Duplicate'}${dups.length > 1 ? ' ×' + (dups.length + 1) : ''}</span>`;
+
   return `<div class="qb-card ${open?'open':''}">
     <div class="qb-meta">
       <input type="checkbox" title="Tick to set the chapter for several questions" ${qbSelectedIds.has(q.id)?'checked':''} onchange="qbToggleSelect('${q.id}',this.checked)" style="margin:0 2px 0 0">
@@ -15618,6 +15659,7 @@ function qbQuestionRowHtml(q, isAdmin) {
       ${q.difficulty ? `<span style="color:${diffColor};font-weight:700">${esc(q.difficulty)}</span>` : ''}
       ${chapterTitle ? `<span>· ${esc(chapterTitle)}</span>` : `<span style="color:var(--brick)">· No chapter</span>`}
       ${source ? `<span>· ${esc(source)}</span>` : ''}
+      ${dupBadge}
     </div>
     <div class="qb-text ${open?'':'clamp'}" onclick="qbToggleExpand('${q.id}')" title="${open?'Click to collapse':'Click to show full question'}">${esc(q.question_text || '')}</div>
     ${open ? `
@@ -15681,10 +15723,10 @@ function renderAdminQuestionBank() {
   </div>`;
 
   const subTabsHtml = `<div class="tabs" style="margin-bottom:16px">
-    <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Review Queue ${pending.length?`<span style="background:var(--brick);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${pending.length}</span>`:''}
     </div>
-    <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Approved Bank ${approved.length?`<span style="background:var(--forest);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${approved.length}</span>`:''}
     </div>
     <div class="tab ${qbSubTab==='papers'?'active':''}" onclick="qbSubTab='papers';qbPaperView='list';qbPaperId=null;qbReviewId=null;loadQbPapers()">
@@ -15747,10 +15789,10 @@ function renderTeacherQuestionBank(teacher) {
   </div>`;
 
   const subTabsHtml = `<div class="tabs" style="margin-bottom:16px">
-    <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Review Queue ${pending.length?`<span style="background:var(--brick);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${pending.length}</span>`:''}
     </div>
-    <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Full Question Bank ${approved.length?`<span style="background:var(--forest);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${approved.length}</span>`:''}
     </div>
     <div class="tab ${qbSubTab==='papers'?'active':''}" onclick="qbSubTab='papers';qbPaperView='list';qbPaperId=null;qbPicker=null;loadQbPapers()">
