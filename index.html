@@ -3285,6 +3285,38 @@ async function hwUploadTeacherFile(file) {
   hwTeacherFileUploading = false; render();
 }
 
+// homework-photos is a private bucket: the stored public-style URLs only locate the file,
+// so pages show a short-lived signed link instead. Until a link is signed (or if signing
+// fails) the stored URL is used as before.
+const hwSigned = {};
+let hwSignTimer = null;
+function hwFileUrl(url) {
+  if (!url) return '';
+  const c = hwSigned[url];
+  if (c && c.url && c.until > Date.now()) return c.url;
+  if (!c || (!c.pending && c.until <= Date.now())) {
+    hwSigned[url] = { url: c ? c.url : '', until: 0, pending: true };
+    clearTimeout(hwSignTimer);
+    hwSignTimer = setTimeout(hwSignPending, 0);
+  }
+  return (c && c.url) || url;
+}
+async function hwSignPending() {
+  const urls = Object.keys(hwSigned).filter(u => hwSigned[u].pending);
+  const refs = urls.map(u => ({ u, ref: qbStorageRef(u) }));
+  const paths = refs.filter(r => r.ref && r.ref.bucket === 'homework-photos').map(r => r.ref.path);
+  let signed = [];
+  if (sb && paths.length) {
+    try { const { data } = await sb.storage.from('homework-photos').createSignedUrls(paths, 6 * 3600); signed = data || []; } catch (e) { /* keep stored URLs */ }
+  }
+  refs.forEach(({ u, ref }) => {
+    const hit = ref && signed.find(x => x.path === ref.path && x.signedUrl);
+    // Re-sign after 5 hours; on failure keep the stored URL and try again in a minute.
+    hwSigned[u] = hit ? { url: hit.signedUrl, until: Date.now() + 5 * 3600e3 } : { url: u, until: Date.now() + 60e3 };
+  });
+  if (refs.length) render();
+}
+
 function hwWaPhone(studentId) {
   // Try student mobile first, then parent mobile
   const studentNums = phoneNumbersFor(studentId, 'student').map(p=>p.number).filter(Boolean);
@@ -14859,7 +14891,7 @@ function renderTeacherHomework(teacher) {
       <label>Attach file <span class="hint" style="font-size:11px">(PDF, image, doc — optional)</span></label>
       ${hwDraft.teacher_file_url ? `
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <a href="${esc(hwDraft.teacher_file_url)}" target="_blank" style="font-size:13px">📎 View attached file</a>
+          <a href="${escAttr(hwFileUrl(hwDraft.teacher_file_url))}" target="_blank" style="font-size:13px">📎 View attached file</a>
           <button class="btn-small btn-danger" onclick="hwDraft.teacher_file_url='';render()">Remove</button>
         </div>` : `
         <div style="display:flex;align-items:center;gap:8px">
@@ -14937,10 +14969,10 @@ function renderTeacherHomework(teacher) {
           </div>
           ${h.description ? `<div style="font-size:13px;color:var(--ink);margin-top:4px">${esc(h.description)}</div>` : ''}
           ${h.studyPlanTopic ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">🔗 ${esc(h.studyPlanTopic)}</div>` : ''}
-          ${h.photoUrl ? `<div style="margin-top:6px"><a href="${esc(h.photoUrl)}" target="_blank"><img src="${esc(h.photoUrl)}" alt="Student work" style="max-height:100px;border-radius:6px;border:1px solid var(--line)"></a></div>` : ''}
+          ${h.photoUrl ? `<div style="margin-top:6px"><a href="${escAttr(hwFileUrl(h.photoUrl))}" target="_blank"><img src="${escAttr(hwFileUrl(h.photoUrl))}" alt="Student work" style="max-height:100px;border-radius:6px;border:1px solid var(--line)"></a></div>` : ''}
           ${h.teacherFeedback ? `<div style="margin-top:6px;font-size:13px;background:rgba(60,94,66,0.08);border-left:3px solid var(--forest);padding:6px 10px;border-radius:0 6px 6px 0">💬 ${esc(h.teacherFeedback)}</div>` : ''}
           ${h.marks !== '' && h.marks != null ? `<div style="font-size:13px;color:var(--forest);margin-top:3px">⭐ Score: <b>${h.marks}${h.totalMarks !== '' && h.totalMarks != null ? ` / ${h.totalMarks}` : ''}</b></div>` : (h.totalMarks !== '' && h.totalMarks != null ? `<div style="font-size:12px;color:var(--muted);margin-top:3px">Out of ${h.totalMarks}</div>` : '')}
-        ${h.teacherFileUrl?`<div style="margin-top:4px"><a href="${esc(h.teacherFileUrl)}" target="_blank" style="font-size:12.5px;color:var(--ink)">📎 Attached file</a></div>`:''}
+        ${h.teacherFileUrl?`<div style="margin-top:4px"><a href="${escAttr(hwFileUrl(h.teacherFileUrl))}" target="_blank" style="font-size:12.5px;color:var(--ink)">📎 Attached file</a></div>`:''}
         </div>
         <div style="flex-shrink:0;text-align:right">
           <span style="font-size:12px;font-weight:600;color:${statusColor}">${hwStatusLabel(h)}</span>
@@ -15023,10 +15055,10 @@ function renderStudentHomeworkSection(student) {
       </div>
       ${h.description?`<div style="font-size:13px;margin-top:4px;color:var(--ink)">${esc(h.description)}</div>`:''}
       ${h.studyPlanTopic?`<div style="font-size:12px;color:var(--muted);margin-top:2px">🔗 ${esc(h.studyPlanTopic)}</div>`:''}
-      ${h.teacherFileUrl?`<div style="margin-top:4px"><a href="${esc(h.teacherFileUrl)}" target="_blank" style="font-size:12.5px;color:var(--gold);font-weight:600">📎 Download file from teacher</a></div>`:''}
+      ${h.teacherFileUrl?`<div style="margin-top:4px"><a href="${escAttr(hwFileUrl(h.teacherFileUrl))}" target="_blank" style="font-size:12.5px;color:var(--gold);font-weight:600">📎 Download file from teacher</a></div>`:''}
       ${h.teacherFeedback?`<div style="margin-top:6px;font-size:13px;background:rgba(60,94,66,0.08);border-left:3px solid var(--forest);padding:6px 10px;border-radius:0 6px 6px 0">💬 ${esc(h.teacherFeedback)}</div>`:''}
       ${h.marks!==''&&h.marks!=null?`<div style="font-size:13px;color:var(--forest);margin-top:3px">⭐ Score: <b>${h.marks}${h.totalMarks!==''&&h.totalMarks!=null?` / ${h.totalMarks}`:''}</b></div>`:(h.totalMarks!==''&&h.totalMarks!=null?`<div style="font-size:12px;color:var(--muted);margin-top:3px">Out of ${h.totalMarks}</div>`:'')}
-      ${h.photoUrl?`<div style="margin-top:6px"><img src="${esc(h.photoUrl)}" alt="Your submission" style="max-height:100px;border-radius:6px;border:1px solid var(--line)"></div>`:''}
+      ${h.photoUrl?`<div style="margin-top:6px"><img src="${escAttr(hwFileUrl(h.photoUrl))}" alt="Your submission" style="max-height:100px;border-radius:6px;border:1px solid var(--line)"></div>`:''}
       <div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span style="font-size:12px;font-weight:600;color:${statusColor}">${hwStatusLabel(h)}</span>
         ${(h.status==='assigned'||hwIsLate(h))&&!h.photoUrl?`
@@ -16617,7 +16649,7 @@ function renderAdminHomework() {
       <td>${h.dueDate?formatDate(h.dueDate):'-'}</td>
       <td><span style="font-weight:600;color:${statusColor}">${hwStatusLabel(h)}</span></td>
       <td>${h.marks!==''&&h.marks!=null?(h.totalMarks!==''&&h.totalMarks!=null?`${h.marks}/${h.totalMarks}`:h.marks):'-'}</td>
-      <td>${h.photoUrl?`<a href="${esc(h.photoUrl)}" target="_blank" style="font-size:12px">📷 View</a>`:'-'}</td>
+      <td>${h.photoUrl?`<a href="${escAttr(hwFileUrl(h.photoUrl))}" target="_blank" style="font-size:12px">📷 View</a>`:'-'}</td>
     </tr>`;
   }).join('');
 
