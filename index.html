@@ -16366,7 +16366,10 @@ function qbPaperEditorHtml() {
   const tabBtn = (k, label) => `<button class="btn-small${tab === k ? ' btn-primary' : ''}" onclick="qbPaperTab='${k}';qbPicker=null;render()">${label}</button>`;
   const tabsHtml = `<div class="qb-actions" style="margin:14px 0 10px;border-bottom:2px solid var(--line);padding-bottom:8px">
     ${tabBtn('students', `Students (${counts.all})${counts.submitted ? ` <span style="background:var(--gold);color:#fff;border-radius:10px;padding:0 6px;font-size:11px;margin-left:2px">${counts.submitted}</span>` : ''}`)}
-    ${tabBtn('questions', `Questions (${qbPaperQs.length})`)}</div>`;
+    ${tabBtn('questions', `Questions (${qbPaperQs.length})`)}
+    ${qbPaperQs.length ? `<span style="flex:1"></span>
+      <button class="btn-small" onclick="qbPrintPaper(false)">⬇ Question paper PDF</button>
+      <button class="btn-small" onclick="qbPrintPaper(true)">⬇ With answer key</button>` : ''}</div>`;
 
   return `<div style="margin-bottom:12px"><button class="btn-small" onclick="qbBackToPapers()">← Papers</button></div>
     <div class="row-form" style="gap:8px;align-items:center;flex-wrap:wrap">
@@ -16397,6 +16400,71 @@ function qbPaperEditorHtml() {
     ${qbAssignOpen && p.status === 'published' ? qbAssignHtml(p) : ''}`}
     ${tabsHtml}
     ${tab === 'students' ? studentsHtml : (sectionsHtml || '<div class="empty">No questions on this paper yet.</div>')}`;
+}
+
+// Printable question paper (and optional answer key) in a new window; the browser's Print → Save as PDF makes the file.
+function qbPrintPaper(withAnswers) {
+  const p = qbPapers.find(x => x.id === qbPaperId);
+  if (!p) return;
+  const g = qbBlueprintForPaper(p);
+  const e = v => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const nl = v => e(v).replace(/\n/g, '<br>');
+  const names = [...new Set([...(g ? g.sections.map(x => x.section_name) : []), ...qbPaperQs.map(x => x.section_name || '')])]
+    .filter(name => qbSectionRows(name).length)
+    .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+  let n = 0;
+  const answers = [];
+  const body = names.map(name => {
+    const sec = g && g.sections.find(x => x.section_name === name);
+    const rows = qbSectionRows(name);
+    const secMarks = rows.reduce((t, pq) => t + qbPqMarks(pq), 0);
+    let prev = null;
+    return `<section><h2><span>${e(qbSectionTitle(name, sec) || 'Questions')}</span><span class="m">${secMarks} marks</span></h2>
+      ${rows.map(pq => {
+        n++;
+        const q = qbQuestionById(pq.question_id) || {};
+        const marks = qbPqMarks(pq);
+        const passage = q.passage_id && q.passage_id !== prev ? qbPassages[q.passage_id] : null;
+        prev = q.passage_id;
+        const opts = q.question_type === 'mcq' && Array.isArray(q.options) && q.options.length
+          ? `<ol class="opts" type="a">${q.options.map(o => `<li>${e(o)}</li>`).join('')}</ol>` : '';
+        const ans = [q.correct_option ? `(${q.correct_option})` : '', q.answer_text || ''].filter(Boolean).join(' ');
+        if (withAnswers) answers.push(`<li value="${n}">${ans ? nl(ans) : '<i>No model answer in the bank.</i>'}</li>`);
+        return `${passage ? `<div class="passage">${nl(passage.passage_text || '')}</div>` : ''}
+          <div class="q"><span class="n">${n}.</span><div class="t">${nl(q.question_text || '')}${q.question_image_url ? `<br><img src="${e(q.question_image_url)}">` : ''}${opts}</div><span class="m">[${marks}]</span></div>`;
+      }).join('')}</section>`;
+  }).join('');
+  const meta = [p.subject_name, qbByName(grades, p.grade_id) ? 'Class ' + qbByName(grades, p.grade_id) : '', qbByName(boards, p.board_id)].filter(Boolean).join(' · ');
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${e(p.title || 'Practice paper')}${withAnswers ? ' — with answers' : ''}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;600&family=Noto+Serif:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  @page { size: A4; margin: 16mm 14mm; }
+  body { font-family: 'Noto Serif', 'Noto Sans Devanagari', serif; font-size: 12.5pt; color: #000; line-height: 1.5; margin: 0 auto; max-width: 780px; padding: 12px; }
+  header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 10px; }
+  header h1 { font-size: 17pt; margin: 0 0 4px; }
+  .info { display: flex; justify-content: space-between; font-weight: 700; margin: 6px 0 2px; }
+  .instr { border: 1px solid #000; padding: 6px 10px; margin: 8px 0 12px; white-space: pre-wrap; font-size: 11.5pt; }
+  h2 { display: flex; justify-content: space-between; font-size: 13.5pt; border-bottom: 1px solid #000; margin: 18px 0 8px; padding-bottom: 2px; break-after: avoid; }
+  .passage { border: 1px solid #888; padding: 8px 10px; margin: 6px 0 8px; }
+  .q { display: flex; gap: 8px; margin: 6px 0 10px; break-inside: avoid; }
+  .q .n { min-width: 26px; font-weight: 700; } .q .t { flex: 1; } .q .m { white-space: nowrap; font-weight: 700; }
+  .q img { max-width: 100%; max-height: 260px; margin-top: 4px; }
+  .opts { margin: 4px 0 0 18px; padding: 0; } .opts li { margin: 1px 0; }
+  .key { break-before: page; } .key ol { padding-left: 28px; } .key li { margin: 4px 0 8px; }
+  .bar { position: sticky; top: 0; background: #fff8e1; border: 1px solid #e0c060; padding: 8px 12px; margin-bottom: 12px; font-family: sans-serif; font-size: 13px; }
+  @media print { .bar { display: none; } }
+</style></head><body>
+<div class="bar">Use <b>Print → Save as PDF</b> to download. <button onclick="window.print()">Print / Save as PDF</button></div>
+<header><h1>${e(p.title || 'Practice paper')}</h1><div>${e(meta)}</div>
+  <div class="info"><span>${p.duration_minutes ? 'Time: ' + e(p.duration_minutes) + ' minutes' : ''}</span><span>Full marks: ${qbPaperQsTotal()}</span></div></header>
+${p.instructions ? `<div class="instr">${e(p.instructions)}</div>` : ''}
+${body}
+${withAnswers ? `<div class="key"><header><h1>Answer key</h1><div>${e(p.title || '')}</div></header><ol>${answers.join('')}</ol></div>` : ''}
+<script>(document.fonts ? document.fonts.ready : Promise.resolve()).then(() => setTimeout(() => window.print(), 300));<\/script>
+</body></html>`;
+  const w = window.open('', '_blank');
+  if (!w) { qbPaperMsg = 'Pop-up blocked — please allow pop-ups for this site and try again.'; render(); return; }
+  w.document.open(); w.document.write(html); w.document.close();
 }
 
 function qbPapersHtml() {
