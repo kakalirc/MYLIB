@@ -15641,16 +15641,6 @@ function renderTeacherQuestionBank(teacher) {
     <div class="tab ${qbSubTab==='papers'?'active':''}" onclick="qbSubTab='papers';qbPaperView='list';qbPaperId=null;qbPicker=null;loadQbPapers()">
       Practice Papers ${(() => { const n = Object.values(qbPaperCounts).reduce((t, c) => t + (c.submitted || 0), 0); return n ? `<span style="background:var(--gold);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px" title="Submitted papers waiting for marking">${n}</span>` : ''; })()}
     </div>
-    <div class="tab ${qbSubTab==='past'?'active':''}" onclick="qbSubTab='past';loadQbSourcePapers()">Past Papers</div>
-  </div>`;
-
-  if (qbSubTab === 'past') return `<div class="card">
-    <div class="row-form" style="justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h2 style="font-family:'Zilla Slab',serif;margin:0">Question Bank</h2>
-    </div>
-    ${subTabsHtml}
-    ${qbMsg ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${esc(qbMsg)}</div>` : ''}
-    ${qbSourcePapersHtml()}
   </div>`;
 
   if (qbSubTab === 'papers') return `<div class="card">
@@ -16424,7 +16414,7 @@ function qbPaperEditorHtml() {
     ${tab === 'students' ? studentsHtml : (sectionsHtml || '<div class="empty">No questions on this paper yet.</div>')}`;
 }
 
-// ── Past papers: the original exam PDFs the bank was built from (RLS limits teachers to their subject + classes)
+// ── Past papers (admin): the original exam PDFs the question bank was built from
 async function loadQbSourcePapers() {
   if (!sb) return;
   qbSourceLoading = true; render();
@@ -16459,7 +16449,7 @@ async function qbOpenSourcePdf(id) {
 }
 function qbSourcePapersHtml() {
   if (qbSourceLoading) return `<div class="empty">Loading past papers…</div>`;
-  if (!qbSourcePapers.length) return `<div class="empty">No past papers for your subject and classes yet.</div>`;
+  if (!qbSourcePapers.length) return `<div class="empty">No past papers stored yet.</div>`;
   const groups = new Map();
   qbSourcePapers.forEach(sp => {
     const k = [sp.subject_name, qbByName(grades, sp.grade_id), qbByName(boards, sp.board_id)].filter(Boolean).join(' · ') || 'Other';
