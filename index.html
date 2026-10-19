@@ -3154,6 +3154,34 @@ async function qbBulkSetChapter(visibleIds) {
   qbSaving = false; render();
   setTimeout(() => { qbMsg = ''; render(); }, 2500);
 }
+// Admin only: approve every unapproved question on screen (current Review Queue filters).
+// Questions flagged as duplicates are skipped so they can be checked one by one.
+async function qbApproveAll(visibleIds) {
+  if (!sb || currentRole !== 'Admin') return;
+  const onScreen = new Set(visibleIds);
+  const pending = qbQuestions.filter(q => onScreen.has(q.id) && !q.approved);
+  const ids = pending.filter(q => !qbDuplicatesOf(q).length).map(q => q.id);
+  const skipped = pending.length - ids.length;
+  if (!ids.length) { qbMsg = skipped ? `All ${skipped} question${skipped===1?' is a duplicate':'s are duplicates'}; approve ${skipped===1?'it':'them'} one by one.` : 'Nothing to approve.'; render(); return; }
+  if (!confirm(`Approve ${ids.length} question${ids.length===1?'':'s'} into the bank?${skipped ? `\n\n${skipped} duplicate${skipped===1?'':'s'} will be skipped.` : ''}`)) return;
+  qbSaving = true; render();
+  const stamp = { approved: true, approved_by: currentUserId || null, approved_at: new Date().toISOString() };
+  const done = new Set();
+  let error = null;
+  // Batches keep the id list in the request URL short.
+  for (let i = 0; i < ids.length && !error; i += 100) {
+    const batch = ids.slice(i, i + 100);
+    ({ error } = await sb.from('qb_questions').update(stamp).in('id', batch));
+    if (!error) batch.forEach(id => done.add(id));
+  }
+  qbQuestions = qbQuestions.map(q => done.has(q.id) ? { ...q, ...stamp } : q);
+  if (done.size && currentUserId) qbApprovers[currentUserId] = currentUsername;
+  qbSelectedIds = new Set();
+  const skipNote = skipped ? ` (${skipped} duplicate${skipped===1?'':'s'} left for review)` : '';
+  qbMsg = error ? `Error after approving ${done.size} of ${ids.length}: ${error.message}` : `✓ Approved ${done.size} question${done.size===1?'':'s'}${skipNote}`;
+  qbSaving = false; render();
+  if (!error) setTimeout(() => { qbMsg = ''; render(); }, 3000);
+}
 function qbToggleSelect(id, on) { if (on) qbSelectedIds.add(id); else qbSelectedIds.delete(id); render(); }
 function qbSelectAll(ids, on) { ids.forEach(id => on ? qbSelectedIds.add(id) : qbSelectedIds.delete(id)); render(); }
 
@@ -15769,7 +15797,10 @@ function renderAdminQuestionBank() {
       : `<p class="hint" style="margin-bottom:12px">Approved questions available for building practice papers.</p>`
     }
     ${qbFiltersHtml(true)}
-    ${qbScopeChosen() ? `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">${viewQs.length} question${viewQs.length===1?'':'s'}</div>` : ''}
+    ${qbScopeChosen() ? `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px">
+      <span style="font-size:12px;color:var(--muted)">${viewQs.length} question${viewQs.length===1?'':'s'}</span>
+      ${isReview && viewQs.length ? `<button class="btn-small btn-primary" onclick="qbApproveAll(${escAttr(JSON.stringify(viewQs.map(q => q.id)))})" ${qbSaving?'disabled':''} title="Approve every question listed here; duplicates are skipped">✓ Approve all</button>` : ''}
+    </div>` : ''}
     ${qbTableHtml(viewQs, true)}
   </div>`;
 }
