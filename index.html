@@ -901,6 +901,8 @@ let qbAssignOpen = false;
 let qbAssignIds = new Set();    // students ticked in the assign panel
 let qbAssignUntil = '';         // due date (yyyy-mm-dd) for new assignments
 let qbAssignAllGrades = false;  // also list the teacher's students who don't match the paper's board / grade / subject
+let qbSourcePapers = [];        // qb_source_papers rows (original exam PDFs) this user may read
+let qbSourceLoading = false;
 let qbAdminPaperFilter = { teacherId: '', subject: '', gradeId: '', waiting: false };  // admin's view of all teachers' papers
 let qbPaperTab = null;          // 'students' | 'questions' on the open paper; null = pick by whether it's assigned
 let qbStudentFilter = null;     // 'all' | an assignment status; null = 'submitted' when any need marking
@@ -15573,6 +15575,16 @@ function renderAdminQuestionBank() {
     <div class="tab ${qbSubTab==='papers'?'active':''}" onclick="qbSubTab='papers';qbPaperView='list';qbPaperId=null;qbReviewId=null;loadQbPapers()">
       Practice Papers ${(() => { const n = Object.values(qbPaperCounts).reduce((t, c) => t + (c.submitted || 0), 0); return n ? `<span style="background:var(--gold);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px" title="Submitted papers waiting for the teacher to mark">${n}</span>` : ''; })()}
     </div>
+    <div class="tab ${qbSubTab==='past'?'active':''}" onclick="qbSubTab='past';loadQbSourcePapers()">Past Papers</div>
+  </div>`;
+
+  if (qbSubTab === 'past') return `<div class="card">
+    <div class="row-form" style="justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h2 style="font-family:'Zilla Slab',serif;margin:0">Question Bank</h2>
+    </div>
+    ${subTabsHtml}
+    ${qbMsg ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${esc(qbMsg)}</div>` : ''}
+    ${qbSourcePapersHtml()}
   </div>`;
 
   if (qbSubTab === 'papers') return `<div class="card">
@@ -16402,6 +16414,56 @@ function qbPaperEditorHtml() {
     ${tab === 'students' ? studentsHtml : (sectionsHtml || '<div class="empty">No questions on this paper yet.</div>')}`;
 }
 
+// ── Past papers (admin): the original exam PDFs the question bank was built from
+async function loadQbSourcePapers() {
+  if (!sb) return;
+  qbSourceLoading = true; render();
+  const { data: rows, error } = await sb.from('qb_source_papers').select('id, board_id, grade_id, subject_name, year, exam_type, medium, question_count, stored_pdf_url, source_url').order('year', { ascending: false });
+  qbSourceLoading = false;
+  if (error) { qbMsg = 'Could not load past papers: ' + error.message; qbSourcePapers = []; }
+  else qbSourcePapers = rows || [];
+  render();
+}
+// stored_pdf_url may be a full Supabase storage URL (public or signed) or "bucket/path"; private files need a fresh signed link.
+function qbStorageRef(url) {
+  const m = String(url || '').match(/\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/([^?]+)/);
+  if (m) return { bucket: m[1], path: decodeURIComponent(m[2]) };
+  if (url && !/^https?:/i.test(url) && url.includes('/')) { const i = url.indexOf('/'); return { bucket: url.slice(0, i), path: url.slice(i + 1) }; }
+  return null;
+}
+async function qbOpenSourcePdf(id) {
+  const sp = qbSourcePapers.find(x => x.id === id);
+  if (!sp) return;
+  const w = window.open('', '_blank');   // open now, so the pop-up isn't blocked while the link is fetched
+  if (!w) { qbMsg = 'Pop-up blocked — please allow pop-ups for this site and try again.'; render(); return; }
+  w.document.write('<p style="font-family:sans-serif">Opening question paper…</p>');
+  let href = sp.stored_pdf_url && /^https?:/i.test(sp.stored_pdf_url) && !/\/object\/sign\//.test(sp.stored_pdf_url) ? sp.stored_pdf_url : null;
+  const ref = qbStorageRef(sp.stored_pdf_url);
+  if (ref) {
+    const { data: signed } = await sb.storage.from(ref.bucket).createSignedUrl(ref.path, 3600);
+    if (signed && signed.signedUrl) href = signed.signedUrl;
+  }
+  href = href || sp.source_url;
+  if (!href) { w.close(); qbMsg = 'No PDF is stored for this paper.'; render(); return; }
+  w.location.href = href;
+}
+function qbSourcePapersHtml() {
+  if (qbSourceLoading) return `<div class="empty">Loading past papers…</div>`;
+  if (!qbSourcePapers.length) return `<div class="empty">No past papers stored yet.</div>`;
+  const groups = new Map();
+  qbSourcePapers.forEach(sp => {
+    const k = [sp.subject_name, qbByName(grades, sp.grade_id), qbByName(boards, sp.board_id)].filter(Boolean).join(' · ') || 'Other';
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(sp);
+  });
+  return `<p class="hint" style="margin-bottom:12px">Original board question papers the question bank was built from.</p>
+    ${[...groups.entries()].map(([k, list]) => `<div style="margin-bottom:16px"><div style="font-weight:700;border-bottom:2px solid var(--line);padding-bottom:4px;margin-bottom:6px">${esc(k)}</div>
+      ${list.map(sp => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:14px">
+        <span><b>${esc(String(sp.year || ''))}</b> ${esc(sp.exam_type || '')}${sp.medium ? ` <span style="color:var(--muted);font-size:12px">· ${esc(sp.medium)}</span>` : ''}${sp.question_count ? ` <span style="color:var(--muted);font-size:12px">· ${esc(String(sp.question_count))} questions</span>` : ''}</span>
+        ${sp.stored_pdf_url || sp.source_url ? `<button class="btn-small" onclick="qbOpenSourcePdf('${sp.id}')">⬇ Open PDF</button>` : '<span class="hint">No PDF</span>'}
+      </div>`).join('')}</div>`).join('')}`;
+}
+
 // Printable question paper (and optional answer key) in a new window; the browser's Print → Save as PDF makes the file.
 function qbPrintPaper(withAnswers) {
   const p = qbPapers.find(x => x.id === qbPaperId);
@@ -16434,7 +16496,7 @@ function qbPrintPaper(withAnswers) {
           <div class="q"><span class="n">${n}.</span><div class="t">${nl(q.question_text || '')}${q.question_image_url ? `<br><img src="${e(q.question_image_url)}">` : ''}${opts}</div><span class="m">[${marks}]</span></div>`;
       }).join('')}</section>`;
   }).join('');
-  const meta = [p.subject_name, qbByName(grades, p.grade_id) ? 'Class ' + qbByName(grades, p.grade_id) : '', qbByName(boards, p.board_id)].filter(Boolean).join(' · ');
+  const meta = [p.subject_name, qbByName(grades, p.grade_id), qbByName(boards, p.board_id)].filter(Boolean).join(' · ');
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${e(p.title || 'Practice paper')}${withAnswers ? ' — with answers' : ''}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;600&family=Noto+Serif:wght@400;700&display=swap" rel="stylesheet">
 <style>
