@@ -15388,7 +15388,9 @@ function qbSubjectOf(q) {
 function qbGradeOf(q) { const v = qbLinkedVal(q, ['grade_id','grade']); return v ? qbNameFrom(grades, v) : ''; }
 // Chapters come from the textbook for a board + grade + subject. Matching is on names, so it works from the filter labels too.
 function qbChapterLabel(c) { return (c.chapter_number != null && c.chapter_number !== '' ? c.chapter_number + '. ' : '') + (c.title || ''); }
-function qbSortChapters(list) { return [...list].sort((a, b) => (Number(a.chapter_number) || 0) - (Number(b.chapter_number) || 0) || String(a.title||'').localeCompare(String(b.title||''), undefined, { numeric:true })); }
+// Numbered lessons first, then the unnumbered skill chapters (grammar, unseen passage, …).
+const qbChapterNum = c => c.chapter_number == null || c.chapter_number === '' ? Infinity : Number(c.chapter_number);
+function qbSortChapters(list) { return [...list].sort((a, b) => (qbChapterNum(a) - qbChapterNum(b) || 0) || String(a.title||'').localeCompare(String(b.title||''), undefined, { numeric:true })); }
 function qbChaptersForNames(board, subject, grade) {
   const lc = x => String(x || '').trim().toLowerCase();
   const tbIds = new Set(qbTextbooks.filter(t =>
