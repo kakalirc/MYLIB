@@ -16465,7 +16465,6 @@ function qbSourcePapersHtml() {
     ${sel('gradeId', 'All classes', sp => sp.grade_id, sp => qbByName(grades, sp.grade_id) || 'Unknown class')}
     ${sel('subject', 'All subjects', sp => sp.subject_name, sp => sp.subject_name)}
     ${sel('year', 'All years', sp => sp.year, sp => String(sp.year))}
-    ${sel('examType', 'All exam types', sp => sp.exam_type, sp => sp.exam_type)}
     ${Object.values(f).some(Boolean) ? `<button class="btn-small" onclick="qbSourceFilter={boardId:'',gradeId:'',subject:'',year:'',examType:''};render()">Clear</button>` : ''}
   </div>`;
   // Nothing is listed until a board and class are chosen; subject, year and exam type can stay on "All".
