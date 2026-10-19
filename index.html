@@ -15995,7 +15995,7 @@ function qbPapersListHtml() {
     const meta = [p.subject_name, qbByName(grades, p.grade_id), qbByName(boards, p.board_id)].filter(Boolean).join(' · ');
     return `<div class="qb-card" style="cursor:pointer" onclick="qbOpenPaper('${p.id}')">
       <div class="qb-meta"><span class="tag" style="${p.status === 'published' ? '' : 'background:rgba(0,0,0,.06);color:var(--muted)'}">${qbPaperStatusLabel(p.status)}</span>
-        <span>${esc(meta)}</span><span>· ${esc(String(p.total_marks || 0))} marks</span><span>· ${c.questions} question${c.questions === 1 ? '' : 's'}</span>
+        <span>${esc(meta)}</span><span>· ${esc(String(p.total_marks || 0))} marks${(() => { const g = qbBlueprintForPaper(p); return g && Number(p.total_marks) && Number(p.total_marks) !== g.total ? ` <span style="color:var(--brick)">(blueprint ${g.total})</span>` : ''; })()}</span><span>· ${c.questions} question${c.questions === 1 ? '' : 's'}</span>
         ${c.assigned ? `<span>· assigned to ${c.assigned}</span>` : ''}${c.submitted ? `<span style="color:var(--gold);font-weight:700">· ${c.submitted} to review</span>` : ''}</div>
       <div style="font-weight:600">${esc(p.title || 'Untitled paper')}</div>
     </div>`;
@@ -16045,7 +16045,7 @@ function qbAdminPapersListHtml() {
       <td style="font-weight:600">${esc(p.title || 'Untitled paper')}</td>
       <td>${esc([p.subject_name, qbByName(grades, p.grade_id)].filter(Boolean).join(' · '))}</td>
       <td>${esc(qbFmtDate(p.created_at))}</td>
-      <td>${qbPaperStatusLabel(p.status)}</td>
+      <td>${qbPaperStatusLabel(p.status)}${(() => { const g = qbBlueprintForPaper(p); return g && Number(p.total_marks) && Number(p.total_marks) !== g.total ? `<div style="font-size:11px;color:var(--brick)">${esc(String(p.total_marks))} of ${g.total} marks</div>` : ''; })()}</td>
       <td>${c.assigned}</td>
       <td>${c.submitted ? `<b style="color:var(--gold)">${c.submitted}</b>${c.oldestSubmitted ? ` <span style="font-size:11px;color:var(--muted)">(${qbDaysSince(c.oldestSubmitted)}d)</span>` : ''}` : '0'}</td>
       <td>${c.reviewed}</td>
@@ -16375,7 +16375,15 @@ function qbPaperEditorHtml() {
     </div>
     <div style="font-size:13px;color:var(--muted);margin:6px 0 10px">${ro ? `By <b style="color:var(--ink)">${esc((data.teachers.find(t => t.id === p.created_by_teacher_id) || {}).name || 'Unknown teacher')}</b> · ` : ''}${esc([p.subject_name, qbByName(grades, p.grade_id), qbByName(boards, p.board_id)].filter(Boolean).join(' · '))}
       · <b style="color:${total === target ? 'var(--forest)' : 'var(--brick)'}">${total} marks${total === target ? '' : ` (blueprint ${target})`}</b> · ${qbPaperQs.length} questions${p.duration_minutes ? ' · ' + esc(String(p.duration_minutes)) + ' min' : ''}</div>
-    ${qbPaperWarnings.length ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${qbPaperWarnings.map(esc).join('<br>')}</div>` : ''}
+    ${(() => {
+      // Which blueprint sections the paper's questions don't add up to, so the teacher sees where marks are missing.
+      const gaps = g ? g.sections.map(sec => {
+        const got = qbSectionRows(sec.section_name).reduce((t, pq) => t + qbPqMarks(pq), 0), want = qbSectionTarget(sec);
+        return got === want ? null : `${qbSectionTitle(sec.section_name, sec)}: ${got} of ${want} marks (${got < want ? want - got + ' short' : got - want + ' over'})`;
+      }).filter(Boolean) : [];
+      const other = qbPaperWarnings.filter(w => !/marks filled/.test(w));
+      return gaps.length || other.length ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${gaps.length ? `<b>Full marks ${total} instead of the blueprint's ${target}:</b><br>` : ''}${[...gaps, ...other].map(esc).join('<br>')}</div>` : '';
+    })()}
     ${ro ? '' : `<div class="qb-actions">
       ${p.status === 'published'
         ? `${!locked ? `<button class="btn-small" onclick="qbUpdatePaper({status:'draft'})">Back to draft</button>` : ''}
