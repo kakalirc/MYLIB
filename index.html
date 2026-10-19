@@ -15671,6 +15671,16 @@ function qbIdOf(q, key) { const v = qbLinkedVal(q, [key]); return v ? v.val : ''
 function qbSameSubject(a, b) { return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase(); }
 function qbQuestionById(id) { return qbQuestions.find(q => q.id === id); }
 function qbPqMarks(pq) { return pq.marks_override != null ? Number(pq.marks_override) : (Number((qbQuestionById(pq.question_id) || {}).marks) || 0); }
+// A paper's full marks are what its questions add up to, which can be less than the blueprint when the bank runs short.
+function qbPaperQsTotal() { return qbPaperQs.reduce((s, pq) => s + qbPqMarks(pq), 0); }
+// Keep the saved full marks in step with the questions while the paper can still change; once assigned it stays fixed.
+async function qbSyncPaperTotal() {
+  const p = qbPapers.find(x => x.id === qbPaperId);
+  if (!p || currentRole === 'Admin' || qbPaperAssignments.length || Number(p.total_marks) === qbPaperQsTotal()) return;
+  // Don't save a total while some questions aren't loaded (their marks would count as 0).
+  if (qbPaperQs.some(pq => pq.marks_override == null && !qbQuestionById(pq.question_id))) return;
+  await qbUpdatePaper({ total_marks: qbPaperQsTotal() });
+}
 function qbShuffle(arr) { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 function qbByName(list, id) { return (list.find(x => x.id === id) || {}).name || ''; }
 function qbSectionTarget(r) { return Number(r.total_marks) || (Number(r.question_count) || 0) * (Number(r.marks_each) || 0); }
@@ -15813,6 +15823,7 @@ async function qbOpenPaper(id) {
   qbPaperQs = pq.data || [];
   qbPaperAssignments = sa.data || [];
   render();
+  if (!pq.error) qbSyncPaperTotal();
 }
 
 function qbStartNewPaper() {
@@ -15845,6 +15856,7 @@ async function qbCreatePaper() {
   await qbOpenPaper(paper.id);
   qbPaperWarnings = warnings;
   render();
+  qbSyncPaperTotal();
 }
 
 async function qbRefillPaper() {
@@ -15864,9 +15876,11 @@ async function qbRefillPaper() {
   await qbOpenPaper(p.id);
   qbPaperWarnings = warnings;
   render();
+  qbSyncPaperTotal();
 }
 
 async function qbUpdatePaper(fields) {
+  if (fields.status === 'published') fields = { ...fields, total_marks: qbPaperQsTotal() };
   const { error } = await sb.from('qb_practice_papers').update({ ...fields, updated_at: new Date().toISOString() }).eq('id', qbPaperId);
   if (error) { qbPaperMsg = 'Error: ' + error.message; render(); return false; }
   const p = qbPapers.find(x => x.id === qbPaperId);
@@ -15908,6 +15922,7 @@ async function qbRemovePq(pqId) {
   if (error) { qbPaperMsg = 'Error: ' + error.message; render(); return; }
   qbPaperQs = qbPaperQs.filter(x => x.id !== pqId);
   render();
+  qbSyncPaperTotal();
 }
 
 function qbOpenPicker(section, pqId) { qbPicker = { section, pqId: pqId || null, search: '' }; render(); }
@@ -15931,6 +15946,7 @@ async function qbPickQuestion(questionId) {
   }
   qbPicker = null;
   render();
+  qbSyncPaperTotal();
 }
 
 function qbToggleAssignStudent(id, on) { if (on) qbAssignIds.add(id); else qbAssignIds.delete(id); render(); }
@@ -15940,6 +15956,9 @@ async function qbAssignPaper() {
   if (!ids.length) { qbPaperMsg = 'Tick at least one student.'; render(); return; }
   qbPaperSaving = true; render();
   const firstAssignment = qbPaperAssignments.length === 0;
+  // Papers marked ready before full marks followed the questions may still carry the blueprint's total.
+  const paper = qbPapers.find(x => x.id === qbPaperId);
+  if (firstAssignment && paper && Number(paper.total_marks) !== qbPaperQsTotal() && !(await qbUpdatePaper({ total_marks: qbPaperQsTotal() }))) { qbPaperSaving = false; render(); return; }
   const now = new Date().toISOString();
   const until = qbAssignUntil ? new Date(qbAssignUntil + 'T23:59:59').toISOString() : null;
   const rows = ids.map(student_id => ({ paper_id: qbPaperId, student_id, assigned_by: currentUserId || null, assigned_at: now, available_until: until, status: 'assigned' }));
@@ -16285,7 +16304,7 @@ function qbPaperEditorHtml() {
   const sectionNames = [...new Set([...(g ? g.sections.map(s => s.section_name) : []), ...qbPaperQs.map(x => x.section_name || '')])]
     .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
   const total = qbPaperQs.reduce((s, pq) => s + qbPqMarks(pq), 0);
-  const target = Number(p.total_marks) || (g ? g.total : 0);
+  const target = g ? g.total : Number(p.total_marks) || 0;   // blueprint marks, to show when the paper falls short
 
   const sectionsHtml = sectionNames.map(name => {
     const sec = g && g.sections.find(s => s.section_name === name);
@@ -16355,7 +16374,7 @@ function qbPaperEditorHtml() {
       <span class="tag" style="${p.status === 'published' ? '' : 'background:rgba(0,0,0,.06);color:var(--muted)'}">${qbPaperStatusLabel(p.status)}</span>
     </div>
     <div style="font-size:13px;color:var(--muted);margin:6px 0 10px">${ro ? `By <b style="color:var(--ink)">${esc((data.teachers.find(t => t.id === p.created_by_teacher_id) || {}).name || 'Unknown teacher')}</b> · ` : ''}${esc([p.subject_name, qbByName(grades, p.grade_id), qbByName(boards, p.board_id)].filter(Boolean).join(' · '))}
-      · <b style="color:${total === target ? 'var(--forest)' : 'var(--brick)'}">${total} / ${target} marks</b> · ${qbPaperQs.length} questions${p.duration_minutes ? ' · ' + esc(String(p.duration_minutes)) + ' min' : ''}</div>
+      · <b style="color:${total === target ? 'var(--forest)' : 'var(--brick)'}">${total} marks${total === target ? '' : ` (blueprint ${target})`}</b> · ${qbPaperQs.length} questions${p.duration_minutes ? ' · ' + esc(String(p.duration_minutes)) + ' min' : ''}</div>
     ${qbPaperWarnings.length ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${qbPaperWarnings.map(esc).join('<br>')}</div>` : ''}
     ${ro ? '' : `<div class="qb-actions">
       ${p.status === 'published'
