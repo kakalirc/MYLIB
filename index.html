@@ -16468,6 +16468,9 @@ function qbSourcePapersHtml() {
     ${sel('examType', 'All exam types', sp => sp.exam_type, sp => sp.exam_type)}
     ${Object.values(f).some(Boolean) ? `<button class="btn-small" onclick="qbSourceFilter={boardId:'',gradeId:'',subject:'',year:'',examType:''};render()">Clear</button>` : ''}
   </div>`;
+  // Like the question bank, nothing is listed until board, class and subject are all chosen.
+  if (!f.boardId || !f.gradeId || !f.subject) return `<p class="hint" style="margin-bottom:12px">Original board question papers the question bank was built from.</p>
+    ${filtersHtml}<div class="empty">Pick a board, class and subject to see the papers.</div>`;
   const list = qbSourcePapers.filter(sp => match(sp));
   if (!list.length) return `${filtersHtml}<div class="empty">No past papers match these filters.</div>`;
   const groups = new Map();
