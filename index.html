@@ -903,6 +903,7 @@ let qbAssignUntil = '';         // due date (yyyy-mm-dd) for new assignments
 let qbAssignAllGrades = false;  // also list the teacher's students who don't match the paper's board / grade / subject
 let qbSourcePapers = [];        // qb_source_papers rows (original exam PDFs) this user may read
 let qbSourceLoading = false;
+let qbSourceFilter = { boardId: '', gradeId: '', subject: '', year: '', examType: '' };
 let qbAdminPaperFilter = { teacherId: '', subject: '', gradeId: '', waiting: false };  // admin's view of all teachers' papers
 let qbPaperTab = null;          // 'students' | 'questions' on the open paper; null = pick by whether it's assigned
 let qbStudentFilter = null;     // 'all' | an assignment status; null = 'submitted' when any need marking
@@ -16450,13 +16451,33 @@ async function qbOpenSourcePdf(id) {
 function qbSourcePapersHtml() {
   if (qbSourceLoading) return `<div class="empty">Loading past papers…</div>`;
   if (!qbSourcePapers.length) return `<div class="empty">No past papers stored yet.</div>`;
+  const f = qbSourceFilter;
+  // Each dropdown offers only values that exist in the papers matching the other filters.
+  const match = (sp, skip) => (skip === 'boardId' || !f.boardId || sp.board_id === f.boardId) && (skip === 'gradeId' || !f.gradeId || sp.grade_id === f.gradeId)
+    && (skip === 'subject' || !f.subject || sp.subject_name === f.subject) && (skip === 'year' || !f.year || String(sp.year) === f.year)
+    && (skip === 'examType' || !f.examType || sp.exam_type === f.examType);
+  const opts = (key, val, label) => [...new Map(qbSourcePapers.filter(sp => match(sp, key)).map(sp => [String(val(sp) ?? ''), label(sp)])).entries()]
+    .filter(([v]) => v).sort((a, b) => key === 'year' ? b[0].localeCompare(a[0]) : String(a[1]).localeCompare(String(b[1]), undefined, { numeric: true }));
+  const sel = (key, all, val, label) => `<select onchange="qbSourceFilter.${key}=this.value;render()"><option value="">${all}</option>
+    ${opts(key, val, label).map(([v, l]) => `<option value="${escAttr(v)}" ${f[key] === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+  const filtersHtml = `<div class="row-form" style="flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center">
+    ${sel('boardId', 'All boards', sp => sp.board_id, sp => qbByName(boards, sp.board_id) || 'Unknown board')}
+    ${sel('gradeId', 'All classes', sp => sp.grade_id, sp => qbByName(grades, sp.grade_id) || 'Unknown class')}
+    ${sel('subject', 'All subjects', sp => sp.subject_name, sp => sp.subject_name)}
+    ${sel('year', 'All years', sp => sp.year, sp => String(sp.year))}
+    ${sel('examType', 'All exam types', sp => sp.exam_type, sp => sp.exam_type)}
+    ${Object.values(f).some(Boolean) ? `<button class="btn-small" onclick="qbSourceFilter={boardId:'',gradeId:'',subject:'',year:'',examType:''};render()">Clear</button>` : ''}
+  </div>`;
+  const list = qbSourcePapers.filter(sp => match(sp));
+  if (!list.length) return `${filtersHtml}<div class="empty">No past papers match these filters.</div>`;
   const groups = new Map();
-  qbSourcePapers.forEach(sp => {
+  list.forEach(sp => {
     const k = [sp.subject_name, qbByName(grades, sp.grade_id), qbByName(boards, sp.board_id)].filter(Boolean).join(' · ') || 'Other';
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(sp);
   });
   return `<p class="hint" style="margin-bottom:12px">Original board question papers the question bank was built from.</p>
+    ${filtersHtml}<div style="font-size:12px;color:var(--muted);margin-bottom:8px">${list.length} paper${list.length === 1 ? '' : 's'}</div>
     ${[...groups.entries()].map(([k, list]) => `<div style="margin-bottom:16px"><div style="font-weight:700;border-bottom:2px solid var(--line);padding-bottom:4px;margin-bottom:6px">${esc(k)}</div>
       ${list.map(sp => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:14px">
         <span><b>${esc(String(sp.year || ''))}</b> ${esc(sp.exam_type || '')}${sp.medium ? ` <span style="color:var(--muted);font-size:12px">· ${esc(sp.medium)}</span>` : ''}${sp.question_count ? ` <span style="color:var(--muted);font-size:12px">· ${esc(String(sp.question_count))} questions</span>` : ''}</span>
