@@ -15456,7 +15456,7 @@ function spPaperHtml() {
 // QUESTION BANK — shared helpers
 // ─────────────────────────────────────────────────────────────
 const QB_TYPES = ['mcq','very_short','short','long','grammar_fill','grammar_transform','unseen_passage','writing','picture_composition','translation','extract_based'];
-const QB_TYPE_LABELS = { mcq:'MCQ', very_short:'Very Short', short:'Short', long:'Long', grammar_fill:'Grammar (Fill)', grammar_transform:'Grammar (Transform)', unseen_passage:'Unseen Passage', writing:'Writing', picture_composition:'Picture Composition', translation:'Translation', extract_based:'Extract Based' };
+const QB_TYPE_LABELS = { mcq:'MCQ', very_short:'Very Short', short:'Short', long:'Long', grammar_fill:'Grammar (Fill)', grammar_transform:'Grammar (Transform)', unseen_passage:'Unseen Passage', writing:'Writing', picture_composition:'Picture Composition', translation:'Translation', extract_based:'Extract Based', any:'MCQ or written' };
 const QB_DIFF_COLORS = { easy:'var(--forest)', medium:'var(--gold)', hard:'var(--brick)' };
 
 // Board / subject / grade live in the linked lookup tables (boards, subject_names, grades).
@@ -16031,9 +16031,10 @@ function qbSides(sec) {
 }
 function qbSideSec(sec, choice) { const sides = qbSides(sec); return (sides.find(x => x.key === (choice || null)) || sides[0]).sec; }
 const QB_SIDE_LABEL = { a: 'अ', b: 'आ' };
-// Which bank questions fit a section: by topic when it has one (only MCQ vs written matters then), else by type.
+// Which bank questions fit a section: by topic when it has one (only MCQ vs written matters then, and
+// question_type 'any' takes both), else by type.
 function qbSecMatches(q, sec) {
-  if (sec.topic) return q.topic === sec.topic && (sec.question_type === 'mcq') === (q.question_type === 'mcq');
+  if (sec.topic) return q.topic === sec.topic && (sec.question_type === 'any' || (sec.question_type === 'mcq') === (q.question_type === 'mcq'));
   return q.question_type === sec.question_type;
 }
 function qbSecKind(sec) { return sec ? sec.topic || QB_TYPE_LABELS[sec.question_type] || sec.question_type || '' : ''; }
@@ -16135,8 +16136,8 @@ function qbAutoFill(g, chapterIds) {
       pool = aSec && aSec.topic && aSec.topic !== sec.topic ? bank.filter(q => !used.has(q.id) && qbSecMatches(q, aSec)) : [];
       if (pool.length) fallback = ` — no approved questions have the topic ${sec.topic} yet, so ${aSec.topic} questions were used`;
       else {
-        pool = bank.filter(q => !used.has(q.id) && !q.topic && q.question_type === sec.question_type);
-        fallback = ` — no approved questions have the topic ${sec.topic} yet, so ${QB_TYPE_LABELS[sec.question_type] || sec.question_type} questions without a topic were used`;
+        pool = bank.filter(q => !used.has(q.id) && !q.topic && (sec.question_type === 'any' || q.question_type === sec.question_type));
+        fallback = ` — no approved questions have the topic ${sec.topic} yet, so ${sec.question_type === 'any' ? '' : (QB_TYPE_LABELS[sec.question_type] || sec.question_type) + ' '}questions without a topic were used`;
       }
     }
     pool = qbShuffle(pool).sort((a, b) => (a.usage_count || 0) - (b.usage_count || 0));
@@ -16432,7 +16433,7 @@ async function qbUsePassage(section, passageId, choice) {
 }
 
 // ── Teacher writes new questions on a paper. They go on the paper at once and into the Review Queue (unapproved).
-function qbNewQItem(type) { return { question_text: '', answer_text: '', marks: '', question_type: type || 'short', difficulty: 'medium', chapter_id: '', image_url: '' }; }
+function qbNewQItem(type) { return { question_text: '', answer_text: '', marks: '', question_type: type && type !== 'any' ? type : 'short', difficulty: 'medium', chapter_id: '', image_url: '' }; }
 function qbOpenNewQ(section, choice) {
   const p = qbPapers.find(x => x.id === qbPaperId);
   const g = p && qbBlueprintForPaper(p);
@@ -17129,13 +17130,16 @@ function qbPrintPaper(withAnswers) {
   @page { size: A4; margin: 16mm 14mm; }
   body { font-family: 'Noto Serif', 'Noto Sans Devanagari', serif; font-size: 12.5pt; color: #000; line-height: 1.5; margin: 0 auto; max-width: 780px; padding: 12px; }
   header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 10px; }
+  .brand { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 10pt; text-align: right; }
+  .brand img { height: 38px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   header h1 { font-size: 17pt; margin: 0 0 4px; }
   .info { display: flex; justify-content: space-between; font-weight: 700; margin: 6px 0 2px; }
   .instr { border: 1px solid #000; padding: 6px 10px; margin: 8px 0 12px; white-space: pre-wrap; font-size: 11.5pt; }
   h2 { display: flex; justify-content: space-between; font-size: 13.5pt; border-bottom: 1px solid #000; margin: 18px 0 8px; padding-bottom: 2px; break-after: avoid; }
   .passage { border: 1px solid #888; padding: 8px 10px; margin: 6px 0 8px; }
-  .pgroup { border-left: 3px solid #000; padding-left: 10px; margin: 8px 0 12px; break-inside: avoid-page; }
-  .pgroup .lead { font-weight: 700; font-size: 11.5pt; }
+  .pgroup { border-left: 3px solid #000; padding-left: 10px; margin: 8px 0 12px; }
+  .pgroup .lead { font-weight: 700; font-size: 11.5pt; break-after: avoid; }
+  .passage, .pgroup > img { break-inside: avoid; }
   .q { display: flex; gap: 8px; margin: 6px 0 10px; break-inside: avoid; }
   .q .n { min-width: 26px; font-weight: 700; } .q .t { flex: 1; } .q .m { white-space: nowrap; font-weight: 700; }
   .q img { max-width: 100%; max-height: 260px; margin-top: 4px; }
@@ -17146,7 +17150,8 @@ function qbPrintPaper(withAnswers) {
   @media print { .bar { display: none; } }
 </style></head><body>
 <div class="bar">Use <b>Print → Save as PDF</b> to download. <button onclick="window.print()">Print / Save as PDF</button></div>
-<header><h1>${e(p.title || 'Practice paper')}</h1><div>${e(meta)}</div>
+<header><div class="brand"><img src="${LOGO_DATA_URI}" alt="LIB Education"><div>${QB_PAPER_SITES.join('<br>')}</div></div>
+  <h1>${e(p.title || 'Practice paper')}</h1><div>${e(meta)}</div>
   <div class="info"><span>${p.duration_minutes ? 'Time: ' + e(p.duration_minutes) + ' minutes' : ''}</span><span>Full marks: ${qbPaperQsTotal()}</span></div></header>
 ${p.instructions ? `<div class="instr">${e(p.instructions)}</div>` : ''}
 ${body}
@@ -17157,6 +17162,9 @@ ${withAnswers ? `<div class="key"><header><h1>Answer key</h1><div>${e(p.title ||
   if (!w) { qbPaperMsg = 'Pop-up blocked — please allow pop-ups for this site and try again.'; render(); return; }
   w.document.open(); w.document.write(html); w.document.close();
 }
+
+// Printed on every practice paper (PDF and Word), under the logo.
+const QB_PAPER_SITES = ['www.libeducation.com', 'app.libeducation.com'];
 
 // ── Word (.docx) copy of the paper, same layout as the PDF. Sanskrit stays Unicode text in Nirmala UI
 // (ships with Windows and Office); Word on Mac and phones falls back to its own Devanagari font.
@@ -17190,6 +17198,9 @@ function qbBuildDocx(D, paper, withAnswers) {
   const box = { top: { style: D.BorderStyle.SINGLE, size: 6, color: '888888', space: 4 }, bottom: { style: D.BorderStyle.SINGLE, size: 6, color: '888888', space: 4 },
     left: { style: D.BorderStyle.SINGLE, size: 6, color: '888888', space: 4 }, right: { style: D.BorderStyle.SINGLE, size: 6, color: '888888', space: 4 } };
   const kids = [
+    ...(paper.logo ? [new D.Paragraph({ tabStops: [{ type: D.TabStopType.RIGHT, position: RIGHT }], spacing: { after: 120 }, children: [
+      new D.ImageRun({ data: paper.logo.data, transformation: { width: paper.logo.width, height: paper.logo.height } }),
+      new D.TextRun({ text: '\t' + (paper.sites || []).join('   ·   '), size: 18 })] })] : []),
     new D.Paragraph({ alignment: D.AlignmentType.CENTER, children: [new D.TextRun({ text: paper.title, bold: true, size: 32 })] }),
     new D.Paragraph({ alignment: D.AlignmentType.CENTER, children: [new D.TextRun(paper.meta)] }),
     new D.Paragraph({ tabStops: [{ type: D.TabStopType.RIGHT, position: RIGHT }], spacing: { after: 160 },
@@ -17265,7 +17276,8 @@ async function qbDownloadDocx(withAnswers) {
       sections.push({ title: qbSectionTitle(name, sec) || 'Questions', marks: qbChoiceSum(rows, qbPqMarks), runs });
     }
     const paper = { title: p.title || 'Practice paper', meta: [p.subject_name, qbByName(grades, p.grade_id), qbByName(boards, p.board_id)].filter(Boolean).join(' · '),
-      duration: p.duration_minutes, total: qbPaperQsTotal(), instructions: p.instructions, sections };
+      duration: p.duration_minutes, total: qbPaperQsTotal(), instructions: p.instructions, sections,
+      logo: { data: Uint8Array.from(atob(LOGO_DATA_URI.split(',')[1]), c => c.charCodeAt(0)), width: 152, height: 38 }, sites: QB_PAPER_SITES };
     const blob = await D.Packer.toBlob(qbBuildDocx(D, paper, withAnswers));
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
