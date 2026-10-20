@@ -3160,10 +3160,12 @@ async function qbSaveEdit(id) {
       mcq = { options: filled, correct_option: 'abcdefgh'[filled.indexOf(slots[ci].trim())] };
     } else mcq = { options: null, correct_option: null };
   }
+  // A teacher's edit goes back to the Review Queue (it stays on any paper that uses it); an admin's edit keeps its approval.
+  const review = currentRole === 'Teacher' && cur.approved ? { approved: false, approved_by: null, approved_at: null } : {};
   qbSaving = true; render();
   const { error } = await sb.from('qb_questions').update({
     ...(hasTopic ? { topic: qbEditDraft.topic || null } : {}),
-    ...mcq,
+    ...mcq, ...review,
     question_text: qbEditDraft.question_text,
     question_type: qbEditDraft.question_type,
     marks: Number(qbEditDraft.marks) || 0,
@@ -3175,11 +3177,12 @@ async function qbSaveEdit(id) {
   const onPaper = qbSubTab === 'papers';   // the Practice Papers tab shows qbPaperMsg, not qbMsg
   if (error) { if (onPaper) qbPaperMsg = 'Error: ' + error.message; else qbMsg = 'Error: ' + error.message; qbSaving = false; render(); return; }
   const { options: _o, correct_option: _c, ...draft } = qbEditDraft;
-  qbQuestions = qbQuestions.map(q => q.id === id ? { ...q, ...draft, ...mcq, marks: Number(qbEditDraft.marks)||0, chapter_id: qbEditDraft.chapter_id || null, question_image_url: qbEditDraft.question_image_url || null, ...(hasTopic ? { topic: qbEditDraft.topic || null } : {}) } : q);
+  qbQuestions = qbQuestions.map(q => q.id === id ? { ...q, ...draft, ...mcq, ...review, marks: Number(qbEditDraft.marks)||0, chapter_id: qbEditDraft.chapter_id || null, question_image_url: qbEditDraft.question_image_url || null, ...(hasTopic ? { topic: qbEditDraft.topic || null } : {}) } : q);
   qbEditId = null; qbEditDraft = {};
   qbSaving = false;
-  if (onPaper) { qbPaperMsg = '✓ Saved to the Question Bank'; render(); qbSyncPaperTotal(); return; }
-  qbMsg = '✓ Saved'; render();
+  const sent = review.approved === false ? ' and sent to the Review Queue' : '';
+  if (onPaper) { qbPaperMsg = '✓ Saved to the Question Bank' + sent; render(); qbSyncPaperTotal(); return; }
+  qbMsg = '✓ Saved' + sent; render();
   setTimeout(() => { qbMsg = ''; render(); }, 2000);
 }
 
@@ -15777,7 +15780,7 @@ function qbEditFormHtml(q, fromPaper, lockMarks) {
   const opts = 'options' in q && type === 'mcq' ? (qbEditDraft.options || []) : null;
   return `<div class="qb-card open">
     <div style="font-size:12px;font-weight:700;margin-bottom:6px">Editing question</div>
-    ${fromPaper ? `<div class="hint" style="margin-bottom:6px">Saved to the Question Bank, so every paper that uses this question shows the change.${lockMarks ? ' Marks and type stay fixed because this paper is assigned.' : ''}</div>` : ''}
+    ${fromPaper || (currentRole === 'Teacher' && q.approved) ? `<div class="hint" style="margin-bottom:6px">${fromPaper ? 'Saved to the Question Bank, so every paper that uses this question shows the change.' : ''}${currentRole === 'Teacher' && q.approved ? ' After saving it goes back to the Review Queue to be checked again' + (fromPaper ? ', and stays on this paper.' : '.') : ''}${lockMarks ? ' Marks and type stay fixed because this paper is assigned.' : ''}</div>` : ''}
     <textarea rows="6" style="width:100%;font-family:inherit;font-size:14px;line-height:1.5;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box;resize:vertical"
       oninput="qbEditDraft.question_text=this.value">${esc(qbEditDraft.question_text||'')}</textarea>
     <div class="row-form" style="gap:8px;margin-top:8px;flex-wrap:wrap">
