@@ -16224,7 +16224,7 @@ function renderAdminQuestionBank() {
     ${qbSubTab === 'archived'
       ? `<p class="hint" style="margin-bottom:12px">Archived questions are not offered for practice papers. Papers that already use them keep them. Restore a question to bring it back.</p>`
       : isReview
-      ? `<p class="hint" style="margin-bottom:12px">Questions extracted from CBSE papers — review for accuracy before approving into the question bank.</p>`
+      ? `<p class="hint" style="margin-bottom:12px">New and edited questions waiting for review. Check them for accuracy before approving them into the question bank.</p>`
       : `<p class="hint" style="margin-bottom:12px">Approved questions available for building practice papers.</p>`
     }
     ${qbFiltersHtml(true)}
@@ -16298,7 +16298,7 @@ function renderTeacherQuestionBank(teacher) {
     ${qbSubTab === 'archived'
       ? `<p class="hint" style="margin-bottom:12px">Archived questions are not offered for practice papers. Papers that already use them keep them. Restore a question to bring it back.</p>`
       : isReview
-      ? `<p class="hint" style="margin-bottom:12px">Review questions extracted from CBSE papers. Approve good questions, edit any that need fixing. You know your subject best.</p>`
+      ? `<p class="hint" style="margin-bottom:12px">Review new and edited questions. Approve good ones, and edit any that need fixing. You know your subject best.</p>`
       : `<p class="hint" style="margin-bottom:12px">Your complete approved question bank — use this to build practice papers.</p>`
     }
     ${qbFiltersHtml(false)}
