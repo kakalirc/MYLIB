@@ -938,6 +938,20 @@ let teacherAttendanceViewMode = 'day'; // 'day' | 'month' - which scope the atte
 function isCurrentMonth(dateStr) { return !!dateStr && dateStr.slice(0,7) === todayStr.slice(0,7); }
 function formatDate(d) { if (!d) return ''; try { return new Date(d+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}); } catch(e) { return d; } }
 let teacherMobileTabMenuOpen = false;
+// Question Bank tab: only for teachers the database lets read some questions (their subject at a class and
+// board they teach), or who already have practice papers to mark. Unknown (null) until the check returns.
+let teacherQbAccess = null;
+async function loadTeacherQbAccess() {
+  if (!sb || !currentLinkedId) { teacherQbAccess = false; return; }
+  try {
+    const [qs, ps] = await Promise.all([
+      sb.from('qb_questions').select('id', { count: 'exact', head: true }),
+      sb.from('qb_practice_papers').select('id', { count: 'exact', head: true }).eq('created_by_teacher_id', currentLinkedId),
+    ]);
+    teacherQbAccess = (qs.count || 0) > 0 || (ps.count || 0) > 0;
+  } catch (e) { teacherQbAccess = false; }
+  if (!teacherQbAccess && teacherPortalTab === 'questionbank') teacherPortalTab = 'dashboard';
+}
 function toggleTeacherMobileTabMenu() { teacherMobileTabMenuOpen = !teacherMobileTabMenuOpen; render(); }
 function setTeacherPortalTab(t) {
   teacherPortalTab = t;
@@ -946,6 +960,7 @@ function setTeacherPortalTab(t) {
   if (t === 'report') { loadTeacherPayrollRecords().then(() => render()); return; }
   if (t === 'studyplans') { studyPlanTeacherStudentId = ''; studyPlanTeacherSubjectId = ''; studyPlanDraftItems = []; studyPlanMsg = ''; studyPlanViewMode = 'report'; studyPlanFilterStatus = 'all'; studyPlanFilterSubjectId = ''; studyPlanFilterStudent = ''; loadStudyPlans().then(() => render()); return; }
   if (t === 'homework') { hwShowForm = false; hwMsg = ''; hwFilterStudentId = ''; hwFilterStatus = 'assigned'; loadHomework().then(() => render()); return; }
+  if (t === 'questionbank' && !teacherQbAccess) { teacherPortalTab = 'dashboard'; render(); return; }
   if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); return; }
   render();
 }
@@ -1008,6 +1023,7 @@ async function load() {
     loadStudyPlans(),
     loadHomework(),
     loadPracticeAssignments(),
+    currentRole === 'Teacher' ? loadTeacherQbAccess() : Promise.resolve(),
   ]);
 
   loaded = true;
@@ -14626,7 +14642,7 @@ function renderTeacherPortal() {
     ['schedule', 'Class Schedule'],
     ['studyplans', 'Study Plans'],
     ['homework', 'Homework'],
-    ['questionbank', 'Question Bank'],
+    ...(teacherQbAccess ? [['questionbank', 'Question Bank']] : []),
     ['availability', 'Availability'],
     ['report', 'My Attendance Report'],
     ['attendance', 'Give Attendance'],
@@ -14640,7 +14656,7 @@ function renderTeacherPortal() {
       <div class="tab ${teacherPortalTab==='schedule'?'active':''}" onclick="setTeacherPortalTab('schedule')">Class Schedule</div>
       <div class="tab ${teacherPortalTab==='studyplans'?'active':''}" onclick="setTeacherPortalTab('studyplans')">Study Plans</div>
       <div class="tab ${teacherPortalTab==='homework'?'active':''}" onclick="setTeacherPortalTab('homework')">Homework</div>
-      <div class="tab ${teacherPortalTab==='questionbank'?'active':''}" onclick="setTeacherPortalTab('questionbank')">Question Bank</div>
+      ${teacherQbAccess ? `<div class="tab ${teacherPortalTab==='questionbank'?'active':''}" onclick="setTeacherPortalTab('questionbank')">Question Bank</div>` : ''}
       <div class="tab ${teacherPortalTab==='availability'?'active':''}" onclick="setTeacherPortalTab('availability')">Availability</div>
       <div class="tab ${teacherPortalTab==='report'?'active':''}" onclick="setTeacherPortalTab('report')">My Attendance Report</div>
       <div class="tab ${teacherPortalTab==='attendance'?'active':''}" onclick="setTeacherPortalTab('attendance')">Give Attendance</div>
@@ -14670,7 +14686,7 @@ function renderTeacherPortal() {
   if (teacherPortalTab === 'homework') {
     return subTabsHtml + renderTeacherHomework(teacher);
   }
-  if (teacherPortalTab === 'questionbank') {
+  if (teacherPortalTab === 'questionbank' && teacherQbAccess) {
     return subTabsHtml + renderTeacherQuestionBank(teacher);
   }
   if (teacherPortalTab === 'availability') {
