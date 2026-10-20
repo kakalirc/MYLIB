@@ -245,6 +245,20 @@
   .bio-btn.bio-expired { border-color:rgba(166,67,46,0.35);background:rgba(166,67,46,0.04); }
   .bio-btn.bio-expired:hover { border-color:rgba(166,67,46,0.5);background:rgba(166,67,46,0.07); }
   .bio-expired-msg { background:rgba(166,67,46,0.08);border:1px solid rgba(166,67,46,0.25);border-radius:6px;padding:9px 12px;font-size:12px;color:var(--brick);text-align:left;margin-top:8px;line-height:1.5; }
+  /* Language keyboard (chosen by the question's subject) */
+  .kb-btn { font-size:12px;font-weight:600;background:none;border:1px solid var(--line);border-radius:6px;padding:3px 9px;margin-top:4px;cursor:pointer;color:var(--ink);font-family:inherit; }
+  .kb-btn.on { background:var(--forest);border-color:var(--forest);color:#fff; }
+  #kbPanel { position:fixed;left:0;right:0;bottom:0;z-index:950;background:var(--paper);border-top:2px solid var(--gold);box-shadow:0 -4px 18px rgba(0,0,0,0.12);padding:8px 8px calc(8px + env(safe-area-inset-bottom));max-height:52vh;overflow-y:auto; }
+  #kbPanel .kb-inner { max-width:760px;margin:0 auto; }
+  #kbPanel .kb-head { display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;font-weight:700;margin-bottom:6px; }
+  #kbPanel .kb-row { display:flex;gap:3px;margin-bottom:3px;justify-content:center; }
+  #kbPanel .kb-key { flex:1 1 0;min-width:0;max-width:52px;height:36px;padding:0;font-size:19px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink);cursor:pointer;font-family:'Nirmala UI','Noto Sans Devanagari','Noto Sans Kannada',inherit;touch-action:manipulation; }
+  #kbPanel .kb-key:active { background:var(--line); }
+  #kbPanel .kb-key.kb-on { background:var(--forest);color:#fff;border-color:var(--forest); }
+  #kbPanel .kb-key.kb-wide { flex:4 1 0;max-width:220px;font-size:14px; }
+  #kbPanel .kb-help { font-size:12px;line-height:1.7;color:var(--muted); }
+  #kbPanel .kb-help b { color:var(--ink);font-weight:600; }
+  body.kb-open { padding-bottom:calc(52vh + 20px); }
 </style>
 </head>
 <body>
@@ -15212,6 +15226,186 @@ function renderStudentHomeworkSection(student) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// LANGUAGE KEYBOARD — picked by the question's subject
+// A text box opts in with kbAttrs(subject, key) and gets a kbBtn() under it. The panel is docked at the
+// bottom of the screen, outside #app, so render() doesn't wipe it; it finds its box again by data-kb-key.
+// Students tap letters on the grid. Teachers and admin can also switch on phonetic typing
+// (Devanagari: ITRANS "raamaH" → रामः, Kannada: Baraha "kannaDa" → ಕನ್ನಡ), via Sanscript.js loaded on first use.
+// ─────────────────────────────────────────────────────────────
+// To add a language: one line here (subject name match → keyboard), plus a layout in KB_LANGS if it's a new script.
+const KB_SUBJECTS = [[/sanskrit|संस्कृत/i, 'deva'], [/hindi|हिन्दी|हिंदी/i, 'deva'], [/kannada|ಕನ್ನಡ/i, 'knda'], [/french|français/i, 'fr']];
+const KB_LANGS = {
+  deva: { name: 'Devanagari', label: 'अ', scheme: 'itrans', script: 'devanagari', rows: [
+    'अ आ इ ई उ ऊ ऋ ॠ ऌ ए ऐ ओ औ', 'ा ि ी ु ू ृ ॄ', 'े ै ो ौ ं ः ँ ्',
+    'क ख ग घ ङ च छ ज झ ञ', 'ट ठ ड ढ ण त थ द ध न', 'प फ ब भ म य र ल व', 'श ष स ह क्ष त्र ज्ञ श्र ऽ ॐ', '। ॥ ० १ २ ३ ४ ५ ६ ७ ८ ९'],
+    help: '<b>a</b> अ · <b>aa</b> आ · <b>i</b> इ · <b>ii</b> ई · <b>u</b> उ · <b>uu</b> ऊ · <b>RRi</b> ऋ · <b>e</b> ए · <b>ai</b> ऐ · <b>o</b> ओ · <b>au</b> औ · <b>M</b> ं · <b>H</b> ः · <b>.N</b> ँ · <b>.a</b> ऽ · <b>|</b> । · <b>||</b> ॥<br>'
+      + '<b>k kh g gh ~N</b> क ख ग घ ङ · <b>ch Ch j jh ~n</b> च छ ज झ ञ · <b>T Th D Dh N</b> ट ठ ड ढ ण · <b>t th d dh n</b> त थ द ध न · <b>p ph b bh m</b> प फ ब भ म · <b>y r l v</b> य र ल व · <b>sh Sh s h</b> श ष स ह · <b>x</b> क्ष · <b>j~n</b> ज्ञ · <b>OM</b> ॐ<br>'
+      + 'e.g. <b>raamaH</b> → रामः, <b>kRRiShNa</b> → कृष्ण, <b>sa.nskRRitam</b> → संस्कृतम्' },
+  knda: { name: 'Kannada', label: 'ಅ', scheme: 'baraha', script: 'kannada', rows: [
+    'ಅ ಆ ಇ ಈ ಉ ಊ ಋ ಎ ಏ ಐ ಒ ಓ ಔ', 'ಾ ಿ ೀ ು ೂ ೃ ೆ', 'ೇ ೈ ೊ ೋ ೌ ಂ ಃ ್',
+    'ಕ ಖ ಗ ಘ ಙ ಚ ಛ ಜ ಝ ಞ', 'ಟ ಠ ಡ ಢ ಣ ತ ಥ ದ ಧ ನ', 'ಪ ಫ ಬ ಭ ಮ ಯ ರ ಲ ವ', 'ಶ ಷ ಸ ಹ ಳ ಕ್ಷ ಜ್ಞ', '೦ ೧ ೨ ೩ ೪ ೫ ೬ ೭ ೮ ೯'],
+    help: '<b>a</b> ಅ · <b>aa</b> ಆ · <b>i</b> ಇ · <b>ee</b> ಈ · <b>u</b> ಉ · <b>oo</b> ಊ · <b>Ru</b> ಋ · <b>e</b> ಎ · <b>E</b> ಏ · <b>ai</b> ಐ · <b>o</b> ಒ · <b>O</b> ಓ · <b>au</b> ಔ · <b>M</b> ಂ · <b>H</b> ಃ<br>'
+      + '<b>k kh g gh</b> ಕ ಖ ಗ ಘ · <b>ch Ch j jh</b> ಚ ಛ ಜ ಝ · <b>T Th D Dh N</b> ಟ ಠ ಡ ಢ ಣ · <b>t th d dh n</b> ತ ಥ ದ ಧ ನ · <b>p ph b bh m</b> ಪ ಫ ಬ ಭ ಮ · <b>y r l v</b> ಯ ರ ಲ ವ · <b>sh Sh s h L</b> ಶ ಷ ಸ ಹ ಳ<br>'
+      + 'e.g. <b>kannaDa</b> → ಕನ್ನಡ, <b>namaskaara</b> → ನಮಸ್ಕಾರ, <b>oMdu</b> → ಒಂದು' },
+  fr: { name: 'French', label: 'é', rows: ['é è ê ë à â ç î ï ô', 'û ù ü ÿ œ æ « » ’'], shift: true },
+};
+const KB_SANSCRIPT_URL = 'https://cdn.jsdelivr.net/npm/@indic-transliteration/sanscript@1.3.3/sanscript.js';
+let kb = { key: null, lang: null, shift: false, phonetic: false };
+try { kb.phonetic = localStorage.getItem('kbPhonetic') === '1'; } catch (e) {}
+let kbPh = null;            // phonetic word being typed: { el, start, len, roman }
+let kbSanscriptLoading = null;
+
+function kbLangFor(subject) { const m = KB_SUBJECTS.find(([re]) => re.test(subject || '')); return m ? m[1] : ''; }
+function kbCanPhonetic() { return currentRole !== 'Student' && currentRole !== 'Parent' && !!(KB_LANGS[kb.lang] || {}).scheme; }
+// Attributes for a text box whose subject has a keyboard. key must be unique on the screen.
+function kbAttrs(subject, key) { const lang = kbLangFor(subject); return lang ? ` data-kb="${lang}" data-kb-key="${escAttr(key)}"` : ''; }
+function kbBtn(subject, key) {
+  const lang = kbLangFor(subject);
+  if (!lang) return '';
+  return `<button type="button" class="kb-btn${kb.key === key ? ' on' : ''}" data-kb-btn="${escAttr(key)}" onmousedown="event.preventDefault()" onclick="kbToggle(this.dataset.kbBtn)">⌨ ${KB_LANGS[lang].label} Keyboard</button>`;
+}
+function kbTarget() { return kb.key ? document.querySelector(`[data-kb-key="${CSS.escape(kb.key)}"]`) : null; }
+function kbToggle(key) {
+  if (kb.key === key) { kbClose(); return; }
+  const el = document.querySelector(`[data-kb-key="${CSS.escape(key)}"]`);
+  if (!el) return;
+  kbOpen(el);
+  el.focus();
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+function kbOpen(el) {
+  const old = kbTarget();
+  if (old && old !== el) old.removeAttribute('inputmode');
+  kb.key = el.dataset.kbKey; kb.lang = el.dataset.kb; kb.shift = false; kbPh = null;
+  kbSyncInputMode();
+  if (kb.phonetic && kbCanPhonetic()) kbLoadSanscript();
+  kbRenderPanel();
+}
+function kbClose() {
+  const el = kbTarget();
+  if (el) el.removeAttribute('inputmode');
+  kb.key = null; kb.lang = null; kbPh = null;
+  kbRenderPanel();
+}
+// While the grid is showing, keep the phone's own keyboard down so the two don't stack.
+function kbSyncInputMode() {
+  const el = kbTarget();
+  if (!el) return;
+  if (kb.phonetic && kbCanPhonetic()) el.removeAttribute('inputmode'); else el.setAttribute('inputmode', 'none');
+}
+function kbRenderPanel() {
+  let p = document.getElementById('kbPanel');
+  document.querySelectorAll('[data-kb-btn]').forEach(b => b.classList.toggle('on', b.dataset.kbBtn === kb.key));
+  if (!kb.key) { if (p) p.remove(); document.body.classList.remove('kb-open'); return; }
+  if (!p) { p = document.createElement('div'); p.id = 'kbPanel'; document.body.appendChild(p); }
+  document.body.classList.add('kb-open');
+  const L = KB_LANGS[kb.lang];
+  const phon = kb.phonetic && kbCanPhonetic();
+  const key = (ch, label, cls) => `<button type="button" class="kb-key${cls ? ' ' + cls : ''}" data-ch="${escAttr(ch)}" onmousedown="event.preventDefault()" onclick="kbPress(this.dataset.ch)">${label || esc(ch)}</button>`;
+  // Vowel signs and other combining marks show on a dotted circle so they can be told apart from letters.
+  const show = ch => /^\p{M}$/u.test(ch) ? '◌' + ch : (kb.shift ? ch.toUpperCase() : ch);
+  const grid = L.rows.map(r => `<div class="kb-row">${r.split(' ').map(ch => key(ch, esc(show(ch)))).join('')}</div>`).join('')
+    + `<div class="kb-row">${L.shift ? key('SHIFT', '⇧', kb.shift ? 'kb-on' : '') : ''}${key(' ', 'space', 'kb-wide')}${key('BACK', '⌫')}${key('ENTER', '↵')}</div>`;
+  p.innerHTML = `<div class="kb-inner">
+    <div class="kb-head"><span>${esc(L.name)} keyboard</span>
+      ${L.scheme && currentRole !== 'Student' && currentRole !== 'Parent' ? `<label style="font-weight:600;display:flex;align-items:center;gap:4px;cursor:pointer" onmousedown="event.preventDefault()">
+        <input type="checkbox" ${phon ? 'checked' : ''} onchange="kbSetPhonetic(this.checked)"> Phonetic typing</label>` : ''}
+      <span style="flex:1"></span>
+      <button type="button" class="btn-small" onmousedown="event.preventDefault()" onclick="kbClose()">✕ Close</button></div>
+    ${phon ? `<div class="kb-help">Type in English letters and they turn into ${esc(L.name)} as you type.<br>${L.help}</div>` : grid}
+  </div>`;
+}
+function kbSetPhonetic(on) {
+  kb.phonetic = on; kbPh = null;
+  try { localStorage.setItem('kbPhonetic', on ? '1' : '0'); } catch (e) {}
+  if (on) kbLoadSanscript();
+  kbSyncInputMode();
+  kbRenderPanel();
+  const el = kbTarget(); if (el) el.focus();
+}
+function kbLoadSanscript() {
+  if (window.Sanscript) return Promise.resolve();
+  if (!kbSanscriptLoading) kbSanscriptLoading = new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = KB_SANSCRIPT_URL;
+    s.onload = res;
+    s.onerror = () => { kbSanscriptLoading = null; rej(); };
+    document.head.appendChild(s);
+  }).catch(() => { if (kb.phonetic) { alert('Phonetic typing could not load. Check the internet connection, or use the letter keys.'); kbSetPhonetic(false); } });
+  return kbSanscriptLoading;
+}
+// Write into the box the same way typing does, so its oninput handler saves the text.
+function kbReplace(el, start, end, text) {
+  el.setRangeText(text, start, end, 'end');
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+function kbPress(ch) {
+  const el = kbTarget();
+  if (!el) { kbClose(); return; }
+  if (ch === 'SHIFT') { kb.shift = !kb.shift; kbRenderPanel(); return; }
+  if (document.activeElement !== el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+  if (ch === 'ENTER') { if (el.tagName !== 'TEXTAREA') return; ch = '\n'; }
+  let s = el.selectionStart, e = el.selectionEnd;
+  if (ch === 'BACK') {
+    if (s === e) {
+      if (!s) return;
+      const before = Array.from(el.value.slice(0, s));
+      s -= before[before.length - 1].length;   // one letter or one vowel sign at a time
+    }
+    kbReplace(el, s, e, '');
+    return;
+  }
+  kbReplace(el, s, e, kb.shift ? ch.toUpperCase() : ch);
+  if (kb.shift) { kb.shift = false; kbRenderPanel(); }
+}
+// Phonetic typing: the Latin letters of the word being typed are kept in kbPh.roman and the word is
+// re-transliterated on every key, so "r" → र्, "ra" → र, "raa" → रा. Any other key ends the word.
+function kbPhonetic(roman) {
+  const L = KB_LANGS[kb.lang];
+  let out = window.Sanscript.t(roman, L.scheme, L.script);
+  if (kb.lang === 'knda') out = out.replace(/।/g, '.');   // Kannada uses a full stop, not a danda
+  return out;
+}
+document.addEventListener('beforeinput', ev => {
+  const el = ev.target;
+  if (!kb.key || !kb.phonetic || !kbCanPhonetic() || !window.Sanscript || el !== kbTarget()) return;
+  const s = el.selectionStart, e = el.selectionEnd;
+  const live = kbPh && kbPh.el === el && s === e && s === kbPh.start + kbPh.len;
+  if (ev.inputType === 'insertText' && ev.data && /^[A-Za-z.~^|']+$/.test(ev.data)) {
+    if (!live) kbPh = { el, start: s, len: 0, roman: '' };
+    const end = live ? s : e;
+    kbPh.roman += ev.data;
+    const out = kbPhonetic(kbPh.roman);
+    ev.preventDefault();
+    kbReplace(el, kbPh.start, end, out);
+    kbPh.len = out.length;
+  } else if (ev.inputType === 'deleteContentBackward' && live && kbPh.roman) {
+    ev.preventDefault();
+    kbPh.roman = kbPh.roman.slice(0, -1);
+    const out = kbPh.roman ? kbPhonetic(kbPh.roman) : '';
+    kbReplace(el, kbPh.start, s, out);
+    kbPh.len = out.length;
+    if (!kbPh.roman) kbPh = null;
+  } else {
+    kbPh = null;
+  }
+}, true);
+// Moving into another box with a keyboard moves the open panel to it; moving into a plain box closes it.
+document.addEventListener('focusin', ev => {
+  if (!kb.key) return;
+  const el = ev.target;
+  if (el.closest && el.closest('#kbPanel')) return;
+  if (el.dataset && el.dataset.kbKey) { if (el.dataset.kbKey !== kb.key) kbOpen(el); else kbSyncInputMode(); }
+  else if (el.matches && el.matches('input, textarea, select')) kbClose();
+});
+document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && kb.key) kbClose(); });
+// After a re-render: put the phone-keyboard setting back on the new box, or close if the box has gone.
+new MutationObserver(() => {
+  if (!kb.key) return;
+  if (!kbTarget()) kbClose(); else { kbSyncInputMode(); document.querySelectorAll('[data-kb-btn]').forEach(b => b.classList.toggle('on', b.dataset.kbBtn === kb.key)); }
+}).observe(document.getElementById('app'), { childList: true, subtree: true });
+
+// ─────────────────────────────────────────────────────────────
 // QUESTION BANK — Practice papers (Student / Parent)
 // Students never read qb_questions directly: the paper comes from qb_paper_for_student (answers hidden
 // until reviewed), answers are saved with qb_save_answer and the attempt is locked and MCQs are marked
@@ -15446,8 +15640,8 @@ function spQuestionHtml(q, n) {
         <input type="file" accept="image/*" multiple style="display:none" onchange="spAddPhotos('${q.question_id}',this.files)" ${spUploadingQid ? 'disabled' : ''}></label>`;
     const textBox = ro
       ? (a.answer_text ? `<div class="qb-block" style="margin-top:8px"><div class="qb-block-label">Your answer</div>${esc(a.answer_text)}</div>` : '')
-      : `<textarea rows="${photoFirst ? 2 : 3}" placeholder="${photoFirst ? 'Or type your answer here (optional)' : 'Type your answer (Sanskrit or English)'}" oninput="spTyped('${q.question_id}',this.value)" onblur="spFlushPending()"
-          style="width:100%;box-sizing:border-box;margin-top:8px;font-family:inherit;font-size:14px;line-height:1.5;padding:8px;border:1px solid var(--line);border-radius:6px;resize:vertical">${esc(a.answer_text || '')}</textarea>`;
+      : `<textarea rows="${photoFirst ? 2 : 3}" placeholder="${photoFirst ? 'Or type your answer here (optional)' : 'Type your answer (Sanskrit or English)'}" oninput="spTyped('${q.question_id}',this.value)" onblur="spFlushPending()"${kbAttrs(spOpen.paper.subject_name, 'sp-' + q.question_id)}
+          style="width:100%;box-sizing:border-box;margin-top:8px;font-family:inherit;font-size:14px;line-height:1.5;padding:8px;border:1px solid var(--line);border-radius:6px;resize:vertical">${esc(a.answer_text || '')}</textarea>${kbBtn(spOpen.paper.subject_name, 'sp-' + q.question_id)}`;
     answerHtml = photoFirst ? `${photoBtn}<div>${photos}</div>${textBox}` : `${textBox}${photoBtn}<div>${photos}</div>`;
     if (ro && !a.answer_text && !(a.photo_urls || []).length) answerHtml = `<div class="hint" style="margin-top:8px">Not answered.</div>`;
   }
@@ -15805,7 +15999,8 @@ function qbEditFormHtml(q, fromPaper, lockMarks) {
     <div style="font-size:12px;font-weight:700;margin-bottom:6px">Editing question</div>
     ${fromPaper || (currentRole === 'Teacher' && q.approved) ? `<div class="hint" style="margin-bottom:6px">${fromPaper ? 'Saved to the Question Bank, so every paper that uses this question shows the change.' : ''}${currentRole === 'Teacher' && q.approved ? ' After saving it goes back to the Review Queue to be checked again' + (fromPaper ? ', and stays on this paper.' : '.') : ''}${lockMarks ? ' Marks and type stay fixed because this paper is assigned.' : ''}</div>` : ''}
     <textarea rows="6" style="width:100%;font-family:inherit;font-size:14px;line-height:1.5;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box;resize:vertical"
-      oninput="qbEditDraft.question_text=this.value">${esc(qbEditDraft.question_text||'')}</textarea>
+      oninput="qbEditDraft.question_text=this.value"${kbAttrs(qbSubjectOf(q), 'qbe-q')}>${esc(qbEditDraft.question_text||'')}</textarea>
+    ${kbBtn(qbSubjectOf(q), 'qbe-q')}
     <div class="row-form" style="gap:8px;margin-top:8px;flex-wrap:wrap">
       <select onchange="qbEditDraft.question_type=this.value;render()" ${lockMarks ? 'disabled' : ''}>
         ${QB_TYPES.map(t=>`<option value="${t}" ${t===type?'selected':''}>${QB_TYPE_LABELS[t]||t}</option>`).join('')}
@@ -15823,13 +16018,14 @@ function qbEditFormHtml(q, fromPaper, lockMarks) {
       ${opts.map((o, i) => { const L = 'abcdefgh'[i]; return `<div style="display:flex;gap:6px;align-items:center;margin-top:4px">
         <input type="radio" name="qbEditCorrect" ${qbEditDraft.correct_option === L ? 'checked' : ''} onchange="qbEditDraft.correct_option='${L}'" title="Correct option">
         <span style="width:22px">(${L})</span>
-        <input type="text" value="${escAttr(o)}" oninput="qbEditDraft.options[${i}]=this.value" style="flex:1;min-width:0;box-sizing:border-box"></div>`; }).join('')}
+        <input type="text" value="${escAttr(o)}" oninput="qbEditDraft.options[${i}]=this.value"${kbAttrs(qbSubjectOf(q), 'qbe-o' + i)} style="flex:1;min-width:0;box-sizing:border-box"></div>`; }).join('')}
       ${opts.length < 8 ? `<button class="btn-small" style="margin-top:4px" onclick="qbEditDraft.options.push('');render()">+ Option</button>` : ''}</div>` : ''}
     <div style="margin-top:8px"><label style="font-size:12px;font-weight:600">Answer / key</label>
       <textarea rows="3" style="width:100%;font-family:inherit;font-size:13px;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box;resize:vertical"
-        oninput="qbEditDraft.answer_text=this.value">${esc(qbEditDraft.answer_text!==undefined?qbEditDraft.answer_text:(q.answer_text||''))}</textarea></div>
+        oninput="qbEditDraft.answer_text=this.value"${kbAttrs(qbSubjectOf(q), 'qbe-a')}>${esc(qbEditDraft.answer_text!==undefined?qbEditDraft.answer_text:(q.answer_text||''))}</textarea>
+      ${kbBtn(qbSubjectOf(q), 'qbe-a')}</div>
     ${'topic' in q ? `<div style="margin-top:8px"><label style="font-size:12px;font-weight:600">Topic</label>
-      <input type="text" list="qbTopicList" value="${escAttr(qbEditDraft.topic || '')}" placeholder="e.g. सन्धिः — practice papers pick grammar and some reading questions by topic" oninput="qbEditDraft.topic=this.value.trim()" style="width:100%;box-sizing:border-box">
+      <input type="text" list="qbTopicList" value="${escAttr(qbEditDraft.topic || '')}" placeholder="e.g. सन्धिः — practice papers pick grammar and some reading questions by topic" oninput="qbEditDraft.topic=this.value.trim()"${kbAttrs(qbSubjectOf(q), 'qbe-t')} style="width:100%;box-sizing:border-box">
       <datalist id="qbTopicList">${QB_TOPICS.map(t => `<option value="${escAttr(t)}">`).join('')}</datalist></div>` : ''}
     ${qbImageFieldHtml('edit', qbEditDraft.question_image_url, "qbEditDraft.question_image_url=''")}
     <div class="qb-actions" style="margin-top:8px">
@@ -16520,11 +16716,11 @@ function qbNewQFormHtml(p, sec, passageSec) {
   const f = qbNewQ;
   const picSec = !!(sec && sec.question_type === 'picture_composition');
   const chapters = qbChaptersForNames(qbByName(boards, p.board_id), p.subject_name, qbByName(grades, p.grade_id));
-  const ta = (rows, val, handler, ph) => `<textarea rows="${rows}" placeholder="${ph}" oninput="${handler}" style="width:100%;box-sizing:border-box;font-family:inherit;font-size:14px;line-height:1.5;padding:8px;border:1px solid var(--line);border-radius:6px;resize:vertical">${esc(val)}</textarea>`;
+  const ta = (rows, val, handler, ph, kbKey) => `<textarea rows="${rows}" placeholder="${ph}" oninput="${handler}"${kbAttrs(p.subject_name, kbKey)} style="width:100%;box-sizing:border-box;font-family:inherit;font-size:14px;line-height:1.5;padding:8px;border:1px solid var(--line);border-radius:6px;resize:vertical">${esc(val)}</textarea>${kbBtn(p.subject_name, kbKey)}`;
   const items = f.items.map((it, i) => `<div class="qb-card" style="margin-top:8px">
       <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:700;margin-bottom:6px">Question ${i + 1}
         ${f.items.length > 1 ? `<button class="btn-small" onclick="qbNewQ.items.splice(${i},1);render()">Remove</button>` : ''}</div>
-      ${ta(3, it.question_text, `qbNewQ.items[${i}].question_text=this.value`, 'Question')}
+      ${ta(3, it.question_text, `qbNewQ.items[${i}].question_text=this.value`, 'Question', 'new-q' + i)}
       <div class="row-form" style="gap:8px;margin-top:8px;flex-wrap:wrap">
         <select onchange="qbNewQ.items[${i}].question_type=this.value">${QB_TYPES.map(t => `<option value="${t}" ${t === it.question_type ? 'selected' : ''}>${QB_TYPE_LABELS[t] || t}</option>`).join('')}</select>
         <input type="number" min="0.5" max="20" step="0.5" value="${escAttr(it.marks)}" placeholder="Marks" oninput="qbNewQ.items[${i}].marks=this.value" style="width:80px">
@@ -16532,7 +16728,7 @@ function qbNewQFormHtml(p, sec, passageSec) {
         ${chapters.length ? `<select onchange="qbNewQ.items[${i}].chapter_id=this.value" style="max-width:260px"><option value="">No chapter</option>
           ${chapters.map(c => `<option value="${c.id}" ${c.id === it.chapter_id ? 'selected' : ''}>${esc(qbChapterLabel(c))}</option>`).join('')}</select>` : ''}
       </div>
-      <div style="margin-top:8px">${ta(2, it.answer_text, `qbNewQ.items[${i}].answer_text=this.value`, 'Model answer (for marking)')}</div>
+      <div style="margin-top:8px">${ta(2, it.answer_text, `qbNewQ.items[${i}].answer_text=this.value`, 'Model answer (for marking)', 'new-a' + i)}</div>
       ${qbImageFieldHtml('new-' + i, it.image_url, `qbNewQ.items[${i}].image_url=''`)}
     </div>`).join('');
   return `<div class="qb-block" style="white-space:normal;border:1px solid var(--gold);margin-top:8px">
@@ -16541,9 +16737,9 @@ function qbNewQFormHtml(p, sec, passageSec) {
       <button class="btn-small" onclick="qbNewQ=null;render()">Cancel</button></div>
     <div class="hint" style="margin-bottom:6px">Added to this paper now, and to the Question Bank's Review Queue.${f.topic ? ` Topic: ${esc(f.topic)}.` : ''}${passageSec && qbSectionRows(sec.section_name, sec.choice).length ? ` It replaces the ${picSec ? 'picture' : 'passage'} in this section.` : ''}</div>
     ${picSec ? `<div style="font-size:12px;font-weight:700">Picture</div>${qbImageFieldHtml('passage', f.passage_image, "qbNewQ.passage_image=''")}
-      <div style="margin-top:8px">${ta(2, f.passage, 'qbNewQ.passage=this.value', 'Words to use (मञ्जूषा) or other text under the picture (optional)')}</div>`
-      : passageSec ? `${ta(6, f.passage, 'qbNewQ.passage=this.value', 'Passage')}${qbImageFieldHtml('passage', f.passage_image, "qbNewQ.passage_image=''")}`
-      : `<details ${f.passage || f.passage_image ? 'open' : ''}><summary style="cursor:pointer;font-size:13px">Based on a passage or picture? (optional)</summary>${ta(4, f.passage, 'qbNewQ.passage=this.value', 'Passage')}${qbImageFieldHtml('passage', f.passage_image, "qbNewQ.passage_image=''")}</details>`}
+      <div style="margin-top:8px">${ta(2, f.passage, 'qbNewQ.passage=this.value', 'Words to use (मञ्जूषा) or other text under the picture (optional)', 'new-p')}</div>`
+      : passageSec ? `${ta(6, f.passage, 'qbNewQ.passage=this.value', 'Passage', 'new-p')}${qbImageFieldHtml('passage', f.passage_image, "qbNewQ.passage_image=''")}`
+      : `<details ${f.passage || f.passage_image ? 'open' : ''}><summary style="cursor:pointer;font-size:13px">Based on a passage or picture? (optional)</summary>${ta(4, f.passage, 'qbNewQ.passage=this.value', 'Passage', 'new-p')}${qbImageFieldHtml('passage', f.passage_image, "qbNewQ.passage_image=''")}</details>`}
     ${items}
     <div class="qb-actions" style="margin-top:8px">
       <button class="btn-small" onclick="qbNewQ.items.push(qbNewQItem(qbNewQ.items[qbNewQ.items.length-1].question_type));render()">+ Another question${picSec ? ' on this picture' : passageSec ? ' on this passage' : ''}</button>
