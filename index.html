@@ -3065,7 +3065,7 @@ async function loadQBQuestions() {
     // Passages and approver names are only needed for the expanded view; failures here are non-fatal.
     const passageIds = [...new Set(qbQuestions.map(q => q.passage_id).filter(Boolean))];
     if (passageIds.length) {
-      const { data: ps } = await sb.from('qb_passages').select('id, passage_text, passage_type, source').in('id', passageIds);
+      const { data: ps } = await sb.from('qb_passages').select('*').in('id', passageIds);
       qbPassages = {}; (ps || []).forEach(p => { qbPassages[p.id] = p; });
     }
     const approverIds = [...new Set(qbQuestions.flatMap(q => [q.approved_by, q.added_by]).filter(Boolean))];
@@ -15402,10 +15402,11 @@ function spPaperHtml() {
   const all = sections.flatMap(s => s.questions);
   const answered = all.filter(q => spIsAnswered(q.question_id)).length;
   let num = sections.slice(0, spOpen.section).reduce((s, x) => s + x.questions.length, 0);
-  const qsHtml = qbPassageRuns(sec.questions, q => q.passage_text ? q.passage_id : null).map(run => {
+  const qsHtml = qbPassageRuns(sec.questions, q => q.passage_text || q.passage_image_url ? q.passage_id : null).map(run => {
     const from = num + 1;
     const inner = run.items.map(q => spQuestionHtml(q, ++num)).join('');
-    return run.pid ? qbPassageBox(esc(qbPassageLead(from, run.items.length)), run.items[0].passage_text, inner) : inner;
+    const first = run.items[0];
+    return run.pid ? qbPassageBox(esc(qbPassageLead(from, run.items.length, !!first.passage_image_url)), first.passage_text, inner, first.passage_image_url) : inner;
   }).join('');
   const secMarks = sec.questions.reduce((s, q) => s + (Number(q.marks) || 0), 0);
   const st = spStatus(assignment);
@@ -15514,7 +15515,7 @@ function qbDistinct(qs, fn) { return [...new Set(qs.map(fn).filter(Boolean))].so
 // A question with no marks (0 or blank) is never put on a practice paper.
 function qbZeroMarks(q) { return !(Number(q.marks) > 0); }
 // Nor is a picture composition without its picture: students can't answer it.
-function qbMissingPicture(q) { return q.question_type === 'picture_composition' && !q.question_image_url; }
+function qbMissingPicture(q) { return q.question_type === 'picture_composition' && !q.question_image_url && !(q.passage_id && (qbPassages[q.passage_id] || {}).image_url); }
 function qbClearDetailFilters() { qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false; qbSelectedIds = new Set(); qbBulkChapterId = ''; }
 
 // Duplicate check. Same clean-up as question-bank/sql/08-check-duplicates.sql: ignore case, spaces,
@@ -15663,10 +15664,15 @@ function qbPassageRuns(list, pidOf) {
   return runs;
 }
 // "Read the passage and answer questions 3–6." (numbers as shown on the paper)
-function qbPassageLead(from, count) { return count > 1 ? `Read the passage and answer questions ${from}–${from + count - 1}.` : `Read the passage and answer question ${from}.`; }
-function qbPassageBox(head, passageText, inner) {
+// "Look at the picture and answer …" when the passage is a picture.
+function qbPassageLead(from, count, picture) {
+  const what = picture ? 'Look at the picture' : 'Read the passage';
+  return count > 1 ? `${what} and answer questions ${from}–${from + count - 1}.` : `${what} and answer question ${from}.`;
+}
+function qbPassageBox(head, passageText, inner, imageUrl) {
   return `<div class="qb-pgroup"><div class="qb-pgroup-head">${head}</div>
-    <div class="qb-block" style="margin-top:0">${esc(passageText || '')}</div>${inner}</div>`;
+    ${imageUrl ? `<img class="qb-img" src="${escAttr(imageUrl)}" alt="" loading="lazy" style="margin-top:0">` : ''}
+    ${passageText ? `<div class="qb-block" style="margin-top:0">${esc(passageText)}</div>` : ''}${inner}</div>`;
 }
 
 function qbFmtDate(ts) { return ts ? formatDate(String(ts).slice(0,10)) : ''; }
@@ -15688,6 +15694,7 @@ async function qbPickImage(key, files) {
   try {
     const url = await qbUploadQuestionImage(file);
     if (key === 'edit') qbEditDraft.question_image_url = url;
+    else if (key === 'passage') { if (qbNewQ) qbNewQ.passage_image = url; }
     else if (qbNewQ) qbNewQ.items[Number(key.slice(4))].image_url = url;
   } catch (e) { alert('Picture not uploaded: ' + e.message); }
   qbImgUploading = ''; render();
@@ -15781,7 +15788,7 @@ function qbQuestionRowHtml(q, isAdmin) {
     ${!open ? qbImgHtml(q.question_image_url, 120) : ''}
     ${open ? `
       ${img(q.question_image_url)}
-      ${passage ? block('Passage' + (passage.passage_type ? ' · ' + esc(passage.passage_type) : ''), esc(passage.passage_text || '')) : ''}
+      ${passage ? block('Passage' + (passage.passage_type ? ' · ' + esc(passage.passage_type) : ''), esc(passage.passage_text || '') + img(passage.image_url)) : ''}
       ${(q.answer_text || q.answer_image_url) ? block('Answer', esc(q.answer_text || '') + img(q.answer_image_url)) : ''}
       ${block('Explanation', esc(q.explanation_text || ''))}
     ` : ''}
@@ -15977,7 +15984,10 @@ function renderTeacherQuestionBank(teacher) {
 // A blueprint is every qb_paper_blueprints row (one per section) sharing board + grade + subject + year.
 // Paper status: 'draft' while being built, 'published' (shown as Ready) once it can be assigned.
 // ─────────────────────────────────────────────────────────────
-const QB_PASSAGE_TYPES = ['unseen_passage', 'extract_based'];
+const QB_PASSAGE_TYPES = ['unseen_passage', 'extract_based', 'picture_composition'];
+// A unit of a passage section: a passage (or picture) with its questions. A picture composition
+// written as one question with its own picture counts as a unit by itself ('q:<id>').
+function qbUnitOf(q, type) { return q.passage_id || (type === 'picture_composition' ? 'q:' + q.id : null); }
 
 function qbIdOf(q, key) { const v = qbLinkedVal(q, [key]); return v ? v.val : ''; }
 function qbSameSubject(a, b) { return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase(); }
@@ -16030,7 +16040,7 @@ function qbBlueprintForPaper(p) {
 // One passage's questions for a section: every approved question linked to it (whatever its type), in the order
 // they were added, keeping the first ones that fit in the marks. Prefers a passage that fills the marks, then the least used.
 function qbPassageQuestions(bank, passageId, used, marks) {
-  const qs = bank.filter(q => q.passage_id === passageId && !used.has(q.id))
+  const qs = bank.filter(q => (q.passage_id === passageId || 'q:' + q.id === passageId) && !used.has(q.id))
     .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
   const out = [];
   let sum = 0;
@@ -16057,8 +16067,8 @@ function qbAutoFill(g, chapterIds) {
       .sort((a, b) => (a.usage_count || 0) - (b.usage_count || 0));
     const chosen = [];
     let remaining = target;
-    if (QB_PASSAGE_TYPES.includes(sec.question_type) && pool.some(q => q.passage_id)) {
-      const passageIds = [...new Set(pool.filter(q => q.passage_id).map(q => q.passage_id))];
+    if (QB_PASSAGE_TYPES.includes(sec.question_type) && pool.some(q => qbUnitOf(q, sec.question_type))) {
+      const passageIds = [...new Set(pool.map(q => qbUnitOf(q, sec.question_type)).filter(Boolean))];
       let left = Math.max(1, Number(sec.question_count) || 1);
       const perPassage = target / left;   // e.g. 3 extracts in 15 marks → up to 5 marks each
       while (remaining > 0 && left-- > 0 && passageIds.length) {
@@ -16295,24 +16305,26 @@ function qbPassagePickerHtml(p, sec) {
   const bank = qbBankFor(p.board_id, p.grade_id, p.subject_name);
   const target = qbSectionTarget(sec);
   const onPaper = new Set(qbPaperQs.map(x => x.question_id));
-  const current = new Set(qbSectionRows(sec.section_name).map(pq => (qbQuestionById(pq.question_id) || {}).passage_id).filter(Boolean));
+  const current = new Set(qbSectionRows(sec.section_name).map(pq => qbUnitOf(qbQuestionById(pq.question_id) || {}, sec.question_type)).filter(Boolean));
   // Questions on this paper outside the section stay where they are; only this section's questions are free to reuse.
   const sectionQs = new Set(qbSectionRows(sec.section_name).map(pq => pq.question_id));
   const taken = new Set([...onPaper].filter(id => !sectionQs.has(id)));
   const lc = (qbPicker.search || '').toLowerCase();
-  const ids = [...new Set(bank.filter(q => q.passage_id && q.question_type === sec.question_type).map(q => q.passage_id))]
-    .filter(id => !current.has(id) && (!lc || String((qbPassages[id] || {}).passage_text || '').toLowerCase().includes(lc)));
+  const unitText = id => id.startsWith('q:') ? (qbQuestionById(id.slice(2)) || {}).question_text || '' : (qbPassages[id] || {}).passage_text || '';
+  const unitImage = id => id.startsWith('q:') ? (qbQuestionById(id.slice(2)) || {}).question_image_url : (qbPassages[id] || {}).image_url;
+  const ids = [...new Set(bank.filter(q => q.question_type === sec.question_type).map(q => qbUnitOf(q, sec.question_type)).filter(Boolean))]
+    .filter(id => !current.has(id) && (!lc || unitText(id).toLowerCase().includes(lc)));
   const cands = ids.map(id => qbPassageQuestions(bank, id, taken, target)).filter(c => c.questions.length)
     .sort((a, b) => (b.marks - a.marks) || (a.usage - b.usage)).slice(0, 30);
   return `<div class="qb-block" style="white-space:normal;border:1px solid var(--gold)">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px">
-      <b style="font-size:13px">${current.size ? 'Swap for another' : 'Choose a'} passage</b>
+      <b style="font-size:13px">${current.size ? 'Swap for another' : 'Choose a'} ${sec.question_type === 'picture_composition' ? 'picture' : 'passage'}</b>
       <button class="btn-small" onclick="qbPicker=null;render()">Close</button>
     </div>
     <input type="text" value="${escAttr(qbPicker.search || '')}" placeholder="Search passage text…" oninput="qbPicker.search=this.value;render();const e=document.getElementById('qbPickerSearch');if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length)}" id="qbPickerSearch" style="width:100%;box-sizing:border-box;margin-bottom:8px">
     ${cands.length ? cands.map(c => `<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-top:1px solid var(--line)">
       <div style="flex:1;min-width:0"><div style="font-size:11px;color:${c.marks === target ? 'var(--muted)' : 'var(--brick)'}">${c.questions.length} question${c.questions.length === 1 ? '' : 's'} · ${c.marks} of ${target} marks · used ${c.usage}×</div>
-        <div class="qb-text clamp" style="cursor:default;font-size:13px">${esc((qbPassages[c.passageId] || {}).passage_text || '')}</div></div>
+        ${qbImgHtml(unitImage(c.passageId), 90)}<div class="qb-text clamp" style="cursor:default;font-size:13px">${esc(unitText(c.passageId))}</div></div>
       <button class="btn-small btn-primary" onclick="qbUsePassage('${escAttr(sec.section_name)}','${c.passageId}')">Use</button></div>`).join('') : '<div class="hint">No other approved passages for this section.</div>'}
   </div>`;
 }
@@ -16350,11 +16362,12 @@ function qbOpenNewQ(section) {
   const g = p && qbBlueprintForPaper(p);
   const sec = g && g.sections.find(s => s.section_name === section);
   qbPicker = null;
-  qbNewQ = { section, passage: '', items: [qbNewQItem(sec && sec.question_type)] };
+  qbNewQ = { section, passage: '', passage_image: '', items: [qbNewQItem(sec && sec.question_type)] };
   render();
 }
 function qbNewQFormHtml(p, sec, passageSec) {
   const f = qbNewQ;
+  const picSec = !!(sec && sec.question_type === 'picture_composition');
   const chapters = qbChaptersForNames(qbByName(boards, p.board_id), p.subject_name, qbByName(grades, p.grade_id));
   const ta = (rows, val, handler, ph) => `<textarea rows="${rows}" placeholder="${ph}" oninput="${handler}" style="width:100%;box-sizing:border-box;font-family:inherit;font-size:14px;line-height:1.5;padding:8px;border:1px solid var(--line);border-radius:6px;resize:vertical">${esc(val)}</textarea>`;
   const items = f.items.map((it, i) => `<div class="qb-card" style="margin-top:8px">
@@ -16373,13 +16386,16 @@ function qbNewQFormHtml(p, sec, passageSec) {
     </div>`).join('');
   return `<div class="qb-block" style="white-space:normal;border:1px solid var(--gold);margin-top:8px">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px">
-      <b style="font-size:13px">${passageSec ? 'Write a new passage' : 'Write a new question'}</b>
+      <b style="font-size:13px">${picSec ? 'Make a new picture set' : passageSec ? 'Write a new passage' : 'Write a new question'}</b>
       <button class="btn-small" onclick="qbNewQ=null;render()">Cancel</button></div>
-    <div class="hint" style="margin-bottom:6px">Added to this paper now, and to the Question Bank's Review Queue.${passageSec && qbSectionRows(sec.section_name).length ? ' It replaces the passage in this section.' : ''}</div>
-    ${passageSec ? ta(6, f.passage, 'qbNewQ.passage=this.value', 'Passage') : `<details ${f.passage ? 'open' : ''}><summary style="cursor:pointer;font-size:13px">Based on a passage? (optional)</summary>${ta(4, f.passage, 'qbNewQ.passage=this.value', 'Passage')}</details>`}
+    <div class="hint" style="margin-bottom:6px">Added to this paper now, and to the Question Bank's Review Queue.${passageSec && qbSectionRows(sec.section_name).length ? ` It replaces the ${picSec ? 'picture' : 'passage'} in this section.` : ''}</div>
+    ${picSec ? `<div style="font-size:12px;font-weight:700">Picture</div>${qbImageFieldHtml('passage', f.passage_image, "qbNewQ.passage_image=''")}
+      <div style="margin-top:8px">${ta(2, f.passage, 'qbNewQ.passage=this.value', 'Words to use (मञ्जूषा) or other text under the picture (optional)')}</div>`
+      : passageSec ? `${ta(6, f.passage, 'qbNewQ.passage=this.value', 'Passage')}${qbImageFieldHtml('passage', f.passage_image, "qbNewQ.passage_image=''")}`
+      : `<details ${f.passage || f.passage_image ? 'open' : ''}><summary style="cursor:pointer;font-size:13px">Based on a passage or picture? (optional)</summary>${ta(4, f.passage, 'qbNewQ.passage=this.value', 'Passage')}${qbImageFieldHtml('passage', f.passage_image, "qbNewQ.passage_image=''")}</details>`}
     ${items}
     <div class="qb-actions" style="margin-top:8px">
-      <button class="btn-small" onclick="qbNewQ.items.push(qbNewQItem(qbNewQ.items[qbNewQ.items.length-1].question_type));render()">+ Another question${passageSec ? ' on this passage' : ''}</button>
+      <button class="btn-small" onclick="qbNewQ.items.push(qbNewQItem(qbNewQ.items[qbNewQ.items.length-1].question_type));render()">+ Another question${picSec ? ' on this picture' : passageSec ? ' on this passage' : ''}</button>
       <button class="btn-small btn-primary" onclick="qbSaveNewQ()" ${qbPaperSaving || qbImgUploading ? 'disabled' : ''}>Save and add to paper</button>
     </div>
   </div>`;
@@ -16394,13 +16410,17 @@ async function qbSaveNewQ() {
   const items = f.items.filter(it => it.question_text.trim() || it.image_url);
   if (!items.length) { alert('Write the question first.'); return; }
   if (items.some(it => !(Number(it.marks) > 0))) { alert('Give every question its marks (more than 0).'); return; }
-  if (passageSec && !f.passage.trim()) { alert('Write the passage first.'); return; }
+  const picSec = !!(sec && sec.question_type === 'picture_composition');
+  if (picSec && !f.passage_image) { alert('Add the picture first.'); return; }
+  if (passageSec && !picSec && !f.passage.trim()) { alert('Write the passage first.'); return; }
   const old = passageSec ? qbSectionRows(f.section) : [];
   qbPaperSaving = true; render();
   const fail = msg => { qbPaperSaving = false; qbPaperMsg = 'Error: ' + msg; render(); };
   let passageId = null;
-  if (f.passage.trim()) {
-    const { data: ps, error } = await sb.from('qb_passages').insert({ passage_text: f.passage.trim() }).select().single();
+  if (f.passage.trim() || f.passage_image) {
+    const row = { passage_text: f.passage.trim() };
+    if (f.passage_image) row.image_url = f.passage_image;
+    const { data: ps, error } = await sb.from('qb_passages').insert(row).select().single();
     if (error) return fail(error.message);
     qbPassages[ps.id] = ps; passageId = ps.id;
   }
@@ -16755,7 +16775,8 @@ function qbReviewHtml() {
             ${answer}${marking}
           </div>`;
       }).join('');
-        return run.pid ? qbPassageBox(esc(qbPassageLead(from, run.items.length)), (qbPassages[run.pid] || {}).passage_text, runHtml) : runHtml;
+        const ps = qbPassages[run.pid] || {};
+        return run.pid ? qbPassageBox(esc(qbPassageLead(from, run.items.length, !!ps.image_url)), ps.passage_text, runHtml, ps.image_url) : runHtml;
       }).join('')}</div>`;
   }).join('');
   const reviewed = a.status === 'reviewed';
@@ -16825,12 +16846,13 @@ function qbPaperEditorHtml() {
         const moveBtns = locked || runs.length < 2 ? '' : `<span class="qb-actions">
           <button class="btn-small" onclick="qbMovePq('${first.id}',-1,'${run.pid}')" ${ri === 0 ? 'disabled' : ''} title="Move the passage and its questions up">↑</button>
           <button class="btn-small" onclick="qbMovePq('${first.id}',1,'${run.pid}')" ${ri === runs.length - 1 ? 'disabled' : ''} title="Move the passage and its questions down">↓</button></span>`;
-        return qbPassageBox(`<span>${esc(qbPassageLead(rows.indexOf(first) + 1, run.items.length))}</span>${moveBtns}`, (qbPassages[run.pid] || {}).passage_text, runHtml);
+        const ps = qbPassages[run.pid] || {};
+        return qbPassageBox(`<span>${esc(qbPassageLead(rows.indexOf(first) + 1, run.items.length, !!ps.image_url))}</span>${moveBtns}`, ps.passage_text, runHtml, ps.image_url);
       }).join(''); })()}
       </div>
       ${locked ? '' : qbNewQ && qbNewQ.section === name ? qbNewQFormHtml(p, sec, passageSec) : (qbPicker && !qbPicker.pqId && qbPicker.section === name ? (passageSec ? qbPassagePickerHtml(p, sec) : qbPickerHtml(p, sec))
-        : `<div class="qb-actions" style="margin-top:8px"><button class="btn-small" onclick="qbOpenPicker('${escAttr(name)}')">${passageSec ? (rows.length ? '⇄ Swap passage' : '+ Choose passage') : '+ Add question'}</button>
-          <button class="btn-small" onclick="qbOpenNewQ('${escAttr(name)}')">✎ ${passageSec ? 'Write a new passage' : 'Write a new question'}</button></div>`)}
+        : `<div class="qb-actions" style="margin-top:8px"><button class="btn-small" onclick="qbOpenPicker('${escAttr(name)}')">${passageSec ? (sec.question_type === 'picture_composition' ? (rows.length ? '⇄ Swap picture' : '+ Choose picture') : (rows.length ? '⇄ Swap passage' : '+ Choose passage')) : '+ Add question'}</button>
+          <button class="btn-small" onclick="qbOpenNewQ('${escAttr(name)}')">✎ ${sec && sec.question_type === 'picture_composition' ? 'Make a new picture set' : passageSec ? 'Write a new passage' : 'Write a new question'}</button></div>`)}
     </div>`;
   }).join('');
 
@@ -17000,7 +17022,8 @@ function qbPrintPaper(withAnswers) {
         if (withAnswers) answers.push(`<li value="${n}">${ans ? nl(ans) : '<i>No model answer in the bank.</i>'}</li>`);
         return `<div class="q"><span class="n">${n}.</span><div class="t">${nl(q.question_text || '')}${q.question_image_url ? `<br><img src="${e(q.question_image_url)}">` : ''}${opts}</div><span class="m">[${marks}]</span></div>`;
       }).join('');
-        return run.pid ? `<div class="pgroup"><div class="lead">${e(qbPassageLead(from, run.items.length))}</div><div class="passage">${nl((qbPassages[run.pid] || {}).passage_text || '')}</div>${runHtml}</div>` : runHtml;
+        const ps = qbPassages[run.pid] || {};
+        return run.pid ? `<div class="pgroup"><div class="lead">${e(qbPassageLead(from, run.items.length, !!ps.image_url))}</div>${ps.image_url ? `<img src="${e(ps.image_url)}">` : ''}${ps.passage_text ? `<div class="passage">${nl(ps.passage_text)}</div>` : ''}${runHtml}</div>` : runHtml;
       }).join('')}</section>`;
   }).join('');
   const meta = [p.subject_name, qbByName(grades, p.grade_id), qbByName(boards, p.board_id)].filter(Boolean).join(' · ');
@@ -17085,7 +17108,8 @@ function qbBuildDocx(D, paper, withAnswers) {
     sec.runs.forEach(run => {
       if (run.passage != null) {
         kids.push(new D.Paragraph({ spacing: { before: 120 }, children: [new D.TextRun({ text: run.lead, bold: true, size: 22 })] }));
-        kids.push(new D.Paragraph({ border: box, spacing: { after: 120 }, children: lines(run.passage) }));
+        if (run.image) kids.push(new D.Paragraph({ children: [new D.ImageRun({ data: run.image.data, transformation: { width: run.image.width, height: run.image.height } })] }));
+        if (run.passage) kids.push(new D.Paragraph({ border: box, spacing: { after: 120 }, children: lines(run.passage) }));
       }
       run.questions.forEach(q => {
         kids.push(new D.Paragraph({ tabStops: [{ type: D.TabStopType.RIGHT, position: RIGHT }], indent: run.passage != null ? { left: 240 } : undefined, spacing: { before: 80 },
@@ -17131,7 +17155,9 @@ async function qbDownloadDocx(withAnswers) {
             image: q.question_image_url ? await qbDocxImage(q.question_image_url) : null,
             answer: [q.correct_option ? `(${q.correct_option})` : '', q.answer_text || ''].filter(Boolean).join(' ') });
         }
-        runs.push(run.pid ? { lead: qbPassageLead(from, run.items.length), passage: (qbPassages[run.pid] || {}).passage_text || '', questions } : { questions });
+        const ps = run.pid ? qbPassages[run.pid] || {} : null;
+        runs.push(ps ? { lead: qbPassageLead(from, run.items.length, !!ps.image_url), passage: ps.passage_text || '',
+          image: ps.image_url ? await qbDocxImage(ps.image_url) : null, questions } : { questions });
       }
       sections.push({ title: qbSectionTitle(name, sec) || 'Questions', marks: rows.reduce((t, pq) => t + qbPqMarks(pq), 0), runs });
     }
