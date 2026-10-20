@@ -14696,7 +14696,26 @@ function renderTeacherPortal() {
   if (!teacher) {
     return `<div class="card"><div class="empty">Your teacher record could not be found. Contact the admin.</div></div>`;
   }
-  const teacherTabsList = [
+  const teacherTabGroups = [
+    { label: 'Teaching', tabs: [
+      ['schedule', 'Class Schedule'],
+      ['studyplans', 'Study Plans'],
+      ['homework', 'Homework'],
+      ...(teacherQbAccess ? [['questionbank', 'Question Bank']] : []),
+    ]},
+    { label: 'Attendance', tabs: [
+      ['attendance', 'Give Attendance'],
+      ['report', 'My Attendance Report'],
+      ['availability', 'Availability'],
+    ]},
+    { label: 'Account', tabs: [
+      ['profile', 'My Profile'],
+      ['setup', 'Setup'],
+    ]},
+  ];
+  const activeGroupLabel = (teacherTabGroups.find(g => g.tabs.some(([key])=>key===teacherPortalTab)) || {}).label;
+  // Phone burger menu keeps its original flat order.
+  const teacherMobileTabsList = [
     ['dashboard', 'Dashboard'],
     ['schedule', 'Class Schedule'],
     ['studyplans', 'Study Plans'],
@@ -14708,20 +14727,22 @@ function renderTeacherPortal() {
     ['profile', 'My Profile'],
     ['setup', 'Setup'],
   ];
-  const currentTeacherTabLabel = (teacherTabsList.find(([key])=>key===teacherPortalTab) || [,''])[1];
-  const subTabsHtml = `
-    <div class="tabs desktop-tabs">
-      <div class="tab ${teacherPortalTab==='dashboard'?'active':''}" onclick="setTeacherPortalTab('dashboard')">Dashboard</div>
-      <div class="tab ${teacherPortalTab==='schedule'?'active':''}" onclick="setTeacherPortalTab('schedule')">Class Schedule</div>
-      <div class="tab ${teacherPortalTab==='studyplans'?'active':''}" onclick="setTeacherPortalTab('studyplans')">Study Plans</div>
-      <div class="tab ${teacherPortalTab==='homework'?'active':''}" onclick="setTeacherPortalTab('homework')">Homework</div>
-      ${teacherQbAccess ? `<div class="tab ${teacherPortalTab==='questionbank'?'active':''}" onclick="setTeacherPortalTab('questionbank')">Question Bank</div>` : ''}
-      <div class="tab ${teacherPortalTab==='availability'?'active':''}" onclick="setTeacherPortalTab('availability')">Availability</div>
-      <div class="tab ${teacherPortalTab==='report'?'active':''}" onclick="setTeacherPortalTab('report')">My Attendance Report</div>
-      <div class="tab ${teacherPortalTab==='attendance'?'active':''}" onclick="setTeacherPortalTab('attendance')">Give Attendance</div>
-      <div class="tab ${teacherPortalTab==='profile'?'active':''}" onclick="setTeacherPortalTab('profile')">My Profile</div>
-      <div class="tab ${teacherPortalTab==='setup'?'active':''}" onclick="setTeacherPortalTab('setup')">Setup</div>
-    </div>
+  const currentTeacherTabLabel = (teacherMobileTabsList.find(([key])=>key===teacherPortalTab) || [,''])[1];
+  const sidebarHtml = `
+    <div class="sidebar-nav">
+      <div class="sidebar-item ${teacherPortalTab==='dashboard'?'active':''}" onclick="setTeacherPortalTab('dashboard')" style="font-weight:700;margin-bottom:10px">Dashboard</div>
+      ${teacherTabGroups.map(g => {
+        const isCollapsed = !!sidebarCollapsedGroups[g.label] && g.label !== activeGroupLabel;
+        return `
+        <div class="sidebar-group">
+          <div class="sidebar-group-header" onclick="toggleSidebarGroup('${g.label}')">
+            <span>${esc(g.label)}</span><span class="chevron ${isCollapsed?'collapsed':''}">▾</span>
+          </div>
+          ${isCollapsed ? '' : g.tabs.map(([key,label])=>`<div class="sidebar-item ${teacherPortalTab===key?'active':''}" onclick="setTeacherPortalTab('${key}')">${label}</div>`).join('')}
+        </div>`;
+      }).join('')}
+    </div>`;
+  const mobileTabBarHtml = `
     <div class="mobile-tab-bar">
       <div class="mobile-tab-toggle" onclick="toggleTeacherMobileTabMenu()">
         <span class="burger">☰</span> ${esc(currentTeacherTabLabel)}
@@ -14729,36 +14750,45 @@ function renderTeacherPortal() {
       ${teacherMobileTabMenuOpen ? `
         <div class="mobile-tab-overlay" onclick="toggleTeacherMobileTabMenu()"></div>
         <div class="mobile-tab-dropdown">
-          ${teacherTabsList.map(([key,label])=>`<div class="mobile-tab-item ${teacherPortalTab===key?'active':''}" onclick="setTeacherPortalTab('${key}')">${label}</div>`).join('')}
+          ${teacherMobileTabsList.map(([key,label])=>`<div class="mobile-tab-item ${teacherPortalTab===key?'active':''}" onclick="setTeacherPortalTab('${key}')">${label}</div>`).join('')}
         </div>
       ` : ''}
     </div>`;
+  return `
+    ${mobileTabBarHtml}
+    <div class="admin-layout">
+      ${sidebarHtml}
+      <div class="sidebar-content">${teacherPortalBodyHtml(teacher)}</div>
+    </div>`;
+}
+// The page for the selected teacher tab, without the menu (renderTeacherPortal wraps it in the sidebar layout).
+function teacherPortalBodyHtml(teacher) {
   if (teacherPortalTab === 'dashboard') {
-    return subTabsHtml + renderTeacherDashboard(teacher);
+    return renderTeacherDashboard(teacher);
   }
   if (teacherPortalTab === 'schedule') {
-    return subTabsHtml + renderTeacherSchedule(teacher, false);
+    return renderTeacherSchedule(teacher, false);
   }
   if (teacherPortalTab === 'studyplans') {
-    return subTabsHtml + renderTeacherStudyPlans(teacher);
+    return renderTeacherStudyPlans(teacher);
   }
   if (teacherPortalTab === 'homework') {
-    return subTabsHtml + renderTeacherHomework(teacher);
+    return renderTeacherHomework(teacher);
   }
   if (teacherPortalTab === 'questionbank' && teacherQbAccess) {
-    return subTabsHtml + renderTeacherQuestionBank(teacher);
+    return renderTeacherQuestionBank(teacher);
   }
   if (teacherPortalTab === 'availability') {
-    return subTabsHtml + teacherLeaveManageHtml(teacher.id) + availabilityManageHtml(teacher.id) + availabilityReportHtml(teacher.id);
+    return teacherLeaveManageHtml(teacher.id) + availabilityManageHtml(teacher.id) + availabilityReportHtml(teacher.id);
   }
   if (teacherPortalTab === 'attendance') {
-    return subTabsHtml + renderTeacherAttendance(teacher);
+    return renderTeacherAttendance(teacher);
   }
   if (teacherPortalTab === 'profile') {
-    return subTabsHtml + renderTeacherProfile(teacher);
+    return renderTeacherProfile(teacher);
   }
   if (teacherPortalTab === 'setup') {
-    return subTabsHtml + renderTeacherSetup();
+    return renderTeacherSetup();
   }
   const monthSessions = data.sessions.filter(s=>s.teacherId===teacher.id && s.date.startsWith(teacherViewMonth));
   const presentSessions = monthSessions.filter(s=>s.status==='Present');
@@ -14847,7 +14877,7 @@ function renderTeacherPortal() {
       </table>
     </div>`;
 
-  return subTabsHtml + `
+  return `
     <div class="card">
       <h2>My Attendance Report — ${teacherViewMonth} <button class="help-btn" onclick="openHelp('my-attendance',event)">?</button></h2>
       <div class="row-form"><input type="month" value="${teacherViewMonth}" onchange="setTeacherViewMonth(this.value)"></div>
