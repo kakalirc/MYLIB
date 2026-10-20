@@ -3131,7 +3131,9 @@ function qbStartEdit(id) {
   const q = qbQuestions.find(x => x.id === id);
   if (!q) return;
   qbEditId = q.id;
-  qbEditDraft = { question_text: q.question_text, question_type: q.question_type, marks: q.marks, difficulty: q.difficulty, answer_text: q.answer_text || '', chapter_id: q.chapter_id || '', question_image_url: q.question_image_url || '', ...('topic' in q ? { topic: q.topic || '' } : {}) };
+  qbEditDraft = { question_text: q.question_text, question_type: q.question_type, marks: q.marks, difficulty: q.difficulty, answer_text: q.answer_text || '', chapter_id: q.chapter_id || '', question_image_url: q.question_image_url || '', ...('topic' in q ? { topic: q.topic || '' } : {}),
+    ...('options' in q ? { options: qbOptionSlots(q.options), correct_option: (q.correct_option || '').toLowerCase() } : {}) };
+  qbPicker = null; qbNewQ = null;
   render();
 }
 
@@ -3142,12 +3144,44 @@ function qbToggleExpand(id) {
 
 function qbCancelEdit() { qbEditId = null; qbEditDraft = {}; render(); }
 
+// Four option boxes for the edit form (more if the question already has more).
+function qbOptionSlots(opts) {
+  const a = Array.isArray(opts) ? opts.slice() : [];
+  while (a.length < 4) a.push('');
+  return a;
+}
+// MCQ options under the question text: (a) … (b) …, correct one in bold.
+function qbOptionsHtml(q) {
+  if (q.question_type !== 'mcq' || !Array.isArray(q.options) || !q.options.length) return '';
+  const right = (q.correct_option || '').toLowerCase();
+  return `<div style="font-size:13px;margin-top:4px;display:flex;flex-wrap:wrap;gap:4px 14px">${q.options.map((o, i) => {
+    const L = 'abcdefgh'[i];
+    return `<span${L === right ? ' style="font-weight:700;color:var(--forest)" title="Correct option"' : ''}>(${L}) ${esc(o)}${L === right ? ' ✓' : ''}</span>`;
+  }).join('')}</div>`;
+}
+
 async function qbSaveEdit(id) {
   if (!sb) return;
+  const cur = qbQuestions.find(x => x.id === id) || {};
+  const hasTopic = 'topic' in cur;   // the column comes with SQL 20
+  // MCQ options (columns from SQL 26): blank boxes are dropped, the correct option must be one that is filled in.
+  let mcq = {};
+  if ('options' in cur && (qbEditDraft.question_type || cur.question_type) === 'mcq') {
+    const slots = qbEditDraft.options || [];
+    const filled = slots.map(o => (o || '').trim()).filter(Boolean);
+    if (filled.length) {
+      if (filled.length < 2) { alert('Give at least 2 options, or leave all the option boxes empty.'); return; }
+      const ci = 'abcdefgh'.indexOf(qbEditDraft.correct_option || '');
+      if (ci < 0 || !(slots[ci] || '').trim()) { alert('Choose which option is correct.'); return; }
+      mcq = { options: filled, correct_option: 'abcdefgh'[filled.indexOf(slots[ci].trim())] };
+    } else mcq = { options: null, correct_option: null };
+  }
+  // A teacher's edit goes back to the Review Queue (it stays on any paper that uses it); an admin's edit keeps its approval.
+  const review = currentRole === 'Teacher' && cur.approved ? { approved: false, approved_by: null, approved_at: null } : {};
   qbSaving = true; render();
-  const hasTopic = 'topic' in (qbQuestions.find(x => x.id === id) || {});   // the column comes with SQL 20
   const { error } = await sb.from('qb_questions').update({
     ...(hasTopic ? { topic: qbEditDraft.topic || null } : {}),
+    ...mcq, ...review,
     question_text: qbEditDraft.question_text,
     question_type: qbEditDraft.question_type,
     marks: Number(qbEditDraft.marks) || 0,
@@ -3156,11 +3190,15 @@ async function qbSaveEdit(id) {
     chapter_id: qbEditDraft.chapter_id || null,
     question_image_url: qbEditDraft.question_image_url || null,
   }).eq('id', id);
-  if (error) { qbMsg = 'Error: ' + error.message; qbSaving = false; render(); return; }
-  qbQuestions = qbQuestions.map(q => q.id === id ? { ...q, ...qbEditDraft, marks: Number(qbEditDraft.marks)||0, chapter_id: qbEditDraft.chapter_id || null, question_image_url: qbEditDraft.question_image_url || null, ...(hasTopic ? { topic: qbEditDraft.topic || null } : {}) } : q);
-  qbMsg = '✓ Saved';
+  const onPaper = qbSubTab === 'papers';   // the Practice Papers tab shows qbPaperMsg, not qbMsg
+  if (error) { if (onPaper) qbPaperMsg = 'Error: ' + error.message; else qbMsg = 'Error: ' + error.message; qbSaving = false; render(); return; }
+  const { options: _o, correct_option: _c, ...draft } = qbEditDraft;
+  qbQuestions = qbQuestions.map(q => q.id === id ? { ...q, ...draft, ...mcq, ...review, marks: Number(qbEditDraft.marks)||0, chapter_id: qbEditDraft.chapter_id || null, question_image_url: qbEditDraft.question_image_url || null, ...(hasTopic ? { topic: qbEditDraft.topic || null } : {}) } : q);
   qbEditId = null; qbEditDraft = {};
-  qbSaving = false; render();
+  qbSaving = false;
+  const sent = review.approved === false ? ' and sent to the Review Queue' : '';
+  if (onPaper) { qbPaperMsg = '✓ Saved to the Question Bank' + sent; render(); qbSyncPaperTotal(); return; }
+  qbMsg = '✓ Saved' + sent; render();
   setTimeout(() => { qbMsg = ''; render(); }, 2000);
 }
 
@@ -15751,17 +15789,21 @@ function qbImageFieldHtml(key, url, onRemove) {
 }
 function qbImgHtml(url, maxH) { return url ? `<img class="qb-img" src="${escAttr(url)}" alt="" loading="lazy"${maxH ? ` style="max-height:${maxH}px"` : ''}>` : ''; }
 
-function qbEditFormHtml(q) {
+// fromPaper: opened from the practice paper editor. lockMarks: that paper is already assigned, so its marks stay as they are.
+function qbEditFormHtml(q, fromPaper, lockMarks) {
   const chapters = qbChaptersForQuestion(q);
+  const type = qbEditDraft.question_type || q.question_type;
+  const opts = 'options' in q && type === 'mcq' ? (qbEditDraft.options || []) : null;
   return `<div class="qb-card open">
     <div style="font-size:12px;font-weight:700;margin-bottom:6px">Editing question</div>
+    ${fromPaper || (currentRole === 'Teacher' && q.approved) ? `<div class="hint" style="margin-bottom:6px">${fromPaper ? 'Saved to the Question Bank, so every paper that uses this question shows the change.' : ''}${currentRole === 'Teacher' && q.approved ? ' After saving it goes back to the Review Queue to be checked again' + (fromPaper ? ', and stays on this paper.' : '.') : ''}${lockMarks ? ' Marks and type stay fixed because this paper is assigned.' : ''}</div>` : ''}
     <textarea rows="6" style="width:100%;font-family:inherit;font-size:14px;line-height:1.5;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box;resize:vertical"
       oninput="qbEditDraft.question_text=this.value">${esc(qbEditDraft.question_text||'')}</textarea>
     <div class="row-form" style="gap:8px;margin-top:8px;flex-wrap:wrap">
-      <select onchange="qbEditDraft.question_type=this.value">
-        ${QB_TYPES.map(t=>`<option value="${t}" ${t===(qbEditDraft.question_type||q.question_type)?'selected':''}>${QB_TYPE_LABELS[t]||t}</option>`).join('')}
+      <select onchange="qbEditDraft.question_type=this.value;render()" ${lockMarks ? 'disabled' : ''}>
+        ${QB_TYPES.map(t=>`<option value="${t}" ${t===type?'selected':''}>${QB_TYPE_LABELS[t]||t}</option>`).join('')}
       </select>
-      <input type="number" value="${qbEditDraft.marks!==undefined?qbEditDraft.marks:q.marks}" min="0.5" max="10" step="0.5" style="width:70px" placeholder="Marks" oninput="qbEditDraft.marks=this.value">
+      <input type="number" value="${qbEditDraft.marks!==undefined?qbEditDraft.marks:q.marks}" min="0.5" max="10" step="0.5" style="width:70px" placeholder="Marks" oninput="qbEditDraft.marks=this.value" ${lockMarks ? 'disabled' : ''}>
       <select onchange="qbEditDraft.difficulty=this.value">
         ${['easy','medium','hard'].map(d=>`<option value="${d}" ${d===(qbEditDraft.difficulty||q.difficulty)?'selected':''}>${d}</option>`).join('')}
       </select>
@@ -15770,6 +15812,12 @@ function qbEditFormHtml(q) {
         ${chapters.map(c=>`<option value="${c.id}" ${c.id===qbEditDraft.chapter_id?'selected':''}>${esc(qbChapterLabel(c))}</option>`).join('')}
       </select>` : `<span class="hint" style="align-self:center">No chapters set up for this board, class and subject yet.</span>`}
     </div>
+    ${opts ? `<div style="margin-top:8px"><label style="font-size:12px;font-weight:600">Options <span style="font-weight:400;color:var(--muted)">(tick the correct one)</span></label>
+      ${opts.map((o, i) => { const L = 'abcdefgh'[i]; return `<div style="display:flex;gap:6px;align-items:center;margin-top:4px">
+        <input type="radio" name="qbEditCorrect" ${qbEditDraft.correct_option === L ? 'checked' : ''} onchange="qbEditDraft.correct_option='${L}'" title="Correct option">
+        <span style="width:22px">(${L})</span>
+        <input type="text" value="${escAttr(o)}" oninput="qbEditDraft.options[${i}]=this.value" style="flex:1;min-width:0;box-sizing:border-box"></div>`; }).join('')}
+      ${opts.length < 8 ? `<button class="btn-small" style="margin-top:4px" onclick="qbEditDraft.options.push('');render()">+ Option</button>` : ''}</div>` : ''}
     <div style="margin-top:8px"><label style="font-size:12px;font-weight:600">Answer / key</label>
       <textarea rows="3" style="width:100%;font-family:inherit;font-size:13px;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box;resize:vertical"
         oninput="qbEditDraft.answer_text=this.value">${esc(qbEditDraft.answer_text!==undefined?qbEditDraft.answer_text:(q.answer_text||''))}</textarea></div>
@@ -15830,6 +15878,7 @@ function qbQuestionRowHtml(q, isAdmin) {
     ${qbZeroMarks(q) && !q.archived ? `<div class="hint" style="color:var(--brick);margin:2px 0 6px">Marks for this question are 0 (zero), so it can't be selected for a practice paper. Edit it to add marks.</div>` : ''}
     ${qbMissingPicture(q) && !q.archived ? `<div class="hint" style="color:var(--brick);margin:2px 0 6px">This picture composition has no picture, so it can't be selected for a practice paper. Edit it to add the picture.</div>` : ''}
     <div class="qb-text ${open?'':'clamp'}" onclick="qbToggleExpand('${q.id}')" title="${open?'Click to collapse':'Click to show full question'}">${esc(q.question_text || '')}</div>
+    ${qbOptionsHtml(q)}
     ${!open ? qbImgHtml(q.question_image_url, 120) : ''}
     ${open ? `
       ${img(q.question_image_url)}
@@ -16244,7 +16293,7 @@ async function loadQbPapers() {
 }
 
 async function qbOpenPaper(id) {
-  qbPaperView = 'edit'; qbPaperId = id; qbReviewId = null; qbPicker = null; qbNewQ = null; qbAssignOpen = false; qbPaperMsg = '';
+  qbPaperView = 'edit'; qbPaperId = id; qbReviewId = null; qbEditId = null; qbPicker = null; qbNewQ = null; qbAssignOpen = false; qbPaperMsg = '';
   qbPaperTab = null; qbStudentFilter = null;
   qbPaperQs = []; qbPaperAssignments = []; render();
   const [pq, sa] = await Promise.all([
@@ -16263,7 +16312,7 @@ function qbStartNewPaper() {
   qbPaperDraft = { blueprintKey: '', title: '', duration: '', chapterIds: new Set() };
   render();
 }
-function qbBackToPapers() { qbNewQ = null; qbPaperView = 'list'; qbPaperId = null; qbReviewId = null; qbPicker = null; qbAssignOpen = false; qbPaperWarnings = []; loadQbPapers(); }
+function qbBackToPapers() { qbNewQ = null; qbEditId = null; qbPaperView = 'list'; qbPaperId = null; qbReviewId = null; qbPicker = null; qbAssignOpen = false; qbPaperWarnings = []; loadQbPapers(); }
 
 function qbToggleDraftChapter(id, on) { if (on) qbPaperDraft.chapterIds.add(id); else qbPaperDraft.chapterIds.delete(id); }
 
@@ -16372,7 +16421,7 @@ async function qbRemovePq(pqId) {
   qbSyncPaperTotal();
 }
 
-function qbOpenPicker(section, pqId, choice) { qbPicker = { section, choice: choice || null, pqId: pqId || null, search: '' }; render(); }
+function qbOpenPicker(section, pqId, choice) { qbEditId = null; qbPicker = { section, choice: choice || null, pqId: pqId || null, search: '' }; render(); }
 
 async function qbPickQuestion(questionId) {
   const marks_override = null;   // the picker only offers questions with their own marks
@@ -16451,6 +16500,7 @@ async function qbUsePassage(section, passageId, choice) {
 // ── Teacher writes new questions on a paper. They go on the paper at once and into the Review Queue (unapproved).
 function qbNewQItem(type) { return { question_text: '', answer_text: '', marks: '', question_type: type && type !== 'any' ? type : 'short', difficulty: 'medium', chapter_id: '', image_url: '' }; }
 function qbOpenNewQ(section, choice) {
+  qbEditId = null;
   const p = qbPapers.find(x => x.id === qbPaperId);
   const g = p && qbBlueprintForPaper(p);
   const sec = qbSideSec(g && g.sections.find(s => s.section_name === section), choice);
@@ -16904,16 +16954,19 @@ function qbEditorSideHtml(p, name, sec, side, locked, offset) {
         const q = qbQuestionById(pq.question_id);
         const inRun = run.pid ? run.items.indexOf(pq) : -1;
         const upOff = run.pid ? inRun === 0 : n === 0, downOff = run.pid ? inRun === run.items.length - 1 : n === rows.length - 1;
+        if (q && qbEditId === q.id) return qbEditFormHtml(q, true, locked);
         return `<div class="qb-card">
           <div class="qb-meta"><span class="qb-sec">Q${offset + n + 1}</span>${q ? `<span class="tag">${esc(QB_TYPE_LABELS[q.question_type] || q.question_type || '')}</span>` : ''}${q && q.topic ? `<span class="tag">${esc(q.topic)}</span>` : ''}
             <span class="qb-marks">${qbPqMarks(pq)} mark${qbPqMarks(pq) === 1 ? '' : 's'}</span>
             ${q ? `<span>· ${esc((qbChapters.find(c => c.id === q.chapter_id) || {}).title || '')}</span>` : ''}</div>
           <div class="qb-text clamp" style="cursor:default">${q ? esc(q.question_text || '') : '<i>This question is no longer in your bank.</i>'}</div>
+          ${q ? qbOptionsHtml(q) : ''}
           ${q ? qbImgHtml(q.question_image_url, 200) : ''}
           ${q && !q.approved ? `<div class="hint" style="margin-top:4px">Waiting in the Review Queue</div>` : ''}
-          ${locked ? '' : `<div class="qb-actions" style="margin-top:8px">
+          ${locked ? (q ? `<div class="qb-actions" style="margin-top:8px"><button class="btn-small" onclick="qbStartEdit('${q.id}')">✎ Edit</button></div>` : '') : `<div class="qb-actions" style="margin-top:8px">
             <button class="btn-small" onclick="qbMovePq('${pq.id}',-1)" ${upOff ? 'disabled' : ''}>↑</button>
             <button class="btn-small" onclick="qbMovePq('${pq.id}',1)" ${downOff ? 'disabled' : ''}>↓</button>
+            ${q ? `<button class="btn-small" onclick="qbStartEdit('${q.id}')">✎ Edit</button>` : ''}
             ${passageSec ? '' : `<button class="btn-small" onclick="qbOpenPicker('${escAttr(name)}','${pq.id}'${sideArg})">Swap</button>`}
             <button class="btn-small" onclick="qbRemovePq('${pq.id}')">Remove</button></div>`}
         </div>
