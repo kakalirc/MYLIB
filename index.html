@@ -15223,6 +15223,7 @@ async function spOpenPaper(assignmentId) {
     if (!s) { s = { name: q.section_name || '', questions: [] }; sections.push(s); }
     s.questions.push(q);
   });
+  sections.forEach(s => { s.questions = qbClusterByPassage(s.questions, q => q.passage_id); });
   const answers = {};
   (res.answers || []).forEach(r => { answers[r.question_id] = { answer_text: r.answer_text || '', photo_urls: r.photo_urls || [], marks_awarded: r.marks_awarded, is_correct: r.is_correct, teacher_comment: r.teacher_comment }; });
   spOpen = { assignmentId, section: 0, assignment: res.assignment || {}, paper: res.paper || {}, sections, answers };
@@ -15350,12 +15351,10 @@ async function spSubmit() {
 
 function spMcqMax() { return spOpen.sections.flatMap(s => s.questions).filter(q => q.question_type === 'mcq').reduce((s, q) => s + (Number(q.marks) || 0), 0); }
 
-function spQuestionHtml(q, n, prevPassage) {
+function spQuestionHtml(q, n) {
   const a = spOpen.answers[q.question_id] || { answer_text: '', photo_urls: [] };
   const ro = spReadOnly();
   const reviewed = spOpen.assignment.status === 'reviewed';
-  const passage = q.passage_id && q.passage_id !== prevPassage && q.passage_text
-    ? `<div class="qb-block" style="margin:0 0 10px"><div class="qb-block-label">Read the passage</div>${esc(q.passage_text)}</div>` : '';
   let answerHtml;
   if (q.question_type === 'mcq') {
     const opts = Array.isArray(q.options) && q.options.length ? q.options : ['', '', '', ''];
@@ -15383,7 +15382,7 @@ function spQuestionHtml(q, n, prevPassage) {
     ? `<div style="margin-top:8px;font-size:13px;color:var(--forest);font-weight:600">${esc(String(a.marks_awarded))} / ${esc(String(q.marks || 0))} marks</div>` : '';
   const comment = reviewed && a.teacher_comment ? `<div style="margin-top:6px;font-size:13px;background:rgba(60,94,66,0.08);border-left:3px solid var(--forest);padding:6px 10px;border-radius:0 6px 6px 0">💬 ${esc(a.teacher_comment)}</div>` : '';
   const model = reviewed && q.answer_text && q.question_type !== 'mcq' ? `<details style="margin-top:6px;font-size:13px"><summary style="cursor:pointer;color:var(--muted)">Model answer</summary><div class="qb-block">${esc(q.answer_text)}</div></details>` : '';
-  return `${passage}<div class="qb-card" style="margin-bottom:10px">
+  return `<div class="qb-card" style="margin-bottom:10px">
     <div class="qb-meta"><span class="qb-sec">Q${n}</span><span class="qb-marks">${esc(String(q.marks || 0))} mark${Number(q.marks) === 1 ? '' : 's'}</span>
       ${!ro && spIsAnswered(q.question_id) ? '<span style="color:var(--forest)">· answered</span>' : ''}</div>
     <div class="qb-text" style="cursor:default">${esc(q.question_text || '')}</div>
@@ -15400,8 +15399,11 @@ function spPaperHtml() {
   const all = sections.flatMap(s => s.questions);
   const answered = all.filter(q => spIsAnswered(q.question_id)).length;
   let num = sections.slice(0, spOpen.section).reduce((s, x) => s + x.questions.length, 0);
-  let prevPassage = null;
-  const qsHtml = sec.questions.map(q => { const h = spQuestionHtml(q, ++num, prevPassage); prevPassage = q.passage_id; return h; }).join('');
+  const qsHtml = qbPassageRuns(sec.questions, q => q.passage_text ? q.passage_id : null).map(run => {
+    const from = num + 1;
+    const inner = run.items.map(q => spQuestionHtml(q, ++num)).join('');
+    return run.pid ? qbPassageBox(esc(qbPassageLead(from, run.items.length)), run.items[0].passage_text, inner) : inner;
+  }).join('');
   const secMarks = sec.questions.reduce((s, q) => s + (Number(q.marks) || 0), 0);
   const st = spStatus(assignment);
   const resultHtml = assignment.status === 'reviewed'
@@ -15628,7 +15630,39 @@ const QB_CARD_CSS = `<style>
   .qb-facts { font-size:11px; color:var(--muted); display:flex; flex-wrap:wrap; gap:4px 12px; }
   .qb-actions { display:flex; gap:6px; flex-wrap:wrap; }
   .qb-actions .btn-small { font-size:12px; padding:4px 10px; }
+  .qb-pgroup { border:2px solid var(--gold); border-radius:12px; padding:10px; display:flex; flex-direction:column; gap:10px; margin-bottom:10px; }
+  .qb-pgroup > .qb-card { margin-bottom:0 !important; }
+  .qb-pgroup-head { display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:12px; font-weight:700; color:var(--gold); }
 </style>`;
+
+// ── Passage grouping on practice papers
+// A passage and the questions based on it always sit together in one box; questions outside the box aren't about it.
+// Keeps every passage's questions together, where its first question is; other questions keep their order.
+function qbClusterByPassage(list, pidOf) {
+  const out = [], groups = new Map();
+  list.forEach(x => {
+    const pid = pidOf(x);
+    if (!pid) { out.push([x]); return; }
+    if (groups.has(pid)) { groups.get(pid).push(x); return; }
+    const g = [x]; groups.set(pid, g); out.push(g);
+  });
+  return out.flat();
+}
+// Consecutive runs of the list: { pid, items }. A run with a pid is one passage and its questions.
+function qbPassageRuns(list, pidOf) {
+  const runs = [];
+  list.forEach(x => {
+    const pid = pidOf(x) || null, last = runs[runs.length - 1];
+    if (pid && last && last.pid === pid) last.items.push(x); else runs.push({ pid, items: [x] });
+  });
+  return runs;
+}
+// "Read the passage and answer questions 3–6." (numbers as shown on the paper)
+function qbPassageLead(from, count) { return count > 1 ? `Read the passage and answer questions ${from}–${from + count - 1}.` : `Read the passage and answer question ${from}.`; }
+function qbPassageBox(head, passageText, inner) {
+  return `<div class="qb-pgroup"><div class="qb-pgroup-head">${head}</div>
+    <div class="qb-block" style="margin-top:0">${esc(passageText || '')}</div>${inner}</div>`;
+}
 
 function qbFmtDate(ts) { return ts ? formatDate(String(ts).slice(0,10)) : ''; }
 
@@ -16020,7 +16054,7 @@ function qbAutoFill(g, chapterIds) {
         i++;
       }
     }
-    chosen.forEach((q, n) => {
+    qbClusterByPassage(chosen, q => q.passage_id).forEach((q, n) => {
       used.add(q.id);
       picks.push({ question_id: q.id, section_name: sec.section_name, question_order: n + 1, marks_override: null });
     });
@@ -16151,18 +16185,31 @@ async function qbDeletePaper() {
   qbBackToPapers();
 }
 
+function qbPqPassageId(pq) { return (qbQuestionById(pq.question_id) || {}).passage_id || null; }
+// A section's questions in paper order, with each passage's questions kept together.
 function qbSectionRows(section) {
-  return qbPaperQs.filter(pq => (pq.section_name || '') === section).sort((a, b) => (a.question_order || 0) - (b.question_order || 0));
+  return qbClusterByPassage(qbPaperQs.filter(pq => (pq.section_name || '') === section).sort((a, b) => (a.question_order || 0) - (b.question_order || 0)), qbPqPassageId);
 }
 
-async function qbMovePq(pqId, dir) {
+// ↑ ↓ on a question: inside a passage it moves within the passage; otherwise it moves past the next question or whole passage.
+// With passageId, the whole passage box moves.
+async function qbMovePq(pqId, dir, passageId) {
   const pq = qbPaperQs.find(x => x.id === pqId);
   const rows = qbSectionRows(pq.section_name || '');
-  const i = rows.indexOf(pq), j = i + dir;
-  if (j < 0 || j >= rows.length) return;
-  // Renumber the section so orders are unique, then swap the two.
-  rows.forEach((r, n) => { r.question_order = n + 1; });
-  [rows[i].question_order, rows[j].question_order] = [rows[j].question_order, rows[i].question_order];
+  // Units: a whole passage with its questions, or one question without a passage.
+  const units = qbPassageRuns(rows, qbPqPassageId).map(r => r.items);
+  const u = units.findIndex(x => x.includes(pq));
+  if (qbPqPassageId(pq) && !passageId) {
+    const unit = units[u], i = unit.indexOf(pq), j = i + dir;
+    if (j < 0 || j >= unit.length) return;
+    [unit[i], unit[j]] = [unit[j], unit[i]];
+  } else {
+    const v = u + dir;
+    if (v < 0 || v >= units.length) return;
+    [units[u], units[v]] = [units[v], units[u]];
+  }
+  // Renumber the section in the new order.
+  units.flat().forEach((r, n) => { r.question_order = n + 1; });
   render();
   const results = await Promise.all(rows.map(r => sb.from('qb_paper_questions').update({ question_order: r.question_order }).eq('id', r.id)));
   const err = results.find(r => r.error);
@@ -16550,15 +16597,12 @@ function qbReviewHtml() {
   let n = 0;
   const body = sections.map(name => {
     const rows = qbSectionRows(name);
-    let prevPassage = null;
     return `<div style="margin-top:16px"><div style="border-bottom:2px solid var(--line);padding-bottom:4px;margin-bottom:8px"><b>${esc(name || 'No section')}</b></div>
-      ${rows.map(pq => {
+      ${qbPassageRuns(rows, qbPqPassageId).map(run => { const from = n + 1; const runHtml = run.items.map(pq => {
         n++;
         const q = qbQuestionById(pq.question_id) || {};
         const max = qbPqMarks(pq);
         const att = qbReviewAttempts.find(r => r.question_id === pq.question_id);
-        const passage = q.passage_id && q.passage_id !== prevPassage ? qbPassages[q.passage_id] : null;
-        prevPassage = q.passage_id;
         let answer;
         if (!att || (!(att.answer_text || '').trim() && !(att.photo_urls || []).length)) answer = `<div class="hint" style="margin-top:6px">Not answered.</div>`;
         else if (q.question_type === 'mcq') {
@@ -16574,13 +16618,14 @@ function qbReviewHtml() {
             <input type="number" min="0" max="${max}" step="1" value="${escAttr(d.marks)}" oninput="qbReviewSetMarks('${pq.question_id}',this.value,${max})" onchange="this.value=(qbReviewDraft['${pq.question_id}']||{}).marks||''" style="width:70px"> <span style="font-size:13px">/ ${max}</span>
             <input type="text" value="${escAttr(d.comment)}" placeholder="Comment (optional)" oninput="qbReviewSetComment('${pq.question_id}',this.value)" style="flex:1;min-width:160px">
           </div>`;
-        return `${passage ? `<div class="qb-block" style="margin-top:0"><div class="qb-block-label">Passage</div><div class="qb-text clamp" style="cursor:default;font-size:13px">${esc(passage.passage_text || '')}</div></div>` : ''}
-          <div class="qb-card" style="margin-bottom:10px">
+        return `<div class="qb-card" style="margin-bottom:10px">
             <div class="qb-meta"><span class="qb-sec">Q${n}</span><span class="tag">${esc(QB_TYPE_LABELS[q.question_type] || q.question_type || '')}</span><span class="qb-marks">${max} mark${max === 1 ? '' : 's'}</span></div>
             <div class="qb-text" style="cursor:default">${esc(q.question_text || '')}</div>
             ${q.answer_text && q.question_type !== 'mcq' ? `<details style="margin-top:6px;font-size:13px"><summary style="cursor:pointer;color:var(--muted)">Model answer</summary><div class="qb-block">${esc(q.answer_text)}</div></details>` : ''}
             ${answer}${marking}
           </div>`;
+      }).join('');
+        return run.pid ? qbPassageBox(esc(qbPassageLead(from, run.items.length)), (qbPassages[run.pid] || {}).passage_text, runHtml) : runHtml;
       }).join('')}</div>`;
   }).join('');
   const reviewed = a.status === 'reviewed';
@@ -16625,24 +16670,31 @@ function qbPaperEditorHtml() {
         <span style="font-size:12px;color:${ok ? 'var(--muted)' : 'var(--brick)'};font-weight:${ok ? 400 : 700}">${esc(QB_TYPE_LABELS[sec && sec.question_type] || '')} · ${got}${want != null ? ' / ' + want : ''} marks</span>
       </div>
       <div class="qb-list">
-      ${rows.map((pq, n) => {
+      ${(() => { const runs = qbPassageRuns(rows, qbPqPassageId); return runs.map((run, ri) => { const runHtml = run.items.map(pq => {
+        const n = rows.indexOf(pq);
         const q = qbQuestionById(pq.question_id);
-        const passage = q && q.passage_id ? qbPassages[q.passage_id] : null;
-        const showPassage = passage && (n === 0 || (qbQuestionById(rows[n - 1].question_id) || {}).passage_id !== q.passage_id);
-        return `${showPassage ? `<div class="qb-block" style="margin-top:0"><div class="qb-block-label">Passage</div><div class="qb-text clamp" style="cursor:default;font-size:13px">${esc(passage.passage_text || '')}</div></div>` : ''}
-        <div class="qb-card">
+        const inRun = run.pid ? run.items.indexOf(pq) : -1;
+        const upOff = run.pid ? inRun === 0 : n === 0, downOff = run.pid ? inRun === run.items.length - 1 : n === rows.length - 1;
+        return `<div class="qb-card">
           <div class="qb-meta"><span class="qb-sec">Q${n + 1}</span>${q ? `<span class="tag">${esc(QB_TYPE_LABELS[q.question_type] || q.question_type || '')}</span>` : ''}
             <span class="qb-marks">${qbPqMarks(pq)} mark${qbPqMarks(pq) === 1 ? '' : 's'}</span>
             ${q ? `<span>· ${esc((qbChapters.find(c => c.id === q.chapter_id) || {}).title || '')}</span>` : ''}</div>
           <div class="qb-text clamp" style="cursor:default">${q ? esc(q.question_text || '') : '<i>This question is no longer in your bank.</i>'}</div>
           ${locked ? '' : `<div class="qb-actions" style="margin-top:8px">
-            <button class="btn-small" onclick="qbMovePq('${pq.id}',-1)" ${n === 0 ? 'disabled' : ''}>↑</button>
-            <button class="btn-small" onclick="qbMovePq('${pq.id}',1)" ${n === rows.length - 1 ? 'disabled' : ''}>↓</button>
+            <button class="btn-small" onclick="qbMovePq('${pq.id}',-1)" ${upOff ? 'disabled' : ''}>↑</button>
+            <button class="btn-small" onclick="qbMovePq('${pq.id}',1)" ${downOff ? 'disabled' : ''}>↓</button>
             ${passageSec ? '' : `<button class="btn-small" onclick="qbOpenPicker('${escAttr(name)}','${pq.id}')">Swap</button>`}
             <button class="btn-small" onclick="qbRemovePq('${pq.id}')">Remove</button></div>`}
         </div>
         ${qbPicker && qbPicker.pqId === pq.id ? qbPickerHtml(p, sec) : ''}`;
-      }).join('')}
+      }).join('');
+        if (!run.pid) return runHtml;
+        const first = run.items[0];
+        const moveBtns = locked || runs.length < 2 ? '' : `<span class="qb-actions">
+          <button class="btn-small" onclick="qbMovePq('${first.id}',-1,'${run.pid}')" ${ri === 0 ? 'disabled' : ''} title="Move the passage and its questions up">↑</button>
+          <button class="btn-small" onclick="qbMovePq('${first.id}',1,'${run.pid}')" ${ri === runs.length - 1 ? 'disabled' : ''} title="Move the passage and its questions down">↓</button></span>`;
+        return qbPassageBox(`<span>${esc(qbPassageLead(rows.indexOf(first) + 1, run.items.length))}</span>${moveBtns}`, (qbPassages[run.pid] || {}).passage_text, runHtml);
+      }).join(''); })()}
       </div>
       ${locked ? '' : (qbPicker && !qbPicker.pqId && qbPicker.section === name ? (passageSec ? qbPassagePickerHtml(p, sec) : qbPickerHtml(p, sec))
         : `<button class="btn-small" style="margin-top:8px" onclick="qbOpenPicker('${escAttr(name)}')">${passageSec ? (rows.length ? '⇄ Swap passage' : '+ Choose passage') : '+ Add question'}</button>`)}
@@ -16802,20 +16854,18 @@ function qbPrintPaper(withAnswers) {
     const sec = g && g.sections.find(x => x.section_name === name);
     const rows = qbSectionRows(name);
     const secMarks = rows.reduce((t, pq) => t + qbPqMarks(pq), 0);
-    let prev = null;
     return `<section><h2><span>${e(qbSectionTitle(name, sec) || 'Questions')}</span><span class="m">${secMarks} marks</span></h2>
-      ${rows.map(pq => {
+      ${qbPassageRuns(rows, qbPqPassageId).map(run => { const from = n + 1; const runHtml = run.items.map(pq => {
         n++;
         const q = qbQuestionById(pq.question_id) || {};
         const marks = qbPqMarks(pq);
-        const passage = q.passage_id && q.passage_id !== prev ? qbPassages[q.passage_id] : null;
-        prev = q.passage_id;
         const opts = q.question_type === 'mcq' && Array.isArray(q.options) && q.options.length
           ? `<ol class="opts" type="a">${q.options.map(o => `<li>${e(o)}</li>`).join('')}</ol>` : '';
         const ans = [q.correct_option ? `(${q.correct_option})` : '', q.answer_text || ''].filter(Boolean).join(' ');
         if (withAnswers) answers.push(`<li value="${n}">${ans ? nl(ans) : '<i>No model answer in the bank.</i>'}</li>`);
-        return `${passage ? `<div class="passage">${nl(passage.passage_text || '')}</div>` : ''}
-          <div class="q"><span class="n">${n}.</span><div class="t">${nl(q.question_text || '')}${q.question_image_url ? `<br><img src="${e(q.question_image_url)}">` : ''}${opts}</div><span class="m">[${marks}]</span></div>`;
+        return `<div class="q"><span class="n">${n}.</span><div class="t">${nl(q.question_text || '')}${q.question_image_url ? `<br><img src="${e(q.question_image_url)}">` : ''}${opts}</div><span class="m">[${marks}]</span></div>`;
+      }).join('');
+        return run.pid ? `<div class="pgroup"><div class="lead">${e(qbPassageLead(from, run.items.length))}</div><div class="passage">${nl((qbPassages[run.pid] || {}).passage_text || '')}</div>${runHtml}</div>` : runHtml;
       }).join('')}</section>`;
   }).join('');
   const meta = [p.subject_name, qbByName(grades, p.grade_id), qbByName(boards, p.board_id)].filter(Boolean).join(' · ');
@@ -16830,6 +16880,8 @@ function qbPrintPaper(withAnswers) {
   .instr { border: 1px solid #000; padding: 6px 10px; margin: 8px 0 12px; white-space: pre-wrap; font-size: 11.5pt; }
   h2 { display: flex; justify-content: space-between; font-size: 13.5pt; border-bottom: 1px solid #000; margin: 18px 0 8px; padding-bottom: 2px; break-after: avoid; }
   .passage { border: 1px solid #888; padding: 8px 10px; margin: 6px 0 8px; }
+  .pgroup { border-left: 3px solid #000; padding-left: 10px; margin: 8px 0 12px; break-inside: avoid-page; }
+  .pgroup .lead { font-weight: 700; font-size: 11.5pt; }
   .q { display: flex; gap: 8px; margin: 6px 0 10px; break-inside: avoid; }
   .q .n { min-width: 26px; font-weight: 700; } .q .t { flex: 1; } .q .m { white-space: nowrap; font-weight: 700; }
   .q img { max-width: 100%; max-height: 260px; margin-top: 4px; }
