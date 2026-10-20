@@ -3085,7 +3085,7 @@ async function loadQBQuestions() {
       const { data: ps } = await sb.from('qb_passages').select('*').in('id', passageIds);
       qbPassages = {}; (ps || []).forEach(p => { qbPassages[p.id] = p; });
     }
-    const approverIds = [...new Set(qbQuestions.flatMap(q => [q.approved_by, q.added_by]).filter(Boolean))];
+    const approverIds = [...new Set(qbQuestions.flatMap(q => [q.approved_by, q.added_by, q.edited_by]).filter(Boolean))];
     if (approverIds.length) {
       const { data: profs } = await sb.from('profiles').select('id, username, admin_name').in('id', approverIds);
       qbApprovers = {}; (profs || []).forEach(p => { qbApprovers[p.id] = p.admin_name || p.username; });
@@ -3142,6 +3142,10 @@ function qbToggleExpand(id) {
   render();
 }
 
+// "Edited by Rishin · 20 Oct 2026" for the last in-app edit (SQL 29 columns).
+function qbEditedByHtml(q) {
+  return q && q.edited_by ? `<span title="Last edited in the app">· ✎ Edited by ${esc(qbApprovers[q.edited_by] || 'unknown user')}${q.edited_at ? ' on ' + esc(qbFmtDate(q.edited_at)) : ''}</span>` : '';
+}
 function qbCancelEdit() { qbEditId = null; qbEditDraft = {}; render(); }
 
 // Four option boxes for the edit form (more if the question already has more).
@@ -3178,10 +3182,12 @@ async function qbSaveEdit(id) {
   }
   // A teacher's edit goes back to the Review Queue (it stays on any paper that uses it); an admin's edit keeps its approval.
   const review = currentRole === 'Teacher' && cur.approved ? { approved: false, approved_by: null, approved_at: null } : {};
+  // Who edited it last (columns from SQL 29).
+  const stamp = 'edited_by' in cur ? { edited_by: currentUserId || null, edited_at: new Date().toISOString() } : {};
   qbSaving = true; render();
   const { error } = await sb.from('qb_questions').update({
     ...(hasTopic ? { topic: qbEditDraft.topic || null } : {}),
-    ...mcq, ...review,
+    ...mcq, ...review, ...stamp,
     question_text: qbEditDraft.question_text,
     question_type: qbEditDraft.question_type,
     marks: Number(qbEditDraft.marks) || 0,
@@ -3191,9 +3197,10 @@ async function qbSaveEdit(id) {
     question_image_url: qbEditDraft.question_image_url || null,
   }).eq('id', id);
   const onPaper = qbSubTab === 'papers';   // the Practice Papers tab shows qbPaperMsg, not qbMsg
+  if (stamp.edited_by) qbApprovers[stamp.edited_by] = qbApprovers[stamp.edited_by] || currentUsername;
   if (error) { if (onPaper) qbPaperMsg = 'Error: ' + error.message; else qbMsg = 'Error: ' + error.message; qbSaving = false; render(); return; }
   const { options: _o, correct_option: _c, ...draft } = qbEditDraft;
-  qbQuestions = qbQuestions.map(q => q.id === id ? { ...q, ...draft, ...mcq, ...review, marks: Number(qbEditDraft.marks)||0, chapter_id: qbEditDraft.chapter_id || null, question_image_url: qbEditDraft.question_image_url || null, ...(hasTopic ? { topic: qbEditDraft.topic || null } : {}) } : q);
+  qbQuestions = qbQuestions.map(q => q.id === id ? { ...q, ...draft, ...mcq, ...review, ...stamp, marks: Number(qbEditDraft.marks)||0, chapter_id: qbEditDraft.chapter_id || null, question_image_url: qbEditDraft.question_image_url || null, ...(hasTopic ? { topic: qbEditDraft.topic || null } : {}) } : q);
   qbEditId = null; qbEditDraft = {};
   qbSaving = false;
   const sent = review.approved === false ? ' and sent to the Review Queue' : '';
@@ -15874,6 +15881,7 @@ function qbQuestionRowHtml(q, isAdmin) {
       ${dupBadge}
       ${q.archived ? `<span style="color:var(--muted);font-weight:700">Archived</span>` : ''}
       ${q.added_by ? `<span title="Written in the app, not imported">· ✎ ${esc(qbApprovers[q.added_by] || 'Teacher')}</span>` : ''}
+      ${qbEditedByHtml(q)}
     </div>
     ${qbZeroMarks(q) && !q.archived ? `<div class="hint" style="color:var(--brick);margin:2px 0 6px">Marks for this question are 0 (zero), so it can't be selected for a practice paper. Edit it to add marks.</div>` : ''}
     ${qbMissingPicture(q) && !q.archived ? `<div class="hint" style="color:var(--brick);margin:2px 0 6px">This picture composition has no picture, so it can't be selected for a practice paper. Edit it to add the picture.</div>` : ''}
@@ -16958,7 +16966,7 @@ function qbEditorSideHtml(p, name, sec, side, locked, offset) {
         return `<div class="qb-card">
           <div class="qb-meta"><span class="qb-sec">Q${offset + n + 1}</span>${q ? `<span class="tag">${esc(QB_TYPE_LABELS[q.question_type] || q.question_type || '')}</span>` : ''}${q && q.topic ? `<span class="tag">${esc(q.topic)}</span>` : ''}
             <span class="qb-marks">${qbPqMarks(pq)} mark${qbPqMarks(pq) === 1 ? '' : 's'}</span>
-            ${q ? `<span>· ${esc((qbChapters.find(c => c.id === q.chapter_id) || {}).title || '')}</span>` : ''}</div>
+            ${q ? `<span>· ${esc((qbChapters.find(c => c.id === q.chapter_id) || {}).title || '')}</span>` : ''}${qbEditedByHtml(q)}</div>
           <div class="qb-text clamp" style="cursor:default">${q ? esc(q.question_text || '') : '<i>This question is no longer in your bank.</i>'}</div>
           ${q ? qbOptionsHtml(q) : ''}
           ${q ? qbImgHtml(q.question_image_url, 200) : ''}
