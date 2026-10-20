@@ -15154,7 +15154,7 @@ function renderStudentHomeworkSection(student) {
 // on the server by qb_submit_attempt. Answer photos go to the private 'practice-answers' bucket as
 // <assignment_id>/<question_id>/<file> and are shown through signed URLs.
 // ─────────────────────────────────────────────────────────────
-const SP_PHOTO_FIRST = ['long', 'writing', 'translation'];   // answered on paper; the text box is the fallback
+const SP_PHOTO_FIRST = ['long', 'writing', 'picture_composition', 'translation'];   // answered on paper; the text box is the fallback
 
 async function loadPracticeAssignments() {
   if (!sb || (currentRole !== 'Student' && currentRole !== 'Parent')) return;
@@ -15441,8 +15441,8 @@ function spPaperHtml() {
 // ─────────────────────────────────────────────────────────────
 // QUESTION BANK — shared helpers
 // ─────────────────────────────────────────────────────────────
-const QB_TYPES = ['mcq','very_short','short','long','grammar_fill','grammar_transform','unseen_passage','writing','translation','extract_based'];
-const QB_TYPE_LABELS = { mcq:'MCQ', very_short:'Very Short', short:'Short', long:'Long', grammar_fill:'Grammar (Fill)', grammar_transform:'Grammar (Transform)', unseen_passage:'Unseen Passage', writing:'Writing', translation:'Translation', extract_based:'Extract Based' };
+const QB_TYPES = ['mcq','very_short','short','long','grammar_fill','grammar_transform','unseen_passage','writing','picture_composition','translation','extract_based'];
+const QB_TYPE_LABELS = { mcq:'MCQ', very_short:'Very Short', short:'Short', long:'Long', grammar_fill:'Grammar (Fill)', grammar_transform:'Grammar (Transform)', unseen_passage:'Unseen Passage', writing:'Writing', picture_composition:'Picture Composition', translation:'Translation', extract_based:'Extract Based' };
 const QB_DIFF_COLORS = { easy:'var(--forest)', medium:'var(--gold)', hard:'var(--brick)' };
 
 // Board / subject / grade live in the linked lookup tables (boards, subject_names, grades).
@@ -15513,6 +15513,8 @@ function qbScopeQuestions(approved) {
 function qbDistinct(qs, fn) { return [...new Set(qs.map(fn).filter(Boolean))].sort((a,b)=>a.localeCompare(b, undefined, { numeric:true })); }
 // A question with no marks (0 or blank) is never put on a practice paper.
 function qbZeroMarks(q) { return !(Number(q.marks) > 0); }
+// Nor is a picture composition without its picture: students can't answer it.
+function qbMissingPicture(q) { return q.question_type === 'picture_composition' && !q.question_image_url; }
 function qbClearDetailFilters() { qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false; qbSelectedIds = new Set(); qbBulkChapterId = ''; }
 
 // Duplicate check. Same clean-up as question-bank/sql/08-check-duplicates.sql: ignore case, spaces,
@@ -15774,6 +15776,7 @@ function qbQuestionRowHtml(q, isAdmin) {
       ${q.added_by ? `<span title="Written in the app, not imported">· ✎ ${esc(qbApprovers[q.added_by] || 'Teacher')}</span>` : ''}
     </div>
     ${qbZeroMarks(q) && !q.archived ? `<div class="hint" style="color:var(--brick);margin:2px 0 6px">Marks for this question are 0 (zero), so it can't be selected for a practice paper. Edit it to add marks.</div>` : ''}
+    ${qbMissingPicture(q) && !q.archived ? `<div class="hint" style="color:var(--brick);margin:2px 0 6px">This picture composition has no picture, so it can't be selected for a practice paper. Edit it to add the picture.</div>` : ''}
     <div class="qb-text ${open?'':'clamp'}" onclick="qbToggleExpand('${q.id}')" title="${open?'Click to collapse':'Click to show full question'}">${esc(q.question_text || '')}</div>
     ${!open ? qbImgHtml(q.question_image_url, 120) : ''}
     ${open ? `
@@ -16015,7 +16018,7 @@ function qbBlueprintLabel(g) {
 }
 // Approved questions this teacher can see for a board / grade / subject.
 function qbBankFor(boardId, gradeId, subject) {
-  return qbQuestions.filter(q => q.approved && !q.archived && !qbZeroMarks(q)
+  return qbQuestions.filter(q => q.approved && !q.archived && !qbZeroMarks(q) && !qbMissingPicture(q)
     && (!boardId || qbIdOf(q, 'board_id') === boardId)
     && (!gradeId || qbIdOf(q, 'grade_id') === gradeId)
     && (!subject || qbSameSubject(q.subject_name, subject)));
@@ -16057,8 +16060,9 @@ function qbAutoFill(g, chapterIds) {
     if (QB_PASSAGE_TYPES.includes(sec.question_type) && pool.some(q => q.passage_id)) {
       const passageIds = [...new Set(pool.filter(q => q.passage_id).map(q => q.passage_id))];
       let left = Math.max(1, Number(sec.question_count) || 1);
+      const perPassage = target / left;   // e.g. 3 extracts in 15 marks → up to 5 marks each
       while (remaining > 0 && left-- > 0 && passageIds.length) {
-        const pick = qbPassagePick(bank, passageIds, used, remaining);
+        const pick = qbPassagePick(bank, passageIds, used, Math.min(remaining, perPassage));
         passageIds.splice(passageIds.indexOf(pick.passageId), 1);
         pick.questions.forEach(q => used.add(q.id));
         chosen.push(...pick.questions);
