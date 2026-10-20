@@ -873,12 +873,13 @@ let qbFilterDifficulty = '';    // difficulty filter
 let qbFilterChapter = '';       // chapter_id filter
 let qbFilterSearch = '';        // text search in question_text
 let qbFilterDup = false;        // show only questions that have a duplicate copy
+let qbFilterTopic = '';         // topic filter ('__none__' = no topic yet)
 let qbFilterZero = false;       // show only questions with 0 marks (they can't go into a practice paper)
 let qbFilterBoard = '';         // board filter — must be set (with subject + grade) before the filters above unlock
 let qbFilterSubject = '';       // subject filter (label from qbSubjectOf)
 let qbFilterGrade = '';         // grade filter (label from qbGradeOf)
 let qbEditId = null;            // question id being edited inline
-let qbEditDraft = {};           // { question_text, question_type, marks, difficulty, answer_text, chapter_id }
+let qbEditDraft = {};           // { question_text, question_type, marks, difficulty, answer_text, chapter_id, topic }
 let qbSaving = false;
 let qbMsg = '';
 let qbChapters = [];            // cached from qb_chapters
@@ -945,7 +946,7 @@ function setTeacherPortalTab(t) {
   if (t === 'report') { loadTeacherPayrollRecords().then(() => render()); return; }
   if (t === 'studyplans') { studyPlanTeacherStudentId = ''; studyPlanTeacherSubjectId = ''; studyPlanDraftItems = []; studyPlanMsg = ''; studyPlanViewMode = 'report'; studyPlanFilterStatus = 'all'; studyPlanFilterSubjectId = ''; studyPlanFilterStudent = ''; loadStudyPlans().then(() => render()); return; }
   if (t === 'homework') { hwShowForm = false; hwMsg = ''; hwFilterStudentId = ''; hwFilterStatus = 'assigned'; loadHomework().then(() => render()); return; }
-  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); return; }
+  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); return; }
   render();
 }
 function setTeacherAttendanceViewMonth(v) { teacherAttendanceViewMonth = v; render(); }
@@ -3114,7 +3115,7 @@ function qbStartEdit(id) {
   const q = qbQuestions.find(x => x.id === id);
   if (!q) return;
   qbEditId = q.id;
-  qbEditDraft = { question_text: q.question_text, question_type: q.question_type, marks: q.marks, difficulty: q.difficulty, answer_text: q.answer_text || '', chapter_id: q.chapter_id || '', question_image_url: q.question_image_url || '' };
+  qbEditDraft = { question_text: q.question_text, question_type: q.question_type, marks: q.marks, difficulty: q.difficulty, answer_text: q.answer_text || '', chapter_id: q.chapter_id || '', question_image_url: q.question_image_url || '', ...('topic' in q ? { topic: q.topic || '' } : {}) };
   render();
 }
 
@@ -3128,7 +3129,9 @@ function qbCancelEdit() { qbEditId = null; qbEditDraft = {}; render(); }
 async function qbSaveEdit(id) {
   if (!sb) return;
   qbSaving = true; render();
+  const hasTopic = 'topic' in (qbQuestions.find(x => x.id === id) || {});   // the column comes with SQL 20
   const { error } = await sb.from('qb_questions').update({
+    ...(hasTopic ? { topic: qbEditDraft.topic || null } : {}),
     question_text: qbEditDraft.question_text,
     question_type: qbEditDraft.question_type,
     marks: Number(qbEditDraft.marks) || 0,
@@ -3138,7 +3141,7 @@ async function qbSaveEdit(id) {
     question_image_url: qbEditDraft.question_image_url || null,
   }).eq('id', id);
   if (error) { qbMsg = 'Error: ' + error.message; qbSaving = false; render(); return; }
-  qbQuestions = qbQuestions.map(q => q.id === id ? { ...q, ...qbEditDraft, marks: Number(qbEditDraft.marks)||0, chapter_id: qbEditDraft.chapter_id || null, question_image_url: qbEditDraft.question_image_url || null } : q);
+  qbQuestions = qbQuestions.map(q => q.id === id ? { ...q, ...qbEditDraft, marks: Number(qbEditDraft.marks)||0, chapter_id: qbEditDraft.chapter_id || null, question_image_url: qbEditDraft.question_image_url || null, ...(hasTopic ? { topic: qbEditDraft.topic || null } : {}) } : q);
   qbMsg = '✓ Saved';
   qbEditId = null; qbEditDraft = {};
   qbSaving = false; render();
@@ -8914,7 +8917,7 @@ async function actuallySaveSessionEdit(id, count, date) {
 }
 
 function setTab(t) { currentTab = t; location.hash = t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; loadStudyPlans().then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
-  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); } }
+  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); } }
 function setPayrollMonth(v) { payrollMonth = v; render(); }
 function setNetProfitMonth(v) { netProfitMonth = v; render(); }
 function setNetProfitViewMode(v) { netProfitViewMode = v; render(); }
@@ -15253,6 +15256,12 @@ async function spLoadPhotoUrls() {
 
 function spAnswer(qid) { return spOpen.answers[qid] || (spOpen.answers[qid] = { answer_text: '', photo_urls: [] }); }
 function spIsAnswered(qid) { const a = spOpen.answers[qid]; return !!(a && ((a.answer_text || '').trim() || (a.photo_urls || []).length)); }
+// The questions a student has to answer: in an either/or section only the option they started (option अ until then).
+function spRequired(qs) {
+  const started = side => qs.some(q => q.choice === side && spIsAnswered(q.question_id));
+  const skip = started('b') && !started('a') ? 'a' : 'b';
+  return qs.filter(q => q.choice !== skip);
+}
 
 function spSetSaveNote(text) { const el = document.getElementById('spSaveNote'); if (el) el.textContent = text; }
 
@@ -15339,7 +15348,7 @@ function spGoSection(i) {
 async function spSubmit() {
   clearTimeout(spSaveTimer);
   await spFlushPending();
-  const all = spOpen.sections.flatMap(s => s.questions);
+  const all = spOpen.sections.flatMap(s => spRequired(s.questions));
   const missing = all.filter(q => !spIsAnswered(q.question_id)).length;
   if (!confirm((missing ? `${missing} question${missing === 1 ? ' is' : 's are'} not answered yet.\n\n` : '') + 'Submit this paper? You can\'t change your answers after submitting.')) return;
   spSubmitting = true; render();
@@ -15352,7 +15361,7 @@ async function spSubmit() {
   render();
 }
 
-function spMcqMax() { return spOpen.sections.flatMap(s => s.questions).filter(q => q.question_type === 'mcq').reduce((s, q) => s + (Number(q.marks) || 0), 0); }
+function spMcqMax() { return qbChoiceSum(spOpen.sections.flatMap(s => s.questions).filter(q => q.question_type === 'mcq'), q => Number(q.marks) || 0); }
 
 function spQuestionHtml(q, n) {
   const a = spOpen.answers[q.question_id] || { answer_text: '', photo_urls: [] };
@@ -15399,16 +15408,20 @@ function spPaperHtml() {
   const { paper, assignment, sections } = spOpen;
   const ro = spReadOnly();
   const sec = sections[spOpen.section] || { name: '', questions: [] };
-  const all = sections.flatMap(s => s.questions);
+  const all = sections.flatMap(s => spRequired(s.questions));
   const answered = all.filter(q => spIsAnswered(q.question_id)).length;
   let num = sections.slice(0, spOpen.section).reduce((s, x) => s + x.questions.length, 0);
-  const qsHtml = qbPassageRuns(sec.questions, q => q.passage_text || q.passage_image_url ? q.passage_id : null).map(run => {
+  const groups = qbChoiceGroups(sec.questions);
+  const qsHtml = groups.map(grp => (grp.side === 'b' ? '<div class="qb-or">अथवा</div>' : '')
+    + (grp.side === 'a' ? '<div class="hint" style="margin-bottom:8px">Answer either (अ) or (आ), not both.</div>' : '')
+    + (grp.side ? `<div style="font-weight:700;margin-bottom:6px">(${QB_SIDE_LABEL[grp.side]})</div>` : '')
+    + qbPassageRuns(grp.items, q => q.passage_text || q.passage_image_url ? q.passage_id : null).map(run => {
     const from = num + 1;
     const inner = run.items.map(q => spQuestionHtml(q, ++num)).join('');
     const first = run.items[0];
     return run.pid ? qbPassageBox(esc(qbPassageLead(from, run.items.length, !!first.passage_image_url)), first.passage_text, inner, first.passage_image_url) : inner;
-  }).join('');
-  const secMarks = sec.questions.reduce((s, q) => s + (Number(q.marks) || 0), 0);
+  }).join('')).join('');
+  const secMarks = qbChoiceSum(sec.questions, q => Number(q.marks) || 0);
   const st = spStatus(assignment);
   const resultHtml = assignment.status === 'reviewed'
     ? `<div class="qb-block" style="white-space:normal;border-left:4px solid var(--forest)"><b style="font-size:16px;color:var(--forest)">Score: ${esc(String(assignment.total_score ?? '–'))} / ${esc(String(paper.total_marks || ''))}</b>
@@ -15416,7 +15429,7 @@ function spPaperHtml() {
     : assignment.status === 'submitted'
       ? `<div class="qb-block" style="white-space:normal">📤 Submitted${spMcqMax() ? ` · MCQ score <b>${esc(String(assignment.mcq_score ?? 0))} / ${spMcqMax()}</b>` : ''} · waiting for your teacher to mark the written answers.</div>` : '';
   const tabs = sections.map((s, i) => {
-    const done = s.questions.every(q => spIsAnswered(q.question_id));
+    const done = spRequired(s.questions).every(q => spIsAnswered(q.question_id));
     return `<div class="tab ${i === spOpen.section ? 'active' : ''}" onclick="spGoSection(${i})">${esc(s.name || 'Section ' + (i + 1))}${!ro && done ? ' ✓' : ''}</div>`;
   }).join('');
   return `${QB_CARD_CSS}<div class="card">
@@ -15428,7 +15441,7 @@ function spPaperHtml() {
     ${paper.instructions ? `<div class="qb-block" style="white-space:pre-wrap">${esc(paper.instructions)}</div>` : ''}
     ${!ro ? `<div style="font-size:12.5px;color:var(--muted);margin:8px 0">${answered} of ${all.length} answered · <span id="spSaveNote">Answers save automatically</span></div>` : ''}
     <div class="tabs" style="margin:12px 0">${tabs}</div>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:10px"><b style="color:var(--ink)">${esc(sec.name)}</b> · ${sec.questions.length} question${sec.questions.length === 1 ? '' : 's'} · ${secMarks} marks</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:10px"><b style="color:var(--ink)">${esc(sec.name)}</b> · ${spRequired(sec.questions).length} question${spRequired(sec.questions).length === 1 ? '' : 's'} · ${secMarks} marks</div>
     ${qsHtml || '<div class="empty">No questions in this section.</div>'}
     <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:12px">
       <button class="btn-small" onclick="spGoSection(${spOpen.section - 1})" ${spOpen.section === 0 ? 'disabled' : ''}>← Previous section</button>
@@ -15516,7 +15529,7 @@ function qbDistinct(qs, fn) { return [...new Set(qs.map(fn).filter(Boolean))].so
 function qbZeroMarks(q) { return !(Number(q.marks) > 0); }
 // Nor is a picture composition without its picture: students can't answer it.
 function qbMissingPicture(q) { return q.question_type === 'picture_composition' && !q.question_image_url && !(q.passage_id && (qbPassages[q.passage_id] || {}).image_url); }
-function qbClearDetailFilters() { qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false; qbSelectedIds = new Set(); qbBulkChapterId = ''; }
+function qbClearDetailFilters() { qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic=''; qbSelectedIds = new Set(); qbBulkChapterId = ''; }
 
 // Duplicate check. Same clean-up as question-bank/sql/08-check-duplicates.sql: ignore case, spaces,
 // punctuation, danda, digits and quote marks. A question under a passage only matches one under the
@@ -15552,6 +15565,8 @@ function qbFilteredQuestions(approved) {
   if (!qbScopeChosen()) return [];
   if (qbFilterType) qs = qs.filter(q => q.question_type === qbFilterType);
   if (qbFilterDifficulty) qs = qs.filter(q => q.difficulty === qbFilterDifficulty);
+  if (qbFilterTopic === '__none__') qs = qs.filter(q => !q.topic);
+  else if (qbFilterTopic) qs = qs.filter(q => q.topic === qbFilterTopic);
   if (qbFilterChapter === '__none__') qs = qs.filter(q => !q.chapter_id);
   else if (qbFilterChapter) qs = qs.filter(q => q.chapter_id === qbFilterChapter);
   if (qbFilterSearch) {
@@ -15576,8 +15591,11 @@ function qbFiltersHtml(showAll) {
   const chapters = qbChaptersForScope(approved);
   const unlinked = qbScopeQuestions(approved).filter(q => !q.chapter_id).length;
   const missing = qbMissingScopeColumns();
-  const anyFilter = qbFilterBoard||qbFilterSubject||qbFilterGrade||qbFilterType||qbFilterDifficulty||qbFilterChapter||qbFilterSearch||qbFilterDup||qbFilterZero;
+  const anyFilter = qbFilterBoard||qbFilterSubject||qbFilterGrade||qbFilterType||qbFilterDifficulty||qbFilterChapter||qbFilterTopic||qbFilterSearch||qbFilterDup||qbFilterZero;
   const zeroCount = qbScopeQuestions(approved).filter(q => qbZeroMarks(q)).length;
+  // Topics only show once questions have them (SQL 20).
+  const topics = qbDistinct(qbScopeQuestions(approved), q => q.topic);
+  const noTopic = qbScopeQuestions(approved).filter(q => !q.topic).length;
   const dupCount = qbScopeQuestions(approved).filter(q => qbDuplicatesOf(q).length).length;
   return `<div class="row-form" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">
     <select onchange="qbFilterBoard=this.value;qbFilterSubject='';qbFilterGrade='';qbClearDetailFilters();render()">
@@ -15609,6 +15627,11 @@ function qbFiltersHtml(showAll) {
       ${unlinked ? `<option value="__none__" ${qbFilterChapter==='__none__'?'selected':''}>No chapter yet (${unlinked})</option>` : ''}
       ${chapters.map(c=>`<option value="${c.id}" ${c.id===qbFilterChapter?'selected':''}>${esc(qbChapterLabel(c))}</option>`).join('')}
     </select>
+    ${topics.length ? `<select ${dis} onchange="qbFilterTopic=this.value;render()">
+      <option value="">All topics</option>
+      ${noTopic ? `<option value="__none__" ${qbFilterTopic==='__none__'?'selected':''}>No topic (${noTopic})</option>` : ''}
+      ${topics.map(t=>`<option value="${escAttr(t)}" ${t===qbFilterTopic?'selected':''}>${esc(t)}</option>`).join('')}
+    </select>` : ''}
     <input type="text" ${dis} value="${esc(qbFilterSearch)}" placeholder="Search question text…" oninput="qbFilterSearch=this.value;render()" style="min-width:180px">
     ${unlocked && (dupCount || qbFilterDup) ? `<label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--brick)"><input type="checkbox" ${qbFilterDup?'checked':''} onchange="qbFilterDup=this.checked;render()">Duplicates only (${dupCount})</label>` : ''}
     ${unlocked && (zeroCount || qbFilterZero) ? `<label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--brick)"><input type="checkbox" ${qbFilterZero?'checked':''} onchange="qbFilterZero=this.checked;render()">0 marks only (${zeroCount})</label>` : ''}
@@ -15639,6 +15662,8 @@ const QB_CARD_CSS = `<style>
   .qb-pgroup { border:2px solid var(--gold); border-radius:12px; padding:10px; display:flex; flex-direction:column; gap:10px; margin-bottom:10px; }
   .qb-pgroup > .qb-card { margin-bottom:0 !important; }
   .qb-pgroup-head { display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:12px; font-weight:700; color:var(--gold); }
+  .qb-or { text-align:center; font-weight:700; font-size:14px; color:var(--gold); margin:10px 0; }
+  .qb-or::before, .qb-or::after { content:'—'; margin:0 8px; color:var(--line); }
 </style>`;
 
 // ── Passage grouping on practice papers
@@ -15732,6 +15757,9 @@ function qbEditFormHtml(q) {
     <div style="margin-top:8px"><label style="font-size:12px;font-weight:600">Answer / key</label>
       <textarea rows="3" style="width:100%;font-family:inherit;font-size:13px;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box;resize:vertical"
         oninput="qbEditDraft.answer_text=this.value">${esc(qbEditDraft.answer_text!==undefined?qbEditDraft.answer_text:(q.answer_text||''))}</textarea></div>
+    ${'topic' in q ? `<div style="margin-top:8px"><label style="font-size:12px;font-weight:600">Topic</label>
+      <input type="text" list="qbTopicList" value="${escAttr(qbEditDraft.topic || '')}" placeholder="e.g. सन्धिः — practice papers pick grammar and some reading questions by topic" oninput="qbEditDraft.topic=this.value.trim()" style="width:100%;box-sizing:border-box">
+      <datalist id="qbTopicList">${QB_TOPICS.map(t => `<option value="${escAttr(t)}">`).join('')}</datalist></div>` : ''}
     ${qbImageFieldHtml('edit', qbEditDraft.question_image_url, "qbEditDraft.question_image_url=''")}
     <div class="qb-actions" style="margin-top:8px">
       <button class="btn-small btn-primary" onclick="qbSaveEdit('${q.id}')" ${qbSaving||qbImgUploading?'disabled':''}>Save</button>
@@ -15774,6 +15802,7 @@ function qbQuestionRowHtml(q, isAdmin) {
       <input type="checkbox" title="Tick to set the chapter for several questions" ${qbSelectedIds.has(q.id)?'checked':''} onchange="qbToggleSelect('${q.id}',this.checked)" style="margin:0 2px 0 0">
       ${section ? `<span class="qb-sec">${esc(section)}</span>` : ''}
       ${typeLabel ? `<span class="tag">${esc(typeLabel)}</span>` : ''}
+      ${q.topic ? `<span class="tag">${esc(q.topic)}</span>` : ''}
       <span class="qb-marks">${q.marks != null ? q.marks + ' mark' + (q.marks == 1 ? '' : 's') : ''}</span>
       ${q.difficulty ? `<span style="color:${diffColor};font-weight:700">${esc(q.difficulty)}</span>` : ''}
       ${chapterTitle ? `<span>· ${esc(chapterTitle)}</span>` : `<span style="color:var(--brick)">· No chapter</span>`}
@@ -15849,13 +15878,13 @@ function renderAdminQuestionBank() {
   </div>`;
 
   const subTabsHtml = `<div class="tabs" style="margin-bottom:16px">
-    <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Review Queue ${pending.length?`<span style="background:var(--brick);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${pending.length}</span>`:''}
     </div>
-    <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Approved Bank ${approved.length?`<span style="background:var(--forest);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${approved.length}</span>`:''}
     </div>
-    <div class="tab ${qbSubTab==='archived'?'active':''}" onclick="qbSubTab='archived';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='archived'?'active':''}" onclick="qbSubTab='archived';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Archived ${archivedN?`<span style="background:var(--muted);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${archivedN}</span>`:''}
     </div>
     <div class="tab ${qbSubTab==='papers'?'active':''}" onclick="qbSubTab='papers';qbPaperView='list';qbPaperId=null;qbReviewId=null;loadQbPapers()">
@@ -15924,13 +15953,13 @@ function renderTeacherQuestionBank(teacher) {
   </div>`;
 
   const subTabsHtml = `<div class="tabs" style="margin-bottom:16px">
-    <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Review Queue ${pending.length?`<span style="background:var(--brick);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${pending.length}</span>`:''}
     </div>
-    <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Full Question Bank ${approved.length?`<span style="background:var(--forest);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${approved.length}</span>`:''}
     </div>
-    <div class="tab ${qbSubTab==='archived'?'active':''}" onclick="qbSubTab='archived';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='archived'?'active':''}" onclick="qbSubTab='archived';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Archived ${archivedN?`<span style="background:var(--muted);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${archivedN}</span>`:''}
     </div>
     <div class="tab ${qbSubTab==='papers'?'active':''}" onclick="qbSubTab='papers';qbPaperView='list';qbPaperId=null;qbPicker=null;loadQbPapers()">
@@ -15989,12 +16018,46 @@ const QB_PASSAGE_TYPES = ['unseen_passage', 'extract_based', 'picture_compositio
 // written as one question with its own picture counts as a unit by itself ('q:<id>').
 function qbUnitOf(q, type) { return q.passage_id || (type === 'picture_composition' ? 'q:' + q.id : null); }
 
+// Topics a blueprint row can pick from (qb_questions.topic, tagged by SQL 20 or set in Edit).
+const QB_TOPICS = ['सन्धिः','समासः','प्रत्ययाः','वाच्यम्','समयः','अव्ययम्','अशुद्धिसंशोधनम्','पत्रलेखनम्','अनुच्छेदलेखनम्','प्रश्ननिर्माणम्','अन्वयः','भावार्थः','घटनाक्रमः','शब्दार्थः'];
+// Either/or (अथवा): a section with internal_choice is filled twice. Option अ uses the section's own type and topic,
+// option आ uses choice_question_type / choice_topic (or the same again). Each option carries the section's full marks
+// and the paper counts only one of them. Its paper questions are marked choice 'a' or 'b'.
+function qbSides(sec) {
+  if (!sec || !sec.internal_choice) return [{ key: null, sec: sec ? { ...sec, choice: null } : null }];
+  const bType = sec.choice_question_type || sec.question_type;
+  const bTopic = sec.choice_topic || (bType === sec.question_type ? sec.topic : null);
+  return [{ key: 'a', sec: { ...sec, choice: 'a' } }, { key: 'b', sec: { ...sec, question_type: bType, topic: bTopic || null, choice: 'b' } }];
+}
+function qbSideSec(sec, choice) { const sides = qbSides(sec); return (sides.find(x => x.key === (choice || null)) || sides[0]).sec; }
+const QB_SIDE_LABEL = { a: 'अ', b: 'आ' };
+// Which bank questions fit a section: by topic when it has one (only MCQ vs written matters then), else by type.
+function qbSecMatches(q, sec) {
+  if (sec.topic) return q.topic === sec.topic && (sec.question_type === 'mcq') === (q.question_type === 'mcq');
+  return q.question_type === sec.question_type;
+}
+function qbSecKind(sec) { return sec ? sec.topic || QB_TYPE_LABELS[sec.question_type] || sec.question_type || '' : ''; }
+// Marks of a set of paper questions, counting each either/or section once (its larger option).
+function qbChoiceSum(list, marksOf) {
+  const by = new Map();
+  list.forEach(x => {
+    const k = x.section_name || '', s = by.get(k) || { n: 0, a: 0, b: 0 }, m = marksOf(x);
+    if (x.choice === 'a' || x.choice === 'b') s[x.choice] += m; else s.n += m;
+    by.set(k, s);
+  });
+  return [...by.values()].reduce((t, s) => t + s.n + Math.max(s.a, s.b), 0);
+}
+// A section's questions split for display: those without a side, then option अ, then option आ (shown after अथवा).
+function qbChoiceGroups(rows) {
+  return [null, 'a', 'b'].map(side => ({ side, items: rows.filter(r => (r.choice || null) === side) })).filter(g => g.items.length);
+}
+
 function qbIdOf(q, key) { const v = qbLinkedVal(q, [key]); return v ? v.val : ''; }
 function qbSameSubject(a, b) { return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase(); }
 function qbQuestionById(id) { return qbQuestions.find(q => q.id === id); }   // archived ones too, so old papers still show them
 function qbPqMarks(pq) { return pq.marks_override != null ? Number(pq.marks_override) : (Number((qbQuestionById(pq.question_id) || {}).marks) || 0); }
 // A paper's full marks are what its questions add up to, which can be less than the blueprint when the bank runs short.
-function qbPaperQsTotal() { return qbPaperQs.reduce((s, pq) => s + qbPqMarks(pq), 0); }
+function qbPaperQsTotal() { return qbChoiceSum(qbPaperQs, qbPqMarks); }
 // Keep the saved full marks in step with the questions while the paper can still change; once assigned it stays fixed.
 async function qbSyncPaperTotal() {
   const p = qbPapers.find(x => x.id === qbPaperId);
@@ -16060,11 +16123,23 @@ function qbAutoFill(g, chapterIds) {
   const used = new Set();
   const picks = [], warnings = [];
   const bank = qbBankFor(g.board_id, g.grade_id, g.subject_name).filter(q => !chapterIds || !chapterIds.size || chapterIds.has(q.chapter_id));
-  g.sections.forEach(sec => {
+  g.sections.forEach(section => qbSides(section).forEach(({ key, sec }) => {
     const target = qbSectionTarget(sec);
     const marksOf = q => Number(q.marks) || 0;
-    const pool = qbShuffle(bank.filter(q => !used.has(q.id) && q.question_type === sec.question_type))
-      .sort((a, b) => (a.usage_count || 0) - (b.usage_count || 0));
+    let pool = bank.filter(q => !used.has(q.id) && qbSecMatches(q, sec));
+    let fallback = '';
+    // No questions with this topic yet: option आ falls back to option अ's topic, then to questions of the row's
+    // type that have no topic (so it never takes another topic's questions). The warning says so.
+    if (sec.topic && !pool.length) {
+      const aSec = key === 'b' ? qbSideSec(section, 'a') : null;
+      pool = aSec && aSec.topic && aSec.topic !== sec.topic ? bank.filter(q => !used.has(q.id) && qbSecMatches(q, aSec)) : [];
+      if (pool.length) fallback = ` — no approved questions have the topic ${sec.topic} yet, so ${aSec.topic} questions were used`;
+      else {
+        pool = bank.filter(q => !used.has(q.id) && !q.topic && q.question_type === sec.question_type);
+        fallback = ` — no approved questions have the topic ${sec.topic} yet, so ${QB_TYPE_LABELS[sec.question_type] || sec.question_type} questions without a topic were used`;
+      }
+    }
+    pool = qbShuffle(pool).sort((a, b) => (a.usage_count || 0) - (b.usage_count || 0));
     const chosen = [];
     let remaining = target;
     if (QB_PASSAGE_TYPES.includes(sec.question_type) && pool.some(q => qbUnitOf(q, sec.question_type))) {
@@ -16108,12 +16183,14 @@ function qbAutoFill(g, chapterIds) {
     }
     qbClusterByPassage(chosen, q => q.passage_id).forEach((q, n) => {
       used.add(q.id);
-      picks.push({ question_id: q.id, section_name: sec.section_name, question_order: n + 1, marks_override: null });
+      picks.push({ question_id: q.id, section_name: sec.section_name, question_order: n + 1, marks_override: null, ...(key ? { choice: key } : {}) });
     });
     const got = target - remaining;
     const isPassage = QB_PASSAGE_TYPES.includes(sec.question_type) && chosen.some(q => q.passage_id);
-    if (got !== target) warnings.push(`${qbSectionTitle(sec.section_name, sec)}: ${got} of ${target} marks filled${got < target ? (isPassage ? ' — the passage’s questions add up to ' + got + ', so full marks are lower' : ' — not enough approved questions') : ''}`);
-  });
+    const title = qbSectionTitle(sec.section_name, sec) + (key ? ` (${QB_SIDE_LABEL[key]})` : '');
+    if (got !== target) warnings.push(`${title}: ${got} of ${target} marks filled${got < target ? (isPassage ? ' — the passage’s questions add up to ' + got + ', so full marks are lower' : ' — not enough approved questions') : ''}`);
+    if (fallback) warnings.push(title + fallback);
+  }));
   return { picks, warnings };
 }
 
@@ -16239,15 +16316,17 @@ async function qbDeletePaper() {
 
 function qbPqPassageId(pq) { return (qbQuestionById(pq.question_id) || {}).passage_id || null; }
 // A section's questions in paper order, with each passage's questions kept together.
-function qbSectionRows(section) {
-  return qbClusterByPassage(qbPaperQs.filter(pq => (pq.section_name || '') === section).sort((a, b) => (a.question_order || 0) - (b.question_order || 0)), qbPqPassageId);
+// With side 'a' or 'b', only that option of an either/or section ('a' also takes questions saved without a side).
+function qbSectionRows(section, side) {
+  const inSide = pq => !side || (side === 'b' ? pq.choice === 'b' : pq.choice !== 'b');
+  return qbClusterByPassage(qbPaperQs.filter(pq => (pq.section_name || '') === section && inSide(pq)).sort((a, b) => (a.question_order || 0) - (b.question_order || 0)), qbPqPassageId);
 }
 
 // ↑ ↓ on a question: inside a passage it moves within the passage; otherwise it moves past the next question or whole passage.
 // With passageId, the whole passage box moves.
 async function qbMovePq(pqId, dir, passageId) {
   const pq = qbPaperQs.find(x => x.id === pqId);
-  const rows = qbSectionRows(pq.section_name || '');
+  const rows = qbSectionRows(pq.section_name || '', pq.choice);
   // Units: a whole passage with its questions, or one question without a passage.
   const units = qbPassageRuns(rows, qbPqPassageId).map(r => r.items);
   const u = units.findIndex(x => x.includes(pq));
@@ -16276,22 +16355,19 @@ async function qbRemovePq(pqId) {
   qbSyncPaperTotal();
 }
 
-function qbOpenPicker(section, pqId) { qbPicker = { section, pqId: pqId || null, search: '' }; render(); }
+function qbOpenPicker(section, pqId, choice) { qbPicker = { section, choice: choice || null, pqId: pqId || null, search: '' }; render(); }
 
 async function qbPickQuestion(questionId) {
-  const p = qbPapers.find(x => x.id === qbPaperId);
-  const g = p && qbBlueprintForPaper(p);
-  const sec = g && g.sections.find(s => s.section_name === qbPicker.section);
-  const q = qbQuestionById(questionId);
   const marks_override = null;   // the picker only offers questions with their own marks
+  const choice = qbPicker.choice || null;
   if (qbPicker.pqId) {
     const { error } = await sb.from('qb_paper_questions').update({ question_id: questionId, marks_override }).eq('id', qbPicker.pqId);
     if (error) { qbPaperMsg = 'Error: ' + error.message; render(); return; }
     const pq = qbPaperQs.find(x => x.id === qbPicker.pqId);
     if (pq) Object.assign(pq, { question_id: questionId, marks_override });
   } else {
-    const order = qbSectionRows(qbPicker.section).reduce((m, r) => Math.max(m, r.question_order || 0), 0) + 1;
-    const { data: row, error } = await sb.from('qb_paper_questions').insert({ paper_id: qbPaperId, question_id: questionId, section_name: qbPicker.section, question_order: order, marks_override }).select().single();
+    const order = qbSectionRows(qbPicker.section, choice).reduce((m, r) => Math.max(m, r.question_order || 0), 0) + 1;
+    const { data: row, error } = await sb.from('qb_paper_questions').insert({ paper_id: qbPaperId, question_id: questionId, section_name: qbPicker.section, question_order: order, marks_override, ...(choice ? { choice } : {}) }).select().single();
     if (error) { qbPaperMsg = 'Error: ' + error.message; render(); return; }
     qbPaperQs.push(row);
   }
@@ -16305,9 +16381,9 @@ function qbPassagePickerHtml(p, sec) {
   const bank = qbBankFor(p.board_id, p.grade_id, p.subject_name);
   const target = qbSectionTarget(sec);
   const onPaper = new Set(qbPaperQs.map(x => x.question_id));
-  const current = new Set(qbSectionRows(sec.section_name).map(pq => qbUnitOf(qbQuestionById(pq.question_id) || {}, sec.question_type)).filter(Boolean));
+  const current = new Set(qbSectionRows(sec.section_name, sec.choice).map(pq => qbUnitOf(qbQuestionById(pq.question_id) || {}, sec.question_type)).filter(Boolean));
   // Questions on this paper outside the section stay where they are; only this section's questions are free to reuse.
-  const sectionQs = new Set(qbSectionRows(sec.section_name).map(pq => pq.question_id));
+  const sectionQs = new Set(qbSectionRows(sec.section_name, sec.choice).map(pq => pq.question_id));
   const taken = new Set([...onPaper].filter(id => !sectionQs.has(id)));
   const lc = (qbPicker.search || '').toLowerCase();
   const unitText = id => id.startsWith('q:') ? (qbQuestionById(id.slice(2)) || {}).question_text || '' : (qbPassages[id] || {}).passage_text || '';
@@ -16325,17 +16401,17 @@ function qbPassagePickerHtml(p, sec) {
     ${cands.length ? cands.map(c => `<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-top:1px solid var(--line)">
       <div style="flex:1;min-width:0"><div style="font-size:11px;color:${c.marks === target ? 'var(--muted)' : 'var(--brick)'}">${c.questions.length} question${c.questions.length === 1 ? '' : 's'} · ${c.marks} of ${target} marks · used ${c.usage}×</div>
         ${qbImgHtml(unitImage(c.passageId), 90)}<div class="qb-text clamp" style="cursor:default;font-size:13px">${esc(unitText(c.passageId))}</div></div>
-      <button class="btn-small btn-primary" onclick="qbUsePassage('${escAttr(sec.section_name)}','${c.passageId}')">Use</button></div>`).join('') : '<div class="hint">No other approved passages for this section.</div>'}
+      <button class="btn-small btn-primary" onclick="qbUsePassage('${escAttr(sec.section_name)}','${c.passageId}','${sec.choice || ''}')">Use</button></div>`).join('') : '<div class="hint">No other approved passages for this section.</div>'}
   </div>`;
 }
 
 // Replace every question in a passage section with one passage's questions.
-async function qbUsePassage(section, passageId) {
+async function qbUsePassage(section, passageId, choice) {
   const p = qbPapers.find(x => x.id === qbPaperId);
   const g = p && qbBlueprintForPaper(p);
-  const sec = g && g.sections.find(s => s.section_name === section);
+  const sec = qbSideSec(g && g.sections.find(s => s.section_name === section), choice);
   if (!p || !sec) return;
-  const old = qbSectionRows(section);
+  const old = qbSectionRows(section, sec.choice);
   const sectionQs = new Set(old.map(pq => pq.question_id));
   const taken = new Set(qbPaperQs.map(x => x.question_id).filter(id => !sectionQs.has(id)));
   const pick = qbPassageQuestions(qbBankFor(p.board_id, p.grade_id, p.subject_name), passageId, taken, qbSectionTarget(sec));
@@ -16347,7 +16423,7 @@ async function qbUsePassage(section, passageId) {
     qbPaperQs = qbPaperQs.filter(x => !old.includes(x));
   }
   const { data: rows, error } = await sb.from('qb_paper_questions')
-    .insert(pick.questions.map((q, n) => ({ paper_id: qbPaperId, question_id: q.id, section_name: section, question_order: n + 1, marks_override: null }))).select();
+    .insert(pick.questions.map((q, n) => ({ paper_id: qbPaperId, question_id: q.id, section_name: section, question_order: n + 1, marks_override: null, ...(sec.choice ? { choice: sec.choice } : {}) }))).select();
   if (error) qbPaperMsg = 'Error: ' + error.message;
   else qbPaperQs.push(...(rows || []));
   qbPicker = null; qbPaperSaving = false;
@@ -16357,12 +16433,12 @@ async function qbUsePassage(section, passageId) {
 
 // ── Teacher writes new questions on a paper. They go on the paper at once and into the Review Queue (unapproved).
 function qbNewQItem(type) { return { question_text: '', answer_text: '', marks: '', question_type: type || 'short', difficulty: 'medium', chapter_id: '', image_url: '' }; }
-function qbOpenNewQ(section) {
+function qbOpenNewQ(section, choice) {
   const p = qbPapers.find(x => x.id === qbPaperId);
   const g = p && qbBlueprintForPaper(p);
-  const sec = g && g.sections.find(s => s.section_name === section);
+  const sec = qbSideSec(g && g.sections.find(s => s.section_name === section), choice);
   qbPicker = null;
-  qbNewQ = { section, passage: '', passage_image: '', items: [qbNewQItem(sec && sec.question_type)] };
+  qbNewQ = { section, choice: choice || null, topic: (sec && sec.topic) || '', passage: '', passage_image: '', items: [qbNewQItem(sec && sec.question_type)] };
   render();
 }
 function qbNewQFormHtml(p, sec, passageSec) {
@@ -16388,7 +16464,7 @@ function qbNewQFormHtml(p, sec, passageSec) {
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px">
       <b style="font-size:13px">${picSec ? 'Make a new picture set' : passageSec ? 'Write a new passage' : 'Write a new question'}</b>
       <button class="btn-small" onclick="qbNewQ=null;render()">Cancel</button></div>
-    <div class="hint" style="margin-bottom:6px">Added to this paper now, and to the Question Bank's Review Queue.${passageSec && qbSectionRows(sec.section_name).length ? ` It replaces the ${picSec ? 'picture' : 'passage'} in this section.` : ''}</div>
+    <div class="hint" style="margin-bottom:6px">Added to this paper now, and to the Question Bank's Review Queue.${f.topic ? ` Topic: ${esc(f.topic)}.` : ''}${passageSec && qbSectionRows(sec.section_name, sec.choice).length ? ` It replaces the ${picSec ? 'picture' : 'passage'} in this section.` : ''}</div>
     ${picSec ? `<div style="font-size:12px;font-weight:700">Picture</div>${qbImageFieldHtml('passage', f.passage_image, "qbNewQ.passage_image=''")}
       <div style="margin-top:8px">${ta(2, f.passage, 'qbNewQ.passage=this.value', 'Words to use (मञ्जूषा) or other text under the picture (optional)')}</div>`
       : passageSec ? `${ta(6, f.passage, 'qbNewQ.passage=this.value', 'Passage')}${qbImageFieldHtml('passage', f.passage_image, "qbNewQ.passage_image=''")}`
@@ -16405,7 +16481,7 @@ async function qbSaveNewQ() {
   const g = p && qbBlueprintForPaper(p);
   const f = qbNewQ;
   if (!p || !f) return;
-  const sec = g && g.sections.find(s => s.section_name === f.section);
+  const sec = qbSideSec(g && g.sections.find(s => s.section_name === f.section), f.choice);
   const passageSec = !!(sec && QB_PASSAGE_TYPES.includes(sec.question_type));
   const items = f.items.filter(it => it.question_text.trim() || it.image_url);
   if (!items.length) { alert('Write the question first.'); return; }
@@ -16413,7 +16489,7 @@ async function qbSaveNewQ() {
   const picSec = !!(sec && sec.question_type === 'picture_composition');
   if (picSec && !f.passage_image) { alert('Add the picture first.'); return; }
   if (passageSec && !picSec && !f.passage.trim()) { alert('Write the passage first.'); return; }
-  const old = passageSec ? qbSectionRows(f.section) : [];
+  const old = passageSec ? qbSectionRows(f.section, f.choice) : [];
   qbPaperSaving = true; render();
   const fail = msg => { qbPaperSaving = false; qbPaperMsg = 'Error: ' + msg; render(); };
   let passageId = null;
@@ -16429,6 +16505,7 @@ async function qbSaveNewQ() {
     chapter_id: it.chapter_id || null, passage_id: passageId, question_text: it.question_text.trim(),
     question_image_url: it.image_url || null, question_type: it.question_type, difficulty: it.difficulty,
     marks: Number(it.marks), answer_text: it.answer_text.trim() || null, approved: false, added_by: currentUserId || null,
+    ...(f.topic ? { topic: f.topic } : {}),
   }))).select();
   if (qErr) return fail(qErr.message);
   const added = qs || [];   // returned in the order sent, so the paper keeps the form's order
@@ -16439,9 +16516,9 @@ async function qbSaveNewQ() {
     if (error) return fail(error.message);
     qbPaperQs = qbPaperQs.filter(x => !old.includes(x));
   }
-  const start = qbSectionRows(f.section).reduce((m, r) => Math.max(m, r.question_order || 0), 0);
+  const start = qbSectionRows(f.section, f.choice).reduce((m, r) => Math.max(m, r.question_order || 0), 0);
   const { data: pqs, error: pqErr } = await sb.from('qb_paper_questions')
-    .insert(added.map((q, n) => ({ paper_id: qbPaperId, question_id: q.id, section_name: f.section, question_order: start + n + 1, marks_override: null }))).select();
+    .insert(added.map((q, n) => ({ paper_id: qbPaperId, question_id: q.id, section_name: f.section, question_order: start + n + 1, marks_override: null, ...(f.choice ? { choice: f.choice } : {}) }))).select();
   if (pqErr) return fail(pqErr.message);
   qbPaperQs.push(...(pqs || []));
   qbNewQ = null; qbPaperSaving = false;
@@ -16591,22 +16668,23 @@ function qbNewPaperHtml() {
 function qbPickerHtml(p, sec) {
   const current = qbPicker.pqId ? qbQuestionById((qbPaperQs.find(x => x.id === qbPicker.pqId) || {}).question_id) : null;
   const type = (sec && sec.question_type) || (current && current.question_type) || '';
+  const fits = q => sec ? qbSecMatches(q, sec) : !type || q.question_type === type;
   const onPaper = new Set(qbPaperQs.map(x => x.question_id));
   const lc = (qbPicker.search || '').toLowerCase();
   const cands = qbBankFor(p.board_id, p.grade_id, p.subject_name)
-    .filter(q => !onPaper.has(q.id) && (!type || q.question_type === type) && (!lc || String(q.question_text || '').toLowerCase().includes(lc)))
+    .filter(q => !onPaper.has(q.id) && fits(q) && (!lc || String(q.question_text || '').toLowerCase().includes(lc)))
     .sort((a, b) => ((current && b.chapter_id === current.chapter_id) - (current && a.chapter_id === current.chapter_id)) || (a.usage_count || 0) - (b.usage_count || 0))
     .slice(0, 40);
   return `<div class="qb-block" style="white-space:normal;border:1px solid var(--gold)">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px">
-      <b style="font-size:13px">${qbPicker.pqId ? 'Swap for' : 'Add'} a ${esc(QB_TYPE_LABELS[type] || type || '')} question</b>
+      <b style="font-size:13px">${qbPicker.pqId ? 'Swap for' : 'Add'} a ${esc(sec && sec.topic ? sec.topic + (sec.question_type === 'mcq' ? ' MCQ' : '') : QB_TYPE_LABELS[type] || type || '')} question</b>
       <button class="btn-small" onclick="qbPicker=null;render()">Close</button>
     </div>
     <input type="text" value="${escAttr(qbPicker.search || '')}" placeholder="Search question text…" oninput="qbPicker.search=this.value;render();const e=document.getElementById('qbPickerSearch');if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length)}" id="qbPickerSearch" style="width:100%;box-sizing:border-box;margin-bottom:8px">
     ${cands.length ? cands.map(q => `<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-top:1px solid var(--line)">
       <div style="flex:1;min-width:0"><div style="font-size:11px;color:var(--muted)">${esc(String(q.marks || ''))} marks · ${esc((qbChapters.find(c => c.id === q.chapter_id) || {}).title || '')} · used ${q.usage_count || 0}×</div>
         <div class="qb-text clamp" style="cursor:default;font-size:13px">${esc(q.question_text || '')}</div></div>
-      <button class="btn-small btn-primary" onclick="qbPickQuestion('${q.id}')">Use</button></div>`).join('') : '<div class="hint">No other approved questions of this type.</div>'}
+      <button class="btn-small btn-primary" onclick="qbPickQuestion('${q.id}')">Use</button></div>`).join('') : `<div class="hint">No other approved questions of this ${sec && sec.topic ? 'topic' : 'type'}.</div>`}
   </div>`;
 }
 
@@ -16699,7 +16777,8 @@ function qbReviewSetMarks(qid, value, max) {
   if (el) el.textContent = qbReviewTotal();
 }
 function qbReviewSetComment(qid, value) { (qbReviewDraft[qid] = qbReviewDraft[qid] || { marks: '', comment: '' }).comment = value; }
-function qbReviewTotal() { return qbPaperQs.reduce((s, pq) => s + qbReviewMarks(pq), 0); }
+// An either/or section counts the option that scored more (normally the one the student answered).
+function qbReviewTotal() { return qbChoiceSum(qbPaperQs, qbReviewMarks); }
 
 async function qbSaveReview(finish, next) {
   const a = qbPaperAssignments.find(x => x.id === qbReviewId);
@@ -16716,7 +16795,7 @@ async function qbSaveReview(finish, next) {
   const results = await Promise.all(updates);
   const err = results.find(r => r.error);
   if (err) { qbPaperMsg = 'Could not save marks: ' + err.error.message; qbPaperSaving = false; render(); return; }
-  const writtenScore = written.reduce((s, pq) => s + qbReviewMarks(pq), 0);
+  const writtenScore = qbChoiceSum(written, qbReviewMarks);
   const fields = { written_score: writtenScore, total_score: (Number(a.mcq_score) || 0) + writtenScore, teacher_feedback: qbReviewFeedback || null };
   if (finish) Object.assign(fields, { status: 'reviewed', reviewed_by: currentUserId || null, reviewed_at: new Date().toISOString() });
   const wasSubmitted = a.status === 'submitted';
@@ -16747,7 +16826,8 @@ function qbReviewHtml() {
   const body = sections.map(name => {
     const rows = qbSectionRows(name);
     return `<div style="margin-top:16px"><div style="border-bottom:2px solid var(--line);padding-bottom:4px;margin-bottom:8px"><b>${esc(name || 'No section')}</b></div>
-      ${qbPassageRuns(rows, qbPqPassageId).map(run => { const from = n + 1; const runHtml = run.items.map(pq => {
+      ${qbChoiceGroups(rows).map(grp => (grp.side === 'b' ? '<div class="qb-or">अथवा</div>' : '') + (grp.side ? `<div style="font-weight:700;margin-bottom:6px">(${QB_SIDE_LABEL[grp.side]})</div>` : '')
+      + qbPassageRuns(grp.items, qbPqPassageId).map(run => { const from = n + 1; const runHtml = run.items.map(pq => {
         n++;
         const q = qbQuestionById(pq.question_id) || {};
         const max = qbPqMarks(pq);
@@ -16777,7 +16857,7 @@ function qbReviewHtml() {
       }).join('');
         const ps = qbPassages[run.pid] || {};
         return run.pid ? qbPassageBox(esc(qbPassageLead(from, run.items.length, !!ps.image_url)), ps.passage_text, runHtml, ps.image_url) : runHtml;
-      }).join('')}</div>`;
+      }).join('')).join('')}</div>`;
   }).join('');
   const reviewed = a.status === 'reviewed';
   return `<div style="margin-bottom:12px"><button class="btn-small" onclick="qbCloseReview()">← ${esc(p.title || 'Paper')}</button></div>
@@ -16795,39 +16875,20 @@ function qbReviewHtml() {
     </div>`}`;
 }
 
-function qbPaperEditorHtml() {
-  const p = qbPapers.find(x => x.id === qbPaperId);
-  if (!p) return `<div class="empty">Paper not found.</div>`;
-  if (qbReviewId) return qbReviewHtml();
-  const g = qbBlueprintForPaper(p);
-  const ro = currentRole === 'Admin';              // admin looks at teachers' papers without changing them
-  const locked = ro || qbPaperAssignments.length > 0;   // once students have it, the questions stay fixed
-  const sectionNames = [...new Set([...(g ? g.sections.map(s => s.section_name) : []), ...qbPaperQs.map(x => x.section_name || '')])]
-    .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
-  const total = qbPaperQs.reduce((s, pq) => s + qbPqMarks(pq), 0);
-  const target = g ? g.total : Number(p.total_marks) || 0;   // blueprint marks, to show when the paper falls short
-
-  const sectionsHtml = sectionNames.map(name => {
-    const sec = g && g.sections.find(s => s.section_name === name);
-    const rows = qbSectionRows(name);
-    const got = rows.reduce((s, pq) => s + qbPqMarks(pq), 0);
-    const want = sec ? qbSectionTarget(sec) : null;
-    const ok = want == null || got === want;
-    // A passage section is swapped as a whole passage, so it never mixes questions from two passages.
-    const passageSec = !!(sec && QB_PASSAGE_TYPES.includes(sec.question_type));
-    return `<div style="margin-top:16px">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;border-bottom:2px solid var(--line);padding-bottom:4px;margin-bottom:8px">
-        <b>${esc(qbSectionTitle(name, sec) || 'No section')}</b>
-        <span style="font-size:12px;color:${ok ? 'var(--muted)' : 'var(--brick)'};font-weight:${ok ? 400 : 700}">${esc(QB_TYPE_LABELS[sec && sec.question_type] || '')} · ${got}${want != null ? ' / ' + want : ''} marks</span>
-      </div>
-      <div class="qb-list">
-      ${(() => { const runs = qbPassageRuns(rows, qbPqPassageId); return runs.map((run, ri) => { const runHtml = run.items.map(pq => {
+// One section (or one option of an either/or section) in the paper editor: its questions, then the add / swap / write buttons.
+function qbEditorSideHtml(p, name, sec, side, locked, offset) {
+  const rows = qbSectionRows(name, side);
+  // A passage section is swapped as a whole passage, so it never mixes questions from two passages.
+  const passageSec = !!(sec && QB_PASSAGE_TYPES.includes(sec.question_type));
+  const sideArg = side ? `,'${side}'` : '';
+  const runs = qbPassageRuns(rows, qbPqPassageId);
+  const list = runs.map((run, ri) => { const runHtml = run.items.map(pq => {
         const n = rows.indexOf(pq);
         const q = qbQuestionById(pq.question_id);
         const inRun = run.pid ? run.items.indexOf(pq) : -1;
         const upOff = run.pid ? inRun === 0 : n === 0, downOff = run.pid ? inRun === run.items.length - 1 : n === rows.length - 1;
         return `<div class="qb-card">
-          <div class="qb-meta"><span class="qb-sec">Q${n + 1}</span>${q ? `<span class="tag">${esc(QB_TYPE_LABELS[q.question_type] || q.question_type || '')}</span>` : ''}
+          <div class="qb-meta"><span class="qb-sec">Q${offset + n + 1}</span>${q ? `<span class="tag">${esc(QB_TYPE_LABELS[q.question_type] || q.question_type || '')}</span>` : ''}${q && q.topic ? `<span class="tag">${esc(q.topic)}</span>` : ''}
             <span class="qb-marks">${qbPqMarks(pq)} mark${qbPqMarks(pq) === 1 ? '' : 's'}</span>
             ${q ? `<span>· ${esc((qbChapters.find(c => c.id === q.chapter_id) || {}).title || '')}</span>` : ''}</div>
           <div class="qb-text clamp" style="cursor:default">${q ? esc(q.question_text || '') : '<i>This question is no longer in your bank.</i>'}</div>
@@ -16836,7 +16897,7 @@ function qbPaperEditorHtml() {
           ${locked ? '' : `<div class="qb-actions" style="margin-top:8px">
             <button class="btn-small" onclick="qbMovePq('${pq.id}',-1)" ${upOff ? 'disabled' : ''}>↑</button>
             <button class="btn-small" onclick="qbMovePq('${pq.id}',1)" ${downOff ? 'disabled' : ''}>↓</button>
-            ${passageSec ? '' : `<button class="btn-small" onclick="qbOpenPicker('${escAttr(name)}','${pq.id}')">Swap</button>`}
+            ${passageSec ? '' : `<button class="btn-small" onclick="qbOpenPicker('${escAttr(name)}','${pq.id}'${sideArg})">Swap</button>`}
             <button class="btn-small" onclick="qbRemovePq('${pq.id}')">Remove</button></div>`}
         </div>
         ${qbPicker && qbPicker.pqId === pq.id ? qbPickerHtml(p, sec) : ''}`;
@@ -16847,12 +16908,46 @@ function qbPaperEditorHtml() {
           <button class="btn-small" onclick="qbMovePq('${first.id}',-1,'${run.pid}')" ${ri === 0 ? 'disabled' : ''} title="Move the passage and its questions up">↑</button>
           <button class="btn-small" onclick="qbMovePq('${first.id}',1,'${run.pid}')" ${ri === runs.length - 1 ? 'disabled' : ''} title="Move the passage and its questions down">↓</button></span>`;
         const ps = qbPassages[run.pid] || {};
-        return qbPassageBox(`<span>${esc(qbPassageLead(rows.indexOf(first) + 1, run.items.length, !!ps.image_url))}</span>${moveBtns}`, ps.passage_text, runHtml, ps.image_url);
-      }).join(''); })()}
+        return qbPassageBox(`<span>${esc(qbPassageLead(offset + rows.indexOf(first) + 1, run.items.length, !!ps.image_url))}</span>${moveBtns}`, ps.passage_text, runHtml, ps.image_url);
+      }).join('');
+  const here = x => x && x.section === name && (x.choice || null) === (side || null);
+  const actions = locked ? '' : here(qbNewQ) ? qbNewQFormHtml(p, sec, passageSec) : (qbPicker && !qbPicker.pqId && here(qbPicker) ? (passageSec ? qbPassagePickerHtml(p, sec) : qbPickerHtml(p, sec))
+        : `<div class="qb-actions" style="margin-top:8px"><button class="btn-small" onclick="qbOpenPicker('${escAttr(name)}',null${sideArg})">${passageSec ? (sec.question_type === 'picture_composition' ? (rows.length ? '⇄ Swap picture' : '+ Choose picture') : (rows.length ? '⇄ Swap passage' : '+ Choose passage')) : '+ Add question'}</button>
+          <button class="btn-small" onclick="qbOpenNewQ('${escAttr(name)}'${sideArg})">✎ ${sec && sec.question_type === 'picture_composition' ? 'Make a new picture set' : passageSec ? 'Write a new passage' : 'Write a new question'}</button></div>`);
+  return `<div class="qb-list">${list}</div>${actions}`;
+}
+
+function qbPaperEditorHtml() {
+  const p = qbPapers.find(x => x.id === qbPaperId);
+  if (!p) return `<div class="empty">Paper not found.</div>`;
+  if (qbReviewId) return qbReviewHtml();
+  const g = qbBlueprintForPaper(p);
+  const ro = currentRole === 'Admin';              // admin looks at teachers' papers without changing them
+  const locked = ro || qbPaperAssignments.length > 0;   // once students have it, the questions stay fixed
+  const sectionNames = [...new Set([...(g ? g.sections.map(s => s.section_name) : []), ...qbPaperQs.map(x => x.section_name || '')])]
+    .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+  const total = qbPaperQsTotal();
+  const target = g ? g.total : Number(p.total_marks) || 0;   // blueprint marks, to show when the paper falls short
+
+  const sectionsHtml = sectionNames.map(name => {
+    const sec = g && g.sections.find(s => s.section_name === name);
+    const rows = qbSectionRows(name);
+    const got = qbChoiceSum(rows, qbPqMarks);
+    const want = sec ? qbSectionTarget(sec) : null;
+    const ok = want == null || got === want;
+    const sides = qbSides(sec);
+    let offset = 0;
+    const body = sides.map(({ key, sec: ssec }, i) => {
+      const html = qbEditorSideHtml(p, name, ssec, key, locked, offset);
+      offset += qbSectionRows(name, key).length;
+      return (i ? `<div class="qb-or">अथवा</div>` : '') + (key ? `<div style="font-size:12px;font-weight:700;color:var(--muted);margin:4px 0">(${QB_SIDE_LABEL[key]}) ${esc(qbSecKind(ssec))}${key === 'a' ? ' · students answer (अ) or (आ)' : ''}</div>` : '') + html;
+    }).join('');
+    return `<div style="margin-top:16px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;border-bottom:2px solid var(--line);padding-bottom:4px;margin-bottom:8px">
+        <b>${esc(qbSectionTitle(name, sec) || 'No section')}</b>
+        <span style="font-size:12px;color:${ok ? 'var(--muted)' : 'var(--brick)'};font-weight:${ok ? 400 : 700}">${esc(sides.length > 1 ? 'Either/or' : qbSecKind(sec))} · ${got}${want != null ? ' / ' + want : ''} marks</span>
       </div>
-      ${locked ? '' : qbNewQ && qbNewQ.section === name ? qbNewQFormHtml(p, sec, passageSec) : (qbPicker && !qbPicker.pqId && qbPicker.section === name ? (passageSec ? qbPassagePickerHtml(p, sec) : qbPickerHtml(p, sec))
-        : `<div class="qb-actions" style="margin-top:8px"><button class="btn-small" onclick="qbOpenPicker('${escAttr(name)}')">${passageSec ? (sec.question_type === 'picture_composition' ? (rows.length ? '⇄ Swap picture' : '+ Choose picture') : (rows.length ? '⇄ Swap passage' : '+ Choose passage')) : '+ Add question'}</button>
-          <button class="btn-small" onclick="qbOpenNewQ('${escAttr(name)}')">✎ ${sec && sec.question_type === 'picture_composition' ? 'Make a new picture set' : passageSec ? 'Write a new passage' : 'Write a new question'}</button></div>`)}
+      ${body}
     </div>`;
   }).join('');
 
@@ -16898,7 +16993,7 @@ function qbPaperEditorHtml() {
     ${(() => {
       // Which blueprint sections the paper's questions don't add up to, so the teacher sees where marks are missing.
       const gaps = g ? g.sections.map(sec => {
-        const got = qbSectionRows(sec.section_name).reduce((t, pq) => t + qbPqMarks(pq), 0), want = qbSectionTarget(sec);
+        const got = qbChoiceSum(qbSectionRows(sec.section_name), qbPqMarks), want = qbSectionTarget(sec);
         return got === want ? null : `${qbSectionTitle(sec.section_name, sec)}: ${got} of ${want} marks (${got < want ? want - got + ' short' : got - want + ' over'})`;
       }).filter(Boolean) : [];
       const other = qbPaperWarnings.filter(w => !/marks filled/.test(w));
@@ -17010,9 +17105,10 @@ function qbPrintPaper(withAnswers) {
   const body = names.map(name => {
     const sec = g && g.sections.find(x => x.section_name === name);
     const rows = qbSectionRows(name);
-    const secMarks = rows.reduce((t, pq) => t + qbPqMarks(pq), 0);
+    const secMarks = qbChoiceSum(rows, qbPqMarks);
     return `<section><h2><span>${e(qbSectionTitle(name, sec) || 'Questions')}</span><span class="m">${secMarks} marks</span></h2>
-      ${qbPassageRuns(rows, qbPqPassageId).map(run => { const from = n + 1; const runHtml = run.items.map(pq => {
+      ${qbChoiceGroups(rows).map(grp => (grp.side === 'b' ? '<div class="or">अथवा</div>' : '') + (grp.side ? `<div class="side">(${QB_SIDE_LABEL[grp.side]})</div>` : '')
+      + qbPassageRuns(grp.items, qbPqPassageId).map(run => { const from = n + 1; const runHtml = run.items.map(pq => {
         n++;
         const q = qbQuestionById(pq.question_id) || {};
         const marks = qbPqMarks(pq);
@@ -17024,7 +17120,7 @@ function qbPrintPaper(withAnswers) {
       }).join('');
         const ps = qbPassages[run.pid] || {};
         return run.pid ? `<div class="pgroup"><div class="lead">${e(qbPassageLead(from, run.items.length, !!ps.image_url))}</div>${ps.image_url ? `<img src="${e(ps.image_url)}">` : ''}${ps.passage_text ? `<div class="passage">${nl(ps.passage_text)}</div>` : ''}${runHtml}</div>` : runHtml;
-      }).join('')}</section>`;
+      }).join('')).join('')}</section>`;
   }).join('');
   const meta = [p.subject_name, qbByName(grades, p.grade_id), qbByName(boards, p.board_id)].filter(Boolean).join(' · ');
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${e(p.title || 'Practice paper')}${withAnswers ? ' — with answers' : ''}</title>
@@ -17044,6 +17140,7 @@ function qbPrintPaper(withAnswers) {
   .q .n { min-width: 26px; font-weight: 700; } .q .t { flex: 1; } .q .m { white-space: nowrap; font-weight: 700; }
   .q img { max-width: 100%; max-height: 260px; margin-top: 4px; }
   .opts { margin: 4px 0 0 18px; padding: 0; } .opts li { margin: 1px 0; }
+  .or { text-align: center; font-weight: 700; margin: 8px 0; } .side { font-weight: 700; margin: 6px 0 2px; }
   .key { break-before: page; } .key ol { padding-left: 28px; } .key li { margin: 4px 0 8px; }
   .bar { position: sticky; top: 0; background: #fff8e1; border: 1px solid #e0c060; padding: 8px 12px; margin-bottom: 12px; font-family: sans-serif; font-size: 13px; }
   @media print { .bar { display: none; } }
@@ -17106,6 +17203,9 @@ function qbBuildDocx(D, paper, withAnswers) {
       border: { bottom: { style: D.BorderStyle.SINGLE, size: 6, color: '000000', space: 2 } },
       children: [new D.TextRun({ text: sec.title, bold: true }), new D.TextRun({ text: `\t${sec.marks} marks`, bold: true })] }));
     sec.runs.forEach(run => {
+      // Either/or: “अथवा” before option आ, and the option's letter.
+      if (run.or) kids.push(new D.Paragraph({ alignment: D.AlignmentType.CENTER, spacing: { before: 120, after: 60 }, children: [new D.TextRun({ text: 'अथवा', bold: true })] }));
+      if (run.side) kids.push(new D.Paragraph({ spacing: { before: 60 }, children: [new D.TextRun({ text: `(${run.side})`, bold: true })] }));
       if (run.passage != null) {
         kids.push(new D.Paragraph({ spacing: { before: 120 }, children: [new D.TextRun({ text: run.lead, bold: true, size: 22 })] }));
         if (run.image) kids.push(new D.Paragraph({ children: [new D.ImageRun({ data: run.image.data, transformation: { width: run.image.width, height: run.image.height } })] }));
@@ -17146,7 +17246,9 @@ async function qbDownloadDocx(withAnswers) {
       const sec = g && g.sections.find(x => x.section_name === name);
       const rows = qbSectionRows(name);
       const runs = [];
-      for (const run of qbPassageRuns(rows, qbPqPassageId)) {
+      for (const grp of qbChoiceGroups(rows)) {
+      if (grp.side) runs.push({ side: QB_SIDE_LABEL[grp.side], or: grp.side === 'b', questions: [] });
+      for (const run of qbPassageRuns(grp.items, qbPqPassageId)) {
         const from = n + 1, questions = [];
         for (const pq of run.items) {
           const q = qbQuestionById(pq.question_id) || {};
@@ -17159,7 +17261,8 @@ async function qbDownloadDocx(withAnswers) {
         runs.push(ps ? { lead: qbPassageLead(from, run.items.length, !!ps.image_url), passage: ps.passage_text || '',
           image: ps.image_url ? await qbDocxImage(ps.image_url) : null, questions } : { questions });
       }
-      sections.push({ title: qbSectionTitle(name, sec) || 'Questions', marks: rows.reduce((t, pq) => t + qbPqMarks(pq), 0), runs });
+      }
+      sections.push({ title: qbSectionTitle(name, sec) || 'Questions', marks: qbChoiceSum(rows, qbPqMarks), runs });
     }
     const paper = { title: p.title || 'Practice paper', meta: [p.subject_name, qbByName(grades, p.grade_id), qbByName(boards, p.board_id)].filter(Boolean).join(' · '),
       duration: p.duration_minutes, total: qbPaperQsTotal(), instructions: p.instructions, sections };
