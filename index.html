@@ -269,7 +269,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-21 19:05 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-21 19:20 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -915,6 +915,7 @@ let qbFilterSearch = '';        // text search in question_text
 let qbFilterDup = false;        // show only questions that have a duplicate copy
 let qbFilterTopic = '';         // topic filter ('__none__' = no topic yet)
 let qbFilterZero = false;       // show only questions with 0 marks (they can't go into a practice paper)
+let qbFilterOld = false;        // show only old-syllabus questions (auto-fill never picks them)
 let qbFilterBoard = '';         // board filter — must be set (with subject + grade) before the filters above unlock
 let qbFilterSubject = '';       // subject filter (label from qbSubjectOf)
 let qbFilterGrade = '';         // grade filter (label from qbGradeOf)
@@ -1008,7 +1009,7 @@ function setTeacherPortalTab(t) {
   if (t === 'studyplans') { studyPlanTeacherStudentId = ''; studyPlanTeacherSubjectId = ''; studyPlanDraftItems = []; studyPlanMsg = ''; studyPlanViewMode = 'report'; studyPlanFilterStatus = 'all'; studyPlanFilterSubjectId = ''; studyPlanFilterStudent = ''; loadStudyPlans().then(() => render()); return; }
   if (t === 'homework') { hwShowForm = false; hwMsg = ''; hwFilterStudentId = ''; hwFilterStatus = 'assigned'; loadHomework().then(() => render()); return; }
   if (t === 'questionbank' && !teacherQbAccess) { teacherPortalTab = 'dashboard'; render(); return; }
-  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); return; }
+  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); return; }
   render();
 }
 function setTeacherAttendanceViewMonth(v) { teacherAttendanceViewMonth = v; render(); }
@@ -9042,7 +9043,7 @@ async function actuallySaveSessionEdit(id, count, date) {
 }
 
 function setTab(t) { currentTab = t; location.hash = t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; loadStudyPlans().then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
-  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); } }
+  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); } }
 function setPayrollMonth(v) { payrollMonth = v; render(); }
 function setNetProfitMonth(v) { netProfitMonth = v; render(); }
 function setNetProfitViewMode(v) { netProfitViewMode = v; render(); }
@@ -15886,6 +15887,8 @@ function qbScopeQuestions(approved) {
 function qbDistinct(qs, fn) { return [...new Set(qs.map(fn).filter(Boolean))].sort((a,b)=>a.localeCompare(b, undefined, { numeric:true })); }
 // A question with no marks (0 or blank) is never put on a practice paper.
 function qbZeroMarks(q) { return !(Number(q.marks) > 0); }
+// An old-syllabus question (syllabus_status 'old', SQL 43): auto-fill never picks it, a teacher can still add it by hand.
+function qbIsOld(q) { return q.syllabus_status === 'old'; }
 // Nor is a picture composition without its picture: students can't answer it.
 function qbMissingPicture(q) { return q.question_type === 'picture_composition' && !q.question_image_url && !(q.passage_id && (qbPassages[q.passage_id] || {}).image_url); }
 // Typing in the search box: wait for a short pause (and for a phone/Devanagari keyboard to finish composing),
@@ -15904,7 +15907,7 @@ function qbSearchInput(el, ev) {
     if (nb && focused) { nb.focus({ preventScroll: true }); if (pos != null) nb.setSelectionRange(pos, pos); }
   }, 250);
 }
-function qbClearDetailFilters() { qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic=''; qbSelectedIds = new Set(); qbBulkChapterId = ''; }
+function qbClearDetailFilters() { qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic=''; qbSelectedIds = new Set(); qbBulkChapterId = ''; }
 
 // Duplicate check. Same clean-up as question-bank/sql/08-check-duplicates.sql: ignore case, spaces,
 // punctuation, danda, digits and quote marks. A question under a passage only matches one under the
@@ -15950,6 +15953,7 @@ function qbFilteredQuestions(approved) {
   }
   if (qbFilterDup) qs = qs.filter(q => qbDuplicatesOf(q).length);
   if (qbFilterZero) qs = qs.filter(q => qbZeroMarks(q));
+  if (qbFilterOld) qs = qs.filter(q => qbIsOld(q));
   return qs;
 }
 
@@ -15966,8 +15970,9 @@ function qbFiltersHtml(showAll) {
   const chapters = qbChaptersForScope(approved);
   const unlinked = qbScopeQuestions(approved).filter(q => !q.chapter_id).length;
   const missing = qbMissingScopeColumns();
-  const anyFilter = qbFilterBoard||qbFilterSubject||qbFilterGrade||qbFilterType||qbFilterDifficulty||qbFilterChapter||qbFilterTopic||qbFilterSearch||qbFilterDup||qbFilterZero;
+  const anyFilter = qbFilterBoard||qbFilterSubject||qbFilterGrade||qbFilterType||qbFilterDifficulty||qbFilterChapter||qbFilterTopic||qbFilterSearch||qbFilterDup||qbFilterZero||qbFilterOld;
   const zeroCount = qbScopeQuestions(approved).filter(q => qbZeroMarks(q)).length;
+  const oldCount = qbScopeQuestions(approved).filter(q => qbIsOld(q)).length;
   // Topics only show once questions have them (SQL 20).
   const topics = qbDistinct(qbScopeQuestions(approved), q => q.topic);
   const noTopic = qbScopeQuestions(approved).filter(q => !q.topic).length;
@@ -16010,6 +16015,7 @@ function qbFiltersHtml(showAll) {
     <input type="text" id="qbFilterSearch" ${dis} value="${esc(qbFilterSearch)}" placeholder="Search question text…" oninput="qbSearchInput(this,event)" oncompositionend="qbSearchInput(this,event)" style="min-width:180px">
     ${unlocked && (dupCount || qbFilterDup) ? `<label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--brick)"><input type="checkbox" ${qbFilterDup?'checked':''} onchange="qbFilterDup=this.checked;render()">Duplicates only (${dupCount})</label>` : ''}
     ${unlocked && (zeroCount || qbFilterZero) ? `<label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--brick)"><input type="checkbox" ${qbFilterZero?'checked':''} onchange="qbFilterZero=this.checked;render()">0 marks only (${zeroCount})</label>` : ''}
+    ${unlocked && (oldCount || qbFilterOld) ? `<label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)"><input type="checkbox" ${qbFilterOld?'checked':''} onchange="qbFilterOld=this.checked;render()">Old syllabus only (${oldCount})</label>` : ''}
     ${anyFilter?`<button class="btn-small" onclick="qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbClearDetailFilters();render()">✕ Clear</button>`:''}
   </div>
   ${missing.length
@@ -16197,6 +16203,7 @@ function qbQuestionRowHtml(q, isAdmin) {
       ${source ? `<span>· ${esc(source)}</span>` : ''}
       ${dupBadge}
       ${q.archived ? `<span style="color:var(--muted);font-weight:700">Archived</span>` : ''}
+      ${qbIsOld(q) ? `<span class="tag" style="background:rgba(0,0,0,.06);color:var(--muted)" title="Not in the current syllabus. Auto-fill never picks it; you can still add it to a paper by hand.">Old syllabus</span>` : ''}
       ${q.added_by ? `<span title="Written in the app, not imported">· ✎ ${esc(qbApprovers[q.added_by] || 'Teacher')}</span>` : ''}
       ${qbEditedByHtml(q)}
     </div>
@@ -16250,7 +16257,7 @@ function qbTableHtml(qs, isAdmin) {
   if (!qbScopeChosen()) return '<div class="empty">Choose Board, Subject and Grade to see questions.</div>';
   if (!qs.length) return '<div class="empty">No questions match these filters.</div>';
   // Draw the list a page at a time; a new tab or filter starts again from the first page.
-  const key = [qbSubTab, qbFilterBoard, qbFilterSubject, qbFilterGrade, qbFilterType, qbFilterDifficulty, qbFilterChapter, qbFilterTopic, qbFilterSearch, qbFilterDup, qbFilterZero].join('|');
+  const key = [qbSubTab, qbFilterBoard, qbFilterSubject, qbFilterGrade, qbFilterType, qbFilterDifficulty, qbFilterChapter, qbFilterTopic, qbFilterSearch, qbFilterDup, qbFilterZero, qbFilterOld].join('|');
   if (key !== qbShowKey) { qbShowKey = key; qbShowLimit = QB_PAGE_SIZE; }
   // Keep the question being edited on screen even if it sits past the current page.
   const editAt = qbEditId ? qs.findIndex(q => q.id === qbEditId) : -1;
@@ -16281,13 +16288,13 @@ function renderAdminQuestionBank() {
   </div>`;
 
   const subTabsHtml = `<div class="tabs" style="margin-bottom:16px">
-    <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Review Queue ${pending.length?`<span style="background:var(--brick);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${pending.length}</span>`:''}
     </div>
-    <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Approved Bank ${approved.length?`<span style="background:var(--forest);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${approved.length}</span>`:''}
     </div>
-    <div class="tab ${qbSubTab==='archived'?'active':''}" onclick="qbSubTab='archived';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='archived'?'active':''}" onclick="qbSubTab='archived';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Archived ${archivedN?`<span style="background:var(--muted);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${archivedN}</span>`:''}
     </div>
     <div class="tab ${qbSubTab==='papers'?'active':''}" onclick="qbSubTab='papers';qbPaperView='list';qbPaperId=null;qbReviewId=null;loadQbPapers()">
@@ -16356,13 +16363,13 @@ function renderTeacherQuestionBank(teacher) {
   </div>`;
 
   const subTabsHtml = `<div class="tabs" style="margin-bottom:16px">
-    <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Review Queue ${pending.length?`<span style="background:var(--brick);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${pending.length}</span>`:''}
     </div>
-    <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Full Question Bank ${approved.length?`<span style="background:var(--forest);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${approved.length}</span>`:''}
     </div>
-    <div class="tab ${qbSubTab==='archived'?'active':''}" onclick="qbSubTab='archived';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
+    <div class="tab ${qbSubTab==='archived'?'active':''}" onclick="qbSubTab='archived';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Archived ${archivedN?`<span style="background:var(--muted);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${archivedN}</span>`:''}
     </div>
     <div class="tab ${qbSubTab==='papers'?'active':''}" onclick="qbSubTab='papers';qbPaperView='list';qbPaperId=null;qbPicker=null;loadQbPapers()">
@@ -16555,7 +16562,7 @@ function qbPassagePick(bank, passageIds, used, marks) {
 function qbAutoFill(g, lessonIds, sectionNames) {
   const used = new Set();
   const picks = [], warnings = [];
-  const bankAll = qbBankFor(g.board_id, g.grade_id, g.subject_name);
+  const bankAll = qbBankFor(g.board_id, g.grade_id, g.subject_name).filter(q => !qbIsOld(q));   // never old syllabus
   const short = lessonIds && lessonIds.size ? ' — not enough approved questions in the ticked lessons' : ' — not enough approved questions';
   g.sections.filter(s => !sectionNames || sectionNames.has(s.section_name)).forEach(section => qbSides(section).forEach(({ key, sec }) => {
     const bank = qbSecBank(bankAll, sec, lessonIds);
@@ -16692,7 +16699,7 @@ function qbToggleDraftChapter(id, on) {
   const g = qbDraftGroup();
   if (!d.autoSkipped) d.autoSkipped = new Set();
   if (g && !before && d.chapterIds.size) {
-    const bank = qbBankFor(g.board_id, g.grade_id, g.subject_name);
+    const bank = qbBankFor(g.board_id, g.grade_id, g.subject_name).filter(q => !qbIsOld(q));
     g.sections.filter(s => !d.skipSections.has(s.section_name) && qbIsSkillSection(bank, s))
       .forEach(s => { d.skipSections.add(s.section_name); d.autoSkipped.add(s.section_name); });
   } else if (before && !d.chapterIds.size) {
@@ -17147,7 +17154,7 @@ function qbAdminPapersListHtml() {
 function qbNewPaperHtml() {
   const groups = qbBlueprintGroups().filter(g => qbBankFor(g.board_id, g.grade_id, g.subject_name).length);
   const g = groups.find(x => x.key === qbPaperDraft.blueprintKey);
-  const bankAll = g ? qbBankFor(g.board_id, g.grade_id, g.subject_name) : [];
+  const bankAll = g ? qbBankFor(g.board_id, g.grade_id, g.subject_name).filter(q => !qbIsOld(q)) : [];   // as auto-fill sees it
   // Only numbered lessons can be ticked; skill chapters always fill their own sections.
   const lessonIds = new Set(bankAll.map(q => q.chapter_id).filter(id => id && qbIsLesson(id)));
   const chapters = qbSortChapters(qbChapters.filter(c => lessonIds.has(c.id)));
@@ -17193,7 +17200,7 @@ function qbPickerHtml(p, sec) {
   const lc = (qbPicker.search || '').toLowerCase();
   const cands = qbPickerBank(p, sec)
     .filter(q => !onPaper.has(q.id) && fits(q) && (!lc || String(q.question_text || '').toLowerCase().includes(lc)))
-    .sort((a, b) => ((current && b.chapter_id === current.chapter_id) - (current && a.chapter_id === current.chapter_id)) || (a.usage_count || 0) - (b.usage_count || 0))
+    .sort((a, b) => (qbIsOld(a) - qbIsOld(b)) || ((current && b.chapter_id === current.chapter_id) - (current && a.chapter_id === current.chapter_id)) || (a.usage_count || 0) - (b.usage_count || 0))
     .slice(0, 40);
   return `<div class="qb-block" style="white-space:normal;border:1px solid var(--gold)">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px">
@@ -17203,7 +17210,7 @@ function qbPickerHtml(p, sec) {
     ${qbPickerScopeHtml(p)}
     <input type="text" value="${escAttr(qbPicker.search || '')}" placeholder="Search question text…" oninput="qbPicker.search=this.value;render();const e=document.getElementById('qbPickerSearch');if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length)}" id="qbPickerSearch" style="width:100%;box-sizing:border-box;margin-bottom:8px">
     ${cands.length ? cands.map(q => `<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-top:1px solid var(--line)">
-      <div style="flex:1;min-width:0"><div style="font-size:11px;color:var(--muted)">${esc(String(q.marks || ''))} marks · ${esc((qbChapters.find(c => c.id === q.chapter_id) || {}).title || '')} · used ${q.usage_count || 0}×</div>
+      <div style="flex:1;min-width:0"><div style="font-size:11px;color:var(--muted)">${esc(String(q.marks || ''))} marks · ${esc((qbChapters.find(c => c.id === q.chapter_id) || {}).title || '')} · used ${q.usage_count || 0}×${qbIsOld(q) ? ' · <b>Old syllabus</b>' : ''}</div>
         <div class="qb-text clamp" style="cursor:default;font-size:13px">${esc(q.question_text || '')}</div></div>
       <button class="btn-small btn-primary" onclick="qbPickQuestion('${q.id}')">Use</button></div>`).join('') : `<div class="hint">No other approved questions of this ${sec && sec.topic ? 'topic' : 'type'}.</div>`}
   </div>`;
