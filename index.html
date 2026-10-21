@@ -269,7 +269,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-21 17:05 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-21 18:45 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -940,13 +940,14 @@ let qbPaperView = 'list';       // 'list' | 'new' | 'edit'
 let qbPaperId = null;           // paper open in the editor
 let qbPaperQs = [];             // qb_paper_questions of the open paper
 let qbPaperAssignments = [];    // qb_student_assignments of the open paper
-let qbPaperDraft = {};          // new paper form: { blueprintKey, title, duration, chapterIds:Set }
+let qbPaperDraft = {};          // new paper form: { blueprintKey, title, duration, chapterIds:Set (lessons), skipSections:Set }
 let qbPaperWarnings = [];       // auto-fill shortfalls for the open paper
 let qbPaperSaving = false;
 let qbPaperMsg = '';
 let qbNewQ = null;              // { section, passage, items:[…] } while a teacher writes new questions on a paper
 let qbImgUploading = '';         // which picture input is uploading ('edit' or 'new-<n>')
-let qbPicker = null;            // { section, pqId|null, search } while swapping / adding a question
+let qbPicker = null;            // { section, pqId|null, search, allChapters } while swapping / adding a question
+let qbEmptyShown = new Set();   // 'paperId|section' for empty sections the teacher brought back with + Add a section
 let qbAssignOpen = false;
 let qbAssignIds = new Set();    // students ticked in the assign panel
 let qbAssignUntil = '';         // due date (yyyy-mm-dd) for new assignments
@@ -16502,6 +16503,25 @@ function qbBankFor(boardId, gradeId, subject) {
 function qbBlueprintForPaper(p) {
   return qbBlueprintGroups().find(g => g.board_id === p.board_id && g.grade_id === p.grade_id && (!g.subject_name || qbSameSubject(g.subject_name, p.subject_name))) || null;
 }
+// A numbered lesson. Skill chapters (grammar, unseen passage, writing, translation) have no number.
+function qbIsLesson(chapterId) { const c = qbChapters.find(x => x.id === chapterId); return !!c && qbChapterNum(c) !== Infinity; }
+// Lesson ticks: a question fits when no lesson is ticked, its lesson is ticked, or it sits in a skill chapter
+// (so Unseen Passage, Writing, Grammar and Translation always fill). Questions with no chapter are left out once a lesson is ticked.
+function qbInLessons(q, lessonIds) { return !lessonIds || !lessonIds.size || lessonIds.has(q.chapter_id) || (!!q.chapter_id && !qbIsLesson(q.chapter_id)); }
+// The sections and lessons chosen when the paper was made (qb_practice_papers.build_options, SQL 40).
+// Empty means the whole blueprint and every lesson, as for papers made before.
+function qbPaperOpts(p) {
+  const o = (p && p.build_options) || {};
+  return { sections: Array.isArray(o.sections) ? new Set(o.sections) : null, lessons: new Set(Array.isArray(o.lessons) ? o.lessons : []) };
+}
+// Approved questions a picker on this paper offers: the paper's lessons (plus skill chapters), or all with "All chapters".
+function qbPickerBank(p) {
+  const bank = qbBankFor(p.board_id, p.grade_id, p.subject_name);
+  return qbPicker && qbPicker.allChapters ? bank : bank.filter(q => qbInLessons(q, qbPaperOpts(p).lessons));
+}
+function qbPickerScopeHtml(p) {
+  return qbPaperOpts(p).lessons.size ? `<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-bottom:8px"><input type="checkbox" ${qbPicker.allChapters ? 'checked' : ''} onchange="qbPicker.allChapters=this.checked;render()">All chapters (not only this paper's lessons)</label>` : '';
+}
 
 // One passage's questions for a section: every approved question linked to it (whatever its type), in the order
 // they were added, keeping the first ones that fit in the marks. Prefers a passage that fills the marks, then the least used.
@@ -16522,11 +16542,13 @@ function qbPassagePick(bank, passageIds, used, marks) {
 // Each section is filled up to its total_marks (question_count is only a guide, since some sections mix marks).
 // Ordinary sections take questions round-robin across chapters, least-used first.
 // A passage section takes one passage per question_count (one for Unseen Passage) with all its questions.
-function qbAutoFill(g, chapterIds) {
+// Only the sections in sectionNames (all when null), and only questions that pass the lesson ticks (qbInLessons).
+function qbAutoFill(g, lessonIds, sectionNames) {
   const used = new Set();
   const picks = [], warnings = [];
-  const bank = qbBankFor(g.board_id, g.grade_id, g.subject_name).filter(q => !chapterIds || !chapterIds.size || chapterIds.has(q.chapter_id));
-  g.sections.forEach(section => qbSides(section).forEach(({ key, sec }) => {
+  const bank = qbBankFor(g.board_id, g.grade_id, g.subject_name).filter(q => qbInLessons(q, lessonIds));
+  const short = lessonIds && lessonIds.size ? ' — not enough approved questions in the ticked lessons' : ' — not enough approved questions';
+  g.sections.filter(s => !sectionNames || sectionNames.has(s.section_name)).forEach(section => qbSides(section).forEach(({ key, sec }) => {
     const target = qbSectionTarget(sec);
     const marksOf = q => Number(q.marks) || 0;
     let pool = bank.filter(q => !used.has(q.id) && qbSecMatches(q, sec));
@@ -16591,7 +16613,7 @@ function qbAutoFill(g, chapterIds) {
     const got = target - remaining;
     const isPassage = QB_PASSAGE_TYPES.includes(sec.question_type) && chosen.some(q => q.passage_id);
     const title = qbSectionTitle(sec.section_name, sec) + (key ? ` (${QB_SIDE_LABEL[key]})` : '');
-    if (got !== target) warnings.push(`${title}: ${got} of ${target} marks filled${got < target ? (isPassage ? ' — the passage’s questions add up to ' + got + ', so full marks are lower' : ' — not enough approved questions') : ''}`);
+    if (got !== target) warnings.push(`${title}: ${got} of ${target} marks filled${got < target ? (isPassage ? ' — the passage’s questions add up to ' + got + ', so full marks are lower' : short) : ''}`);
     if (fallback) warnings.push(title + fallback);
   }));
   return { picks, warnings };
@@ -16646,25 +16668,44 @@ async function qbOpenPaper(id) {
 
 function qbStartNewPaper() {
   qbPaperView = 'new'; qbPaperId = null; qbPaperWarnings = []; qbPaperMsg = '';
-  qbPaperDraft = { blueprintKey: '', title: '', duration: '', chapterIds: new Set() };
+  qbPaperDraft = { blueprintKey: '', title: '', duration: '', chapterIds: new Set(), skipSections: new Set() };
   render();
 }
 function qbBackToPapers() { qbNewQ = null; qbEditId = null; qbPaperView = 'list'; qbPaperId = null; qbReviewId = null; qbPicker = null; qbAssignOpen = false; qbPaperWarnings = []; loadQbPapers(); }
 
-function qbToggleDraftChapter(id, on) { if (on) qbPaperDraft.chapterIds.add(id); else qbPaperDraft.chapterIds.delete(id); }
+function qbToggleDraftChapter(id, on) { if (on) qbPaperDraft.chapterIds.add(id); else qbPaperDraft.chapterIds.delete(id); render(); }
+function qbDraftGroup() { return qbBlueprintGroups().find(x => x.key === qbPaperDraft.blueprintKey); }
+function qbToggleDraftSection(i, on) {
+  const s = (qbDraftGroup() || { sections: [] }).sections[i];
+  if (!s) return;
+  if (on) qbPaperDraft.skipSections.delete(s.section_name); else qbPaperDraft.skipSections.add(s.section_name);
+  render();
+}
+function qbDraftAllSections(on) { const g = qbDraftGroup(); qbPaperDraft.skipSections = new Set(on || !g ? [] : g.sections.map(s => s.section_name)); render(); }
 
 async function qbCreatePaper() {
-  const g = qbBlueprintGroups().find(x => x.key === qbPaperDraft.blueprintKey);
+  const g = qbDraftGroup();
   if (!g) { qbPaperMsg = 'Choose a blueprint first.'; render(); return; }
+  const chosen = g.sections.filter(s => !qbPaperDraft.skipSections.has(s.section_name));
+  if (!chosen.length) { qbPaperMsg = 'Tick at least one section.'; render(); return; }
+  const sections = new Set(chosen.map(s => s.section_name));
+  const lessons = [...qbPaperDraft.chapterIds];
+  // Saved so Re-run auto-fill and Swap keep the same choice. Nothing is saved for the whole blueprint with every lesson.
+  const build_options = chosen.length < g.sections.length || lessons.length ? { sections: [...sections], lessons } : null;
   const title = (qbPaperDraft.title || '').trim() || `${g.subject_name || 'Practice'} ${qbByName(grades, g.grade_id)} practice paper — ${formatDate(todayStr)}`.trim();
   qbPaperSaving = true; qbPaperMsg = ''; render();
-  const { data: paper, error } = await sb.from('qb_practice_papers').insert({
+  const row = {
     title, board_id: g.board_id || null, grade_id: g.grade_id || null, subject_name: g.subject_name || null,
-    total_marks: g.total, duration_minutes: parseInt(qbPaperDraft.duration) || null,
+    total_marks: chosen.reduce((t, s) => t + qbSectionTarget(s), 0), duration_minutes: parseInt(qbPaperDraft.duration) || null,
     status: 'draft', created_by_teacher_id: currentLinkedId,
-  }).select().single();
+  };
+  let { data: paper, error } = await sb.from('qb_practice_papers').insert(build_options ? { ...row, build_options } : row).select().single();
+  // Before SQL 40 the column isn't there: make the paper anyway, it just won't remember the choice.
+  const notSaved = !!(error && build_options && /build_options/.test(error.message));
+  if (notSaved) ({ data: paper, error } = await sb.from('qb_practice_papers').insert(row).select().single());
   if (error) { qbPaperMsg = 'Could not create paper: ' + error.message; qbPaperSaving = false; render(); return; }
-  const { picks, warnings } = qbAutoFill(g, qbPaperDraft.chapterIds);
+  const { picks, warnings } = qbAutoFill(g, qbPaperDraft.chapterIds, sections);
+  if (notSaved) warnings.push('Your sections and lessons were used, but the paper can’t remember them yet (SQL 40 not run), so Re-run auto-fill and Swap will use the whole blueprint.');
   if (picks.length) {
     const { error: pqErr } = await sb.from('qb_paper_questions').insert(picks.map(p => ({ ...p, paper_id: paper.id })));
     if (pqErr) warnings.unshift('Could not add questions: ' + pqErr.message);
@@ -16681,11 +16722,15 @@ async function qbRefillPaper() {
   const p = qbPapers.find(x => x.id === qbPaperId);
   const g = p && qbBlueprintForPaper(p);
   if (!g) { qbPaperMsg = 'No blueprint matches this paper.'; render(); return; }
-  if (!confirm('Replace every question on this paper with a fresh auto-fill?')) return;
+  const opts = qbPaperOpts(p);
+  // The sections chosen when the paper was made, plus any added since or with questions now.
+  const sections = opts.sections && new Set([...opts.sections, ...qbPaperQs.map(x => x.section_name || ''),
+    ...g.sections.map(s => s.section_name).filter(n => qbEmptyShown.has(p.id + '|' + n))]);
+  if (!confirm('Replace every question on this paper with a fresh auto-fill' + (opts.sections || opts.lessons.size ? ' from the sections and lessons you chose' : '') + '?')) return;
   qbPaperSaving = true; render();
   const { error } = await sb.from('qb_paper_questions').delete().eq('paper_id', p.id);
   if (error) { qbPaperMsg = 'Error: ' + error.message; qbPaperSaving = false; render(); return; }
-  const { picks, warnings } = qbAutoFill(g, null);
+  const { picks, warnings } = qbAutoFill(g, opts.lessons, sections);
   if (picks.length) {
     const { error: pqErr } = await sb.from('qb_paper_questions').insert(picks.map(x => ({ ...x, paper_id: p.id })));
     if (pqErr) warnings.unshift('Could not add questions: ' + pqErr.message);
@@ -16758,7 +16803,7 @@ async function qbRemovePq(pqId) {
   qbSyncPaperTotal();
 }
 
-function qbOpenPicker(section, pqId, choice) { qbEditId = null; qbPicker = { section, choice: choice || null, pqId: pqId || null, search: '' }; render(); }
+function qbOpenPicker(section, pqId, choice) { qbEditId = null; qbPicker = { section, choice: choice || null, pqId: pqId || null, search: '', allChapters: false }; render(); }
 
 async function qbPickQuestion(questionId) {
   const marks_override = null;   // the picker only offers questions with their own marks
@@ -16781,7 +16826,7 @@ async function qbPickQuestion(questionId) {
 
 // Passage picker: passages with questions of this section's type, each with the questions that fit the section's marks.
 function qbPassagePickerHtml(p, sec) {
-  const bank = qbBankFor(p.board_id, p.grade_id, p.subject_name);
+  const bank = qbPickerBank(p);
   const target = qbSectionTarget(sec);
   const onPaper = new Set(qbPaperQs.map(x => x.question_id));
   const current = new Set(qbSectionRows(sec.section_name, sec.choice).map(pq => qbUnitOf(qbQuestionById(pq.question_id) || {}, sec.question_type)).filter(Boolean));
@@ -16800,6 +16845,7 @@ function qbPassagePickerHtml(p, sec) {
       <b style="font-size:13px">${current.size ? 'Swap for another' : 'Choose a'} ${sec.question_type === 'picture_composition' ? 'picture' : 'passage'}</b>
       <button class="btn-small" onclick="qbPicker=null;render()">Close</button>
     </div>
+    ${qbPickerScopeHtml(p)}
     <input type="text" value="${escAttr(qbPicker.search || '')}" placeholder="Search passage text…" oninput="qbPicker.search=this.value;render();const e=document.getElementById('qbPickerSearch');if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length)}" id="qbPickerSearch" style="width:100%;box-sizing:border-box;margin-bottom:8px">
     ${cands.length ? cands.map(c => `<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-top:1px solid var(--line)">
       <div style="flex:1;min-width:0"><div style="font-size:11px;color:${c.marks === target ? 'var(--muted)' : 'var(--brick)'}">${c.questions.length} question${c.questions.length === 1 ? '' : 's'} · ${c.marks} of ${target} marks · used ${c.usage}×</div>
@@ -16817,7 +16863,7 @@ async function qbUsePassage(section, passageId, choice) {
   const old = qbSectionRows(section, sec.choice);
   const sectionQs = new Set(old.map(pq => pq.question_id));
   const taken = new Set(qbPaperQs.map(x => x.question_id).filter(id => !sectionQs.has(id)));
-  const pick = qbPassageQuestions(qbBankFor(p.board_id, p.grade_id, p.subject_name), passageId, taken, qbSectionTarget(sec));
+  const pick = qbPassageQuestions(qbPickerBank(p), passageId, taken, qbSectionTarget(sec));
   if (!pick.questions.length) return;
   qbPaperSaving = true; render();
   if (old.length) {
@@ -17074,19 +17120,32 @@ function qbAdminPapersListHtml() {
 function qbNewPaperHtml() {
   const groups = qbBlueprintGroups().filter(g => qbBankFor(g.board_id, g.grade_id, g.subject_name).length);
   const g = groups.find(x => x.key === qbPaperDraft.blueprintKey);
-  const chapterIds = g ? new Set(qbBankFor(g.board_id, g.grade_id, g.subject_name).map(q => q.chapter_id).filter(Boolean)) : new Set();
-  const chapters = qbChapters.filter(c => chapterIds.has(c.id)).sort((a, b) => (a.chapter_number || 0) - (b.chapter_number || 0));
-  const sectionsHtml = g ? `<div class="qb-block" style="white-space:normal"><div class="qb-block-label">Sections</div>
-    ${g.sections.map(s => {
-      const have = qbBankFor(g.board_id, g.grade_id, g.subject_name).filter(q => q.question_type === s.question_type).length;
-      return `<div style="display:flex;justify-content:space-between;gap:8px;padding:2px 0"><span>${esc(qbSectionTitle(s.section_name, s))} — ${esc(QB_TYPE_LABELS[s.question_type] || s.question_type || '')}</span>
-        <span style="white-space:nowrap">${esc(String(s.question_count || ''))} q · ${qbSectionTarget(s)} marks · <span style="color:${have ? 'var(--muted)' : 'var(--brick)'}">${have} in bank</span></span></div>`;
-    }).join('')}</div>` : '';
+  const bankAll = g ? qbBankFor(g.board_id, g.grade_id, g.subject_name) : [];
+  // Only numbered lessons can be ticked; skill chapters always fill their own sections.
+  const lessonIds = new Set(bankAll.map(q => q.chapter_id).filter(id => id && qbIsLesson(id)));
+  const chapters = qbSortChapters(qbChapters.filter(c => lessonIds.has(c.id)));
+  const ticked = qbPaperDraft.chapterIds;
+  const bank = bankAll.filter(q => qbInLessons(q, ticked));
+  // Questions a section (both options of an either/or) can take with the current lesson ticks, as auto-fill matches them.
+  const fits = (list, s) => list.filter(q => qbSides(s).some(({ sec }) => qbSecMatches(q, sec)));
+  const chosen = g ? g.sections.filter(s => !qbPaperDraft.skipSections.has(s.section_name)) : [];
+  const chosenTotal = chosen.reduce((t, s) => t + qbSectionTarget(s), 0);
+  const sectionsHtml = g ? `<div class="qb-block" style="white-space:normal"><div class="qb-block-label" style="display:flex;justify-content:space-between;align-items:center;gap:8px">Sections to include
+      <span class="qb-actions"><button class="btn-small" onclick="qbDraftAllSections(true)">All</button><button class="btn-small" onclick="qbDraftAllSections(false)">None</button></span></div>
+    ${g.sections.map((s, i) => {
+      const on = !qbPaperDraft.skipSections.has(s.section_name);
+      const all = fits(bankAll, s), have = ticked.size ? fits(bank, s).length : all.length;
+      const skill = ticked.size && all.length && all.every(q => q.chapter_id && !qbIsLesson(q.chapter_id));
+      const kind = s.internal_choice ? 'Either/or' : qbSecKind(s);
+      return `<label style="display:flex;justify-content:space-between;gap:8px;padding:2px 0;cursor:pointer;${on ? '' : 'opacity:.5'}"><span style="display:flex;align-items:center;gap:6px"><input type="checkbox" ${on ? 'checked' : ''} onchange="qbToggleDraftSection(${i},this.checked)">${esc(qbSectionTitle(s.section_name, s))} — ${esc(kind)}</span>
+        <span style="white-space:nowrap">${esc(String(s.question_count || ''))} q · ${qbSectionTarget(s)} marks · <span style="color:${have ? 'var(--muted)' : 'var(--brick)'}">${have} in bank${skill ? ' · all chapters' : ''}</span></span></label>`;
+    }).join('')}
+    <div style="margin-top:6px;font-weight:700;color:${chosen.length ? 'var(--ink)' : 'var(--brick)'}">Paper total: ${chosenTotal} of ${g.total} marks${chosen.length ? '' : ' — tick at least one section'}</div></div>` : '';
   return `<div style="margin-bottom:12px"><button class="btn-small" onclick="qbBackToPapers()">← Papers</button></div>
     <h3 style="margin:0 0 10px">New practice paper</h3>
     ${groups.length ? '' : '<div class="empty">No blueprint matches the approved questions you can see yet.</div>'}
     <div class="row-form" style="flex-wrap:wrap;gap:8px">
-      <select onchange="qbPaperDraft.blueprintKey=this.value;qbPaperDraft.chapterIds=new Set();render()" style="min-width:260px">
+      <select onchange="qbPaperDraft.blueprintKey=this.value;qbPaperDraft.chapterIds=new Set();qbPaperDraft.skipSections=new Set();render()" style="min-width:260px">
         <option value="">Blueprint…</option>
         ${groups.map(x => `<option value="${escAttr(x.key)}" ${x.key === qbPaperDraft.blueprintKey ? 'selected' : ''}>${esc(qbBlueprintLabel(x))}</option>`).join('')}
       </select>
@@ -17094,10 +17153,11 @@ function qbNewPaperHtml() {
       <input type="number" min="0" value="${escAttr(String(qbPaperDraft.duration || ''))}" placeholder="Minutes" oninput="qbPaperDraft.duration=this.value" style="width:90px">
     </div>
     ${sectionsHtml}
-    ${chapters.length ? `<div class="qb-block" style="white-space:normal"><div class="qb-block-label">Chapters to include (none ticked = all)</div>
-      ${chapters.map(c => `<label style="display:inline-flex;align-items:center;gap:4px;margin:2px 12px 2px 0;font-size:13px"><input type="checkbox" ${qbPaperDraft.chapterIds.has(c.id) ? 'checked' : ''} onchange="qbToggleDraftChapter('${c.id}',this.checked)">${esc((c.chapter_number ? c.chapter_number + '. ' : '') + (c.title || ''))}</label>`).join('')}
+    ${chapters.length ? `<div class="qb-block" style="white-space:normal"><div class="qb-block-label">Lessons to include (none ticked = all)</div>
+      ${chapters.map(c => `<label style="display:inline-flex;align-items:center;gap:4px;margin:2px 12px 2px 0;font-size:13px"><input type="checkbox" ${qbPaperDraft.chapterIds.has(c.id) ? 'checked' : ''} onchange="qbToggleDraftChapter('${c.id}',this.checked)">${esc(qbChapterLabel(c))}</label>`).join('')}
+      <div class="hint" style="margin-top:4px">Grammar, Writing, Unseen Passage and Translation sections always take questions from all chapters.</div>
     </div>` : ''}
-    <div style="margin-top:12px"><button class="btn-primary" onclick="qbCreatePaper()" ${!g || qbPaperSaving ? 'disabled' : ''}>${qbPaperSaving ? 'Building…' : 'Create and auto-fill'}</button></div>`;
+    <div style="margin-top:12px"><button class="btn-primary" onclick="qbCreatePaper()" ${!g || !chosen.length || qbPaperSaving ? 'disabled' : ''}>${qbPaperSaving ? 'Building…' : 'Create and auto-fill'}</button></div>`;
 }
 
 function qbPickerHtml(p, sec) {
@@ -17106,7 +17166,7 @@ function qbPickerHtml(p, sec) {
   const fits = q => sec ? qbSecMatches(q, sec) : !type || q.question_type === type;
   const onPaper = new Set(qbPaperQs.map(x => x.question_id));
   const lc = (qbPicker.search || '').toLowerCase();
-  const cands = qbBankFor(p.board_id, p.grade_id, p.subject_name)
+  const cands = qbPickerBank(p)
     .filter(q => !onPaper.has(q.id) && fits(q) && (!lc || String(q.question_text || '').toLowerCase().includes(lc)))
     .sort((a, b) => ((current && b.chapter_id === current.chapter_id) - (current && a.chapter_id === current.chapter_id)) || (a.usage_count || 0) - (b.usage_count || 0))
     .slice(0, 40);
@@ -17115,6 +17175,7 @@ function qbPickerHtml(p, sec) {
       <b style="font-size:13px">${qbPicker.pqId ? 'Swap for' : 'Add'} a ${esc(sec && sec.topic ? sec.topic + (sec.question_type === 'mcq' ? ' MCQ' : '') : QB_TYPE_LABELS[type] || type || '')} question</b>
       <button class="btn-small" onclick="qbPicker=null;render()">Close</button>
     </div>
+    ${qbPickerScopeHtml(p)}
     <input type="text" value="${escAttr(qbPicker.search || '')}" placeholder="Search question text…" oninput="qbPicker.search=this.value;render();const e=document.getElementById('qbPickerSearch');if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length)}" id="qbPickerSearch" style="width:100%;box-sizing:border-box;margin-bottom:8px">
     ${cands.length ? cands.map(q => `<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-top:1px solid var(--line)">
       <div style="flex:1;min-width:0"><div style="font-size:11px;color:var(--muted)">${esc(String(q.marks || ''))} marks · ${esc((qbChapters.find(c => c.id === q.chapter_id) || {}).title || '')} · used ${q.usage_count || 0}×</div>
@@ -17365,10 +17426,20 @@ function qbPaperEditorHtml() {
   const g = qbBlueprintForPaper(p);
   const ro = currentRole === 'Admin';              // admin looks at teachers' papers without changing them
   const locked = ro || qbPaperAssignments.length > 0;   // once students have it, the questions stay fixed
+  // Only sections with questions show, plus empty ones brought back with + Add a section (until the paper is assigned).
+  const shownEmpty = name => !locked && qbEmptyShown.has(p.id + '|' + name);
   const sectionNames = [...new Set([...(g ? g.sections.map(s => s.section_name) : []), ...qbPaperQs.map(x => x.section_name || '')])]
+    .filter(name => qbSectionRows(name).length || shownEmpty(name))
     .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+  const onPaper = g ? g.sections.filter(s => sectionNames.includes(s.section_name)) : [];
+  const offPaper = g ? g.sections.map((s, i) => ({ s, i })).filter(x => !sectionNames.includes(x.s.section_name)) : [];
   const total = qbPaperQsTotal();
-  const target = g ? g.total : Number(p.total_marks) || 0;   // blueprint marks, to show when the paper falls short
+  // Marks of the sections on the paper, to show when the paper falls short of them.
+  const target = g ? onPaper.reduce((t, s) => t + qbSectionTarget(s), 0) : Number(p.total_marks) || 0;
+  const addSectionHtml = locked || !offPaper.length ? '' : `<div style="margin-top:16px"><select onchange="qbAddSection(this.value)" style="max-width:100%">
+      <option value="">+ Add a section…</option>
+      ${offPaper.map(x => `<option value="${x.i}">${esc(qbSectionTitle(x.s.section_name, x.s))} — ${esc(x.s.internal_choice ? 'Either/or' : qbSecKind(x.s))} · ${qbSectionTarget(x.s)} marks</option>`).join('')}
+    </select></div>`;
 
   const sectionsHtml = sectionNames.map(name => {
     const sec = g && g.sections.find(s => s.section_name === name);
@@ -17433,15 +17504,16 @@ function qbPaperEditorHtml() {
       <span class="tag" style="${p.status === 'published' ? '' : 'background:rgba(0,0,0,.06);color:var(--muted)'}">${qbPaperStatusLabel(p.status)}</span>
     </div>
     <div style="font-size:13px;color:var(--muted);margin:6px 0 10px">${ro ? `By <b style="color:var(--ink)">${esc((data.teachers.find(t => t.id === p.created_by_teacher_id) || {}).name || 'Unknown teacher')}</b> · ` : ''}${esc([p.subject_name, qbByName(grades, p.grade_id), qbByName(boards, p.board_id)].filter(Boolean).join(' · '))}
-      · <b style="color:${total === target ? 'var(--forest)' : 'var(--brick)'}">${total} marks${total === target ? '' : ` (blueprint ${target})`}</b> · ${qbPaperQs.length} questions${p.duration_minutes ? ' · ' + esc(String(p.duration_minutes)) + ' min' : ''}</div>
+      · <b style="color:${total === target ? 'var(--forest)' : 'var(--brick)'}">${total} marks${total === target ? '' : ` (sections add up to ${target})`}</b> · ${qbPaperQs.length} questions${p.duration_minutes ? ' · ' + esc(String(p.duration_minutes)) + ' min' : ''}</div>
     ${(() => {
       // Which blueprint sections the paper's questions don't add up to, so the teacher sees where marks are missing.
-      const gaps = g ? g.sections.map(sec => {
+      const gaps = g ? onPaper.map(sec => {
         const got = qbChoiceSum(qbSectionRows(sec.section_name), qbPqMarks), want = qbSectionTarget(sec);
         return got === want ? null : `${qbSectionTitle(sec.section_name, sec)}: ${got} of ${want} marks (${got < want ? want - got + ' short' : got - want + ' over'})`;
       }).filter(Boolean) : [];
-      const other = qbPaperWarnings.filter(w => !/marks filled/.test(w));
-      return gaps.length || other.length ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${gaps.length ? `<b>Full marks ${total} instead of the blueprint's ${target}:</b><br>` : ''}${[...gaps, ...other].map(esc).join('<br>')}</div>` : '';
+      // Shortfalls show from the sections themselves; a section auto-fill left empty is off the paper, so say so.
+      const other = qbPaperWarnings.filter(w => !/marks filled/.test(w) || / 0 of \d+ marks filled/.test(w));
+      return gaps.length || other.length ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${gaps.length ? `<b>Full marks ${total} instead of ${target}:</b><br>` : ''}${[...gaps, ...other].map(esc).join('<br>')}</div>` : '';
     })()}
     ${ro ? '' : `<div class="qb-actions">
       ${p.status === 'published'
@@ -17455,7 +17527,18 @@ function qbPaperEditorHtml() {
     ${locked ? '<div class="hint" style="margin-top:6px">Questions are fixed now that the paper is assigned.</div>' : ''}
     ${qbAssignOpen && p.status === 'published' ? qbAssignHtml(p) : ''}`}
     ${tabsHtml}
-    ${tab === 'students' ? studentsHtml : (sectionsHtml || '<div class="empty">No questions on this paper yet.</div>')}`;
+    ${tab === 'students' ? studentsHtml : (sectionsHtml || '<div class="empty">No questions on this paper yet.</div>') + addSectionHtml}`;
+}
+
+// Bring a blueprint section onto the paper empty, to fill by hand. It also joins the paper's chosen sections for Re-run auto-fill.
+async function qbAddSection(i) {
+  const p = qbPapers.find(x => x.id === qbPaperId);
+  const s = i !== '' && p && (qbBlueprintForPaper(p) || { sections: [] }).sections[Number(i)];
+  if (!s) return;
+  qbEmptyShown.add(p.id + '|' + s.section_name);
+  const o = p.build_options;
+  if (o && Array.isArray(o.sections) && !o.sections.includes(s.section_name)) await qbUpdatePaper({ build_options: { ...o, sections: [...o.sections, s.section_name] } });
+  else render();
 }
 
 // ── Past papers: the original exam PDFs the question bank was built from.
