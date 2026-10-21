@@ -269,7 +269,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-21 19:20 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-21 19:30 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -915,7 +915,7 @@ let qbFilterSearch = '';        // text search in question_text
 let qbFilterDup = false;        // show only questions that have a duplicate copy
 let qbFilterTopic = '';         // topic filter ('__none__' = no topic yet)
 let qbFilterZero = false;       // show only questions with 0 marks (they can't go into a practice paper)
-let qbFilterOld = false;        // show only old-syllabus questions (auto-fill never picks them)
+let qbFilterOld = false;        // show only old-syllabus questions; off = they're hidden (auto-fill never picks them)
 let qbFilterBoard = '';         // board filter — must be set (with subject + grade) before the filters above unlock
 let qbFilterSubject = '';       // subject filter (label from qbSubjectOf)
 let qbFilterGrade = '';         // grade filter (label from qbGradeOf)
@@ -15953,7 +15953,9 @@ function qbFilteredQuestions(approved) {
   }
   if (qbFilterDup) qs = qs.filter(q => qbDuplicatesOf(q).length);
   if (qbFilterZero) qs = qs.filter(q => qbZeroMarks(q));
+  // Old-syllabus questions are hidden unless "Old syllabus only" is ticked (the Archived tab shows everything archived).
   if (qbFilterOld) qs = qs.filter(q => qbIsOld(q));
+  else if (qbSubTab !== 'archived') qs = qs.filter(q => !qbIsOld(q));
   return qs;
 }
 
@@ -15968,15 +15970,17 @@ function qbFiltersHtml(showAll) {
   const dis = unlocked ? '' : 'disabled';
   // Only offer chapters of the chosen board / subject / grade.
   const chapters = qbChaptersForScope(approved);
-  const unlinked = qbScopeQuestions(approved).filter(q => !q.chapter_id).length;
+  // Counts match the list: old-syllabus questions only count while they're shown.
+  const shown = qbScopeQuestions(approved).filter(q => qbSubTab === 'archived' || qbFilterOld || !qbIsOld(q));
+  const unlinked = shown.filter(q => !q.chapter_id).length;
   const missing = qbMissingScopeColumns();
   const anyFilter = qbFilterBoard||qbFilterSubject||qbFilterGrade||qbFilterType||qbFilterDifficulty||qbFilterChapter||qbFilterTopic||qbFilterSearch||qbFilterDup||qbFilterZero||qbFilterOld;
-  const zeroCount = qbScopeQuestions(approved).filter(q => qbZeroMarks(q)).length;
+  const zeroCount = shown.filter(q => qbZeroMarks(q)).length;
   const oldCount = qbScopeQuestions(approved).filter(q => qbIsOld(q)).length;
   // Topics only show once questions have them (SQL 20).
-  const topics = qbDistinct(qbScopeQuestions(approved), q => q.topic);
-  const noTopic = qbScopeQuestions(approved).filter(q => !q.topic).length;
-  const dupCount = qbScopeQuestions(approved).filter(q => qbDuplicatesOf(q).length).length;
+  const topics = qbDistinct(shown, q => q.topic);
+  const noTopic = shown.filter(q => !q.topic).length;
+  const dupCount = shown.filter(q => qbDuplicatesOf(q).length).length;
   return `<div class="row-form" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">
     <select onchange="qbFilterBoard=this.value;qbFilterSubject='';qbFilterGrade='';qbClearDetailFilters();render()">
       <option value="">Board…</option>
@@ -16015,7 +16019,7 @@ function qbFiltersHtml(showAll) {
     <input type="text" id="qbFilterSearch" ${dis} value="${esc(qbFilterSearch)}" placeholder="Search question text…" oninput="qbSearchInput(this,event)" oncompositionend="qbSearchInput(this,event)" style="min-width:180px">
     ${unlocked && (dupCount || qbFilterDup) ? `<label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--brick)"><input type="checkbox" ${qbFilterDup?'checked':''} onchange="qbFilterDup=this.checked;render()">Duplicates only (${dupCount})</label>` : ''}
     ${unlocked && (zeroCount || qbFilterZero) ? `<label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--brick)"><input type="checkbox" ${qbFilterZero?'checked':''} onchange="qbFilterZero=this.checked;render()">0 marks only (${zeroCount})</label>` : ''}
-    ${unlocked && (oldCount || qbFilterOld) ? `<label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)"><input type="checkbox" ${qbFilterOld?'checked':''} onchange="qbFilterOld=this.checked;render()">Old syllabus only (${oldCount})</label>` : ''}
+    ${unlocked && (oldCount || qbFilterOld) ? `<label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)"><input type="checkbox" ${qbFilterOld?'checked':''} onchange="qbFilterOld=this.checked;render()" title="Old-syllabus questions are hidden unless this is ticked">Old syllabus only (${oldCount})</label>` : ''}
     ${anyFilter?`<button class="btn-small" onclick="qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbClearDetailFilters();render()">✕ Clear</button>`:''}
   </div>
   ${missing.length
