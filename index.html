@@ -267,7 +267,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-21 08:45 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-21 09:55 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -439,6 +439,30 @@ let gradesOpen = false;
 let categoriesOpen = false;
 let boardsOpen = false;
 let subjectNamesOpen = false;
+// Admin Setup → Question Bank access: which teachers get the Question Bank (teachers.qb_access, SQL 32).
+let qbAccessOpen = false;
+let qbAccessByTeacher = null; // { teacherId: true/false } once loaded; null = not loaded yet
+let qbAccessMsg = '';
+async function loadQbAccessList() {
+  const { data: rows, error } = await sb.from('teachers').select('id,qb_access');
+  if (error) { qbAccessByTeacher = null; qbAccessMsg = 'Could not load the list. Run SQL 32 in Supabase first. (' + error.message + ')'; render(); return; }
+  qbAccessByTeacher = {};
+  (rows || []).forEach(r => { qbAccessByTeacher[r.id] = !!r.qb_access; });
+  qbAccessMsg = '';
+  render();
+}
+function toggleQbAccessCard() {
+  qbAccessOpen = !qbAccessOpen;
+  if (qbAccessOpen) loadQbAccessList();
+  render();
+}
+async function setTeacherQbAccess(teacherId, on) {
+  const { error } = await sb.from('teachers').update({ qb_access: on }).eq('id', teacherId);
+  if (error) { qbAccessMsg = 'Could not save: ' + error.message; render(); return; }
+  qbAccessByTeacher[teacherId] = on;
+  qbAccessMsg = teacherName(teacherId) + (on ? ' can now use the Question Bank.' : ' no longer has the Question Bank.');
+  render();
+}
 let discountTiers = []; // [{ minClasses, percent }, ...] — bulk-class discount structure
 let newTierMinClasses = '';
 let newTierPercent = '';
@@ -952,12 +976,16 @@ let teacherAttendanceViewMode = 'day'; // 'day' | 'month' - which scope the atte
 function isCurrentMonth(dateStr) { return !!dateStr && dateStr.slice(0,7) === todayStr.slice(0,7); }
 function formatDate(d) { if (!d) return ''; try { return new Date(d+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}); } catch(e) { return d; } }
 let teacherMobileTabMenuOpen = false;
-// Question Bank tab: only for teachers the database lets read some questions (their subject at a class and
-// board they teach), or who already have practice papers to mark. Unknown (null) until the check returns.
+// Question Bank tab: only for teachers an admin has switched on (Setup → Question Bank access), and then
+// only if the database lets them read some questions (their subject at a class they teach) or they already
+// have practice papers to mark. Unknown (null) until the check returns.
 let teacherQbAccess = null;
 async function loadTeacherQbAccess() {
   if (!sb || !currentLinkedId) { teacherQbAccess = false; return; }
   try {
+    // Until SQL 32 is run this function doesn't exist; then fall back to the scope check alone.
+    const sw = await sb.rpc('qb_my_qb_access');
+    if (!sw.error && sw.data !== true) { teacherQbAccess = false; if (teacherPortalTab === 'questionbank') teacherPortalTab = 'dashboard'; return; }
     const [qs, ps] = await Promise.all([
       sb.from('qb_questions').select('id', { count: 'exact', head: true }),
       sb.from('qb_practice_papers').select('id', { count: 'exact', head: true }).eq('created_by_teacher_id', currentLinkedId),
@@ -12122,6 +12150,30 @@ function renderUsers() {
           </tr>`).join('')}
       </table></div>
       ` : '<div class="empty">No subject names yet — add one above.</div>'}
+      ` : ''}
+    </div>
+
+    <div class="card">
+      <h2 style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none" onclick="toggleQbAccessCard()">
+        <span style="font-size:12px;color:var(--muted)">${qbAccessOpen ? '▼' : '▶'}</span>
+        Question Bank access
+        ${!qbAccessOpen ? `<span class="tag" style="margin-left:auto;font-size:11px;font-weight:400">master control</span>` : ''}
+      </h2>
+      ${qbAccessOpen ? `
+      <div class="hint">Tick the teachers who may use the Question Bank. Everyone else does not see the Question Bank tab, and the database blocks them from questions, past papers and practice papers too. A ticked teacher still only sees their own subject and classes (Teachers &amp; Subjects). A teacher who is logged in sees the change after logging in again.</div>
+      ${qbAccessMsg ? `<div class="hint" style="color:${qbAccessMsg.startsWith('Could not')?'var(--brick)':'var(--forest)'}">${esc(qbAccessMsg)}</div>` : ''}
+      ${qbAccessByTeacher === null ? (qbAccessMsg ? '' : '<div class="hint">Loading…</div>') : `
+      <div class="table-scroll"><table>
+        <tr><th>Teacher</th><th>Subjects</th><th>Question Bank</th></tr>
+        ${byName(data.teachers.filter(t=>!t.archived)).map(t=>`
+          <tr>
+            <td>${esc(teacherLabel(t))}</td>
+            <td style="font-size:12.5px;color:var(--muted)">${esc([...new Set(data.subjects.filter(s=>s.teacherId===t.id).map(s=>s.name))].join(', ') || '—')}</td>
+            <td><label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" ${qbAccessByTeacher[t.id]?'checked':''} onchange="setTeacherQbAccess('${t.id}', this.checked)"> ${qbAccessByTeacher[t.id]?'On':'Off'}</label></td>
+          </tr>`).join('')}
+      </table></div>
+      <div class="hint">${data.teachers.filter(t=>!t.archived && qbAccessByTeacher[t.id]).length} of ${data.teachers.filter(t=>!t.archived).length} teachers switched on.</div>
+      `}
       ` : ''}
     </div>
 
