@@ -267,7 +267,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-21 10:10 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-21 10:25 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -3114,18 +3114,19 @@ async function loadQBQuestions() {
     else if (chaps) qbChapters = chaps.sort((a,b) => String(a.title||'').localeCompare(String(b.title||''), undefined, { numeric:true }));
     const { data: tbs } = await sb.from('qb_textbooks').select('*');
     qbTextbooks = tbs || [];
-    // Load questions (no FK join — avoids PostgREST FK lookup issues)
-    const { data: rows, error } = await sb
-      .from('qb_questions')
-      .select('*')
-      .order('created_at', { ascending: false });
+    // Load questions (no FK join — avoids PostgREST FK lookup issues). Paged: one request stops at 1,000 rows,
+    // which once cut off the older (approved / archived) questions after a big import filled the Review Queue.
+    const { data: rows, error } = await selectAllPaged('qb_questions', ['created_at']);
     if (error) { qbMsg = 'Load error: ' + error.message; }
-    else if (rows) qbQuestions = rows;
+    else if (rows) qbQuestions = rows.reverse(); // newest first
     // Passages and approver names are only needed for the expanded view; failures here are non-fatal.
     const passageIds = [...new Set(qbQuestions.map(q => q.passage_id).filter(Boolean))];
     if (passageIds.length) {
-      const { data: ps } = await sb.from('qb_passages').select('*').in('id', passageIds);
-      qbPassages = {}; (ps || []).forEach(p => { qbPassages[p.id] = p; });
+      qbPassages = {};
+      for (let i = 0; i < passageIds.length; i += 100) { // keeps each request URL short
+        const { data: ps } = await sb.from('qb_passages').select('*').in('id', passageIds.slice(i, i + 100));
+        (ps || []).forEach(p => { qbPassages[p.id] = p; });
+      }
     }
     const approverIds = [...new Set(qbQuestions.flatMap(q => [q.approved_by, q.added_by, q.edited_by]).filter(Boolean))];
     if (approverIds.length) {
