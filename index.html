@@ -269,7 +269,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-21 11:07 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-21 16:10 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -17150,8 +17150,8 @@ function qbAssignHtml(p) {
 }
 
 // ── Teacher review of a submitted attempt ────────────────────
-// MCQs were marked on the server at submit time; the teacher marks the rest question by question,
-// adds overall feedback, and "Mark as reviewed" sets the scores the student then sees.
+// MCQs were marked on the server at submit time; the teacher can change those marks and marks the rest
+// question by question, adds overall feedback, and "Mark as reviewed" sets the scores the student then sees.
 async function qbOpenReview(assignmentId) {
   qbReviewId = assignmentId; qbReviewLoading = true; qbPaperMsg = ''; render(); window.scrollTo(0, 0);
   const { data: rows, error } = await sb.from('qb_student_attempts').select('*').eq('assignment_id', assignmentId);
@@ -17183,9 +17183,6 @@ function qbNextToMark(afterId) {
 }
 
 function qbReviewMarks(pq) {
-  const q = qbQuestionById(pq.question_id);
-  const att = qbReviewAttempts.find(r => r.question_id === pq.question_id);
-  if (q && q.question_type === 'mcq') return Number(att && att.marks_awarded) || 0;
   const d = qbReviewDraft[pq.question_id];
   return d && d.marks !== '' ? Number(d.marks) || 0 : 0;
 }
@@ -17195,20 +17192,24 @@ function qbReviewSetMarks(qid, value, max) {
   (qbReviewDraft[qid] = qbReviewDraft[qid] || { marks: '', comment: '' }).marks = v === '' ? '' : String(v);
   const el = document.getElementById('qbReviewTotal');
   if (el) el.textContent = qbReviewTotal();
+  const mel = document.getElementById('qbReviewMcq');
+  if (mel) mel.textContent = qbReviewMcqTotal();
 }
 function qbReviewSetComment(qid, value) { (qbReviewDraft[qid] = qbReviewDraft[qid] || { marks: '', comment: '' }).comment = value; }
 // An either/or section counts the option that scored more (normally the one the student answered).
 function qbReviewTotal() { return qbChoiceSum(qbPaperQs, qbReviewMarks); }
+function qbReviewMcqTotal() { return qbChoiceSum(qbPaperQs.filter(pq => (qbQuestionById(pq.question_id) || {}).question_type === 'mcq'), qbReviewMarks); }
 
 async function qbSaveReview(finish, next) {
   const a = qbPaperAssignments.find(x => x.id === qbReviewId);
   if (!a) return;
   const written = qbPaperQs.filter(pq => (qbQuestionById(pq.question_id) || {}).question_type !== 'mcq');
-  const unmarked = written.filter(pq => qbReviewAttempts.some(r => r.question_id === pq.question_id) && (qbReviewDraft[pq.question_id] || {}).marks === '').length;
+  const unmarked = qbPaperQs.filter(pq => qbReviewAttempts.some(r => r.question_id === pq.question_id) && (qbReviewDraft[pq.question_id] || {}).marks === '').length;
   if (finish && unmarked && !confirm(`${unmarked} answered question${unmarked === 1 ? ' has' : 's have'} no marks yet and will count as 0. Mark as reviewed anyway?`)) return;
   qbPaperSaving = true; render();
   // Only answered questions have an attempt row; unanswered ones simply score 0.
-  const updates = qbReviewAttempts.filter(r => (qbQuestionById(r.question_id) || {}).question_type !== 'mcq').map(r => {
+  // MCQ rows are saved too, so a teacher's change to an auto-given mark sticks.
+  const updates = qbReviewAttempts.map(r => {
     const d = qbReviewDraft[r.question_id] || { marks: '', comment: '' };
     return sb.from('qb_student_attempts').update({ marks_awarded: d.marks === '' ? null : Number(d.marks), teacher_comment: d.comment || null }).eq('id', r.id);
   });
@@ -17216,14 +17217,15 @@ async function qbSaveReview(finish, next) {
   const err = results.find(r => r.error);
   if (err) { qbPaperMsg = 'Could not save marks: ' + err.error.message; qbPaperSaving = false; render(); return; }
   const writtenScore = qbChoiceSum(written, qbReviewMarks);
-  const fields = { written_score: writtenScore, total_score: (Number(a.mcq_score) || 0) + writtenScore, teacher_feedback: qbReviewFeedback || null };
+  const mcqScore = qbReviewMcqTotal();
+  const fields = { mcq_score: mcqScore, written_score: writtenScore, total_score: mcqScore + writtenScore, teacher_feedback: qbReviewFeedback || null };
   if (finish) Object.assign(fields, { status: 'reviewed', reviewed_by: currentUserId || null, reviewed_at: new Date().toISOString() });
   const wasSubmitted = a.status === 'submitted';
   const { error } = await sb.from('qb_student_assignments').update(fields).eq('id', a.id);
   if (error) { qbPaperMsg = 'Could not save review: ' + error.message; qbPaperSaving = false; render(); return; }
   Object.assign(a, fields);
   if (finish && wasSubmitted && qbPaperCounts[qbPaperId]) qbPaperCounts[qbPaperId].submitted = Math.max(0, (qbPaperCounts[qbPaperId].submitted || 0) - 1);
-  qbReviewAttempts.forEach(r => { const d = qbReviewDraft[r.question_id]; if (d && (qbQuestionById(r.question_id) || {}).question_type !== 'mcq') { r.marks_awarded = d.marks === '' ? null : Number(d.marks); r.teacher_comment = d.comment || null; } });
+  qbReviewAttempts.forEach(r => { const d = qbReviewDraft[r.question_id]; if (d) { r.marks_awarded = d.marks === '' ? null : Number(d.marks); r.teacher_comment = d.comment || null; } });
   qbPaperSaving = false;
   if (finish) {
     const s = data.students.find(x => x.id === a.student_id);
@@ -17256,13 +17258,14 @@ function qbReviewHtml() {
         if (!att || (!(att.answer_text || '').trim() && !(att.photo_urls || []).length)) answer = `<div class="hint" style="margin-top:6px">Not answered.</div>`;
         else if (q.question_type === 'mcq') {
           const ok = att.is_correct;
-          answer = `<div style="margin-top:6px;font-size:13px">Picked <b>(${esc(att.answer_text || '–')})</b>${q.correct_option ? ` · correct <b>(${esc(q.correct_option)})</b>` : ''} · <b style="color:${ok ? 'var(--forest)' : 'var(--brick)'}">${ok ? '✓' : '✗'} ${esc(String(att.marks_awarded || 0))} / ${max}</b></div>`;
+          const auto = ok == null ? '<span class="hint">no answer key, mark it yourself</span>' : `<b style="color:${ok ? 'var(--forest)' : 'var(--brick)'}">${ok ? '✓ right' : '✗ wrong'}</b>`;
+          answer = `<div style="margin-top:6px;font-size:13px">Picked <b>(${esc(att.answer_text || '–')})</b>${q.correct_option ? ` · correct <b>(${esc(q.correct_option)})</b>` : ''} · ${auto}</div>`;
         } else {
           answer = `${(att.answer_text || '').trim() ? `<div class="qb-block" style="margin-top:6px"><div class="qb-block-label">Student's answer</div>${esc(att.answer_text)}</div>` : ''}
             ${(att.photo_urls || []).map(ph => `<a href="${escAttr(qbReviewPhotoUrls[ph] || '#')}" target="_blank"><img src="${escAttr(qbReviewPhotoUrls[ph] || '')}" alt="Answer photo" style="max-width:100%;max-height:420px;margin:6px 6px 0 0;border:1px solid var(--line);border-radius:6px"></a>`).join('')}`;
         }
         const d = qbReviewDraft[pq.question_id] || { marks: '', comment: '' };
-        const marking = q.question_type === 'mcq' || !att ? '' : ro ? `<div style="margin-top:8px;font-size:13px"><b>Marks: ${d.marks !== '' ? esc(d.marks) : '–'} / ${max}</b>${d.comment ? ` · ${esc(d.comment)}` : ''}</div>` : `<div class="row-form" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
+        const marking = !att ? '' : ro ? `<div style="margin-top:8px;font-size:13px"><b>Marks: ${d.marks !== '' ? esc(d.marks) : '–'} / ${max}</b>${d.comment ? ` · ${esc(d.comment)}` : ''}</div>` : `<div class="row-form" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
             <label style="font-size:13px;font-weight:600">Marks</label>
             <input type="number" min="0" max="${max}" step="1" value="${escAttr(d.marks)}" oninput="qbReviewSetMarks('${pq.question_id}',this.value,${max})" onchange="this.value=(qbReviewDraft['${pq.question_id}']||{}).marks||''" style="width:70px"> <span style="font-size:13px">/ ${max}</span>
             <input type="text" value="${escAttr(d.comment)}" placeholder="Comment (optional)" oninput="qbReviewSetComment('${pq.question_id}',this.value)" style="flex:1;min-width:160px">
@@ -17283,7 +17286,7 @@ function qbReviewHtml() {
   return `<div style="margin-bottom:12px"><button class="btn-small" onclick="qbCloseReview()">← ${esc(p.title || 'Paper')}</button></div>
     <h3 style="margin:0 0 4px">${esc(s ? s.name : 'Student')} — ${esc(p.title || '')}</h3>
     <div style="font-size:13px;color:var(--muted);margin-bottom:8px">Submitted ${esc(qbFmtDate(a.submitted_at))}${reviewed ? ' · reviewed ' + esc(qbFmtDate(a.reviewed_at)) : ''}
-      ${ro ? '' : (() => { const left = qbPaperAssignments.filter(x => x.status === 'submitted' && x.id !== a.id).length; return left ? `<span style="color:var(--gold);font-weight:700">· ${left} more to mark</span> ` : ''; })()}· MCQ ${esc(String(Number(a.mcq_score) || 0))} · Total <b style="color:var(--ink)"><span id="qbReviewTotal">${qbReviewTotal()}</span> / ${esc(String(p.total_marks || ''))}</b></div>
+      ${ro ? '' : (() => { const left = qbPaperAssignments.filter(x => x.status === 'submitted' && x.id !== a.id).length; return left ? `<span style="color:var(--gold);font-weight:700">· ${left} more to mark</span> ` : ''; })()}· MCQ <span id="qbReviewMcq">${qbReviewMcqTotal()}</span> · Total <b style="color:var(--ink)"><span id="qbReviewTotal">${qbReviewTotal()}</span> / ${esc(String(p.total_marks || ''))}</b></div>
     ${body}
     ${ro ? `<div class="qb-block" style="white-space:normal;margin-top:16px"><div class="qb-block-label">Teacher's feedback</div>${qbReviewFeedback ? esc(qbReviewFeedback) : '<span class="hint">None yet.</span>'}</div>
       ${reviewed ? '' : '<div class="hint" style="margin-top:8px">The teacher hasn’t finished marking this paper yet.</div>'}` : `<div class="qb-block" style="white-space:normal;margin-top:16px"><div class="qb-block-label">Overall feedback</div>
