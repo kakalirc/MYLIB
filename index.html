@@ -269,7 +269,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-21 19:30 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-21 20:40 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -860,6 +860,7 @@ let resettingUserId = null;
 let studentViewMonth = monthStr;
 let teacherViewMonth = monthStr;
 let teacherPortalTab = 'dashboard';
+let teacherStudentSearch = '';
 let studyPlanTeacherStudentId = '';
 let studyPlanTeacherSubjectId = '';
 let studyPlanMsg = '';
@@ -1004,6 +1005,7 @@ function toggleTeacherMobileTabMenu() { teacherMobileTabMenuOpen = !teacherMobil
 function setTeacherPortalTab(t) {
   teacherPortalTab = t;
   teacherMobileTabMenuOpen = false;
+  if (t === 'students') teacherStudentSearch = '';
   if (t === 'attendance') { logDraft.teacherId = currentLinkedId; logDraft.date = todayStr; logMsg = ''; }
   if (t === 'report') { loadTeacherPayrollRecords().then(() => render()); return; }
   if (t === 'studyplans') { studyPlanTeacherStudentId = ''; studyPlanTeacherSubjectId = ''; studyPlanDraftItems = []; studyPlanMsg = ''; studyPlanViewMode = 'report'; studyPlanFilterStatus = 'all'; studyPlanFilterSubjectId = ''; studyPlanFilterStudent = ''; loadStudyPlans().then(() => render()); return; }
@@ -1465,6 +1467,17 @@ function handleOtherAdminPhotoUpload(event, profileId) {
   reader.readAsDataURL(file);
 }
 async function loadFeeRates() {
+  // Teachers never get the student fee price list, discounts or UPI details (SQL 45 also blocks the table for them):
+  // only the academic year and audit switches, through teacher_app_settings().
+  if (currentRole === 'Teacher') {
+    feeSettingsRowId = null; feeRates = {}; discountTiers = []; upiId = ''; feeContactMobile = ''; upiQrImage = '';
+    const { data: st, error: stErr } = await sb.rpc('teacher_app_settings');
+    const row = (!stErr && st) ? st : {};
+    globalAcademicYear = row.global_academic_year || '';
+    auditLoggingEnabled = row.audit_logging_enabled !== false;
+    loginAuditEnabled = row.login_audit_enabled !== false;
+    return;
+  }
   const { data: rows, error } = await sb.from('fee_settings').select('*').order('updated_at', { ascending: false, nullsFirst: false }).limit(1);
   if (!error && rows && rows.length) {
     feeSettingsRowId = rows[0].id;
@@ -3062,11 +3075,24 @@ async function loadStudentsAndSubscriptions() {
   if (!enErr && enrollRows) {
     data.studentSubjects = enrollRows.map(r => ({ id: r.id, studentId: r.student_id, subjectId: r.subject_id, enrolledAt: r.enrolled_at || '' }));
   }
-  const { data: subRows, error: subErr } = await selectAllPaged('subscriptions', ['date']);
+  // Teachers get subscriptions through teacher_my_subscriptions() (SQL 45): classes, dates and expiry only, never
+  // amounts, payment references/remarks or fee requests. Until SQL 45 is run that function doesn't exist, so fall
+  // back to the table and drop the money and fee requests here.
+  let subRows, subErr;
+  if (currentRole === 'Teacher') {
+    const res = await sb.rpc('teacher_my_subscriptions');
+    if (!res.error && Array.isArray(res.data)) subRows = res.data;
+    else {
+      ({ data: subRows, error: subErr } = await selectAllPaged('subscriptions', ['date']));
+      if (subRows) subRows = subRows.filter(r => r.kind !== 'Request').map(r => Object.assign({}, r, { amount_paid: 0, payment_reference: '', payment_remarks: '' }));
+    }
+  } else {
+    ({ data: subRows, error: subErr } = await selectAllPaged('subscriptions', ['date']));
+  }
   if (!subErr && subRows) {
     data.subscriptions = subRows.map(r => ({
       id: r.id, studentId: r.student_id, subjectId: r.subject_id, type: r.type,
-      classes: Number(r.classes), amountPaid: Number(r.amount_paid), date: r.date, kind: r.kind,
+      classes: Number(r.classes), amountPaid: Number(r.amount_paid) || 0, date: r.date, kind: r.kind,
       paymentReference: r.payment_reference || '', paymentRemarks: r.payment_remarks || '',
       transferGroupId: r.transfer_group_id || '',
       expiresOn: r.expires_on || '', expiredBatchId: r.expired_batch_id || ''
@@ -13090,6 +13116,88 @@ function studentFeeCalculatorHtml(student) {
     ${ratesFeesContent}`;
 }
 
+// ── My Students (teacher) ─────────────────────────────────────
+// Contact details and class balances for the teacher's own students only (the database already limits teachers
+// to students enrolled in their subjects). No money anywhere: teachers' subscription rows come without amounts
+// (teacher_my_subscriptions, SQL 45).
+function teacherStudentPhoneLinks(number) {
+  const digits = String(number || '').replace(/\D/g, '');
+  if (!digits) return '';
+  const wa = digits.length === 10 ? '91' + digits : digits;
+  return `<span style="display:inline-flex;align-items:center;gap:6px;margin:2px 10px 2px 0">
+    <a href="tel:${escAttr(number)}">${esc(number)}</a>
+    <a href="https://wa.me/${wa}" target="_blank" class="btn-small" style="background:#25D366;color:#fff;border-color:#25D366;text-decoration:none;font-size:11px;padding:2px 8px">WhatsApp</a>
+  </span>`;
+}
+function teacherStudentCardHtml(s, teacher) {
+  const gradeName = s.gradeId ? ((grades.find(g=>g.id===s.gradeId)||{}).name||'') : '';
+  const boardName = s.boardId ? ((boards.find(b=>b.id===s.boardId)||{}).name||'') : '';
+  const classLine = [gradeName, boardName, s.academicYear].filter(Boolean).join(' · ');
+  const studentNums = phoneNumbersFor(s.id, 'student').map(p=>p.number).filter(Boolean);
+  const parentNums = phoneNumbersFor(s.id, 'parent').map(p=>p.number).filter(Boolean);
+  if (s.mobileNumber && !studentNums.includes(s.mobileNumber) && !parentNums.includes(s.mobileNumber)) studentNums.unshift(s.mobileNumber);
+  const subjRows = [];
+  subjectsForStudentAndTeacher(s.id, teacher.id).forEach(subj => {
+    TYPES.forEach(ty => {
+      const bought = studentSubscribed(s.id, subj.id, ty), used = studentUsed(s.id, subj.id, ty);
+      if (bought === 0 && used === 0) return;
+      const nextExpiry = allocateSubscriptions(s.id, subj.id, ty)
+        .filter(b => b.remainingHere > 0 && b.expiresOn && b.expiresOn >= todayStr)
+        .sort((a,b) => a.expiresOn.localeCompare(b.expiresOn))[0];
+      subjRows.push(`<tr><td>${esc(subj.name)}</td><td>${ty}</td><td>${bought}</td><td>${used}</td>
+        <td style="font-weight:600;color:${bought-used<=0?'var(--brick)':'inherit'}">${bought-used}</td>
+        <td>${nextExpiry ? `${nextExpiry.remainingHere} on ${esc(formatDate(nextExpiry.expiresOn))}` : '<span class="hint">—</span>'}</td></tr>`);
+    });
+    if (!TYPES.some(ty => studentSubscribed(s.id, subj.id, ty) || studentUsed(s.id, subj.id, ty))) {
+      subjRows.push(`<tr><td>${esc(subj.name)}</td><td colspan="5" class="hint">No classes subscribed yet</td></tr>`);
+    }
+  });
+  const search = [s.name, s.code, s.parentName, s.email, gradeName, ...studentNums, ...parentNums].join(' ').toLowerCase();
+  const term = teacherStudentSearch.trim().toLowerCase();
+  const hidden = term && !search.includes(term);
+  return `
+    <div class="card teacher-student-card" data-search="${escAttr(search)}" style="margin-bottom:12px${hidden ? ';display:none' : ''}">
+      <h3 style="margin:0 0 2px">${esc(studentLabel(s))}</h3>
+      ${classLine ? `<div class="hint" style="margin:0 0 8px">${esc(classLine)}</div>` : ''}
+      <div style="font-size:14px;line-height:1.8">
+        <div><b>Parent:</b> ${s.parentName ? esc(s.parentName) : '<span class="hint">—</span>'}</div>
+        <div><b>Parent mobile:</b> ${parentNums.length ? parentNums.map(teacherStudentPhoneLinks).join('') : '<span class="hint">—</span>'}</div>
+        <div><b>Student mobile:</b> ${studentNums.length ? studentNums.map(teacherStudentPhoneLinks).join('') : '<span class="hint">—</span>'}</div>
+        <div><b>Email:</b> ${s.email ? `<a href="mailto:${escAttr(s.email)}">${esc(s.email)}</a>` : '<span class="hint">—</span>'}</div>
+      </div>
+      ${subjRows.length ? `<div class="table-scroll" style="margin-top:10px"><table>
+        <tr><th>Subject</th><th>Type</th><th>Subscribed</th><th>Used</th><th>Left</th><th>Next expiry</th></tr>
+        ${subjRows.join('')}
+      </table></div>` : ''}
+    </div>`;
+}
+// Filters the cards in place (no re-render), so typing in the box never loses focus.
+function teacherStudentsFilter(value) {
+  teacherStudentSearch = value;
+  const term = value.trim().toLowerCase();
+  let shown = 0;
+  document.querySelectorAll('.teacher-student-card').forEach(el => {
+    const ok = !term || el.dataset.search.includes(term);
+    el.style.display = ok ? '' : 'none';
+    if (ok) shown++;
+  });
+  const none = document.getElementById('teacherStudentsNone');
+  if (none) none.style.display = shown ? 'none' : '';
+}
+function renderTeacherStudents(teacher) {
+  const list = byName(studentsForTeacher(teacher.id).filter(s=>!s.archived));
+  if (!list.length) return `<div class="card"><h2>My Students</h2><div class="empty">No students are enrolled in your subjects yet.</div></div>`;
+  const cards = list.map(s => teacherStudentCardHtml(s, teacher));
+  const anyShown = cards.some(c => !c.includes(';display:none"'));
+  return `
+    <div class="card">
+      <h2>My Students <span class="hint" style="font-weight:400">(${list.length})</span></h2>
+      <div class="hint" style="margin:0 0 8px">Contact details and class balances for students enrolled in your subjects.</div>
+      <input type="search" placeholder="Search name, parent, phone or email…" value="${escAttr(teacherStudentSearch)}" oninput="teacherStudentsFilter(this.value)" style="width:100%;max-width:360px">
+    </div>
+    ${cards.join('')}
+    <div id="teacherStudentsNone" class="card" style="${anyShown ? 'display:none' : ''}"><div class="empty">No student matches this search.</div></div>`;
+}
 function renderTeacherStudyPlans(teacher) {
   const myStudents = byName(data.students.filter(s=>!s.archived && subjectsForStudentAndTeacher(s.id,teacher.id).length));
   if (!myStudents.length) return `<div class="card"><div class="empty">No students are mapped to you yet. Once a student is enrolled in your subjects, they will appear here.</div></div>`;
@@ -14774,6 +14882,7 @@ function renderTeacherPortal() {
   const teacherTabGroups = [
     { label: 'Teaching', tabs: [
       ['schedule', 'Class Schedule'],
+      ['students', 'My Students'],
       ['studyplans', 'Study Plans'],
       ['homework', 'Homework'],
       ...(teacherQbAccess ? [['questionbank', 'Question Bank']] : []),
@@ -14793,6 +14902,7 @@ function renderTeacherPortal() {
   const teacherMobileTabsList = [
     ['dashboard', 'Dashboard'],
     ['schedule', 'Class Schedule'],
+    ['students', 'My Students'],
     ['studyplans', 'Study Plans'],
     ['homework', 'Homework'],
     ...(teacherQbAccess ? [['questionbank', 'Question Bank']] : []),
@@ -14843,6 +14953,9 @@ function teacherPortalBodyHtml(teacher) {
   }
   if (teacherPortalTab === 'schedule') {
     return renderTeacherSchedule(teacher, false);
+  }
+  if (teacherPortalTab === 'students') {
+    return renderTeacherStudents(teacher);
   }
   if (teacherPortalTab === 'studyplans') {
     return renderTeacherStudyPlans(teacher);
