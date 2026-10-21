@@ -267,7 +267,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-21 09:55 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-21 10:10 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -5184,6 +5184,8 @@ async function refreshAllData(silent) {
       loadExpiryConfig(),
       loadHomework(),
       loadPracticeAssignments(),
+      // Picks up an admin switching this teacher's Question Bank on/off without a fresh login.
+      currentRole === 'Teacher' ? loadTeacherQbAccess() : Promise.resolve(),
     ]);
     await Promise.all([
       loadMyPhoto(),
