@@ -269,7 +269,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-21 16:10 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-21 17:05 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -929,6 +929,8 @@ let qbBulkChapterId = '';       // chapter chosen in the "Set chapter" bar
 let qbPassages = {};            // passage_id -> qb_passages row, for unseen-passage questions
 let qbApprovers = {};           // profile id -> username, for "approved by"
 let qbExpandedIds = new Set();  // question ids whose details are open in the list
+const QB_PAGE_SIZE = 40;          // cards drawn at a time; drawing the whole bank at once froze slower laptops
+let qbShowLimit = QB_PAGE_SIZE, qbShowKey = '';  // how many cards are drawn, and for which tab + filters
 // Practice papers (teacher's "Practice Papers" sub-tab of the Question Bank)
 let qbBlueprints = [];          // qb_paper_blueprints rows, one per section
 let qbPapers = [];              // this teacher's qb_practice_papers
@@ -15754,7 +15756,7 @@ function spQuestionHtml(q, n) {
     <div class="qb-meta"><span class="qb-sec">Q${n}</span><span class="qb-marks">${esc(String(q.marks || 0))} mark${Number(q.marks) === 1 ? '' : 's'}</span>
       ${!ro && spIsAnswered(q.question_id) ? '<span style="color:var(--forest)">· answered</span>' : ''}</div>
     <div class="qb-text" style="cursor:default">${esc(q.question_text || '')}</div>
-    ${q.question_image_url ? `<img class="qb-img" src="${escAttr(q.question_image_url)}" alt="" loading="lazy">` : ''}
+    ${q.question_image_url ? `<img class="qb-img" src="${escAttr(q.question_image_url)}" alt="" loading="lazy" decoding="async">` : ''}
     ${answerHtml}${marksLine}${comment}${model}
   </div>`;
 }
@@ -16017,6 +16019,7 @@ function qbFiltersHtml(showAll) {
 const QB_CARD_CSS = `<style>
   .qb-list { display:flex; flex-direction:column; gap:10px; }
   .qb-card { border:1px solid var(--line); border-radius:10px; background:var(--paper); padding:12px 14px; }
+  .qb-list > .qb-card { content-visibility:auto; contain-intrinsic-size:auto 180px; }
   .qb-card.open { border-color:var(--gold); }
   .qb-meta { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:12px; color:var(--muted); margin-bottom:8px; }
   .qb-meta .tag { margin-left:0; }
@@ -16068,7 +16071,7 @@ function qbPassageLead(from, count, picture) {
 }
 function qbPassageBox(head, passageText, inner, imageUrl) {
   return `<div class="qb-pgroup"><div class="qb-pgroup-head">${head}</div>
-    ${imageUrl ? `<img class="qb-img" src="${escAttr(imageUrl)}" alt="" loading="lazy" style="margin-top:0">` : ''}
+    ${imageUrl ? `<img class="qb-img" src="${escAttr(imageUrl)}" alt="" loading="lazy" decoding="async" style="margin-top:0">` : ''}
     ${passageText ? `<div class="qb-block" style="margin-top:0">${esc(passageText)}</div>` : ''}${inner}</div>`;
 }
 
@@ -16105,7 +16108,7 @@ function qbImageFieldHtml(key, url, onRemove) {
     ${url ? `<button class="btn-small" onclick="${onRemove};render()">Remove picture</button>` : ''}
   </div>`;
 }
-function qbImgHtml(url, maxH) { return url ? `<img class="qb-img" src="${escAttr(url)}" alt="" loading="lazy"${maxH ? ` style="max-height:${maxH}px"` : ''}>` : ''; }
+function qbImgHtml(url, maxH) { return url ? `<img class="qb-img" src="${escAttr(url)}" alt="" loading="lazy" decoding="async"${maxH ? ` style="max-height:${maxH}px"` : ''}>` : ''; }
 
 // fromPaper: opened from the practice paper editor. lockMarks: that paper is already assigned, so its marks stay as they are.
 function qbEditFormHtml(q, fromPaper, lockMarks) {
@@ -16162,7 +16165,7 @@ function qbQuestionRowHtml(q, isAdmin) {
   const source = [q.source_year, q.source_exam_type].filter(Boolean).join(' · ');
   const passage = q.passage_id ? qbPassages[q.passage_id] : null;
   const block = (label, body) => body ? `<div class="qb-block"><div class="qb-block-label">${label}</div>${body}</div>` : '';
-  const img = url => url ? `<img class="qb-img" src="${escAttr(url)}" alt="" loading="lazy">` : '';
+  const img = url => url ? `<img class="qb-img" src="${escAttr(url)}" alt="" loading="lazy" decoding="async">` : '';
 
   const facts = [];
   if (q.language) facts.push(`Language: ${esc(q.language)}`);
@@ -16245,7 +16248,19 @@ function qbBulkBarHtml(qs) {
 function qbTableHtml(qs, isAdmin) {
   if (!qbScopeChosen()) return '<div class="empty">Choose Board, Subject and Grade to see questions.</div>';
   if (!qs.length) return '<div class="empty">No questions match these filters.</div>';
-  return `${QB_CARD_CSS}${qbBulkBarHtml(qs)}<div class="qb-list">${qs.map(q => qbQuestionRowHtml(q, isAdmin)).join('')}</div>`;
+  // Draw the list a page at a time; a new tab or filter starts again from the first page.
+  const key = [qbSubTab, qbFilterBoard, qbFilterSubject, qbFilterGrade, qbFilterType, qbFilterDifficulty, qbFilterChapter, qbFilterTopic, qbFilterSearch, qbFilterDup, qbFilterZero].join('|');
+  if (key !== qbShowKey) { qbShowKey = key; qbShowLimit = QB_PAGE_SIZE; }
+  // Keep the question being edited on screen even if it sits past the current page.
+  const editAt = qbEditId ? qs.findIndex(q => q.id === qbEditId) : -1;
+  const shown = qs.slice(0, Math.max(qbShowLimit, editAt + 1));
+  const left = qs.length - shown.length;
+  const more = left ? `<div style="display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:8px;margin-top:12px">
+      <span style="font-size:12px;color:var(--muted)">Showing ${shown.length} of ${qs.length}</span>
+      <button class="btn-small btn-primary" onclick="qbShowLimit=${shown.length + QB_PAGE_SIZE};render()">Show ${Math.min(left, QB_PAGE_SIZE)} more</button>
+      ${left > QB_PAGE_SIZE ? `<button class="btn-small" onclick="qbShowLimit=${qs.length};render()" title="Can be slow on older laptops">Show all ${qs.length}</button>` : ''}
+    </div>` : '';
+  return `${QB_CARD_CSS}${qbBulkBarHtml(qs)}<div class="qb-list">${shown.map(q => qbQuestionRowHtml(q, isAdmin)).join('')}</div>${more}`;
 }
 
 // ─────────────────────────────────────────────────────────────
