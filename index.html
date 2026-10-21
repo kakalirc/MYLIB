@@ -267,7 +267,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-20 14:34 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-21 08:30 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -16858,12 +16858,43 @@ async function qbAssignPaper() {
   qbPaperSaving = false; render();
 }
 
+// Not started: delete the row. Started: qb_unassign (SQL 30) also deletes the answers, which teachers can't delete directly.
 async function qbUnassign(assignmentId) {
-  if (!confirm('Remove this assignment?')) return;
-  const { error } = await sb.from('qb_student_assignments').delete().eq('id', assignmentId);
-  if (error) { qbPaperMsg = 'Error: ' + error.message; render(); return; }
-  qbPaperAssignments = qbPaperAssignments.filter(a => a.id !== assignmentId);
+  const a = qbPaperAssignments.find(x => x.id === assignmentId);
+  if (!a) return;
+  const s = data.students.find(x => x.id === a.student_id);
+  const who = s ? s.name : 'this student';
+  if (!confirm(a.status === 'assigned' ? `Remove this paper from ${who}?`
+    : `${who} has already started this paper. Removing it deletes their answers. Remove anyway?`)) return;
+  let error;
+  if (a.status === 'assigned') {
+    const res = await sb.from('qb_student_assignments').delete().eq('id', assignmentId).select('id');
+    error = res.error || (!(res.data || []).length ? { message: 'not allowed to remove it' } : null);
+  } else {
+    ({ error } = await sb.rpc('qb_unassign', { p_assignment_id: assignmentId }));
+  }
+  if (error) { qbPaperMsg = 'Could not remove: ' + error.message; render(); return; }
+  qbPaperAssignments = qbPaperAssignments.filter(x => x.id !== assignmentId);
+  if (qbPaperCounts[qbPaperId]) qbPaperCounts[qbPaperId].assigned = Math.max(0, (qbPaperCounts[qbPaperId].assigned || 0) - 1);
+  qbPaperMsg = `✓ Removed from ${who}`;
   render();
+}
+
+// Change (or clear) one student's due date. value is yyyy-mm-dd from the date box, '' for no due date.
+async function qbSetDue(assignmentId, value) {
+  const until = value ? new Date(value + 'T23:59:59').toISOString() : null;
+  const { data: rows, error } = await sb.from('qb_student_assignments').update({ available_until: until }).eq('id', assignmentId).select();
+  if (error || !(rows || []).length) { qbPaperMsg = 'Could not change the due date: ' + (error ? error.message : 'not allowed'); render(); return; }
+  const a = qbPaperAssignments.find(x => x.id === assignmentId);
+  if (a) Object.assign(a, rows[0]);
+  qbPaperMsg = value ? `✓ Due date changed to ${qbFmtDate(until)}` : '✓ Due date removed';
+  render();
+}
+// The date box shows the due date in local time, like qbAssignPaper stored it.
+function qbDueInput(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 // ── Rendering ────────────────────────────────────────────────
@@ -17269,12 +17300,15 @@ function qbPaperEditorHtml() {
       const s = data.students.find(x => x.id === a.student_id);
       const due = a.available_until ? ' · due ' + qbFmtDate(a.available_until) : '';
       const label = { assigned: 'not started', in_progress: 'in progress', submitted: 'needs marking · submitted ' + qbFmtDate(a.submitted_at), reviewed: `reviewed · ${a.total_score ?? '–'} / ${p.total_marks || ''}` }[a.status] || a.status || 'assigned';
+      const open = a.status === 'assigned' || a.status === 'in_progress';
       const btn = ro ? (a.status === 'submitted' || a.status === 'reviewed' ? `<button class="btn-small" onclick="qbOpenReview('${a.id}')">View answers</button>` : '')
-        : a.status === 'assigned' ? `<button class="btn-small" onclick="qbUnassign('${a.id}')">Remove</button>`
+        : open ? `<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <label style="font-size:11px;color:var(--muted)">Due <input type="date" value="${escAttr(qbDueInput(a.available_until))}" onchange="qbSetDue('${a.id}',this.value)" style="font-size:12px;padding:2px 4px"></label>
+            <button class="btn-small" onclick="qbUnassign('${a.id}')">Remove</button></span>`
         : a.status === 'submitted' ? `<button class="btn-small btn-primary" onclick="qbOpenReview('${a.id}')">Review</button>`
         : a.status === 'reviewed' ? `<button class="btn-small" onclick="qbOpenReview('${a.id}')">View / edit marks</button>` : '';
       return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;font-size:13px;border-bottom:1px solid var(--line)">
-        <span>${esc(s ? s.name : 'Student')} <span style="color:${a.status === 'submitted' ? 'var(--gold)' : 'var(--muted)'};font-size:11px;font-weight:${a.status === 'submitted' ? 700 : 400}">${esc(label)}${a.status === 'submitted' || a.status === 'reviewed' ? '' : esc(due)}</span></span>
+        <span>${esc(s ? s.name : 'Student')} <span style="color:${a.status === 'submitted' ? 'var(--gold)' : 'var(--muted)'};font-size:11px;font-weight:${a.status === 'submitted' ? 700 : 400}">${esc(label)}${open && ro ? esc(due) : ''}</span></span>
         ${btn}</div>`;
     }).join('')}</div>` : `<div class="empty">No students in this list.</div>`}`;
   const tabBtn = (k, label) => `<button class="btn-small${tab === k ? ' btn-primary' : ''}" onclick="qbPaperTab='${k}';qbPicker=null;render()">${label}</button>`;
