@@ -267,7 +267,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-21 08:30 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-21 08:45 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -3121,6 +3121,20 @@ async function qbApprove(id) {
   qbQuestions = qbQuestions.map(q => q.id === id ? { ...q, ...stamp } : q);
   if (currentUserId) qbApprovers[currentUserId] = currentUsername;
   qbMsg = '✓ Approved';
+  qbSaving = false; render();
+  setTimeout(() => { qbMsg = ''; render(); }, 2000);
+}
+
+// Send an approved question back to the Review Queue (it stays on any paper that already uses it).
+async function qbSendForReview(id) {
+  if (!sb) return;
+  if (!confirm('Send this question back to the Review Queue for re-review? It will not be offered for new practice papers until it is approved again.')) return;
+  qbSaving = true; render();
+  const stamp = { approved: false, approved_by: null, approved_at: null };
+  const { error } = await sb.from('qb_questions').update(stamp).eq('id', id);
+  if (error) { qbMsg = 'Error: ' + error.message; qbSaving = false; render(); return; }
+  qbQuestions = qbQuestions.map(q => q.id === id ? { ...q, ...stamp } : q);
+  qbMsg = '✓ Sent to the Review Queue';
   qbSaving = false; render();
   setTimeout(() => { qbMsg = ''; render(); }, 2000);
 }
@@ -15814,6 +15828,22 @@ function qbDistinct(qs, fn) { return [...new Set(qs.map(fn).filter(Boolean))].so
 function qbZeroMarks(q) { return !(Number(q.marks) > 0); }
 // Nor is a picture composition without its picture: students can't answer it.
 function qbMissingPicture(q) { return q.question_type === 'picture_composition' && !q.question_image_url && !(q.passage_id && (qbPassages[q.passage_id] || {}).image_url); }
+// Typing in the search box: wait for a short pause (and for a phone/Devanagari keyboard to finish composing),
+// then re-draw the list and put the cursor back in the box, so letters are not lost.
+let qbSearchTimer = null;
+function qbSearchInput(el, ev) {
+  qbFilterSearch = el.value;
+  clearTimeout(qbSearchTimer);
+  if (ev && ev.isComposing) return;
+  qbSearchTimer = setTimeout(() => {
+    const box = document.getElementById('qbFilterSearch');
+    const focused = document.activeElement === box;
+    const pos = box ? box.selectionStart : null;
+    render();
+    const nb = document.getElementById('qbFilterSearch');
+    if (nb && focused) { nb.focus({ preventScroll: true }); if (pos != null) nb.setSelectionRange(pos, pos); }
+  }, 250);
+}
 function qbClearDetailFilters() { qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterTopic=''; qbSelectedIds = new Set(); qbBulkChapterId = ''; }
 
 // Duplicate check. Same clean-up as question-bank/sql/08-check-duplicates.sql: ignore case, spaces,
@@ -15917,7 +15947,7 @@ function qbFiltersHtml(showAll) {
       ${noTopic ? `<option value="__none__" ${qbFilterTopic==='__none__'?'selected':''}>No topic (${noTopic})</option>` : ''}
       ${topics.map(t=>`<option value="${escAttr(t)}" ${t===qbFilterTopic?'selected':''}>${esc(t)}</option>`).join('')}
     </select>` : ''}
-    <input type="text" ${dis} value="${esc(qbFilterSearch)}" placeholder="Search question text…" oninput="qbFilterSearch=this.value;render()" style="min-width:180px">
+    <input type="text" id="qbFilterSearch" ${dis} value="${esc(qbFilterSearch)}" placeholder="Search question text…" oninput="qbSearchInput(this,event)" oncompositionend="qbSearchInput(this,event)" style="min-width:180px">
     ${unlocked && (dupCount || qbFilterDup) ? `<label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--brick)"><input type="checkbox" ${qbFilterDup?'checked':''} onchange="qbFilterDup=this.checked;render()">Duplicates only (${dupCount})</label>` : ''}
     ${unlocked && (zeroCount || qbFilterZero) ? `<label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--brick)"><input type="checkbox" ${qbFilterZero?'checked':''} onchange="qbFilterZero=this.checked;render()">0 marks only (${zeroCount})</label>` : ''}
     ${anyFilter?`<button class="btn-small" onclick="qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbClearDetailFilters();render()">✕ Clear</button>`:''}
@@ -16126,6 +16156,7 @@ function qbQuestionRowHtml(q, isAdmin) {
         <button class="btn-small" onclick="qbToggleExpand('${q.id}')">${open ? 'Hide details' : 'Show details'}</button>
         ${q.archived ? `<button class="btn-small btn-primary" onclick="qbSetArchived('${q.id}',false)" ${qbSaving?'disabled':''}>↺ Restore</button>` : `
         ${!q.approved ? `<button class="btn-small btn-primary" onclick="qbApprove('${q.id}')" ${qbSaving?'disabled':''}>✓ Approve</button>` : ''}
+        ${q.approved ? `<button class="btn-small" onclick="qbSendForReview('${q.id}')" ${qbSaving?'disabled':''} title="Take it out of the bank and back to the Review Queue">↩ Re-review</button>` : ''}
         <button class="btn-small" onclick="qbStartEdit('${q.id}')">Edit</button>
         <button class="btn-small" onclick="qbSetArchived('${q.id}',true)" ${qbSaving?'disabled':''}>Archive</button>`}
       </div>
