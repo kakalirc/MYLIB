@@ -269,7 +269,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 10:00 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 10:20 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -572,6 +572,8 @@ let appUsageRecent = null;    // events in the last 30 days (for "not using")
 let appUsageProfiles = [];    // logins, to name users and list who is not using
 let appUsageFirst = '';       // date of the oldest event (when tracking started)
 let appUsageMsg = '';
+let appUsageExpanded = {}; // 'f:<feature>' or 'u:<user id>' → row opened
+function toggleAppUsageRow(key) { appUsageExpanded[key] = !appUsageExpanded[key]; render(); }
 async function appUsageSelect(from, to) {
   let rows = [];
   for (let i = 0; i < 200000; i += 1000) {
@@ -620,37 +622,54 @@ function appUsageHtml() {
   const roles = ['Teacher', 'Student', 'Parent', 'Admin'];
   const rows = appUsageRows.filter(r => !appUsageRole || r.role === appUsageRole);
   const shown = appUsageRole ? [appUsageRole] : roles;
+  const order = f => { const i = APP_USAGE_ACTIONS.findIndex(a => a[0] === f); return i >= 0 ? i : 1000; };
+  const byOrder = (a, b) => order(a) - order(b) || appUsageFeatureLabel(a).localeCompare(appUsageFeatureLabel(b));
+  const arrow = key => `<span style="display:inline-block;width:14px;font-size:11px;color:var(--muted)">${appUsageExpanded[key] ? '▼' : '▶'}</span>`;
+  const sub = (cols, html) => `<tr><td colspan="${cols}" style="background:var(--paper);padding:6px 10px 10px 28px">${html}</td></tr>`;
   if (appUsageView === 'feature') {
     if (!rows.length) return '<div class="empty">Nothing logged this month.</div>';
     const by = {};
     rows.forEach(r => {
-      const f = by[r.feature] || (by[r.feature] = { n: {}, users: new Set() });
-      f.n[r.role] = (f.n[r.role] || 0) + 1; f.users.add(r.user_id);
+      const f = by[r.feature] || (by[r.feature] = { n: {}, users: {} });
+      f.n[r.role] = (f.n[r.role] || 0) + 1;
+      const u = f.users[r.user_id] || (f.users[r.user_id] = { label: appUsageUserLabel(r.user_id, r.role, r.linked_id), role: r.role || '', n: 0, last: '' });
+      u.n++; if (String(r.created_at) > u.last) u.last = String(r.created_at);
     });
-    const order = f => { const i = APP_USAGE_ACTIONS.findIndex(a => a[0] === f); return i >= 0 ? i : 1000; };
-    const keys = Object.keys(by).sort((a, b) => order(a) - order(b) || appUsageFeatureLabel(a).localeCompare(appUsageFeatureLabel(b)));
+    const keys = Object.keys(by).sort(byOrder);
+    const cols = shown.length + 2;
+    const who = k => `<table style="font-size:12.5px;margin:0">
+      <tr><th>Who</th><th>Role</th><th>Times</th><th>Last used</th></tr>
+      ${Object.values(by[k].users).sort((a, b) => b.n - a.n || a.label.localeCompare(b.label)).map(u => `<tr><td>${esc(u.label)}</td><td>${esc(u.role)}</td><td>${u.n}</td><td>${esc(u.last.slice(0, 10))}</td></tr>`).join('')}
+    </table>`;
     return `<div class="table-scroll"><table>
       <tr><th>Feature</th>${shown.map(r => `<th>${r}s</th>`).join('')}<th>People</th></tr>
-      ${keys.map(k => `<tr><td>${esc(appUsageFeatureLabel(k))}</td>${shown.map(r => `<td>${by[k].n[r] || ''}</td>`).join('')}<td>${by[k].users.size}</td></tr>`).join('')}
+      ${keys.map(k => `<tr style="cursor:pointer" onclick="toggleAppUsageRow('f:${escAttr(k)}')"><td>${arrow('f:' + k)}${esc(appUsageFeatureLabel(k))}</td>${shown.map(r => `<td>${by[k].n[r] || ''}</td>`).join('')}<td>${Object.keys(by[k].users).length}</td></tr>${appUsageExpanded['f:' + k] ? sub(cols, who(k)) : ''}`).join('')}
     </table></div>
-    <div class="hint">Numbers are how many times. "People" is how many different logins used it. Screen opens count once a minute at most.</div>`;
+    <div class="hint">Tap a feature to see who used it. Numbers are how many times. "People" is how many different logins used it. Screen opens count once a minute at most.</div>`;
   }
   if (appUsageView === 'user') {
     if (!rows.length) return '<div class="empty">Nothing logged this month.</div>';
     const by = {};
     rows.forEach(r => {
-      const u = by[r.user_id] || (by[r.user_id] = { label: appUsageUserLabel(r.user_id, r.role, r.linked_id), role: r.role || '', total: 0, actions: 0, f: {}, last: '' });
+      const u = by[r.user_id] || (by[r.user_id] = { id: r.user_id, label: appUsageUserLabel(r.user_id, r.role, r.linked_id), role: r.role || '', total: 0, actions: 0, f: {}, fLast: {}, last: '' });
       u.total++; if (!r.feature.startsWith('tab:')) u.actions++;
       u.f[r.feature] = (u.f[r.feature] || 0) + 1;
-      if (String(r.created_at) > u.last) u.last = String(r.created_at);
+      const t = String(r.created_at);
+      if (t > (u.fLast[r.feature] || '')) u.fLast[r.feature] = t;
+      if (t > u.last) u.last = t;
     });
     const list = Object.values(by).sort((a, b) => b.actions - a.actions || b.total - a.total);
     const top = u => Object.entries(u.f).filter(([k]) => !k.startsWith('tab:')).sort((a, b) => b[1] - a[1]).slice(0, 3)
       .map(([k, n]) => `${esc(appUsageFeatureLabel(k))} ×${n}`).join(', ') || '<span style="color:var(--muted)">only opened screens</span>';
+    const all = u => `<table style="font-size:12.5px;margin:0">
+      <tr><th>Feature</th><th>Times</th><th>Last used</th></tr>
+      ${Object.keys(u.f).sort(byOrder).map(k => `<tr><td>${esc(appUsageFeatureLabel(k))}</td><td>${u.f[k]}</td><td>${esc(u.fLast[k].slice(0, 10))}</td></tr>`).join('')}
+    </table>`;
     return `<div class="table-scroll"><table>
       <tr><th>User</th><th>Role</th><th>Actions</th><th>Screens opened</th><th>Top actions</th><th>Last used</th></tr>
-      ${list.map(u => `<tr><td>${esc(u.label)}</td><td>${esc(u.role)}</td><td>${u.actions}</td><td>${u.total - u.actions}</td><td style="font-size:12.5px">${top(u)}</td><td>${esc(u.last.slice(0, 10))}</td></tr>`).join('')}
-    </table></div>`;
+      ${list.map(u => `<tr style="cursor:pointer" onclick="toggleAppUsageRow('u:${escAttr(u.id)}')"><td>${arrow('u:' + u.id)}${esc(u.label)}</td><td>${esc(u.role)}</td><td>${u.actions}</td><td>${u.total - u.actions}</td><td style="font-size:12.5px">${top(u)}</td><td>${esc(u.last.slice(0, 10))}</td></tr>${appUsageExpanded['u:' + u.id] ? sub(6, all(u)) : ''}`).join('')}
+    </table></div>
+    <div class="hint">Tap a person to see everything they used this month.</div>`;
   }
   // Not using: logins (not archived) with nothing of a kind in the last 30 days.
   const recent = appUsageRecent || [];
