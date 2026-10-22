@@ -269,7 +269,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 07:30 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 07:55 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1203,7 +1203,7 @@ function setTeacherPortalTab(t) {
   if (t === 'homework') { hwShowForm = false; hwMsg = ''; hwFilterStudentId = ''; hwFilterStatus = 'assigned'; loadHomework().then(() => render()); return; }
   if (t === 'questionbank' && !teacherQbAccess) { teacherPortalTab = 'dashboard'; render(); return; }
   if (t === 'research' && !teacherResearchAccess) { teacherPortalTab = 'dashboard'; render(); return; }
-  if (t === 'research') { researchNotesMsg = ''; researchOpenNoteId = ''; insightsStudentId = ''; if (teacherQbAccess) loadInsights(); loadResearchData(); return; }
+  if (t === 'research') { researchNotesMsg = ''; researchOpenNoteId = ''; insightsStudentId = ''; if (teacherQbAccess) loadInsights(); loadResources().then(render); loadResearchData(); return; }
   if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); return; }
   render();
 }
@@ -1268,6 +1268,7 @@ async function load() {
     loadPracticeAssignments(),
     currentRole === 'Teacher' ? loadTeacherQbAccess() : Promise.resolve(),
     currentRole === 'Teacher' ? loadTeacherResearchAccess() : Promise.resolve(),
+    currentRole === 'Student' || currentRole === 'Parent' ? loadResources() : Promise.resolve(),
   ]);
 
   loaded = true;
@@ -5414,6 +5415,7 @@ async function refreshAllData(silent) {
       // Picks up an admin switching this teacher's Question Bank on/off without a fresh login.
       currentRole === 'Teacher' ? loadTeacherQbAccess() : Promise.resolve(),
       currentRole === 'Teacher' ? loadTeacherResearchAccess() : Promise.resolve(),
+      currentRole === 'Student' || currentRole === 'Parent' ? loadResources() : Promise.resolve(),
     ]);
     await Promise.all([
       loadMyPhoto(),
@@ -13824,6 +13826,7 @@ function renderStudentPortal() {
     + renderStudyPlanReadOnly(student)
     + renderStudentHomeworkSection(student)
     + renderStudentPracticeSection(student)
+    + renderStudentResourcesSection(student)
     + aiHowAmIDoingHtml(student.id)
     + studentTeacherNoteHtml()
     + myPhotoUploadHtml()
@@ -13858,7 +13861,7 @@ function renderParentPortal() {
     </div>` : `<div class="card"><div class="hint">Viewing: <b>${esc(child.name)}</b>${child.archived?' <span class="tag cat">Archived</span>':''}</div></div>`;
 
   if (spOpen) return switcher + spPaperHtml();
-  return studentFeeOverdueBanner(child) + switcher + studentDashboardStatsHtml(child) + renderStudyPlanReadOnly(child) + renderStudentHomeworkSection(child) + renderStudentPracticeSection(child) + myPhotoUploadHtml() + renderStudentReportCards(child, studentViewMonth, 'setStudentViewMonth', esc(child.name) + "'s")
+  return studentFeeOverdueBanner(child) + switcher + studentDashboardStatsHtml(child) + renderStudyPlanReadOnly(child) + renderStudentHomeworkSection(child) + renderStudentPracticeSection(child) + renderStudentResourcesSection(child) + myPhotoUploadHtml() + renderStudentReportCards(child, studentViewMonth, 'setStudentViewMonth', esc(child.name) + "'s")
     + studentFeeCalculatorHtml(child);
 }
 
@@ -15667,7 +15670,142 @@ function questionResearchHtml(teacher) {
     </table></div>
   </div>`;
 }
-// Research tab: Lesson prep form, the brief just written, this teacher's saved briefs, then Student insights and Question research.
+// Research → Resource library: a teacher's notes, PDFs, pictures and links per subject / class / chapter
+// (teacher_resources + private "teacher-resources" bucket, SQL 47). Shared ones show on the student's and parent's page.
+let resources = null;          // teacher: own resources; student / parent: shared ones they may see. null = not loaded
+let resourcesMsg = '';
+let resDraft = { subjectId: '', gradeId: '', chapter: '', title: '', link: '', note: '', shared: false };
+let resFile = null;
+let resSaving = false;
+let resFilterSubjectId = '';
+const RES_MAX_BYTES = 20 * 1024 * 1024;
+async function loadResources() {
+  const q = sb.from('teacher_resources').select('*').order('created_at', { ascending: false });
+  const { data: rows, error } = currentRole === 'Teacher' ? await q.eq('teacher_id', currentLinkedId) : await q.eq('shared', true);
+  if (error) { resources = []; resourcesMsg = currentRole === 'Teacher' ? 'Could not load the library. Run SQL 47 in Supabase first. (' + error.message + ')' : ''; }
+  else { resources = rows || []; resourcesMsg = ''; }
+}
+function setResField(field, value) {
+  resDraft[field] = value;
+  if (field === 'subjectId') { const subj = data.subjects.find(s => s.id === value); const gs = subj ? gradesForCategory(subj.category) : []; resDraft.gradeId = gs.length === 1 ? gs[0] : ''; render(); }
+  if (field === 'gradeId' || field === 'shared') render();
+}
+function resPickFile(input) {
+  const f = input.files && input.files[0];
+  if (f && f.size > RES_MAX_BYTES) { resourcesMsg = 'That file is over 20 MB. Pick a smaller one or add it as a link.'; resFile = null; input.value = ''; render(); return; }
+  resFile = f || null;
+  if (f && !resDraft.title.trim()) resDraft.title = f.name.replace(/\.[^.]+$/, '');
+  resourcesMsg = ''; render();
+}
+async function saveResource() {
+  const d = resDraft, title = d.title.trim(), link = d.link.trim();
+  if (!d.subjectId || !title) { resourcesMsg = 'Pick a subject and give it a title.'; render(); return; }
+  if (!resFile && !link) { resourcesMsg = 'Choose a file or paste a link.'; render(); return; }
+  if (link && !/^https?:\/\//i.test(link)) { resourcesMsg = 'A link must start with http:// or https://'; render(); return; }
+  resSaving = true; resourcesMsg = ''; render();
+  let file_path = null;
+  if (resFile) {
+    file_path = currentLinkedId + '/' + Date.now() + '-' + resFile.name.replace(/[^\w.\-]+/g, '_').slice(-80);
+    const { error: upErr } = await sb.storage.from('teacher-resources').upload(file_path, resFile, { contentType: resFile.type || undefined, upsert: false });
+    if (upErr) { resourcesMsg = 'Could not upload: ' + upErr.message; resSaving = false; render(); return; }
+  }
+  const { data: row, error } = await sb.from('teacher_resources').insert({
+    teacher_id: currentLinkedId, subject_id: d.subjectId, grade_id: d.gradeId || null, chapter: d.chapter.trim() || null,
+    title, link_url: resFile ? null : link, file_path, file_name: resFile ? resFile.name : null, note: d.note.trim() || null, shared: !!d.shared,
+  }).select().single();
+  if (error) {
+    if (file_path) await sb.storage.from('teacher-resources').remove([file_path]);
+    resourcesMsg = 'Could not save: ' + error.message; resSaving = false; render(); return;
+  }
+  resources = [row, ...(resources || [])];
+  resDraft = { ...resDraft, chapter: '', title: '', link: '', note: '' };
+  resFile = null; resSaving = false;
+  resourcesMsg = '✓ Added' + (row.shared ? ' and shared with your students in ' + ((data.subjects.find(s => s.id === row.subject_id) || {}).name || 'this subject') + '.' : '.');
+  render();
+}
+async function setResourceShared(id, on) {
+  const { error } = await sb.from('teacher_resources').update({ shared: on }).eq('id', id);
+  if (error) { resourcesMsg = 'Could not save: ' + error.message; render(); return; }
+  const r = (resources || []).find(x => x.id === id); if (r) r.shared = on;
+  render();
+}
+async function deleteResource(id) {
+  const r = (resources || []).find(x => x.id === id);
+  if (!r || !confirm('Delete "' + r.title + '"? Students will no longer see it.')) return;
+  const { error } = await sb.from('teacher_resources').delete().eq('id', id);
+  if (error) { resourcesMsg = 'Could not delete: ' + error.message; render(); return; }
+  if (r.file_path) await sb.storage.from('teacher-resources').remove([r.file_path]);
+  resources = resources.filter(x => x.id !== id);
+  render();
+}
+async function openResource(id) {
+  const r = (resources || []).find(x => x.id === id);
+  if (!r) return;
+  if (r.link_url) { window.open(r.link_url, '_blank', 'noopener'); return; }
+  const { data: urlData, error } = await sb.storage.from('teacher-resources').createSignedUrl(r.file_path, 3600);
+  if (error) { resourcesMsg = 'Could not open the file: ' + error.message; render(); return; }
+  const a = document.createElement('a');
+  a.href = urlData.signedUrl; a.target = '_blank'; a.rel = 'noopener';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+function resItemHtml(r, teacherView) {
+  const subj = data.subjects.find(s => s.id === r.subject_id);
+  const meta = [teacherView ? '' : (subj ? subj.name : ''), qbByName(grades, r.grade_id), r.chapter, r.link_url ? 'Link' : (r.file_name || 'File')].filter(Boolean).join(' · ');
+  return `<div style="border-top:1px solid var(--line);padding:8px 0;display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">
+    <div style="flex:1;min-width:180px">
+      <a style="cursor:pointer;font-weight:600" onclick="openResource('${r.id}')">${r.link_url ? '🔗' : '📄'} ${esc(r.title)}</a>
+      <div style="font-size:12px;color:var(--muted)">${esc(meta)}</div>
+      ${r.note ? `<div style="font-size:13px;margin-top:2px">${esc(r.note)}</div>` : ''}
+    </div>
+    ${teacherView ? `<label style="font-size:13px;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" ${r.shared ? 'checked' : ''} onchange="setResourceShared('${r.id}', this.checked)"> Shared with students</label>
+      <button class="btn-small btn-danger" onclick="deleteResource('${r.id}')">Delete</button>` : ''}
+  </div>`;
+}
+function resourceLibraryHtml(teacher) {
+  const mySubjects = data.subjects.filter(s => s.teacherId === teacher.id && !s.archived);
+  const subj = mySubjects.find(s => s.id === resDraft.subjectId);
+  const gradeIds = subj ? gradesForCategory(subj.category) : [];
+  const chapters = subj ? researchChaptersFor(subj.name, resDraft.gradeId) : [];
+  const list = (resources || []).filter(r => !resFilterSubjectId || r.subject_id === resFilterSubjectId);
+  return `<div class="card">
+    <h3 style="font-family:'Zilla Slab',serif;margin:0 0 6px">Resource library</h3>
+    <div class="hint" style="margin-bottom:10px">Keep your notes, worksheets, pictures and useful links by subject and chapter. Tick "Share with students" and they appear on the page of every student enrolled with you in that subject (and their parents).</div>
+    ${!mySubjects.length ? '<div class="empty">No subjects are mapped to you yet.</div>' : `
+    <div class="row-form" style="flex-wrap:wrap;gap:8px">
+      <select onchange="setResField('subjectId', this.value)"><option value="">Subject *</option>${mySubjects.map(s => `<option value="${s.id}" ${s.id === resDraft.subjectId ? 'selected' : ''}>${esc(s.name)} (${esc(catLabel(s.category))})</option>`).join('')}</select>
+      <select onchange="setResField('gradeId', this.value)" ${subj ? '' : 'disabled'}><option value="">Any class</option>${gradeIds.map(id => `<option value="${id}" ${id === resDraft.gradeId ? 'selected' : ''}>${esc(qbByName(grades, id))}</option>`).join('')}</select>
+      <input type="text" list="resChapterOptions" value="${escAttr(resDraft.chapter)}" placeholder="Chapter (optional)" oninput="setResField('chapter', this.value)">
+      <datalist id="resChapterOptions">${chapters.map(c => `<option value="${escAttr(qbChapterLabel(c))}"></option>`).join('')}</datalist>
+    </div>
+    <div class="row-form"><label>Title *</label><input type="text" value="${escAttr(resDraft.title)}" placeholder="e.g. Chapter 3 summary notes" oninput="setResField('title', this.value)"></div>
+    <div class="row-form"><label>File</label><input type="file" onchange="resPickFile(this)">${resFile ? `<span class="hint">${esc(resFile.name)}</span>` : ''}</div>
+    <div class="row-form"><label>or Link</label><input type="text" value="${escAttr(resDraft.link)}" placeholder="https://… (YouTube, website, Google Drive)" oninput="setResField('link', this.value)" ${resFile ? 'disabled' : ''}></div>
+    <div class="row-form"><label>Note</label><input type="text" value="${escAttr(resDraft.note)}" placeholder="Optional: what it is for" oninput="setResField('note', this.value)"></div>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:13px;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" ${resDraft.shared ? 'checked' : ''} onchange="setResField('shared', this.checked)"> Share with students</label>
+      <button class="btn-primary" onclick="saveResource()" ${resSaving ? 'disabled' : ''}>${resSaving ? 'Saving…' : '+ Add to library'}</button>
+    </div>`}
+    ${resourcesMsg ? `<div class="hint" style="margin-top:8px;color:${resourcesMsg.startsWith('✓') ? 'var(--forest)' : 'var(--brick)'}">${esc(resourcesMsg)}</div>` : ''}
+    ${resources === null ? '<div class="hint">Loading…</div>' : !resources.length ? '' : `
+    <div style="display:flex;align-items:center;gap:8px;margin:14px 0 4px">
+      <b style="flex:1">Your library (${resources.length})</b>
+      <select onchange="resFilterSubjectId=this.value;render()"><option value="">All subjects</option>${mySubjects.map(s => `<option value="${s.id}" ${s.id === resFilterSubjectId ? 'selected' : ''}>${esc(s.name)} (${esc(catLabel(s.category))})</option>`).join('')}</select>
+    </div>
+    ${list.map(r => resItemHtml(r, true)).join('') || '<div class="hint">Nothing for this subject yet.</div>'}`}
+  </div>`;
+}
+// Student / parent page: resources their teachers shared for the student's subjects.
+function renderStudentResourcesSection(student) {
+  if (!resources) return '';
+  const subjIds = new Set(data.studentSubjects.filter(ss => ss.studentId === student.id).map(ss => ss.subjectId));
+  const list = resources.filter(r => subjIds.has(r.subject_id));
+  if (!list.length) return '';
+  return `<div class="card"><h2>📚 From your teachers</h2>
+    <div class="hint">Notes, worksheets and links your teachers shared for your subjects.</div>
+    ${resourcesMsg ? `<div class="hint" style="color:var(--brick)">${esc(resourcesMsg)}</div>` : ''}
+    ${list.map(r => resItemHtml(r, false)).join('')}</div>`;
+}
+// Research tab: Lesson prep form, the brief just written, this teacher's saved briefs, Student insights, Question research and the Resource library.
 function renderTeacherResearch(teacher) {
   const mySubjects = data.subjects.filter(s => s.teacherId === teacher.id && !s.archived);
   const subj = mySubjects.find(s => s.id === researchDraft.subjectId);
@@ -15753,7 +15891,8 @@ function renderTeacherResearch(teacher) {
       </div>`).join('')}
   </div>
   ${insightsHtml()}
-  ${questionResearchHtml(teacher)}`;
+  ${questionResearchHtml(teacher)}
+  ${resourceLibraryHtml(teacher)}`;
 }
 function renderTeacherHomework(teacher) {
   const myStudents = byName(data.students.filter(s => {
