@@ -271,7 +271,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 17:24 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 17:50 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1407,20 +1407,33 @@ async function loadResearchData() {
   if (chaps) researchChapterList = { chapters: (chaps.data || []), textbooks: ((tbs && tbs.data) || []) };
   render();
 }
+// Grades offered for a subject in the Research tab. A "Class 10" category is also linked to the Language grade
+// (for enrollment), so when the category is named "Class N" / "Grade N" and one linked grade is N, only that grade counts.
+function researchGradesFor(subj) {
+  const gs = subj ? [...new Set(gradesForCategory(subj.category))] : [];
+  const m = gs.length > 1 && String(catLabel(subj.category)).trim().match(/^(?:class|grade)\s*(\d+)$/i);
+  if (!m) return gs;
+  const hit = gs.filter(id => String(qbByName(grades, id)).trim().replace(/^(?:class|grade)\s*/i, '') === m[1]);
+  return hit.length === 1 ? hit : gs;
+}
 // Question Bank chapters for the picked subject + grade (current syllabus first), used as suggestions only.
-function researchChaptersFor(subjectName, gradeId) {
-  if (!researchChapterList || !subjectName || !gradeId) return [];
-  const tbIds = new Set(researchChapterList.textbooks.filter(tb => qbSameSubject(tb.subject_name, subjectName) && tb.grade_id === gradeId
-    && (!researchDraft.boardId || !tb.board_id || tb.board_id === researchDraft.boardId)).map(tb => tb.id));
-  return researchChapterList.chapters.filter(c => tbIds.has(c.textbook_id) && c.is_current_syllabus !== false)
-    .sort((a, b) => (Number(a.chapter_number) || 999) - (Number(b.chapter_number) || 999) || String(a.title || '').localeCompare(String(b.title || '')));
+// No grade picked: chapters of every grade in gradeIds, each tagged with _gradeId.
+function researchChaptersFor(subjectName, gradeId, gradeIds) {
+  const want = gradeId ? [gradeId] : (gradeIds || []);
+  if (!researchChapterList || !subjectName || !want.length) return [];
+  const tbGrade = new Map(researchChapterList.textbooks.filter(tb => qbSameSubject(tb.subject_name, subjectName) && want.includes(tb.grade_id)
+    && (!researchDraft.boardId || !tb.board_id || tb.board_id === researchDraft.boardId)).map(tb => [tb.id, tb.grade_id]));
+  const gradeOrder = id => { const g = grades.find(x => x.id === id); return g ? (g.sortOrder || 0) : 999; };
+  return researchChapterList.chapters.filter(c => tbGrade.has(c.textbook_id) && c.is_current_syllabus !== false)
+    .map(c => ({ ...c, _gradeId: tbGrade.get(c.textbook_id) }))
+    .sort((a, b) => gradeOrder(a._gradeId) - gradeOrder(b._gradeId) || (Number(a.chapter_number) || 999) - (Number(b.chapter_number) || 999) || String(a.title || '').localeCompare(String(b.title || '')));
 }
 // Students this teacher teaches in the subject (and grade, when the subject has more than one), for the "For student" picker.
 function researchStudentsFor(subjectId, gradeId) {
   const subj = data.subjects.find(s => s.id === subjectId);
   if (!subj) return [];
   const ids = new Set(data.studentSubjects.filter(ss => ss.subjectId === subjectId).map(ss => ss.studentId));
-  const multiGrade = gradesForCategory(subj.category).length > 1;
+  const multiGrade = researchGradesFor(subj).length > 1;
   return byName(data.students.filter(st => ids.has(st.id) && !st.archived && (!multiGrade || !gradeId || !st.gradeId || st.gradeId === gradeId)));
 }
 // Study plan topics for the chapter box. A picked student: their topics in plan order, done ones last.
@@ -1450,7 +1463,7 @@ function setResearchField(field, value) {
   researchDraft[field] = value;
   if (field === 'subjectId') {
     const subj = data.subjects.find(s => s.id === value);
-    const gs = subj ? gradesForCategory(subj.category) : [];
+    const gs = researchGradesFor(subj);
     researchDraft.gradeId = gs.length === 1 ? gs[0] : '';
     researchDraft.studentId = '';
     researchDraft.chapter = '';
@@ -1460,7 +1473,7 @@ function setResearchField(field, value) {
     // Prefill grade and board from the student's record when they're set.
     const st = data.students.find(x => x.id === value);
     const subj = data.subjects.find(s => s.id === researchDraft.subjectId);
-    if (st && st.gradeId && subj && gradesForCategory(subj.category).includes(st.gradeId)) researchDraft.gradeId = st.gradeId;
+    if (st && st.gradeId && subj && researchGradesFor(subj).includes(st.gradeId)) researchDraft.gradeId = st.gradeId;
     if (st && st.boardId && boards.some(b => b.id === st.boardId && !b.archived)) researchDraft.boardId = st.boardId;
   }
   if (field === 'gradeId' || field === 'boardId' || field === 'studentId') researchDraft.chapter = '';
@@ -1485,13 +1498,17 @@ async function generateResearchBrief() {
   const subj = data.subjects.find(s => s.id === researchDraft.subjectId);
   const chapter = researchDraft.chapter.trim();
   if (!subj || !chapter) { researchBrief = { ...researchBrief, error: 'Pick a subject and type or pick a chapter.' }; render(); return; }
-  const ask = { subjectName: subj.name, gradeId: researchDraft.gradeId, studentId: researchDraft.studentId || '', chapter, focus: researchDraft.focus.trim() };
+  const matchedChapters = researchChaptersFor(subj.name, researchDraft.gradeId, researchGradesFor(subj)).filter(c => qbChapterLabel(c) === chapter || c.title === chapter);
+  const matched = matchedChapters.map(c => c.id);
+  // No grade picked but the chapter belongs to one grade's book: brief for that grade.
+  const chapterGrades = [...new Set(matchedChapters.map(c => c._gradeId))];
+  const gradeId = researchDraft.gradeId || (chapterGrades.length === 1 ? chapterGrades[0] : '');
+  const ask = { subjectName: subj.name, gradeId, studentId: researchDraft.studentId || '', chapter, focus: researchDraft.focus.trim() };
   researchBrief = { loading: true, text: '', error: '', savedId: '', ask };
   researchBankQs = [];
   render();
-  const matched = researchChaptersFor(subj.name, researchDraft.gradeId).filter(c => qbChapterLabel(c) === chapter || c.title === chapter).map(c => c.id);
   const [r] = await Promise.all([
-    callResearchFunction({ subject: subj.name, grade: qbByName(grades, researchDraft.gradeId), board: qbByName(boards, researchDraft.boardId), chapter, focus: ask.focus }),
+    callResearchFunction({ subject: subj.name, grade: qbByName(grades, gradeId), board: qbByName(boards, researchDraft.boardId), chapter, focus: ask.focus }),
     matched.length && teacherQbAccess ? loadResearchBankQuestions(matched) : Promise.resolve(),
   ]);
   researchBrief = r.error ? { loading: false, text: '', error: r.error, savedId: '', ask } : { loading: false, text: r.data.text || '', error: '', savedId: '', ask };
@@ -16330,7 +16347,7 @@ let qrOpenChapter = '';
 let qrChapterNames = {};    // chapter id → "1. Title"
 function setQrField(field, value) {
   qrDraft[field] = value;
-  if (field === 'subjectId') { const subj = data.subjects.find(s => s.id === value); const gs = subj ? gradesForCategory(subj.category) : []; qrDraft.gradeId = gs.length === 1 ? gs[0] : ''; }
+  if (field === 'subjectId') { const gs = researchGradesFor(data.subjects.find(s => s.id === value)); qrDraft.gradeId = gs.length === 1 ? gs[0] : ''; }
   qrOpenChapter = '';
   if (field === 'examType') { render(); return; }
   loadQuestionResearch();
@@ -16363,7 +16380,7 @@ function questionResearchHtml(teacher) {
   if (!teacherQbAccess) return '';
   const mySubjects = data.subjects.filter(s => s.teacherId === teacher.id && !s.archived);
   const subj = mySubjects.find(s => s.id === qrDraft.subjectId);
-  const gradeIds = subj ? gradesForCategory(subj.category) : [];
+  const gradeIds = researchGradesFor(subj);
   const head = `<h3 style="font-family:'Zilla Slab',serif;margin:0 0 6px">Question research</h3>
     <div class="hint" style="margin-bottom:10px">How past papers in the Question Bank ask each chapter: how often it comes, how many marks, and in what form. Only approved, current-syllabus questions from past papers count.</div>
     <div class="row-form" style="flex-wrap:wrap;gap:8px">
@@ -16428,7 +16445,7 @@ async function loadResources() {
 }
 function setResField(field, value) {
   resDraft[field] = value;
-  if (field === 'subjectId') { const subj = data.subjects.find(s => s.id === value); const gs = subj ? gradesForCategory(subj.category) : []; resDraft.gradeId = gs.length === 1 ? gs[0] : ''; render(); }
+  if (field === 'subjectId') { const gs = researchGradesFor(data.subjects.find(s => s.id === value)); resDraft.gradeId = gs.length === 1 ? gs[0] : ''; render(); }
   if (field === 'gradeId' || field === 'shared') render();
 }
 function resPickFile(input) {
@@ -16508,7 +16525,7 @@ function resItemHtml(r, teacherView) {
 function resourceLibraryHtml(teacher) {
   const mySubjects = data.subjects.filter(s => s.teacherId === teacher.id && !s.archived);
   const subj = mySubjects.find(s => s.id === resDraft.subjectId);
-  const gradeIds = subj ? gradesForCategory(subj.category) : [];
+  const gradeIds = researchGradesFor(subj);
   const chapters = subj ? researchChaptersFor(subj.name, resDraft.gradeId) : [];
   const list = (resources || []).filter(r => !resFilterSubjectId || r.subject_id === resFilterSubjectId);
   return `<div class="card">
@@ -16553,8 +16570,8 @@ function renderStudentResourcesSection(student) {
 function renderTeacherResearch(teacher) {
   const mySubjects = data.subjects.filter(s => s.teacherId === teacher.id && !s.archived);
   const subj = mySubjects.find(s => s.id === researchDraft.subjectId);
-  const gradeIds = subj ? gradesForCategory(subj.category) : [];
-  const chapters = subj ? researchChaptersFor(subj.name, researchDraft.gradeId) : [];
+  const gradeIds = researchGradesFor(subj);
+  const chapters = subj ? researchChaptersFor(subj.name, researchDraft.gradeId, gradeIds) : [];
   const myStudents = subj ? researchStudentsFor(subj.id, researchDraft.gradeId) : [];
   if (researchDraft.studentId && !myStudents.some(st => st.id === researchDraft.studentId)) researchDraft.studentId = '';
   const chapterLabels = new Set(chapters.map(c => qbChapterLabel(c).toLowerCase()));
@@ -16600,7 +16617,7 @@ function renderTeacherResearch(teacher) {
     <div class="row-form">
       <label>Chapter or topic *</label>
       <input type="text" list="researchChapterOptions" value="${escAttr(researchDraft.chapter)}" placeholder="${chapters.length || planTopics.length ? 'Pick from the list or type a topic' : 'e.g. Photosynthesis, Quadratic equations'}" oninput="setResearchField('chapter', this.value)">
-      <datalist id="researchChapterOptions">${chapters.map(c => `<option value="${escAttr(qbChapterLabel(c))}"></option>`).join('')}${planTopics.map(t => `<option value="${escAttr(t.value)}" label="${escAttr(t.label ? 'Study plan · ' + t.label : 'Study plan')}"></option>`).join('')}</datalist>
+      <datalist id="researchChapterOptions">${chapters.map(c => `<option value="${escAttr(qbChapterLabel(c))}"${!researchDraft.gradeId && gradeIds.length > 1 ? ` label="${escAttr(qbByName(grades, c._gradeId))}"` : ''}></option>`).join('')}${planTopics.map(t => `<option value="${escAttr(t.value)}" label="${escAttr(t.label ? 'Study plan · ' + t.label : 'Study plan')}"></option>`).join('')}</datalist>
     </div>
     ${subj && !chapters.length && !planTopics.length ? `<div class="hint" style="margin:-4px 0 8px">${researchDraft.studentId ? 'This student has no study plan topics for this subject yet.' : 'No chapter suggestions yet.'} Add topics in Study Plans to see them here, or type a topic.</div>` : ''}
     <div class="row-form">
