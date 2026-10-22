@@ -14,10 +14,12 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // For navigation requests (index.html), always bypass the HTTP cache
-  // so the browser never serves a stale cached version of the app.
+  // For navigation requests (index.html), always check with the server
+  // ("no-cache" = revalidate). If the page hasn't changed, the server answers
+  // 304 and the browser reuses its copy, so nothing large is downloaded; after
+  // a new build it gets the new page straight away. Never stale.
   if (event.request.mode === 'navigate') {
-    event.respondWith(fetch(event.request, { cache: 'no-store' }));
+    event.respondWith(fetch(event.request, { cache: 'no-cache' }));
     return;
   }
   // For everything else (icons, manifest, etc.) go to network normally.
