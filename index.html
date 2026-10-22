@@ -271,7 +271,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 19:20 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 20:40 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -885,19 +885,21 @@ let newAnnouncementMessage = '';
 let newAnnouncementTargetType = 'all';
 let newAnnouncementTargetRole = 'Admin';
 let newAnnouncementTargetUserId = '';
-function defaultAnnouncementExpiry() { const d = new Date(); d.setDate(d.getDate() + 30); return d.toISOString().slice(0,10); }
+// A date N days from today in the user's own time zone (toISOString() would give the UTC date, a day behind before 5:30 am IST).
+function localDateFromToday(days) { const d = new Date(); d.setDate(d.getDate() + days); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function defaultAnnouncementExpiry() { return localDateFromToday(30); }
 let newAnnouncementExpiresAt = defaultAnnouncementExpiry();
 let loginLogRows = [];
 let loginLogFilterEvent = '';
 let loginLogFilterUser = '';
-let loginLogFilterFrom = (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0,10); })();
+let loginLogFilterFrom = localDateFromToday(-30);
 let loginLogFilterTo = todayStr;
 let loginLogLoading = false;
 let loginLogMsg = '';
 let auditFilterTable = '';
 let auditFilterAction = '';
 let auditFilterUser = '';
-let auditFilterFrom = (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0,10); })();
+let auditFilterFrom = localDateFromToday(-30);
 let auditFilterTo = todayStr;
 let auditLoading = false;
 let auditMsg = '';
@@ -2644,7 +2646,7 @@ async function loadDemoLogs() {
       board: r.board || '', studentName: r.student_name || '',
       parentMobile: r.parent_mobile || '', notes: r.notes || '',
       linkedStudentId: r.linked_student_id || '', status: r.status || 'Pending',
-      demoTime: r.demo_time || '', convertedAt: r.converted_at || '', bonusAmount: Number(r.bonus_amount || 100), bonusPaid: !!r.bonus_paid,
+      demoTime: r.demo_time || '', convertedAt: r.converted_at || '', bonusAmount: r.bonus_amount == null ? 100 : Number(r.bonus_amount), bonusPaid: !!r.bonus_paid,
       createdAt: r.created_at || ''
     }));
   }
@@ -2656,7 +2658,8 @@ async function loadTeacherPayrollRecords() {
       id: r.id, teacherId: r.teacher_id, month: r.month,
       adjustment: Number(r.adjustment) || 0,
       adjustmentNote: r.adjustment_note || '',
-      paid: !!r.paid, paidDate: r.paid_date || '', paidReference: r.paid_reference || ''
+      paid: !!r.paid, paidDate: r.paid_date || '', paidReference: r.paid_reference || '',
+      paidAmount: r.paid_amount == null ? null : Number(r.paid_amount)   // SQL 55; null on older rows
     }));
   }
 }
@@ -2732,21 +2735,24 @@ async function confirmPayrollMarkPaid(teacherId) {
   const paidDate = dateEl ? dateEl.value : todayStr;
   const paidRef  = refEl  ? refEl.value.trim() : '';
   const existing = payrollRecord(teacherId, payrollMonth);
+  // Keep the amount actually paid, so a later change to that month's classes can't silently change the slip.
+  const figs = salarySlipFigures(teacherId, payrollMonth);
+  const paidAmount = figs ? Math.round(figs.netPayable * 100) / 100 : null;
   let saveError = null;
   if (existing) {
-    const { error } = await sb.from('teacher_payroll_records')
-      .update({ paid: true, paid_date: paidDate, paid_reference: paidRef, updated_at: new Date().toISOString() })
-      .eq('id', existing.id);
-    if (!error) { existing.paid = true; existing.paidDate = paidDate; existing.paidReference = paidRef; }
+    const patch = { paid: true, paid_date: paidDate, paid_reference: paidRef, paid_amount: paidAmount, updated_at: new Date().toISOString() };
+    let { error } = await sb.from('teacher_payroll_records').update(patch).eq('id', existing.id);
+    if (error && /paid_amount/.test(error.message || '')) { delete patch.paid_amount; ({ error } = await sb.from('teacher_payroll_records').update(patch).eq('id', existing.id)); }   // SQL 55 not run yet
+    if (!error) { existing.paid = true; existing.paidDate = paidDate; existing.paidReference = paidRef; existing.paidAmount = 'paid_amount' in patch ? paidAmount : null; }
     else saveError = error;
   } else {
-    const { data: row, error } = await sb.from('teacher_payroll_records')
-      .insert({ teacher_id: teacherId, month: payrollMonth, adjustment: 0, paid: true, paid_date: paidDate, paid_reference: paidRef })
-      .select().single();
+    const ins = { teacher_id: teacherId, month: payrollMonth, adjustment: 0, paid: true, paid_date: paidDate, paid_reference: paidRef, paid_amount: paidAmount };
+    let { data: row, error } = await sb.from('teacher_payroll_records').insert(ins).select().single();
+    if (error && /paid_amount/.test(error.message || '')) { delete ins.paid_amount; ({ data: row, error } = await sb.from('teacher_payroll_records').insert(ins).select().single()); }
     if (!error && row) {
       data.teacherPayrollRecords.push({
         id: row.id, teacherId, month: payrollMonth, adjustment: 0, adjustmentNote: '',
-        paid: true, paidDate: paidDate, paidReference: paidRef
+        paid: true, paidDate: paidDate, paidReference: paidRef, paidAmount: 'paid_amount' in ins ? paidAmount : null
       });
     } else saveError = error;
   }
@@ -2761,10 +2767,10 @@ function cancelPayrollUndoPaid() { payrollUndoPaidId = null; render(); }
 async function markPayrollUnpaid(teacherId) {
   const existing = payrollRecord(teacherId, payrollMonth);
   if (!existing) return;
-  const { error } = await sb.from('teacher_payroll_records')
-    .update({ paid: false, paid_date: null, paid_reference: '', updated_at: new Date().toISOString() })
-    .eq('id', existing.id);
-  if (!error) { existing.paid = false; existing.paidDate = ''; existing.paidReference = ''; payrollMsg = ''; }
+  const patch = { paid: false, paid_date: null, paid_reference: '', paid_amount: null, updated_at: new Date().toISOString() };
+  let { error } = await sb.from('teacher_payroll_records').update(patch).eq('id', existing.id);
+  if (error && /paid_amount/.test(error.message || '')) { delete patch.paid_amount; ({ error } = await sb.from('teacher_payroll_records').update(patch).eq('id', existing.id)); }   // SQL 55 not run yet
+  if (!error) { existing.paid = false; existing.paidDate = ''; existing.paidReference = ''; existing.paidAmount = null; payrollMsg = ''; }
   else { payrollMsg = 'Undo failed: ' + (error.message || error.code || JSON.stringify(error)); }
   payrollUndoPaidId = null;
   render();
@@ -2776,6 +2782,14 @@ const SLIP_COMPANY = { name: 'LIBXL-Education Private Limited', address: 'No 6, 
 // One teacher's pay for one month, worked out the same way as the Payroll page and the
 // teacher's Earnings card: every logged class counts (times its class count), split by
 // category, class type and mode. Classes with no rate set are kept apart so the slip can warn.
+// Classes the per-rate counting below can't place: the subject was deleted, its category no longer exists, or the
+// class type / mode is not one of the known ones. They earn nothing, so they are shown as a warning instead of vanishing.
+function payrollUncountedClasses(sessions) {
+  return sessions.filter(s => {
+    const subj = subject(s.subjectId);
+    return !subj || !categories.some(c => c.id === subj.category) || !TYPES.includes(s.classType) || !RATE_MODES.includes(s.mode);
+  }).reduce((a, s) => a + s.count, 0);
+}
 function salarySlipFigures(teacherId, month) {
   const teacher = data.teachers.find(t => t.id === teacherId);
   if (!teacher) return null;
@@ -2791,6 +2805,8 @@ function salarySlipFigures(teacherId, month) {
     if (rate > 0) { lines.push({ label, cnt, rate, earn: cnt * rate }); basePay += cnt * rate; }
     else unrated.push({ label, cnt });
   })));
+  const uncounted = payrollUncountedClasses(mine);
+  if (uncounted) unrated.push({ label: 'Subject or category missing', cnt: uncounted });
   const demoLines = data.demoLogs.filter(d => d.teacherId === teacherId && d.status === 'Converted' && (d.convertedAt || d.date || '').startsWith(month))
     .map(d => ({ studentName: d.studentName || (d.linkedStudentId ? (data.students.find(s => s.id === d.linkedStudentId) || { name: '' }).name : ''), amount: d.bonusAmount || 0 }));
   const demoBonus = demoLines.reduce((a, d) => a + d.amount, 0);
@@ -2801,7 +2817,8 @@ function salarySlipFigures(teacherId, month) {
     teacher, month, lines, unrated, demoLines, demoBonus, basePay, grossPay, adjustment,
     adjNote: pr ? (pr.adjustmentNote || '') : '',
     netPayable: grossPay + adjustment,
-    paid: pr ? pr.paid : false, paidDate: pr ? pr.paidDate : '', paidRef: pr ? pr.paidReference : ''
+    paid: pr ? pr.paid : false, paidDate: pr ? pr.paidDate : '', paidRef: pr ? pr.paidReference : '',
+    paidAmount: pr && pr.paid && pr.paidAmount != null ? pr.paidAmount : null
   };
 }
 
@@ -2887,8 +2904,8 @@ function salarySlipSheetHtml(f) {
     ${f.paid ? `<div class="paid-box"><div class="paid-top">✓ Payment Made</div><div class="paid-fields">
       ${f.paidDate ? `<div class="paid-field"><div class="lbl">Date</div><div class="val">${e(f.paidDate)}</div></div>` : ''}
       ${f.paidRef ? `<div class="paid-field"><div class="lbl">Reference / Mode</div><div class="val">${e(f.paidRef)}</div></div>` : ''}
-      <div class="paid-field"><div class="lbl">Amount Paid</div><div class="val">${money(f.netPayable)}</div></div>
-    </div></div>` : `<div class="pending-box">⏳ Payment pending for ${monthDisplay}</div>`}
+      <div class="paid-field"><div class="lbl">Amount Paid</div><div class="val">${money(f.paidAmount != null ? f.paidAmount : f.netPayable)}</div></div>
+    </div></div>${f.paidAmount != null && Math.abs(f.paidAmount - f.netPayable) > 0.005 ? `<div class="warn-box"><b>⚠ Classes changed after this was paid.</b> Paid ${money(f.paidAmount)}; the classes now add up to ${money(f.netPayable)} (difference ${money(f.netPayable - f.paidAmount)}).</div>` : ''}` : `<div class="pending-box">⏳ Payment pending for ${monthDisplay}</div>`}
     <div class="footer"><span>${e(SLIP_COMPANY.name)} · Confidential · Computer-generated slip, no signature needed</span><span>Generated ${today}</span></div>
   </div>
 </div>`;
@@ -3433,6 +3450,18 @@ async function scheduleWixBooking() {
   data.demoLogs.unshift({ id: logRow.id, teacherId: d.teacherId, date: d.date, subjectId: '', board: '', studentName: booking.studentName, parentMobile: booking.phone, notes: noteText, linkedStudentId: '', status: 'Pending', demoTime: d.time || '', convertedAt: '', bonusAmount: 100, bonusPaid: false, createdAt: logRow.created_at || '' });
   wixBookingActionId = null; wixBookingScheduleDraft = {};
   wixBookingsMsg = 'Demo scheduled ✓ — also visible in Class Log → Demo Log.'; render();
+}
+// Wix bookings come from a public web form, so their text is never pasted into an onclick: the button passes only the id.
+function wixScheduleInDemoRegister(id) {
+  const b = data.wixBookings.find(x => x.id === id); if (!b) return;
+  wixBookingFromId = id;
+  demoLogDraft = { ...demoLogDraft, studentName: b.studentName, parentMobile: b.phone, notes: 'Wix booking' };
+  render();
+  setTimeout(() => { const el = document.getElementById('demo-register-heading'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 150);
+}
+function wixStartConvert(id) {
+  const b = data.wixBookings.find(x => x.id === id); if (!b) return;
+  wixConvertingId = id; wixConvertDraft = { studentName: b.studentName, confirmed: false }; wixConvertMsg = ''; render();
 }
 async function cancelWixBooking(id) {
   const wb = data.wixBookings.find(x => x.id === id);
@@ -5252,10 +5281,17 @@ async function studyPlanAiGapCall(subjectId) {
 
 async function loadTeachersAndSubjects() {
   // Same reasoning as students — photo excluded from the bulk load, fetched on demand instead.
+  // Students and parents get teachers through teachers_public_list() (SQL 54): name, ID and class link only, never
+  // pay rates, bank details or contact details. Until SQL 54 is run that function doesn't exist, so fall back to the table.
+  const isStudentOrParent = currentRole === 'Student' || currentRole === 'Parent';
+  const teacherSelect = () => sb.from('teachers')
+    .select(isStudentOrParent ? 'id,name,archived,teacher_code,online_class_link'
+      : 'id,name,rates,archived,teacher_code,online_class_link,mobile_number,bank_account_number,bank_name,ifsc_code,upi_id,email,address')
+    .order('name');
   const [tRes, sRes] = await Promise.all([
-    sb.from('teachers')
-      .select('id,name,rates,archived,teacher_code,online_class_link,mobile_number,bank_account_number,bank_name,ifsc_code,upi_id,email,address')
-      .order('name'),
+    isStudentOrParent
+      ? sb.rpc('teachers_public_list').then(r => (!r.error && Array.isArray(r.data)) ? r : teacherSelect())
+      : teacherSelect(),
     selectAllPaged('subjects', ['name']),
   ]);
   const { data: teacherRows, error: tErr } = tRes;
@@ -6108,7 +6144,16 @@ function hasUnsavedEditInProgress() {
   }
   return false;
 }
+// "Today" (todayStr) is worked out once when the page loads and many screens default to it. A phone can keep the
+// app open past midnight, so when the date has moved on, reload the page (only when nothing is being typed).
+function reloadIfDayChanged() {
+  if (localDateFromToday(0) === todayStr || hasUnsavedEditInProgress()) return false;
+  location.reload();
+  return true;
+}
+setInterval(() => { if (document.visibilityState === 'visible') reloadIfDayChanged(); }, 5 * 60 * 1000);
 document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && reloadIfDayChanged()) return;
   if (document.visibilityState === 'visible' && isLoggedIn && !hasUnsavedEditInProgress()) {
     refreshAllData(true);
   }
@@ -6190,6 +6235,14 @@ async function logout() {
   dangerZoneUnlocked = false; unlockPasswordAttempt = ''; unlockMsg = '';
   // Financial records shouldn't linger in memory once someone has signed out.
   expenseList = []; editingExpenseId = ''; pendingDeleteExpenseId = ''; expenseMsg = '';
+  // Nor should anything else this login loaded: the next person to log in on this tab may have a different role,
+  // and their load() only refills what their role can read.
+  data = { teachers: [], subjects: [], students: [], studentSubjects: [], subscriptions: [], sessions: [], users: [], parentStudents: [], studentPhoneNumbers: [], adminPhoneNumbers: [], demoLogs: [], teacherPayrollRecords: [], wixBookings: [], supportTickets: [] };
+  feeRates = {}; discountTiers = []; prospectQuotes = []; notifications = []; myAnnouncements = []; allAnnouncementsAdmin = [];
+  auditRows = []; loginLogRows = []; scheduledClasses = []; teacherAvailability = []; teacherLeave = [];
+  aiUsageRows = null; aiUsageNames = {}; appUsageRows = null; appUsageRecent = null; appUsageProfiles = [];
+  qbAccessByTeacher = null; researchAccessByTeacher = null;
+  expiryIndexCache = null;
   expenseDraft = { date: todayStr, category: '', amount: '', notes: '' };
   teardownChatRealtime();
   teardownChatOnlinePresence();
@@ -7819,21 +7872,26 @@ async function addSubscriptionPayment() {
     student_id: selectedStudentId, subject_id: d.subjectId, type: d.type, classes, amount_paid: amountPaid, date, kind: 'Payment',
     payment_reference: paymentReference || null, payment_remarks: paymentRemarks || null
   }).select().single();
-  if (error) { render(); return; }
+  if (error) { alert('Could not record this payment: ' + error.message); render(); return; }
   data.subscriptions.push({ id: row.id, studentId: row.student_id, subjectId: row.subject_id, type: row.type, classes: Number(row.classes), amountPaid: Number(row.amount_paid), date: row.date, kind: row.kind, paymentReference: row.payment_reference||'', paymentRemarks: row.payment_remarks||'', expiresOn: row.expires_on || '', expiredBatchId: '' });
   subDraft = { subjectId: '', type: 'Group', classes: '', amountPaid: '', date: todayStr };
   render();
 }
+// The money being recorded IS the payment for the pending request(s): mark them paid with the date, reference and
+// remarks typed in the form, and add no second payment (that used to give the student the classes twice).
 async function markPendingThenPay() {
   if (!subPayPendingWarning) return;
-  for (const s of subPayPendingWarning.pending) {
-    const { error } = await sb.from('subscriptions').update({ kind: 'Payment', date: todayStr, payment_remarks: 'Marked paid on recording new payment' }).eq('id', s.id);
-    if (!error) {
-      const row = data.subscriptions.find(x => x.id === s.id);
-      if (row) { row.kind = 'Payment'; row.date = todayStr; row.paymentRemarks = 'Marked paid on recording new payment'; }
-    }
+  const { pending, date, paymentReference, paymentRemarks } = subPayPendingWarning;
+  const failed = [];
+  for (const s of pending) {
+    const { error } = await sb.from('subscriptions').update({ kind: 'Payment', date, payment_reference: paymentReference || s.paymentReference || null, payment_remarks: paymentRemarks || 'Marked paid on recording payment' }).eq('id', s.id);
+    if (error) failed.push(error.message);
   }
-  await addSubscriptionPayment(); // subPayPendingWarning still set → uses stored values, skips check
+  subPayPendingWarning = null;
+  if (failed.length) alert('Could not mark ' + failed.length + ' request(s) paid: ' + failed[0]);
+  subDraft = { subjectId: '', type: 'Group', classes: '', amountPaid: '', date: todayStr };
+  await loadStudentsAndSubscriptions();   // the database sets each payment's expiry date; fetch it
+  render();
 }
 function cancelPendingPayCheck() { subPayPendingWarning = null; render(); }
 
@@ -9279,7 +9337,7 @@ async function confirmMarkPaid(id) {
   const paymentRemarks = remarksInput ? remarksInput.value.trim() : '';
   if (!date) return;
   const { error } = await sb.from('subscriptions').update({ kind: 'Payment', date, payment_reference: paymentReference || null, payment_remarks: paymentRemarks || null }).eq('id', id);
-  if (error) { render(); return; }
+  if (error) { alert('Could not mark this request paid: ' + error.message); render(); return; }
   const s = data.subscriptions.find(x=>x.id===id);
   if (s) { s.kind = 'Payment'; s.date = date; s.paymentReference = paymentReference; s.paymentRemarks = paymentRemarks; }
   await loadStudentsAndSubscriptions();   // the database sets the payment's expiry date; fetch it
@@ -9321,7 +9379,7 @@ async function saveRequestEdit(id) {
   // it must not be allowed to push any affected balance below zero.
   if (original.kind !== 'Request') {
     const otherRowsFor = (subjectId, type) => data.subscriptions
-      .filter(s => s.id !== id && s.subjectId === subjectId && s.type === type && s.kind !== 'Request')
+      .filter(s => s.id !== id && s.studentId === original.studentId && s.subjectId === subjectId && s.type === type && s.kind !== 'Request')
       .reduce((a,s) => a + s.classes, 0);
     const newComboSubscribed = otherRowsFor(d.subjectId, d.type) + storedClasses;
     const newComboUsed = studentUsed(original.studentId, d.subjectId, d.type);
@@ -9368,7 +9426,7 @@ async function saveRequestEdit(id) {
 }
 async function cancelFeeRequest(id) {
   const { error } = await sb.from('subscriptions').delete().eq('id', id);
-  if (error) { render(); return; }
+  if (error) { alert('Could not cancel this request: ' + error.message); render(); return; }
   data.subscriptions = data.subscriptions.filter(s=>s.id!==id);
   render();
 }
@@ -9464,8 +9522,17 @@ function transferConfirmModalHtml() {
     </div>`;
 }
 async function deleteSubscription(id) {
+  const sub = data.subscriptions.find(s => s.id === id);
+  if (!sub) return;
+  const what = sub.kind === 'Refund' ? 'refund' : 'payment';
+  // Deleting a payment takes its classes out of the balance; refuse if classes already given would then go negative.
+  if (sub.kind !== 'Refund' && sub.kind !== 'Request') {
+    const left = studentRemaining(sub.studentId, sub.subjectId, sub.type) - sub.classes;
+    if (left < 0) { alert(`Can't delete this payment: ${subjectName(sub.subjectId)} (${sub.type}) would be left at ${fmtN(left)} classes, because classes have already been given against it. Edit the payment instead.`); return; }
+  }
+  if (!confirm(`Delete this ${what} for good? ${subjectName(sub.subjectId)}, ${sub.type}, ${fmtN(Math.abs(sub.classes))} classes, ₹${Math.abs(sub.amountPaid || 0).toFixed(2)}, ${sub.date || ''}. This cannot be undone.`)) return;
   const { error } = await sb.from('subscriptions').delete().eq('id', id);
-  if (error) { render(); return; }
+  if (error) { alert('Could not delete: ' + error.message); render(); return; }
   data.subscriptions = data.subscriptions.filter(s=>s.id!==id && s.expiredBatchId!==id);   // its Expiry entry goes with it
   render();
 }
@@ -9938,6 +10005,24 @@ async function saveSessionEdit(id) {
       editSessionMsg = 'You can only edit attendance within the current month.';
       render();
       return;
+    }
+  }
+  // Same balance and duplicate checks as giving attendance, so an edit can't go past what was paid for.
+  const orig = data.sessions.find(x=>x.id===id);
+  if (orig) {
+    const giveBack = orig.classType === d.classType ? orig.count : 0;   // this class's own count is already in "used"
+    const leftAfter = studentRemaining(orig.studentId, orig.subjectId, d.classType) + giveBack - count;
+    if (count > giveBack && leftAfter < 0) {
+      const left = leftAfter + count;
+      if (currentRole === 'Teacher') {
+        editSessionMsg = `This student has ${fmtN(left)} ${d.classType} class${left===1?'':'es'} left for this subject — not enough for ${fmtN(count)}. Ask the Admin to add a subscription.`;
+        render();
+        return;
+      }
+      if (!confirm(`This student has ${fmtN(left)} ${d.classType} class${left===1?'':'es'} left for this subject. Saving takes the balance to ${fmtN(leftAfter)}. Save anyway?`)) return;
+    }
+    if (date !== orig.date && sessionDuplicateExists(orig.studentId, orig.teacherId, orig.subjectId, date, id)) {
+      if (!confirm('This student already has attendance for this teacher and subject on ' + date + '. Save anyway?')) return;
     }
   }
   if (d.status === 'Absent') {
@@ -10643,6 +10728,12 @@ function exportNetProfitReport() {
         });
       });
     });
+    payroll += data.demoLogs
+      .filter(d => d.teacherId === t.id && d.status === 'Converted' && inRange((d.convertedAt || d.date || '').slice(0, 10)))
+      .reduce((a, d) => a + (d.bonusAmount || 0), 0);
+    payroll += data.teacherPayrollRecords
+      .filter(r => r.teacherId === t.id && inRange(r.month + '-01'))
+      .reduce((a, r) => a + (r.adjustment || 0), 0);
   });
   const expenses = netProfitTeacherFilter === 'ALL' ? expenseList.filter(e => inRange(e.date)).reduce((a,e)=>a+e.amount, 0) : 0;
   const teacherLabelForFile = (netProfitTeacherFilter && netProfitTeacherFilter !== 'ALL') ? (teacherPool[0] ? teacherPool[0].name : 'Teacher') : 'All Teachers';
@@ -11284,10 +11375,10 @@ function renderStudents() {
         const total = pw.pending.reduce((a,s)=>a+(s.amountPaid||0),0);
         return `<div style="background:rgba(201,154,60,0.12);border:1.5px solid rgba(201,154,60,0.4);border-radius:8px;padding:12px 14px;margin-top:10px">
           <div style="font-weight:700;color:var(--gold);font-size:13px;margin-bottom:6px">⚠ Pending fee request${pw.pending.length>1?'s':''} found for ${subjName}</div>
-          <div class="hint" style="margin-bottom:10px">There ${pw.pending.length===1?'is':'are'} ${pw.pending.length} pending fee request${pw.pending.length>1?'s':''} for this subject (₹${total.toFixed(0)} total). Mark ${pw.pending.length===1?'it':'them'} paid before recording this payment?</div>
+          <div class="hint" style="margin-bottom:10px">There ${pw.pending.length===1?'is':'are'} ${pw.pending.length} pending fee request${pw.pending.length>1?'s':''} for this subject (₹${total.toFixed(0)} total). Is this payment for ${pw.pending.length===1?'that request':'those requests'}? Then mark ${pw.pending.length===1?'it':'them'} paid instead of adding a new payment, so the classes are counted once.</div>
           <div class="row-form">
-            <button class="btn-primary" onclick="markPendingThenPay()">Mark pending paid + Record payment</button>
-            <button class="btn-small" onclick="addSubscriptionPayment()">Skip — just record payment</button>
+            <button class="btn-primary" onclick="markPendingThenPay()">Mark pending request${pw.pending.length>1?'s':''} paid (no new payment)</button>
+            <button class="btn-small" onclick="addSubscriptionPayment()">No — record as a separate new payment</button>
             <button class="btn-small" style="color:var(--brick);border-color:rgba(166,67,46,0.4)" onclick="cancelPendingPayCheck()">Cancel</button>
           </div>
         </div>`;
@@ -11779,7 +11870,7 @@ function renderReports() {
     });
     const breakdown = Object.entries(rateMap).sort((a,b)=>Number(b[0])-Number(a[0]))
       .map(([rate,cnt])=>({ rate: Number(rate), cnt, earn: Number(rate)*cnt }));
-    return { t, name: teacherLabel(t), byCatType, pay, breakdown };
+    return { t, name: teacherLabel(t), byCatType, pay, breakdown, uncounted: payrollUncountedClasses(mine) };
   });
   // Include demo bonuses (Converted, in the selected month) in each teacher's payroll row
   payrollRows.forEach(r => {
@@ -11796,6 +11887,7 @@ function renderReports() {
       r.paid = pr ? pr.paid : false;
       r.paidDate = pr ? pr.paidDate : '';
       r.paidReference = pr ? pr.paidReference : '';
+      r.paidAmount = pr && pr.paid && pr.paidAmount != null ? pr.paidAmount : null;
       r.net = r.pay + r.adjustment;
     } else {
       r.demoLines = []; r.bonus = 0; r.adjustment = 0; r.adjustmentNote = ''; r.paid = false; r.paidDate = ''; r.paidReference = ''; r.net = r.pay;
@@ -11834,6 +11926,13 @@ function renderReports() {
           });
         });
       });
+      // Same extras as the Teacher payroll card: converted-demo bonuses and the month's +/- adjustment.
+      netProfitPayroll += data.demoLogs
+        .filter(d => d.teacherId === t.id && d.status === 'Converted' && netProfitInRange((d.convertedAt || d.date || '').slice(0, 10)))
+        .reduce((a, d) => a + (d.bonusAmount || 0), 0);
+      netProfitPayroll += data.teacherPayrollRecords
+        .filter(r => r.teacherId === t.id && netProfitInRange(r.month + '-01'))
+        .reduce((a, r) => a + (r.adjustment || 0), 0);
     });
     // Institute-wide expenses (rent and so on) don't belong to any one teacher, so they are
     // only counted for the whole-institute view.
@@ -11890,6 +11989,7 @@ function renderReports() {
           ? `<div style="display:flex;flex-direction:column;gap:3px">
               <span class="tag" style="background:var(--forest);color:#fff;white-space:nowrap">✓ Paid${r.paidDate?' '+r.paidDate:''}</span>
               ${r.paidReference?`<span style="font-size:11px;color:var(--hint)">${esc(r.paidReference)}</span>`:''}
+              ${r.paidAmount != null && Math.abs(r.paidAmount - r.net) > 0.005 ? `<span style="font-size:11px;color:var(--brick)">⚠ Paid ₹${r.paidAmount.toFixed(2)}; classes changed since, now ₹${r.net.toFixed(2)}</span>` : ''}
               <button class="btn-small" style="font-size:10px" onclick="printSalarySlip('${tid}','${payrollMonth}')">📄 Salary Slip</button>
               ${payrollUndoPaidId === tid
                 ? `<div style="display:flex;flex-direction:column;gap:4px;padding:6px 0">
@@ -11920,9 +12020,10 @@ function renderReports() {
           <td style="text-align:right;white-space:nowrap">₹${r.pay.toFixed(2)}</td>
           <td style="font-size:12px;color:var(--hint);padding-left:8px">
             ${r.breakdown.map(b=>`${fmtN(b.cnt)} × ₹${b.rate} = ₹${b.earn.toFixed(2)}`).join('<br>')}
-            ${r.demoLines && r.demoLines.length ? r.demoLines.map(l=>`<br><span style="color:var(--forest)">+ ₹${l.amount.toFixed(0)} demo bonus — ${l.studentName}</span>`).join('') : ''}
+            ${r.demoLines && r.demoLines.length ? r.demoLines.map(l=>`<br><span style="color:var(--forest)">+ ₹${l.amount.toFixed(0)} demo bonus — ${esc(l.studentName)}</span>`).join('') : ''}
             ${r.demoLines && r.demoLines.length ? `<br><b style="color:var(--ink)">= ₹${r.pay.toFixed(0)} total</b>` : ''}
             ${r.breakdown.length===0 && !(r.demoLines&&r.demoLines.length) ? '<span style="color:var(--brick)">No rates set — check Fee setup</span>' : ''}
+            ${r.uncounted ? `<br><span style="color:var(--brick)">⚠ ${fmtN(r.uncounted)} class${r.uncounted===1?'':'es'} not counted — subject or category missing</span>` : ''}
           </td>
           <td>${adjHtml}</td>
           <td style="text-align:right;white-space:nowrap"><b>₹${r.net.toFixed(2)}</b></td>
@@ -12147,7 +12248,7 @@ function renderReports() {
       ${netProfitTeacherFilter === '' ? '<div class="empty">Pick a teacher above to see net profit for them, or choose All Teachers for the whole institute.</div>' : `
       <div class="table-scroll"><table>
         <tr><td>Total fee collection</td><td style="text-align:right">${netProfitCollection.toFixed(2)}</td></tr>
-        <tr><td>Total teacher payroll</td><td style="text-align:right">${netProfitPayroll.toFixed(2)}</td></tr>
+        <tr><td>Total teacher payroll <span style="color:var(--muted);font-size:12px">(incl. demo bonuses and adjustments)</span></td><td style="text-align:right">${netProfitPayroll.toFixed(2)}</td></tr>
         <tr><td>Other expenses${netProfitTeacherFilter==='ALL'?'':' <span style="color:var(--muted);font-size:12px">(institute-wide — only counted under All Teachers)</span>'}</td><td style="text-align:right">${netProfitTeacherFilter==='ALL' ? netProfitExpenses.toFixed(2) : '—'}</td></tr>
         <tr class="total"><td>Net profit</td><td style="text-align:right;color:${netProfitValue<0?'var(--brick)':'var(--forest)'}">${netProfitValue.toFixed(2)}</td></tr>
       </table></div>
@@ -12613,7 +12714,7 @@ function renderWixBookings() {
       } else {
         scheduleBlock = `
           <div style="margin-top:10px">
-            <button class="btn-small btn-primary" onclick="wixBookingFromId='${b.id}';demoLogDraft={...demoLogDraft,studentName:'${b.studentName.replace(/'/g,"\\'")}',parentMobile:'${b.phone.replace(/'/g,"\\'")}',notes:'Wix booking'};render();setTimeout(()=>{const el=document.getElementById('demo-register-heading');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},150)">📅 Schedule in Demo Register ↓</button>
+            <button class="btn-small btn-primary" onclick="wixScheduleInDemoRegister('${b.id}')">📅 Schedule in Demo Register ↓</button>
             <div style="margin-top:14px;padding-top:10px;border-top:1px dashed var(--border)">
               <span class="hint" style="font-size:11px">Student won't be coming?</span>
               <button class="btn-small" style="color:var(--brick);border-color:var(--brick);margin-left:8px;font-size:11px" onclick="cancelWixBooking('${b.id}')">✕ Cancel Booking</button>
@@ -12670,7 +12771,7 @@ function renderWixBookings() {
             </div>
           </div>`;
       } else {
-        convertBlock = `<div style="margin-top:8px"><button class="btn-small btn-primary" style="background:var(--forest)" onclick="wixConvertingId='${b.id}';wixConvertDraft={studentName:'${b.studentName.replace(/'/g,"\\'")}',confirmed:false};wixConvertMsg='';render()">🎓 Convert to Student</button></div>`;
+        convertBlock = `<div style="margin-top:8px"><button class="btn-small btn-primary" style="background:var(--forest)" onclick="wixStartConvert('${b.id}')">🎓 Convert to Student</button></div>`;
       }
     }
 
@@ -15558,7 +15659,7 @@ function renderTeacherDashboard(teacher) {
     ? earningsBreakdown.map(b=>fmtN(b.cnt)+' \u00d7 \u20b9'+b.rate+' = \u20b9'+b.earn.toFixed(2)).join(' + ')
       + (teacherDemoBonus > 0 ? (earningsBreakdown.length ? ' + ' : '')+'<span style="color:var(--forest)">'+demoBonusLabel+'</span>' : '')
       + ' = \u20b9'+earnings.toFixed(2)
-      + (teacherAdj !== 0 ? ' <span style="color:'+(teacherAdj<0?'var(--brick)':'var(--forest)')+'">'+( teacherAdj>0?'+':'')+' \u20b9'+teacherAdj.toFixed(2)+' adjustment'+(teacherAdjNote?' ('+teacherAdjNote+')':'')+'</span> = <b>\u20b9'+teacherNet.toFixed(2)+'</b>' : ' = <b>\u20b9'+earnings.toFixed(2)+'</b>')
+      + (teacherAdj !== 0 ? ' <span style="color:'+(teacherAdj<0?'var(--brick)':'var(--forest)')+'">'+( teacherAdj>0?'+':'')+' \u20b9'+teacherAdj.toFixed(2)+' adjustment'+(teacherAdjNote?' ('+esc(teacherAdjNote)+')':'')+'</span> = <b>\u20b9'+teacherNet.toFixed(2)+'</b>' : ' = <b>\u20b9'+earnings.toFixed(2)+'</b>')
       + (teacherPaid ? ' <span class="tag" style="background:var(--forest);color:#fff;margin-left:6px">\u2713 Paid'+(teacherPaidDate?' '+teacherPaidDate:'')+'</span>'+(teacherPaidRef?'<span style="font-size:11px;color:var(--hint);margin-left:6px">'+esc(teacherPaidRef)+'</span>':'') : ' <span class="tag absent" style="margin-left:6px">Pending</span>')
     : 'No classes recorded for this month.';
   const needingRenewal = countStudentsNeedingRenewal(teacher.id);
