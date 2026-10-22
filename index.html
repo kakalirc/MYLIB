@@ -271,7 +271,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 20:40 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 21:25 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -2577,7 +2577,8 @@ async function loadSessions() {
   if (!error && sessionRows) {
     data.sessions = sessionRows.map(r => ({
       id: r.id, date: r.date, studentId: r.student_id, teacherId: r.teacher_id, subjectId: r.subject_id,
-      classType: r.class_type, mode: r.mode, status: r.status, count: Number(r.count), remarks: r.remarks || ''
+      classType: r.class_type, mode: r.mode, status: r.status, count: Number(r.count), remarks: r.remarks || '',
+      createdAt: r.created_at || ''
     }));
   }
 }
@@ -2632,7 +2633,7 @@ async function loadExpenses() {
     all = all.concat(rows || []);
     if (!rows || rows.length < PAGE) break;
   }
-  expenseList = all.map(r => ({ id: r.id, date: r.expense_date, category: r.category, amount: Number(r.amount), notes: r.notes || '' }));
+  expenseList = all.map(r => ({ id: r.id, date: r.expense_date, category: r.category, amount: Number(r.amount), notes: r.notes || '', createdAt: r.created_at || '' }));
 }
 async function loadDemoLogs() {
   if (currentRole !== 'Admin' && currentRole !== 'Teacher') { data.demoLogs = []; return; }
@@ -3733,7 +3734,7 @@ let teacherLeave = [];
 async function loadTeacherLeave() {
   const { data: rows, error } = await selectAllPaged('teacher_leave', ['start_date']);
   if (!error && rows) {
-    teacherLeave = rows.map(r => ({ id: r.id, teacherId: r.teacher_id, startDate: r.start_date, endDate: r.end_date, reason: r.reason || '' }));
+    teacherLeave = rows.map(r => ({ id: r.id, teacherId: r.teacher_id, startDate: r.start_date, endDate: r.end_date, reason: r.reason || '', createdAt: r.created_at || '' }));
   }
 }
 async function loadStudentsAndSubscriptions() {
@@ -3770,7 +3771,8 @@ async function loadStudentsAndSubscriptions() {
       classes: Number(r.classes), amountPaid: Number(r.amount_paid) || 0, date: r.date, kind: r.kind,
       paymentReference: r.payment_reference || '', paymentRemarks: r.payment_remarks || '',
       transferGroupId: r.transfer_group_id || '',
-      expiresOn: r.expires_on || '', expiredBatchId: r.expired_batch_id || ''
+      expiresOn: r.expires_on || '', expiredBatchId: r.expired_batch_id || '',
+      createdAt: r.created_at || ''   // teachers' list (teacher_my_subscriptions) has no saved time
     }));
   }
 }
@@ -5550,7 +5552,7 @@ function allSubscriptionRows() {
       subjectId: s.subjectId, subjectName: subjectName(s.subjectId), type: s.type,
       classes: s.classes, amountPaid: s.amountPaid, date: s.date,
       status: 'Refund', usedHere: 0, remainingHere: 0,
-      paymentReference: s.paymentReference || '', paymentRemarks: s.paymentRemarks || ''
+      paymentReference: s.paymentReference || '', paymentRemarks: s.paymentRemarks || '', createdAt: s.createdAt || ''
     });
   });
   return rows.sort((a,b)=> a.studentName.localeCompare(b.studentName) || a.subjectName.localeCompare(b.subjectName) || a.type.localeCompare(b.type) || (a.date||'').localeCompare(b.date||''));
@@ -5785,12 +5787,23 @@ function subjectsForStudentAndTeacher(studentId, teacherId) {
 
 // For a teacher and month: a chronological attendance log — one row per class actually held,
 // sorted by date. This reads like a traditional register, not a summary.
+// The time an entry was saved (created_at), shown in small text under its date, in India time.
+// Only the time when it was saved on that same day; the day too when it was saved on another day (e.g. logged late).
+function savedAtHtml(ts, onDate) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (isNaN(d)) return '';
+  const day = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  const time = d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true });
+  const label = day === onDate ? time : d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short' }) + ', ' + time;
+  return `<div class="hint" style="white-space:nowrap" title="Saved ${day} ${esc(time)} (India time)">saved ${esc(label)}</div>`;
+}
 function teacherRegisterEntries(teacherId, month) {
   return data.sessions
     .filter(s=>s.teacherId===teacherId && s.date.startsWith(month))
     .map(s => ({
       date: s.date, studentName: studentNameWithCode(s.studentId), subjectName: subjectName(s.subjectId),
-      classType: s.classType, mode: s.mode, status: s.status, count: s.count
+      classType: s.classType, mode: s.mode, status: s.status, count: s.count, createdAt: s.createdAt
     }))
     .sort((a,b)=> a.date.localeCompare(b.date) || a.studentName.localeCompare(b.studentName));
 }
@@ -10203,7 +10216,7 @@ function renderExpenses() {
         <tr><th>Date</th><th>Category</th><th style="text-align:right">Amount</th><th>Notes</th><th></th></tr>
         ${monthList.map(e => `
           <tr${editingExpenseId===e.id?' style="background:#f6efd9"':''}>
-            <td>${esc(e.date)}</td><td>${esc(e.category)}</td><td style="text-align:right">${e.amount.toFixed(2)}</td><td>${esc(e.notes) || '<span class="hint">—</span>'}</td>
+            <td>${esc(e.date)}${savedAtHtml(e.createdAt, e.date)}</td><td>${esc(e.category)}</td><td style="text-align:right">${e.amount.toFixed(2)}</td><td>${esc(e.notes) || '<span class="hint">—</span>'}</td>
             <td>${pendingDeleteExpenseId===e.id
               ? `Delete? <button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="confirmDeleteExpense('${e.id}')">Yes</button> <button class="btn-small" onclick="cancelDeleteExpense()">No</button>`
               : `<button class="btn-small" onclick="startEditExpense('${e.id}')">Edit</button> <button class="icon-btn" onclick="startDeleteExpense('${e.id}')" title="Delete">✕</button>`}</td>
@@ -10300,12 +10313,15 @@ function parseImportedWorkbook(wb) {
 
   const subscriptions = getSheet('Subscriptions').filter(r=>r.SubscriptionID).map(r => {
     const statusCell = String(r.Status||'');
-    const kind = statusCell === 'Refund' ? 'Refund' : (statusCell === 'Requested' ? 'Request' : 'Payment');
+    const kind = statusCell === 'Refund' ? 'Refund' : (statusCell === 'Requested' ? 'Request'
+      : (['TransferIn','TransferOut','Expiry'].includes(statusCell) ? statusCell : 'Payment'));
     return {
       id: String(r.SubscriptionID), studentId: String(r.StudentID||''), subjectId: String(r.SubjectID||''),
       type: String(r.Type||'Group'), classes: Number(r.Classes)||0, amountPaid: Number(r.AmountPaid)||0,
       date: normalizeDateCell(r.PaymentDate), kind,
-      paymentReference: String(r.PaymentReference||''), paymentRemarks: String(r.PaymentRemarks||'')
+      paymentReference: String(r.PaymentReference||''), paymentRemarks: String(r.PaymentRemarks||''),
+      // Older backups have none of these three columns; the restore then works out expiry again, as before.
+      expiresOn: r.ExpiresOn ? normalizeDateCell(r.ExpiresOn) : '', transferGroupId: String(r.TransferGroupID||''), expiredBatchId: String(r.ExpiredBatchID||'')
     };
   });
 
@@ -10373,7 +10389,7 @@ function buildImportPayload(parsed) {
     students: parsed.students.map(s => ({ id: s.id, name: s.name, archived: s.archived, parent_name: s.parentName, mobile_number: s.mobileNumber, student_code: s.code||null, email: s.email||null, address: s.address||null, grade_id: s.gradeId||null, board_id: s.boardId||null, academic_year: s.academicYear||null, mode_preference: s.modePreference||null, class_type_preference: s.classTypePreference||null })),
     subjects: parsed.subjects.map(s => ({ id: s.id, name: s.name, category: s.category, teacher_id: s.teacherId })),
     student_subjects: parsed.studentSubjects.map(e => ({ id: e.id, student_id: e.studentId, subject_id: e.subjectId, enrolled_at: e.enrolledAt || null })),
-    subscriptions: parsed.subscriptions.map(s => ({ id: s.id, student_id: s.studentId, subject_id: s.subjectId, type: s.type, classes: s.classes, amount_paid: s.amountPaid, date: s.date, kind: s.kind, payment_reference: s.paymentReference || null, payment_remarks: s.paymentRemarks || null })),
+    subscriptions: parsed.subscriptions.map(s => ({ id: s.id, student_id: s.studentId, subject_id: s.subjectId, type: s.type, classes: s.classes, amount_paid: s.amountPaid, date: s.date, kind: s.kind, payment_reference: s.paymentReference || null, payment_remarks: s.paymentRemarks || null, expires_on: s.expiresOn || null, transfer_group_id: s.transferGroupId || null, expired_batch_id: s.expiredBatchId || null })),
     sessions: parsed.sessions.map(s => ({ id: s.id, date: s.date, student_id: s.studentId, teacher_id: s.teacherId, subject_id: s.subjectId, class_type: s.classType, mode: s.mode, status: s.status, count: s.count, remarks: s.remarks || null })),
   };
 }
@@ -10455,11 +10471,21 @@ function exportExcel() {
     status: 'Requested', usedHere: 0, remainingHere: 0,
     paymentReference: s.paymentReference||'', paymentRemarks: s.paymentRemarks||''
   }));
-  const subsSheet = [...allSubscriptionRows(), ...pendingRowsForExport].map(r => ({
+  // Transfers and expiry entries are not payments, but a restore needs them or balances come back wrong.
+  const otherRowsForExport = data.subscriptions.filter(s => ['TransferIn','TransferOut','Expiry'].includes(s.kind)).map(s => ({
+    id: s.id, studentId: s.studentId, studentName: studentName(s.studentId),
+    subjectId: s.subjectId, subjectName: subjectName(s.subjectId), type: s.type,
+    classes: s.classes, amountPaid: s.amountPaid, date: s.date,
+    status: s.kind, usedHere: 0, remainingHere: 0,
+    paymentReference: s.paymentReference||'', paymentRemarks: s.paymentRemarks||'',
+    transferGroupId: s.transferGroupId||'', expiredBatchId: s.expiredBatchId||''
+  }));
+  const subsSheet = [...allSubscriptionRows(), ...pendingRowsForExport, ...otherRowsForExport].map(r => ({
     SubscriptionID: r.id, StudentID: r.studentId, StudentName: r.studentName,
     SubjectID: r.subjectId, SubjectName: r.subjectName, Type: r.type,
     Classes: r.classes, AmountPaid: r.amountPaid||0, PaymentDate: r.date, Status: r.status,
-    Used: r.usedHere, Remaining: r.remainingHere, PaymentReference: r.paymentReference||'', PaymentRemarks: r.paymentRemarks||''
+    Used: r.usedHere, Remaining: r.remainingHere, PaymentReference: r.paymentReference||'', PaymentRemarks: r.paymentRemarks||'',
+    ExpiresOn: r.expiresOn||'', TransferGroupID: r.transferGroupId||'', ExpiredBatchID: r.expiredBatchId||''
   }));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(subsSheet), 'Subscriptions');
 
@@ -11073,7 +11099,7 @@ function renderStudents() {
         return `
         <tr${isRefund?' style="color:var(--brick)"':''}>
           <td>${esc(r.subjectName)}</td><td>${r.type}</td><td>${r.classes}</td>
-          <td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}</td>
+          <td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td>
           <td>${subscriptionStatusCellHtml(r)}</td><td>${isRefund?'—':r.usedHere}</td><td>${isRefund||!r.expiredClasses?'—':`<span style="color:var(--brick)">${r.expiredClasses}</span>`}</td><td>${isRefund?'—':r.remainingHere}</td>
           <td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${r.paymentRemarks ? `<div class="hint">${esc(r.paymentRemarks)}</div>` : ''}</td>
           <td>
@@ -11293,7 +11319,7 @@ function renderStudents() {
             const isEditing = editingRequestId === r.id;
             return `<tr>
               <td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td>
-              <td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}</td>
+              <td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td>
               <td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}</td>
               <td>
                 ${rejectPaymentMsg[r.id] ? `<div class="hint" style="color:var(--brick)">${esc(rejectPaymentMsg[r.id])}</div>` : ''}
@@ -11730,7 +11756,7 @@ function renderReports() {
       <tr><th>Student</th><th>Parent</th><th>Mobile</th><th>Subject</th><th>Type</th><th>Classes</th><th>Amount</th><th>Requested</th><th>Reference</th><th></th></tr>
       ${pendingRequestRows.map(r=>{
         const st = data.students.find(x=>x.id===r.studentId);
-        return `<tr><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(st?(st.parentName||'—'):'—')}</td><td>${esc(st?(st.mobileNumber||'—'):'—')}${copyBtnHtml(st&&st.mobileNumber)}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}</td><td>${r.paymentReference?esc(r.paymentReference):'<span class="hint">—</span>'}</td><td><button class="btn-small" onclick="generateFeeMessageForRequest('${r.id}')">Message</button>${waChips(r.studentId, feeMessageTextForRequest(r.id))}</td></tr>`;
+        return `<tr><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(st?(st.parentName||'—'):'—')}</td><td>${esc(st?(st.mobileNumber||'—'):'—')}${copyBtnHtml(st&&st.mobileNumber)}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${r.paymentReference?esc(r.paymentReference):'<span class="hint">—</span>'}</td><td><button class="btn-small" onclick="generateFeeMessageForRequest('${r.id}')">Message</button>${waChips(r.studentId, feeMessageTextForRequest(r.id))}</td></tr>`;
       }).join('')}
     </table></div>` : '<div class="empty">No pending fee requests.</div>';
 
@@ -12082,7 +12108,7 @@ function renderReports() {
         <tr><th>Date</th><th>Student</th><th>Subject</th><th>Type</th><th>Mode</th><th>Status</th><th>Classes</th></tr>
         ${entries.map(e=>`
           <tr>
-            <td>${e.date}</td><td>${esc(e.studentName)}</td><td>${esc(e.subjectName)}</td>
+            <td>${e.date}${savedAtHtml(e.createdAt, e.date)}</td><td>${esc(e.studentName)}</td><td>${esc(e.subjectName)}</td>
             <td>${e.classType}</td><td>${e.mode}</td>
             <td>${e.status==='Present' ? '<span class="tag">Present</span>' : '<span class="tag absent">Absent</span>'}</td>
             <td>${e.count}</td>
@@ -12103,7 +12129,7 @@ function renderReports() {
           <tr><th>Date</th><th>Subject</th><th>Teacher</th><th>Type</th><th>Mode</th><th>Status</th><th>Classes</th></tr>
           ${rMonthSessions.map(s=>`
             <tr>
-              <td>${s.date}</td><td>${esc(subjectName(s.subjectId))}</td><td>${esc(teacherNameWithCode(s.teacherId))}</td>
+              <td>${s.date}${savedAtHtml(s.createdAt, s.date)}</td><td>${esc(subjectName(s.subjectId))}</td><td>${esc(teacherNameWithCode(s.teacherId))}</td>
               <td>${s.classType}</td><td>${s.mode}</td>
               <td>${s.status==='Present' ? '<span class="tag">Present</span>' : '<span class="tag absent">Absent</span>'}</td>
               <td>${s.count}</td>
@@ -12123,7 +12149,7 @@ function renderReports() {
         <div class="table-scroll"><table>
           <tr><th>Subject</th><th>Type</th><th>Classes</th><th>Amount</th><th>Date</th><th>Status</th><th>Used</th><th>Remaining</th><th>Reference</th></tr>
           ${rPayments.map(r=>`
-            <tr${r.status==='Refund'?' style="color:var(--brick)"':''}><td>${esc(r.subjectName)}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}</td>
+            <tr${r.status==='Refund'?' style="color:var(--brick)"':''}><td>${esc(r.subjectName)}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td>
               <td>${subscriptionStatusCellHtml(r)}</td><td>${r.status==='Refund'?'—':r.usedHere}</td><td>${r.status==='Refund'?'—':r.remainingHere}</td><td>${r.paymentReference?esc(r.paymentReference):'<span class="hint">—</span>'}</td></tr>`).join('')}
           ${transferRowsHtml(rTransfers, 9, false)}
         </table></div>` : '<div class="empty">No subscription payments recorded yet.</div>';
@@ -12147,7 +12173,7 @@ function renderReports() {
   const refundsHtml = refundRows.length ? `
     <div class="table-scroll"><table>
       <tr><th>Student</th><th>Subject</th><th>Type</th><th>Classes refunded</th><th>Amount refunded</th><th>Date</th></tr>
-      ${refundRows.map(r=>`<tr><td>${esc(r.studentName)}</td><td>${esc(r.subjectName)}</td><td>${r.type}</td><td>${Math.abs(r.classes)}</td><td>${Math.abs(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}</td></tr>`).join('')}
+      ${refundRows.map(r=>`<tr><td>${esc(r.studentName)}</td><td>${esc(r.subjectName)}</td><td>${r.type}</td><td>${Math.abs(r.classes)}</td><td>${Math.abs(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td></tr>`).join('')}
       <tr class="total"><td colspan="3">Total</td><td>${refundTotalClasses}</td><td>${refundTotalAmount.toFixed(2)}</td><td></td></tr>
     </table></div>` : '<div class="empty">No refunds issued this month.</div>';
 
@@ -12389,7 +12415,7 @@ function renderFees() {
       <tr><th>Student</th><th>Parent</th><th>Mobile</th><th>Subject</th><th>Type</th><th>Classes</th><th>Amount</th><th>Requested</th><th>Reference</th><th></th></tr>
       ${pendingRequestRows.map(r=>{
         const st = data.students.find(x=>x.id===r.studentId);
-        return `<tr><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(st?(st.parentName||'—'):'—')}</td><td>${esc(st?(st.mobileNumber||'—'):'—')}${copyBtnHtml(st&&st.mobileNumber)}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}</td><td>${r.paymentReference?esc(r.paymentReference):'<span class="hint">—</span>'}</td><td><button class="btn-small" onclick="generateFeeMessageForRequest('${r.id}')">Message</button>${waChips(r.studentId, feeMessageTextForRequest(r.id))}</td></tr>`;
+        return `<tr><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(st?(st.parentName||'—'):'—')}</td><td>${esc(st?(st.mobileNumber||'—'):'—')}${copyBtnHtml(st&&st.mobileNumber)}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${r.paymentReference?esc(r.paymentReference):'<span class="hint">—</span>'}</td><td><button class="btn-small" onclick="generateFeeMessageForRequest('${r.id}')">Message</button>${waChips(r.studentId, feeMessageTextForRequest(r.id))}</td></tr>`;
       }).join('')}
     </table></div>` : '<div class="empty">No pending fee requests.</div>';
 
@@ -12403,7 +12429,7 @@ function renderFees() {
       <tr><th>Student</th><th>Subject</th><th>Type</th><th>Classes</th><th>Amount</th><th>Date</th><th>Status</th><th>Used</th><th>Expired</th><th>Remaining</th><th>Reference &amp; Remarks</th></tr>
       ${allPaymentsFiltered.map(r=>`
         <tr${r.status==='Refund'?' style="color:var(--brick)"':''}><td>${esc(r.studentName)}</td><td>${esc(r.subjectName)}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td>
-          <td>${r.date||'—'}</td><td>${subscriptionStatusCellHtml(r)}</td><td>${r.status==='Refund'?'—':r.usedHere}</td><td>${r.status==='Refund'||!r.expiredClasses?'—':`<span style="color:var(--brick)">${r.expiredClasses}</span>`}</td><td>${r.status==='Refund'?'—':r.remainingHere}</td><td>${r.paymentReference?esc(r.paymentReference):'<span class="hint">—</span>'}${r.paymentRemarks?`<div class="hint">${esc(r.paymentRemarks)}</div>`:''}</td></tr>`).join('')}
+          <td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${subscriptionStatusCellHtml(r)}</td><td>${r.status==='Refund'?'—':r.usedHere}</td><td>${r.status==='Refund'||!r.expiredClasses?'—':`<span style="color:var(--brick)">${r.expiredClasses}</span>`}</td><td>${r.status==='Refund'?'—':r.remainingHere}</td><td>${r.paymentReference?esc(r.paymentReference):'<span class="hint">—</span>'}${r.paymentRemarks?`<div class="hint">${esc(r.paymentRemarks)}</div>`:''}</td></tr>`).join('')}
     </table></div>` : (allPaymentsStudentFilter==='' ? '<div class="empty">Pick a student above to see their subscription payments.</div>' : `<div class="empty">No matching subscription payments.</div>`);
   const allPaymentsStudentOptions = `
     <option value="" ${allPaymentsStudentFilter===''?'selected':''}>Pick a student…</option>
@@ -13577,7 +13603,7 @@ function renderStudentReportCards(student, viewMonth, monthSetterFn, titlePrefix
       <tr><th>Date</th><th>Subject</th><th>Teacher</th><th>Type</th><th>Mode</th><th>Status</th><th>Classes</th><th>Remarks</th></tr>
       ${monthSessions.map(s=>`
         <tr>
-          <td>${s.date}</td><td>${esc(subjectName(s.subjectId))}</td><td>${esc(teacherName(s.teacherId))}</td>
+          <td>${s.date}${savedAtHtml(s.createdAt, s.date)}</td><td>${esc(subjectName(s.subjectId))}</td><td>${esc(teacherName(s.teacherId))}</td>
           <td>${s.classType}</td><td>${s.mode}</td>
           <td>${s.status==='Present' ? '<span class="tag">Present</span>' : '<span class="tag absent">Absent</span>'}</td>
           <td>${s.count}</td>
@@ -13593,7 +13619,7 @@ function renderStudentReportCards(student, viewMonth, monthSetterFn, titlePrefix
       ${myPayments.map(r=>`
         <tr${r.status==='Refund'?' style="color:var(--brick)"':''}>
           <td>${esc(r.subjectName)}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td>
-          <td>${r.date||'—'}</td><td>${subscriptionStatusCellHtml(r)}</td><td>${r.status==='Refund'?'—':r.usedHere}</td><td>${r.status==='Refund'||!r.expiredClasses?'—':`<span style="color:var(--brick)">${r.expiredClasses}</span>`}</td><td>${r.status==='Refund'?'—':r.remainingHere}</td>
+          <td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${subscriptionStatusCellHtml(r)}</td><td>${r.status==='Refund'?'—':r.usedHere}</td><td>${r.status==='Refund'||!r.expiredClasses?'—':`<span style="color:var(--brick)">${r.expiredClasses}</span>`}</td><td>${r.status==='Refund'?'—':r.remainingHere}</td>
           <td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${r.paymentRemarks ? `<div class="hint">${esc(r.paymentRemarks)}</div>` : ''}</td>
           <td>${r.status==='Refund'?'':"<button class='btn-small' onclick='openReceipt(\'"+(r.id||'')+"\')'  style='font-size:11px'>Receipt</button>"}</td>
         </tr>`).join('')}
@@ -13634,7 +13660,7 @@ function renderStudentReportCards(student, viewMonth, monthSetterFn, titlePrefix
         <tr><th></th><th>Subject</th><th>Type</th><th>Classes</th><th>Amount</th><th>Requested</th><th>Status</th></tr>
         ${myPendingRequests.map(r=>`<tr>
           <td><input type="checkbox" ${payCheckoutSelected.has(r.id)?'checked':''} ${r.paymentReference?'disabled title="Already initiated — contact admin to reset before paying again"':''} onchange="togglePayCheckoutSelect('${r.id}')"></td>
-          <td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}</td>
+          <td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td>
           <td>${r.paymentReference ? `<span class="hint">Initiated (${esc(r.paymentReference)}) <a href="#" onclick="startUndoPaymentInitiation('${r.id}'); return false;" style="color:var(--brick)">Undo</a></span>` : (r.paymentRemarks ? `<span class="hint" style="color:var(--brick)">${esc(r.paymentRemarks)}</span>` : '<span class="hint">—</span>')}</td>
         </tr>`).join('')}
       </table></div>
@@ -15002,7 +15028,7 @@ function teacherLeaveManageHtml(teacherId) {
       ${myLeave.length===0 ? '<div class="empty">No leave recorded.</div>' : `
       <div class="table-scroll"><table>
         <tr><th>From</th><th>To</th><th>Reason</th><th></th></tr>
-        ${myLeave.map(l=>`<tr><td>${esc(l.startDate)}</td><td>${esc(l.endDate)}</td><td>${l.reason?esc(l.reason):'<span class="hint">—</span>'}</td><td><button class="icon-btn" onclick="removeTeacherLeave('${l.id}')">✕</button></td></tr>`).join('')}
+        ${myLeave.map(l=>`<tr><td>${esc(l.startDate)}${savedAtHtml(l.createdAt, l.startDate)}</td><td>${esc(l.endDate)}</td><td>${l.reason?esc(l.reason):'<span class="hint">—</span>'}</td><td><button class="icon-btn" onclick="removeTeacherLeave('${l.id}')">✕</button></td></tr>`).join('')}
       </table></div>`}
     </div>`;
 }
@@ -15416,7 +15442,7 @@ function renderTeacherAttendance(teacher) {
         if (editingSessionId === s.id) {
           const ed = editSessionDraft;
           return `<tr>
-            <td>${s.date}</td><td>${esc(studentName(s.studentId))}</td><td>${esc(subjectName(s.subjectId))}</td>
+            <td>${s.date}${savedAtHtml(s.createdAt, s.date)}</td><td>${esc(studentName(s.studentId))}</td><td>${esc(subjectName(s.subjectId))}</td>
             <td colspan="6">
               ${editSessionMsg ? `<div class="hint" style="color:var(--brick)">${esc(editSessionMsg)}</div>` : ''}
               <div class="row-form" style="margin-bottom:0">
@@ -15439,7 +15465,7 @@ function renderTeacherAttendance(teacher) {
           </tr>`;
         }
         return `<tr>
-          <td>${s.date}</td><td>${esc(studentName(s.studentId))}</td><td>${esc(subjectName(s.subjectId))}</td>
+          <td>${s.date}${savedAtHtml(s.createdAt, s.date)}</td><td>${esc(studentName(s.studentId))}</td><td>${esc(subjectName(s.subjectId))}</td>
           <td>${s.classType}</td><td>${s.mode}</td>
           <td>${s.status==='Present' ? '<span class="tag">Present</span>' : '<span class="tag absent">Absent</span>'}</td>
           <td>${s.count}</td>
@@ -16117,7 +16143,7 @@ function teacherPortalBodyHtml(teacher) {
       <tr><th>Date</th><th>Student</th><th>Subject</th><th>Type</th><th>Mode</th><th>Status</th><th>Classes</th><th>Remarks</th></tr>
       ${allMonthSessions.map(s=>`
         <tr>
-          <td>${s.date}</td><td>${esc(studentName(s.studentId))}</td><td>${esc(subjectName(s.subjectId))}</td>
+          <td>${s.date}${savedAtHtml(s.createdAt, s.date)}</td><td>${esc(studentName(s.studentId))}</td><td>${esc(subjectName(s.subjectId))}</td>
           <td>${s.classType}</td><td>${s.mode}</td>
           <td>${s.status==='Present' ? '<span class="tag">Present</span>' : '<span class="tag absent">Absent</span>'}</td>
           <td>${s.count}</td>
