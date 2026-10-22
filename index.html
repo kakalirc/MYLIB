@@ -269,7 +269,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 08:15 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 08:40 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1091,7 +1091,7 @@ async function loadResearchData() {
   if (chaps) researchChapterList = { chapters: (chaps.data || []), textbooks: ((tbs && tbs.data) || []) };
   render();
 }
-// Question Bank chapters for the picked subject + class (current syllabus first), used as suggestions only.
+// Question Bank chapters for the picked subject + grade (current syllabus first), used as suggestions only.
 function researchChaptersFor(subjectName, gradeId) {
   if (!researchChapterList || !subjectName || !gradeId) return [];
   const tbIds = new Set(researchChapterList.textbooks.filter(tb => qbSameSubject(tb.subject_name, subjectName) && tb.grade_id === gradeId
@@ -1177,7 +1177,7 @@ function resetResearchState() {
   researchBrief = { loading: false, text: '', error: '', savedId: '', ask: null }; researchBankQs = [];
   researchDraft = { subjectId: '', gradeId: '', boardId: '', chapter: '', focus: '' };
   researchNotes = null; researchNotesMsg = ''; researchOpenNoteId = '';
-  insights = null; insightsStudentId = ''; insightsMsg = '';
+  insights = null; insightsRaw = null; insightsFilter = { subject: '', gradeId: '', days: '', search: '' }; insightsStudentId = ''; insightsMsg = '';
   qrRows = null; qrMsg = ''; qrOpenChapter = ''; qrDraft = { subjectId: '', gradeId: '', boardId: '', examType: '' };
   resources = null; resourcesMsg = ''; resFile = null; resFilterSubjectId = '';
   resDraft = { subjectId: '', gradeId: '', chapter: '', title: '', link: '', note: '', shared: false };
@@ -15463,6 +15463,8 @@ let insightsLoading = false;
 let insightsMsg = '';
 let insightsStudentId = '';
 let insightsChapterNames = {};  // chapter id → "1. Title"
+let insightsRaw = null;         // loaded rows; insights is worked out from them with the filters below
+let insightsFilter = { subject: '', gradeId: '', days: '', search: '' };
 const INSIGHTS_WEAK = 60;       // a chapter under this % counts as weak
 // Rows of table where col is in ids, 100 ids per request (keeps URLs short), every page.
 async function insightsSelectIn(table, columns, col, ids) {
@@ -15498,10 +15500,31 @@ async function loadInsights() {
     const pqByPaper = new Map();
     pqs.forEach(r => { if (!pqByPaper.has(r.paper_id)) pqByPaper.set(r.paper_id, []); pqByPaper.get(r.paper_id).push(r); });
     const gotBy = new Map(attempts.map(t => [t.assignment_id + '|' + t.question_id, t]));
-    const students = {}, chapters = {};
+    insightsRaw = { assigns, paperById, pqByPaper, gotBy, qById };
+    insightsCompute();
+  } catch (e) { insightsMsg = 'Could not load insights: ' + (e.message || e); insights = null; insightsRaw = null; }
+  insightsLoading = false; render();
+}
+function setInsightsFilter(field, value) {
+  insightsFilter[field] = value;
+  if (field === 'subject') insightsFilter.gradeId = '';
+  if (field !== 'search') { insightsCompute(); render(); return; }
+  // Typing in the search box: redraw only the table so the box keeps focus.
+  const el = document.getElementById('insightsBody');
+  if (el) el.innerHTML = insightsBodyHtml(); else render();
+}
+// Totals per student and chapter for the reviewed papers that pass the subject / grade / period filters.
+function insightsCompute() {
+  if (!insightsRaw) { insights = null; return; }
+  const { assigns, paperById, pqByPaper, gotBy, qById } = insightsRaw, f = insightsFilter;
+  const since = f.days ? new Date(Date.now() - Number(f.days) * 864e5).toISOString() : '';
+  const students = {}, chapters = {};
     const add = (bucket, key, got, max) => { const r = bucket[key] || (bucket[key] = { got: 0, max: 0, n: 0 }); r.got += got; r.max += max; r.n++; };
     assigns.forEach(a => {
       const p = paperById.get(a.paper_id), rows = pqByPaper.get(a.paper_id) || [];
+      if (f.subject && !qbSameSubject(p.subject_name, f.subject)) return;
+      if (f.gradeId && p.grade_id !== f.gradeId) return;
+      if (since && String(a.reviewed_at || '') < since) return;
       const st = students[a.student_id] || (students[a.student_id] = { papers: 0, got: 0, max: 0, chapters: {}, types: {}, last: null, lastAt: '' });
       st.papers++;
       if (String(a.reviewed_at || '') >= st.lastAt) { st.lastAt = String(a.reviewed_at || ''); st.last = p; }
@@ -15525,12 +15548,10 @@ async function loadInsights() {
       });
     });
     insights = { students, chapters };
-  } catch (e) { insightsMsg = 'Could not load insights: ' + (e.message || e); insights = null; }
-  insightsLoading = false; render();
 }
 function insightsPct(r) { return r && r.max ? Math.round(100 * r.got / r.max) : null; }
 function insightsChapterName(id) { return id === 'none' ? 'No chapter' : (insightsChapterNames[id] || 'Unknown chapter'); }
-// Opens the Question Bank's new-paper form for the student's latest subject / class, with their weak lessons ticked.
+// Opens the Question Bank's new-paper form for the student's latest subject / grade, with their weak lessons ticked.
 async function insightsMakePaper(studentId) {
   const st = insights && insights.students[studentId];
   if (!st || !st.last) return;
@@ -15557,19 +15578,34 @@ function insightsHtml() {
     <div class="hint" style="margin-bottom:10px">How your students did on the practice papers you marked, by chapter and question type. A chapter under ${INSIGHTS_WEAK}% is shown as weak.</div>`;
   if (insightsLoading) return `<div class="card">${head}<div class="hint">Loading…</div></div>`;
   if (insightsMsg) return `<div class="card">${head}<div class="hint" style="color:var(--brick)">${esc(insightsMsg)}</div></div>`;
-  if (!insights) return `<div class="card">${head}<button class="btn-small" onclick="loadInsights()">Show insights</button></div>`;
+  if (!insightsRaw) return `<div class="card">${head}<button class="btn-small" onclick="loadInsights()">Show insights</button></div>`;
+  if (!insightsRaw.assigns.length) return `<div class="card">${head}<div class="empty">No marked practice papers yet. Insights appear once you mark a student's paper in the Question Bank.</div></div>`;
+  // Filter choices come from the marked papers themselves.
+  const papers = [...new Set(insightsRaw.assigns.map(a => a.paper_id))].map(id => insightsRaw.paperById.get(id)).filter(Boolean);
+  const f = insightsFilter;
+  const subjects = [...new Map(papers.filter(p => p.subject_name).map(p => [String(p.subject_name).trim().toLowerCase(), p.subject_name])).values()].sort();
+  const gradeIds = [...new Set(papers.filter(p => !f.subject || qbSameSubject(p.subject_name, f.subject)).map(p => p.grade_id).filter(Boolean))];
+  const filters = `<div class="row-form" style="flex-wrap:wrap;gap:8px">
+      <select onchange="setInsightsFilter('subject', this.value)"><option value="">All subjects</option>${subjects.map(x => `<option value="${escAttr(x)}" ${qbSameSubject(x, f.subject) && f.subject ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+      ${gradeIds.length > 1 ? `<select onchange="setInsightsFilter('gradeId', this.value)"><option value="">All grades</option>${gradeIds.map(id => `<option value="${id}" ${id === f.gradeId ? 'selected' : ''}>${esc(qbByName(grades, id))}</option>`).join('')}</select>` : ''}
+      <select onchange="setInsightsFilter('days', this.value)">${[['', 'All time'], ['30', 'Last 30 days'], ['90', 'Last 3 months'], ['180', 'Last 6 months']].map(([v, l]) => `<option value="${v}" ${v === f.days ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      ${insightsStudentId ? '' : `<input type="text" value="${escAttr(f.search)}" placeholder="Search student" oninput="setInsightsFilter('search', this.value)" style="max-width:200px">`}
+    </div>`;
+  return `<div class="card">${head}${filters}<div id="insightsBody">${insightsBodyHtml()}</div></div>`;
+}
+function insightsBodyHtml() {
   const ids = Object.keys(insights.students);
-  if (!ids.length) return `<div class="card">${head}<div class="empty">No marked practice papers yet. Insights appear once you mark a student's paper in the Question Bank.</div></div>`;
+  if (!ids.length) return `<div class="empty">No marked papers match these filters.</div>`;
   const nameOf = id => (data.students.find(s => s.id === id) || {}).name || 'Unknown student';
   const pctCell = r => { const v = insightsPct(r); if (v == null) return '—'; return `<b style="color:${v < INSIGHTS_WEAK ? 'var(--brick)' : 'var(--forest)'}">${v}%</b>`; };
   const weakest = st => Object.entries(st.chapters).filter(([id]) => id !== 'none').sort((a, b) => insightsPct(a[1]) - insightsPct(b[1]))[0];
   const sel = insightsStudentId && insights.students[insightsStudentId];
-  let body;
+  if (insightsStudentId && !sel) return `<button class="btn-small" onclick="insightsStudentId='';render()">← All students</button><div class="empty">No marked papers for this student with these filters.</div>`;
   if (sel) {
     const chRows = Object.entries(sel.chapters).sort((a, b) => insightsPct(a[1]) - insightsPct(b[1]));
     const tyRows = Object.entries(sel.types).sort((a, b) => insightsPct(a[1]) - insightsPct(b[1]));
     const weakCount = chRows.filter(([id, r]) => id !== 'none' && insightsPct(r) < INSIGHTS_WEAK).length;
-    body = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+    return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
         <button class="btn-small" onclick="insightsStudentId='';render()">← All students</button>
         <b style="flex:1">${esc(nameOf(insightsStudentId))}: ${pctCell(sel)} over ${sel.papers} paper${sel.papers === 1 ? '' : 's'}</b>
         ${weakCount ? `<button class="btn-small" onclick="insightsMakePaper('${insightsStudentId}')">Make a paper on weak chapters</button>` : ''}
@@ -15582,22 +15618,22 @@ function insightsHtml() {
         <tr><th>Question type</th><th>Questions</th><th>Marks</th><th>Score</th></tr>
         ${tyRows.map(([t, r]) => `<tr><td>${esc(QB_TYPE_LABELS[t] || t)}</td><td>${r.n}</td><td>${r.got} / ${r.max}</td><td>${pctCell(r)}</td></tr>`).join('')}
       </table></div>`;
-  } else {
-    const hardest = Object.entries(insights.chapters).filter(([id]) => id !== 'none').sort((a, b) => insightsPct(a[1]) - insightsPct(b[1])).slice(0, 5);
-    body = `<div class="table-scroll"><table>
-        <tr><th>Student</th><th>Papers marked</th><th>Average</th><th>Weakest chapter</th></tr>
-        ${ids.sort((a, b) => nameOf(a).localeCompare(nameOf(b))).map(id => { const st = insights.students[id], w = weakest(st); return `
-          <tr style="cursor:pointer" onclick="insightsStudentId='${id}';render()"><td><a>${esc(nameOf(id))}</a></td><td>${st.papers}</td><td>${pctCell(st)}</td><td>${w ? esc(insightsChapterName(w[0])) + ' (' + insightsPct(w[1]) + '%)' : '—'}</td></tr>`; }).join('')}
-      </table></div>
-      ${hardest.length ? `<h3 style="font-size:15px;margin:14px 0 6px">Chapters your students find hardest</h3>
-      <ol style="margin:4px 0 0 20px;padding:0;font-size:14px;line-height:1.6">${hardest.map(([id, r]) => `<li>${esc(insightsChapterName(id))}: ${insightsPct(r)}% of marks</li>`).join('')}</ol>` : ''}`;
   }
-  return `<div class="card">${head}${body}</div>`;
+  const q = insightsFilter.search.trim().toLowerCase();
+  const shown = ids.filter(id => !q || nameOf(id).toLowerCase().includes(q)).sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
+  const hardest = Object.entries(insights.chapters).filter(([id]) => id !== 'none').sort((a, b) => insightsPct(a[1]) - insightsPct(b[1])).slice(0, 5);
+  return `${shown.length ? `<div class="table-scroll"><table>
+      <tr><th>Student</th><th>Papers marked</th><th>Average</th><th>Weakest chapter</th></tr>
+      ${shown.map(id => { const st = insights.students[id], w = weakest(st); return `
+        <tr style="cursor:pointer" onclick="insightsStudentId='${id}';render()"><td><a>${esc(nameOf(id))}</a></td><td>${st.papers}</td><td>${pctCell(st)}</td><td>${w ? esc(insightsChapterName(w[0])) + ' (' + insightsPct(w[1]) + '%)' : '—'}</td></tr>`; }).join('')}
+    </table></div>` : '<div class="empty">No student matches that name.</div>'}
+    ${hardest.length ? `<h3 style="font-size:15px;margin:14px 0 6px">Chapters your students find hardest</h3>
+    <ol style="margin:4px 0 0 20px;padding:0;font-size:14px;line-height:1.6">${hardest.map(([id, r]) => `<li>${esc(insightsChapterName(id))}: ${insightsPct(r)}% of marks</li>`).join('')}</ol>` : ''}`;
 }
 // Research → Question research: how past papers in the Question Bank ask each chapter (approved, current-syllabus
 // questions that came from a past paper). Read only, no AI. Needs Question Bank access.
 let qrDraft = { subjectId: '', gradeId: '', boardId: '', examType: '' };
-let qrRows = null;          // questions for the picked subject + class; null = nothing loaded
+let qrRows = null;          // questions for the picked subject + grade; null = nothing loaded
 let qrLoading = false;
 let qrMsg = '';
 let qrOpenChapter = '';
@@ -15642,7 +15678,7 @@ function questionResearchHtml(teacher) {
     <div class="hint" style="margin-bottom:10px">How past papers in the Question Bank ask each chapter: how often it comes, how many marks, and in what form. Only approved, current-syllabus questions from past papers count.</div>
     <div class="row-form" style="flex-wrap:wrap;gap:8px">
       <select onchange="setQrField('subjectId', this.value)"><option value="">Subject…</option>${mySubjects.map(s => `<option value="${s.id}" ${s.id === qrDraft.subjectId ? 'selected' : ''}>${esc(s.name)} (${esc(catLabel(s.category))})</option>`).join('')}</select>
-      <select onchange="setQrField('gradeId', this.value)" ${subj ? '' : 'disabled'}><option value="">Class…</option>${gradeIds.map(id => `<option value="${id}" ${id === qrDraft.gradeId ? 'selected' : ''}>${esc(qbByName(grades, id))}</option>`).join('')}</select>
+      ${gradeIds.length > 1 ? `<select onchange="setQrField('gradeId', this.value)"><option value="">Grade…</option>${gradeIds.map(id => `<option value="${id}" ${id === qrDraft.gradeId ? 'selected' : ''}>${esc(qbByName(grades, id))}</option>`).join('')}</select>` : ''}
       <select onchange="setQrField('boardId', this.value)"><option value="">Any board</option>${boards.filter(x => !x.archived).map(x => `<option value="${x.id}" ${x.id === qrDraft.boardId ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
       ${qrRows && qrRows.length ? `<select onchange="setQrField('examType', this.value)"><option value="">All exam types</option>${[...new Set(qrRows.map(q => q.source_exam_type).filter(Boolean))].sort().map(t => `<option value="${escAttr(t)}" ${t === qrDraft.examType ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}
     </div>`;
@@ -15650,7 +15686,7 @@ function questionResearchHtml(teacher) {
   if (qrMsg) return `<div class="card">${head}<div class="hint" style="color:var(--brick)">${esc(qrMsg)}</div></div>`;
   if (!qrRows) return `<div class="card">${head}</div>`;
   const rows = qrRows.filter(q => !qrDraft.examType || q.source_exam_type === qrDraft.examType);
-  if (!rows.length) return `<div class="card">${head}<div class="empty">No past-paper questions in the bank for this subject and class yet.</div></div>`;
+  if (!rows.length) return `<div class="card">${head}<div class="empty">No past-paper questions in the bank for this subject and grade yet.</div></div>`;
   const papers = new Map();
   rows.forEach(q => { const k = qrPaperKey(q); if (!papers.has(k)) papers.set(k, { year: q.source_year, type: q.source_exam_type }); });
   const nPapers = papers.size;
@@ -15685,7 +15721,7 @@ function questionResearchHtml(teacher) {
     </table></div>
   </div>`;
 }
-// Research → Resource library: a teacher's notes, PDFs, pictures and links per subject / class / chapter
+// Research → Resource library: a teacher's notes, PDFs, pictures and links per subject / grade / chapter
 // (teacher_resources + private "teacher-resources" bucket, SQL 47). Shared ones show on the student's and parent's page.
 let resources = null;          // teacher: own resources; student / parent: shared ones they may see. null = not loaded
 let resourcesMsg = '';
@@ -15788,7 +15824,7 @@ function resourceLibraryHtml(teacher) {
     ${!mySubjects.length ? '<div class="empty">No subjects are mapped to you yet.</div>' : `
     <div class="row-form" style="flex-wrap:wrap;gap:8px">
       <select onchange="setResField('subjectId', this.value)"><option value="">Subject *</option>${mySubjects.map(s => `<option value="${s.id}" ${s.id === resDraft.subjectId ? 'selected' : ''}>${esc(s.name)} (${esc(catLabel(s.category))})</option>`).join('')}</select>
-      <select onchange="setResField('gradeId', this.value)" ${subj ? '' : 'disabled'}><option value="">Any class</option>${gradeIds.map(id => `<option value="${id}" ${id === resDraft.gradeId ? 'selected' : ''}>${esc(qbByName(grades, id))}</option>`).join('')}</select>
+      ${gradeIds.length > 1 ? `<select onchange="setResField('gradeId', this.value)"><option value="">Any grade</option>${gradeIds.map(id => `<option value="${id}" ${id === resDraft.gradeId ? 'selected' : ''}>${esc(qbByName(grades, id))}</option>`).join('')}</select>` : ''}
       <input type="text" list="resChapterOptions" value="${escAttr(resDraft.chapter)}" placeholder="Chapter (optional)" oninput="setResField('chapter', this.value)">
       <datalist id="resChapterOptions">${chapters.map(c => `<option value="${escAttr(qbChapterLabel(c))}"></option>`).join('')}</datalist>
     </div>
@@ -15831,7 +15867,7 @@ function renderTeacherResearch(teacher) {
   return `
   <div class="card">
     <h3 style="font-family:'Zilla Slab',serif;margin:0 0 6px">Lesson prep</h3>
-    <div class="hint" style="margin-bottom:12px">Pick what you're teaching next. You get a short brief with key points, a teaching order, common mistakes, examples and practice questions. AI can get things wrong, so check it against the textbook before class.</div>
+    <div class="hint" style="margin-bottom:12px">Pick the subject and chapter you're teaching next. You get a short brief with key points, a teaching order, common mistakes, examples and practice questions. AI can get things wrong, so check it against the textbook before class.</div>
     ${!mySubjects.length ? `<div class="empty">No subjects are mapped to you yet.</div>` : `
     <div class="row-form">
       <label>Subject *</label>
@@ -15840,13 +15876,13 @@ function renderTeacherResearch(teacher) {
         ${mySubjects.map(s => `<option value="${s.id}" ${s.id === researchDraft.subjectId ? 'selected' : ''}>${esc(s.name)} (${esc(catLabel(s.category))})</option>`).join('')}
       </select>
     </div>
-    <div class="row-form">
-      <label>Class</label>
-      <select onchange="setResearchField('gradeId', this.value)" ${!subj ? 'disabled' : ''}>
-        <option value="">${subj ? (gradeIds.length ? 'Select class…' : 'Any class') : '— select subject first —'}</option>
+    ${gradeIds.length > 1 ? `<div class="row-form">
+      <label>Grade</label>
+      <select onchange="setResearchField('gradeId', this.value)">
+        <option value="">Select grade…</option>
         ${gradeIds.map(id => `<option value="${id}" ${id === researchDraft.gradeId ? 'selected' : ''}>${esc(qbByName(grades, id))}</option>`).join('')}
       </select>
-    </div>
+    </div>` : ''}
     <div class="row-form">
       <label>Board <span class="hint" style="font-size:11px">(optional)</span></label>
       <select onchange="setResearchField('boardId', this.value)">
