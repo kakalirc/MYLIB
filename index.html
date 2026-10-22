@@ -271,7 +271,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 17:03 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 17:24 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -4534,6 +4534,8 @@ function formatBytes(b) {
 // null and the panel works the old way (upload and delete per student).
 let tbLibrary = null;          // textbook_library rows this user can see; null = not loaded / SQL 53 not run
 let tbLinkCounts = {};         // admin: library_id → number of student links
+let tbLinks = {};              // admin: library_id → [{ studentId, subjectId, teacherId }]
+let tbAdminOpenLinksId = '';   // admin: book whose student links are shown
 let tbLinkGrade = null;        // "Add from library" grade filter: null = the student's grade, '' = all grades
 let tbUploadTags = { gradeId: null, boardId: null }; // tags for a new upload; null = the student's grade/board
 let tbAdminEditId = '';
@@ -4545,9 +4547,13 @@ async function loadTextbookLibrary() {
   const { data: rows, error } = await selectAllPaged('textbook_library', ['file_name']);
   tbLibrary = error ? null : rows;
   if (!error && currentRole === 'Admin') {
-    const { data: links } = await selectAllPaged('study_plan_textbooks', [], 'id,library_id');
-    tbLinkCounts = {};
-    (links || []).forEach(l => { if (l.library_id) tbLinkCounts[l.library_id] = (tbLinkCounts[l.library_id] || 0) + 1; });
+    const { data: links } = await selectAllPaged('study_plan_textbooks', [], 'id,library_id,student_id,subject_id,teacher_id');
+    tbLinkCounts = {}; tbLinks = {};
+    (links || []).forEach(l => {
+      if (!l.library_id) return;
+      tbLinkCounts[l.library_id] = (tbLinkCounts[l.library_id] || 0) + 1;
+      (tbLinks[l.library_id] = tbLinks[l.library_id] || []).push({ studentId: l.student_id, subjectId: l.subject_id, teacherId: l.teacher_id });
+    });
   }
 }
 async function loadStudyPlanTextbooks() {
@@ -4973,10 +4979,15 @@ function textbookLibraryAdminHtml() {
       </div>` : `
       <div style="border-top:1px solid var(--line);padding:8px 0;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         <span style="flex:1;min-width:180px;font-size:13px;word-break:break-word"><b>${esc(b.file_name)}</b><br><span style="font-size:12px;color:var(--muted)">${esc([b.subject_name, tbBookMeta(b), String(b.created_at || '').slice(0, 10)].filter(Boolean).join(' · '))}</span></span>
-        <span style="font-size:12px;color:var(--muted)">${tbLinkCounts[b.id] || 0} student link${(tbLinkCounts[b.id] || 0) === 1 ? '' : 's'}</span>
+        ${tbLinkCounts[b.id] ? `<button class="btn-small" onclick="tbAdminOpenLinksId = tbAdminOpenLinksId === '${b.id}' ? '' : '${b.id}'; render()" title="Show which students use this book">${tbAdminOpenLinksId === b.id ? '▼' : '▶'} ${tbLinkCounts[b.id]} student link${tbLinkCounts[b.id] === 1 ? '' : 's'}</button>`
+          : '<span style="font-size:12px;color:var(--muted)">0 student links</span>'}
         <button class="btn-small" onclick="studyPlanDownloadTextbook('${escAttr(b.file_path)}','${escAttr(b.file_name)}')">⬇</button>
         <button class="btn-small" onclick="tbAdminEdit('${b.id}')">Edit</button>
         <button class="btn-small btn-danger" onclick="tbAdminDelete('${b.id}')">Delete</button>
+        ${tbAdminOpenLinksId === b.id ? `<div style="flex-basis:100%;margin:2px 0 0 12px;font-size:13px">${byName((tbLinks[b.id] || []).map(l => ({
+          name: (data.students.find(x => x.id === l.studentId) || {}).name || 'Student (removed)',
+          rest: [(data.subjects.find(x => x.id === l.subjectId) || {}).name, (data.teachers.find(x => x.id === l.teacherId) || {}).name].filter(Boolean).join(' · teacher ') })))
+          .map(l => `<div>• <b>${esc(l.name)}</b>${l.rest ? ` <span style="color:var(--muted)">${esc(l.rest)}</span>` : ''}</div>`).join('')}</div>` : ''}
       </div>`;
   return `<div class="card">
     <h2>📚 Textbook library ${helpBtn('textbook-library')}</h2>
@@ -5020,7 +5031,7 @@ async function tbAdminDelete(id) {
   if (error) { tbAdminMsg = 'Could not delete: ' + error.message; render(); return; }
   await sb.storage.from('textbooks').remove([b.file_path]);
   tbLibrary = tbLibrary.filter(x => x.id !== id);
-  delete tbLinkCounts[id];
+  delete tbLinkCounts[id]; delete tbLinks[id];
   tbAdminMsg = '✓ Deleted.';
   render();
 }
@@ -16121,7 +16132,7 @@ const HELP = {
   'hw-teacher': { t:'Homework', b:'<ul><li>+ Assign homework: pick the student and subject, add a title, due date and description, and optionally a study plan topic or an attached file.</li><li>The student uploads a photo (or marks it submitted). It then shows under Awaiting review.</li><li>Open it, give marks and feedback, then Mark reviewed. The student and parent see the feedback.</li><li>Late means the due date has passed and it is not submitted yet.</li></ul>' },
   'hw-admin': { t:'Homework (all teachers)', b:'<ul><li>Every homework set by every teacher.</li><li>Filter by teacher, student or status to follow up.</li><li>Teachers set and review homework from their own Homework tab.</li></ul>' },
   'sp-admin': { t:'Study Plans (all teachers)', b:'<ul><li>Read-only view of every study plan and how far each student has got.</li><li>Only the teacher can edit a plan, from their own Study Plans tab.</li></ul>' },
-  'textbook-library': { t:'Textbook library', b:'<ul><li>Every book teachers uploaded for Study Plans, once each, with how many student links it has.</li><li>Teachers see the books for the subjects they teach (all grades) and can link or unlink them; they cannot change or delete a book.</li><li><b>Edit</b> fixes a book\'s name, subject, grade or board. The subject decides which teachers see it.</li><li><b>Delete</b> removes the book and its student links. Topics already added to plans stay.</li></ul>' },
+  'textbook-library': { t:'Textbook library', b:'<ul><li>Every book teachers uploaded for Study Plans, once each, with how many student links it has.</li><li>Teachers see the books for the subjects they teach (all grades) and can link or unlink them; they cannot change or delete a book.</li><li><b>Edit</b> fixes a book\'s name, subject, grade or board. The subject decides which teachers see it.</li><li>Tap <b>▶ N student links</b> to see which students use the book (with subject and teacher).</li><li><b>Delete</b> removes the book and its student links. Topics already added to plans stay.</li></ul>' },
   'research': { t:'Research', b:'<ul><li><b>Lesson prep</b>: pick subject, grade and chapter (or type a topic) to get an AI brief: key points, teaching order, common mistakes, examples and practice questions. Check it against the textbook. Save keeps it in Saved briefs.</li><li><b>For student</b> (optional): pick one of your students to see their Study Plan topics in the chapter list (done topics last) and fill in their grade and board. With no student picked, the list shows all your students’ topics with their names. Question Bank chapters come first. Saved briefs remember the student and can be filtered by student.</li><li><b>Student insights</b>: how each student did, by chapter and question type, on the practice papers you marked. Under 60% shows as weak; Make a paper on weak chapters starts a practice paper with those lessons ticked.</li><li><b>Question research</b>: per chapter, which past papers asked it, average marks and question types.</li><li><b>Resource library</b>: keep notes, worksheets, pictures and links by subject and chapter. Tick Share with students to show an item to your students and their parents.</li><li>Student insights and Question research need Question Bank access.</li></ul>' },
   'student-homework': { t:'Homework', b:'<ul><li>Homework your teachers have set, with the due date.</li><li>Upload a photo of your work, or Mark submitted if there is nothing to photograph.</li><li>Once the teacher reviews it you see the marks and feedback here.</li></ul>' },
   'student-practice': { t:'Practice Papers', b:'<ul><li>Papers your teacher assigned. Start (or Continue) opens the paper.</li><li>Go section by section. Tap the answer for MCQs, type short answers, and upload a photo for long answers.</li><li>Answers save automatically, so you can stop and come back before the due date.</li><li>Submit paper when finished. MCQs are marked at once; the full score shows after the teacher reviews it.</li></ul>' },
