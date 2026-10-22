@@ -10300,12 +10300,15 @@ function parseImportedWorkbook(wb) {
 
   const subscriptions = getSheet('Subscriptions').filter(r=>r.SubscriptionID).map(r => {
     const statusCell = String(r.Status||'');
-    const kind = statusCell === 'Refund' ? 'Refund' : (statusCell === 'Requested' ? 'Request' : 'Payment');
+    const kind = statusCell === 'Refund' ? 'Refund' : (statusCell === 'Requested' ? 'Request'
+      : (['TransferIn','TransferOut','Expiry'].includes(statusCell) ? statusCell : 'Payment'));
     return {
       id: String(r.SubscriptionID), studentId: String(r.StudentID||''), subjectId: String(r.SubjectID||''),
       type: String(r.Type||'Group'), classes: Number(r.Classes)||0, amountPaid: Number(r.AmountPaid)||0,
       date: normalizeDateCell(r.PaymentDate), kind,
-      paymentReference: String(r.PaymentReference||''), paymentRemarks: String(r.PaymentRemarks||'')
+      paymentReference: String(r.PaymentReference||''), paymentRemarks: String(r.PaymentRemarks||''),
+      // Older backups have none of these three columns; the restore then works out expiry again, as before.
+      expiresOn: r.ExpiresOn ? normalizeDateCell(r.ExpiresOn) : '', transferGroupId: String(r.TransferGroupID||''), expiredBatchId: String(r.ExpiredBatchID||'')
     };
   });
 
@@ -10373,7 +10376,7 @@ function buildImportPayload(parsed) {
     students: parsed.students.map(s => ({ id: s.id, name: s.name, archived: s.archived, parent_name: s.parentName, mobile_number: s.mobileNumber, student_code: s.code||null, email: s.email||null, address: s.address||null, grade_id: s.gradeId||null, board_id: s.boardId||null, academic_year: s.academicYear||null, mode_preference: s.modePreference||null, class_type_preference: s.classTypePreference||null })),
     subjects: parsed.subjects.map(s => ({ id: s.id, name: s.name, category: s.category, teacher_id: s.teacherId })),
     student_subjects: parsed.studentSubjects.map(e => ({ id: e.id, student_id: e.studentId, subject_id: e.subjectId, enrolled_at: e.enrolledAt || null })),
-    subscriptions: parsed.subscriptions.map(s => ({ id: s.id, student_id: s.studentId, subject_id: s.subjectId, type: s.type, classes: s.classes, amount_paid: s.amountPaid, date: s.date, kind: s.kind, payment_reference: s.paymentReference || null, payment_remarks: s.paymentRemarks || null })),
+    subscriptions: parsed.subscriptions.map(s => ({ id: s.id, student_id: s.studentId, subject_id: s.subjectId, type: s.type, classes: s.classes, amount_paid: s.amountPaid, date: s.date, kind: s.kind, payment_reference: s.paymentReference || null, payment_remarks: s.paymentRemarks || null, expires_on: s.expiresOn || null, transfer_group_id: s.transferGroupId || null, expired_batch_id: s.expiredBatchId || null })),
     sessions: parsed.sessions.map(s => ({ id: s.id, date: s.date, student_id: s.studentId, teacher_id: s.teacherId, subject_id: s.subjectId, class_type: s.classType, mode: s.mode, status: s.status, count: s.count, remarks: s.remarks || null })),
   };
 }
@@ -10455,11 +10458,21 @@ function exportExcel() {
     status: 'Requested', usedHere: 0, remainingHere: 0,
     paymentReference: s.paymentReference||'', paymentRemarks: s.paymentRemarks||''
   }));
-  const subsSheet = [...allSubscriptionRows(), ...pendingRowsForExport].map(r => ({
+  // Transfers and expiry entries are not payments, but a restore needs them or balances come back wrong.
+  const otherRowsForExport = data.subscriptions.filter(s => ['TransferIn','TransferOut','Expiry'].includes(s.kind)).map(s => ({
+    id: s.id, studentId: s.studentId, studentName: studentName(s.studentId),
+    subjectId: s.subjectId, subjectName: subjectName(s.subjectId), type: s.type,
+    classes: s.classes, amountPaid: s.amountPaid, date: s.date,
+    status: s.kind, usedHere: 0, remainingHere: 0,
+    paymentReference: s.paymentReference||'', paymentRemarks: s.paymentRemarks||'',
+    transferGroupId: s.transferGroupId||'', expiredBatchId: s.expiredBatchId||''
+  }));
+  const subsSheet = [...allSubscriptionRows(), ...pendingRowsForExport, ...otherRowsForExport].map(r => ({
     SubscriptionID: r.id, StudentID: r.studentId, StudentName: r.studentName,
     SubjectID: r.subjectId, SubjectName: r.subjectName, Type: r.type,
     Classes: r.classes, AmountPaid: r.amountPaid||0, PaymentDate: r.date, Status: r.status,
-    Used: r.usedHere, Remaining: r.remainingHere, PaymentReference: r.paymentReference||'', PaymentRemarks: r.paymentRemarks||''
+    Used: r.usedHere, Remaining: r.remainingHere, PaymentReference: r.paymentReference||'', PaymentRemarks: r.paymentRemarks||'',
+    ExpiresOn: r.expiresOn||'', TransferGroupID: r.transferGroupId||'', ExpiredBatchID: r.expiredBatchId||''
   }));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(subsSheet), 'Subscriptions');
 
