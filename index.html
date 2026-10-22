@@ -269,7 +269,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 09:10 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 10:00 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -525,6 +525,153 @@ function setAiUsageMonth(v) { if (v) { aiUsageMonth = v; loadAiUsage(); } }
 function aiUsageUserLabel(r) {
   if (r.teacher_id) { const t = data.teachers.find(x => x.id === r.teacher_id); if (t) return teacherLabel(t); }
   return aiUsageNames[r.user_id] || 'Unknown user';
+}
+// Feature usage tracking (app_events, SQL 49). One small row per screen open / key action:
+// who, role, which feature, when. No content. Fire-and-forget; never blocks or breaks the app.
+let trackOff = false;   // set once the server says SQL 49 is not there, so we stop trying
+const trackLast = {};   // feature → last time logged; screen opens are logged at most once a minute
+function trackUse(feature, once) {
+  if (trackOff || !isLoggedIn || !currentUserId || biometricLockActive) return;
+  const now = Date.now();
+  if (once && trackLast[feature] && now - trackLast[feature] < 60000) return;
+  trackLast[feature] = now;
+  try {
+    sb.rpc('log_app_event', { p_feature: feature }).then(r => {
+      if (r && r.error && /log_app_event|schema cache|does not exist/i.test(r.error.message || '')) trackOff = true;
+    }, () => {});
+  } catch (e) {}
+}
+const APP_USAGE_ACTIONS = [
+  ['attendance.give', 'Attendance given'], ['class.schedule', 'Class scheduled'],
+  ['homework.assign', 'Homework assigned'], ['homework.submit', 'Homework submitted'], ['homework.review', 'Homework reviewed'],
+  ['studyplan.save', 'Study plan saved'],
+  ['paper.make', 'Practice paper made'], ['paper.assign', 'Practice paper assigned'], ['paper.open', 'Practice paper opened'],
+  ['paper.submit', 'Practice paper submitted'], ['paper.mark', 'Practice paper marked'],
+  ['brief.make', 'Lesson brief made'], ['resource.add', 'Resource added'], ['resource.share', 'Resource shared'], ['resource.open', 'Resource opened'],
+  ['chat.send', 'Chat message sent'], ['ai.use', 'AI button used'],
+];
+const APP_USAGE_SCREENS = {
+  schedule: 'Class Schedule', students: 'Students', studyplans: 'Study Plans', homework: 'Homework', questionbank: 'Question Bank',
+  research: 'Research', attendance: 'Give Attendance', report: 'Attendance Report', availability: 'Availability', profile: 'My Profile',
+  setup: 'Setup / Teachers & Subjects', dashboard: 'Dashboard', log: 'Class Log', chat: 'Communication', wixbookings: 'Demo Bookings',
+  fees: 'Fees', expenses: 'Expenses', reports: 'Reports & Export', parents: 'Parents', admins: 'Manage Admins', users: 'Setup',
+  audit: 'Audit Log', support: 'Support',
+};
+function appUsageFeatureLabel(f) {
+  const a = APP_USAGE_ACTIONS.find(x => x[0] === f); if (a) return a[1];
+  if (f.startsWith('tab:')) { const k = f.slice(4); return 'Opened ' + (APP_USAGE_SCREENS[k] || k); }
+  return f;
+}
+// Admin Setup → App usage.
+let appUsageOpen = false;
+let appUsageMonth = todayStr.slice(0, 7);
+let appUsageView = 'feature'; // feature | user | notusing
+let appUsageRole = '';        // '' = all roles
+let appUsageRows = null;      // events for appUsageMonth; null = loading
+let appUsageRecent = null;    // events in the last 30 days (for "not using")
+let appUsageProfiles = [];    // logins, to name users and list who is not using
+let appUsageFirst = '';       // date of the oldest event (when tracking started)
+let appUsageMsg = '';
+async function appUsageSelect(from, to) {
+  let rows = [];
+  for (let i = 0; i < 200000; i += 1000) {
+    const r = await sb.from('app_events').select('user_id, role, linked_id, feature, created_at').gte('created_at', from).lt('created_at', to).order('created_at').order('id').range(i, i + 999);
+    if (r.error) return { error: r.error };
+    rows = rows.concat(r.data || []);
+    if (!r.data || r.data.length < 1000) break;
+  }
+  return { rows };
+}
+async function loadAppUsage() {
+  appUsageRows = null; appUsageRecent = null; appUsageMsg = ''; render();
+  const [y, m] = appUsageMonth.split('-').map(Number);
+  const from = appUsageMonth + '-01T00:00:00+05:30', to = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10) + 'T00:00:00+05:30';
+  const since = new Date(Date.now() - 30 * 86400000).toISOString(), until = new Date(Date.now() + 86400000).toISOString();
+  const [mon, rec, first, profs] = await Promise.all([
+    appUsageSelect(from, to),
+    appUsageSelect(since, until),
+    sb.from('app_events').select('created_at').order('created_at').limit(1),
+    sb.from('profiles').select('id, username, admin_name, role, linked_teacher_id, linked_student_id, archived'),
+  ]);
+  const err = mon.error || rec.error || first.error;
+  if (err) { appUsageMsg = 'Could not load app usage. Run SQL 49 in Supabase first. (' + err.message + ')'; appUsageRows = []; appUsageRecent = []; render(); return; }
+  appUsageRows = mon.rows; appUsageRecent = rec.rows;
+  appUsageFirst = first.data && first.data[0] ? String(first.data[0].created_at).slice(0, 10) : '';
+  appUsageProfiles = (profs.data || []).filter(p => !p.archived);
+  render();
+}
+function toggleAppUsageCard() {
+  appUsageOpen = !appUsageOpen;
+  if (appUsageOpen) loadAppUsage();
+  render();
+}
+function setAppUsageMonth(v) { if (v) { appUsageMonth = v; loadAppUsage(); } }
+function setAppUsageView(v) { appUsageView = v; render(); }
+function setAppUsageRole(v) { appUsageRole = v; render(); }
+function appUsageUserLabel(userId, role, linkedId) {
+  if (role === 'Teacher' && linkedId) { const t = data.teachers.find(x => x.id === linkedId); if (t) return teacherLabel(t); }
+  if (role === 'Student' && linkedId) { const s = data.students.find(x => x.id === linkedId); if (s) return studentLabel(s); }
+  const p = appUsageProfiles.find(x => x.id === userId);
+  return p ? (p.admin_name || p.username) : 'Unknown user';
+}
+function appUsageHtml() {
+  if (appUsageRows === null) return '<div class="hint">Loading…</div>';
+  if (appUsageMsg) return '';
+  const roles = ['Teacher', 'Student', 'Parent', 'Admin'];
+  const rows = appUsageRows.filter(r => !appUsageRole || r.role === appUsageRole);
+  const shown = appUsageRole ? [appUsageRole] : roles;
+  if (appUsageView === 'feature') {
+    if (!rows.length) return '<div class="empty">Nothing logged this month.</div>';
+    const by = {};
+    rows.forEach(r => {
+      const f = by[r.feature] || (by[r.feature] = { n: {}, users: new Set() });
+      f.n[r.role] = (f.n[r.role] || 0) + 1; f.users.add(r.user_id);
+    });
+    const order = f => { const i = APP_USAGE_ACTIONS.findIndex(a => a[0] === f); return i >= 0 ? i : 1000; };
+    const keys = Object.keys(by).sort((a, b) => order(a) - order(b) || appUsageFeatureLabel(a).localeCompare(appUsageFeatureLabel(b)));
+    return `<div class="table-scroll"><table>
+      <tr><th>Feature</th>${shown.map(r => `<th>${r}s</th>`).join('')}<th>People</th></tr>
+      ${keys.map(k => `<tr><td>${esc(appUsageFeatureLabel(k))}</td>${shown.map(r => `<td>${by[k].n[r] || ''}</td>`).join('')}<td>${by[k].users.size}</td></tr>`).join('')}
+    </table></div>
+    <div class="hint">Numbers are how many times. "People" is how many different logins used it. Screen opens count once a minute at most.</div>`;
+  }
+  if (appUsageView === 'user') {
+    if (!rows.length) return '<div class="empty">Nothing logged this month.</div>';
+    const by = {};
+    rows.forEach(r => {
+      const u = by[r.user_id] || (by[r.user_id] = { label: appUsageUserLabel(r.user_id, r.role, r.linked_id), role: r.role || '', total: 0, actions: 0, f: {}, last: '' });
+      u.total++; if (!r.feature.startsWith('tab:')) u.actions++;
+      u.f[r.feature] = (u.f[r.feature] || 0) + 1;
+      if (String(r.created_at) > u.last) u.last = String(r.created_at);
+    });
+    const list = Object.values(by).sort((a, b) => b.actions - a.actions || b.total - a.total);
+    const top = u => Object.entries(u.f).filter(([k]) => !k.startsWith('tab:')).sort((a, b) => b[1] - a[1]).slice(0, 3)
+      .map(([k, n]) => `${esc(appUsageFeatureLabel(k))} ×${n}`).join(', ') || '<span style="color:var(--muted)">only opened screens</span>';
+    return `<div class="table-scroll"><table>
+      <tr><th>User</th><th>Role</th><th>Actions</th><th>Screens opened</th><th>Top actions</th><th>Last used</th></tr>
+      ${list.map(u => `<tr><td>${esc(u.label)}</td><td>${esc(u.role)}</td><td>${u.actions}</td><td>${u.total - u.actions}</td><td style="font-size:12.5px">${top(u)}</td><td>${esc(u.last.slice(0, 10))}</td></tr>`).join('')}
+    </table></div>`;
+  }
+  // Not using: logins (not archived) with nothing of a kind in the last 30 days.
+  const recent = appUsageRecent || [];
+  const did = (uid, f) => recent.some(r => r.user_id === uid && (!f || r.feature === f));
+  const people = role => appUsageProfiles.filter(p => p.role === role && (role !== 'Teacher' || data.teachers.some(t => t.id === p.linked_teacher_id && !t.archived)) && (role !== 'Student' || data.students.some(s => s.id === p.linked_student_id && !s.archived)));
+  const name = p => appUsageUserLabel(p.id, p.role, p.role === 'Teacher' ? p.linked_teacher_id : p.linked_student_id);
+  const block = (title, list) => `<div style="margin-top:10px"><b>${esc(title)}</b> <span class="tag" style="font-size:11px">${list.length}</span>
+    <div class="hint" style="margin-top:4px">${list.length ? list.map(p => esc(name(p))).sort().join(', ') : 'Everyone used it.'}</div></div>`;
+  const teachers = people('Teacher'), students = people('Student'), parents = people('Parent');
+  const out = [];
+  if (!appUsageRole || appUsageRole === 'Teacher') out.push(
+    block('Teachers who used nothing in the app', teachers.filter(p => !did(p.id))),
+    block('Teachers with no attendance given', teachers.filter(p => !did(p.id, 'attendance.give'))),
+    block('Teachers with no homework assigned', teachers.filter(p => !did(p.id, 'homework.assign'))),
+    block('Teachers with no practice paper assigned', teachers.filter(p => !did(p.id, 'paper.assign'))));
+  if (!appUsageRole || appUsageRole === 'Student') out.push(
+    block('Students who used nothing in the app', students.filter(p => !did(p.id))),
+    block('Students who never opened a practice paper', students.filter(p => !did(p.id, 'paper.open'))),
+    block('Students with no homework submitted', students.filter(p => !did(p.id, 'homework.submit'))));
+  if (!appUsageRole || appUsageRole === 'Parent') out.push(block('Parents who used nothing in the app', parents.filter(p => !did(p.id))));
+  return `<div class="hint">Last 30 days, people with a login only.${appUsageFirst ? ` Tracking started on ${esc(appUsageFirst)}, so anything before that is not counted.` : ' Nothing has been logged yet.'}</div>${out.join('')}`;
 }
 let discountTiers = []; // [{ minClasses, percent }, ...] — bulk-class discount structure
 let newTierMinClasses = '';
@@ -1140,6 +1287,7 @@ async function generateResearchBrief() {
     matched.length && teacherQbAccess ? loadResearchBankQuestions(matched) : Promise.resolve(),
   ]);
   researchBrief = r.error ? { loading: false, text: '', error: r.error, savedId: '', ask } : { loading: false, text: r.data.text || '', error: '', savedId: '', ask };
+  if (!r.error) trackUse('brief.make');
   render();
 }
 // A few approved, current-syllabus questions from the Question Bank for the chapter (newest papers first).
@@ -1210,6 +1358,7 @@ function researchMdHtml(md) {
 function toggleTeacherMobileTabMenu() { teacherMobileTabMenuOpen = !teacherMobileTabMenuOpen; render(); }
 function setTeacherPortalTab(t) {
   teacherPortalTab = t;
+  trackUse('tab:' + t, true);
   teacherMobileTabMenuOpen = false;
   if (t === 'students') teacherStudentSearch = '';
   if (t === 'attendance') { logDraft.teacherId = currentLinkedId; logDraft.date = todayStr; logMsg = ''; }
@@ -3609,6 +3758,7 @@ async function saveHomework() {
       payload.status = 'assigned';
       const { data: row, error } = await sb.from('homework').insert(payload).select().single();
       if (error) { hwMsg = 'Error: ' + error.message; hwSaving = false; render(); return; }
+      trackUse('homework.assign');
       if (row) homeworkData.unshift({ id:row.id, teacherId:row.teacher_id, studentId:row.student_id, subjectId:row.subject_id, title:row.title, description:row.description, studyPlanTopic:row.study_plan_topic, assignedDate:row.assigned_date, dueDate:row.due_date, status:row.status, marks:'', totalMarks:row.total_marks!=null?row.total_marks:'', teacherFeedback:row.teacher_feedback, teacherFileUrl:row.teacher_file_url||null, photoUrl:null, submittedAt:null, reviewedAt:null, createdAt:row.created_at, updatedAt:row.updated_at });
     }
     hwShowForm = false; hwEditId = null; hwDraft = { title:'', description:'', due_date:'', study_plan_topic:'', total_marks:'', marks:'', teacher_feedback:'', teacher_file_url:'' };
@@ -3659,6 +3809,7 @@ async function hwSaveReview(hwId, marks, feedback) {
   const payload = { status: 'reviewed', marks: marks !== '' ? parseFloat(marks)||null : null, teacher_feedback: feedback.trim()||null, reviewed_at: now, updated_at: now };
   const { error } = await sb.from('homework').update(payload).eq('id', hwId);
   if (!error) {
+    trackUse('homework.review');
     const hw = homeworkData.find(h=>h.id===hwId);
     if (hw) Object.assign(hw, { status:'reviewed', marks: payload.marks??'', teacherFeedback:payload.teacher_feedback, reviewedAt:now, updatedAt:now });
     delete hwReviewDraft[hwId];
@@ -3690,6 +3841,7 @@ async function hwUploadPhoto(hwId, file) {
       const hw = homeworkData.find(h=>h.id===hwId);
       if (hw) { hw.photoUrl = photoUrl; hw.status = 'submitted'; hw.submittedAt = new Date().toISOString(); }
       hwPhotoMsg = 'Photo uploaded & marked as submitted ✓';
+      trackUse('homework.submit');
     } else { hwPhotoMsg = 'DB error: ' + dbErr.message; }
   } catch(e) { hwPhotoMsg = 'Error: ' + e.message; }
   hwPhotoUploading = false; render();
@@ -3875,6 +4027,7 @@ async function saveStudyPlan() {
   }
   studyPlanSaving = false;
   studyPlanMsg = error ? 'Error: ' + error.message : 'Study plan saved ✓';
+  if (!error) trackUse('studyplan.save');
   render();
 }
 function setStudyPlanStudent(val) {
@@ -5896,6 +6049,7 @@ async function sendChatMessage() {
       p_reply_to_id: replyToId, p_reply_to_body: replyToBody, p_reply_to_sender_id: replyToSenderId,
     });
     if (error) { chatMsg = 'Could not send: ' + error.message; render(); return; }
+    trackUse('chat.send');
     // Realtime will also deliver this back to us - chatHandleIncomingMessage dedupes by id.
     chatHandleIncomingMessage({
       id: newId, conversation_id: selectedConversationId, sender_id: currentUserId, body: body || null, created_at: new Date().toISOString(),
@@ -7594,6 +7748,7 @@ async function loadAiSettings() {
 async function aiProxyFetch(feature, body) {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) throw new Error('Not logged in');
+  trackUse('ai.use');
   const res = await fetch(SUPABASE_URL + '/functions/v1/ai-proxy', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + session.access_token },
@@ -9187,6 +9342,7 @@ async function actuallyAddSession(count) {
     class_type: d.classType, mode: d.mode, status: d.status, count: count, remarks: remarks || null
   }).select().single();
   if (error) { logMsg = 'Could not log this class: ' + error.message; render(); return; }
+  trackUse('attendance.give');
   data.sessions.push({
     id: row.id, date: row.date, studentId: row.student_id, teacherId: row.teacher_id, subjectId: row.subject_id,
     classType: row.class_type, mode: row.mode, status: row.status, count: Number(row.count), remarks: row.remarks || ''
@@ -9263,7 +9419,7 @@ async function actuallySaveSessionEdit(id, count, date) {
   render();
 }
 
-function setTab(t) { currentTab = t; location.hash = t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; loadStudyPlans().then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
+function setTab(t) { currentTab = t; trackUse('tab:' + t, true); location.hash = t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; loadStudyPlans().then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
   if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); } }
 function setPayrollMonth(v) { payrollMonth = v; render(); }
 function setNetProfitMonth(v) { netProfitMonth = v; render(); }
@@ -12462,6 +12618,31 @@ function renderUsers() {
     </div>
 
     <div class="card">
+      <h2 style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none" onclick="toggleAppUsageCard()">
+        <span style="font-size:12px;color:var(--muted)">${appUsageOpen ? '▼' : '▶'}</span>
+        App usage
+        ${!appUsageOpen ? `<span class="tag" style="margin-left:auto;font-size:11px;font-weight:400">which features people use</span>` : ''}
+      </h2>
+      ${appUsageOpen ? `
+      <div class="hint">Which parts of the app each person uses: screens opened and key actions (attendance, homework, practice papers, briefs, resources, chat, AI). Only who, what and when is kept, never marks, messages or money. Logins are in Audit Log.</div>
+      <div class="row-form">
+        <select onchange="setAppUsageView(this.value)">
+          <option value="feature" ${appUsageView==='feature'?'selected':''}>By feature</option>
+          <option value="user" ${appUsageView==='user'?'selected':''}>By user</option>
+          <option value="notusing" ${appUsageView==='notusing'?'selected':''}>Not using (last 30 days)</option>
+        </select>
+        <select onchange="setAppUsageRole(this.value)">
+          <option value="" ${!appUsageRole?'selected':''}>All roles</option>
+          ${['Teacher','Student','Parent','Admin'].map(r => `<option value="${r}" ${appUsageRole===r?'selected':''}>${r}s</option>`).join('')}
+        </select>
+        ${appUsageView !== 'notusing' ? `<label>Month</label><input type="month" value="${escAttr(appUsageMonth)}" onchange="setAppUsageMonth(this.value)">` : ''}
+      </div>
+      ${appUsageMsg ? `<div class="hint" style="color:var(--brick)">${esc(appUsageMsg)}</div>` : ''}
+      ${appUsageHtml()}
+      ` : ''}
+    </div>
+
+    <div class="card">
       <h2>Add user</h2>
       <div class="hint">Admin has full access. Student and Teacher accounts only see their own attendance and (for students) subscription details.</div>
       ${userMsg.addUser ? `<div class="hint" style="color:var(--forest)">${esc(userMsg.addUser)}</div>` : ''}
@@ -13910,6 +14091,7 @@ async function addScheduledClass(teacherId) {
   await loadScheduledClasses();
   scheduleDraft = { studentId: '', subjectId: '', classType: '', date: scheduleDraft.date, time: '' };
   scheduleMsg = 'Scheduled.';
+  trackUse('class.schedule');
   render();
 }
 async function deleteScheduledClass(id) {
@@ -15751,6 +15933,7 @@ async function saveResource() {
     if (file_path) await sb.storage.from('teacher-resources').remove([file_path]);
     resourcesMsg = 'Could not save: ' + error.message; resSaving = false; render(); return;
   }
+  trackUse('resource.add');
   resources = [row, ...(resources || [])];
   resDraft = { ...resDraft, chapter: '', title: '', link: '', note: '' };
   resFile = null; resSaving = false;
@@ -15760,6 +15943,7 @@ async function saveResource() {
 async function setResourceShared(id, on) {
   const { error } = await sb.from('teacher_resources').update({ shared: on }).eq('id', id);
   if (error) { resourcesMsg = 'Could not save: ' + error.message; render(); return; }
+  if (on) trackUse('resource.share');
   const r = (resources || []).find(x => x.id === id); if (r) r.shared = on;
   render();
 }
@@ -15775,6 +15959,7 @@ async function deleteResource(id) {
 async function openResource(id) {
   const r = (resources || []).find(x => x.id === id);
   if (!r) return;
+  trackUse('resource.open', true);
   if (r.link_url) { window.open(r.link_url, '_blank', 'noopener'); return; }
   const { data: urlData, error } = await sb.storage.from('teacher-resources').createSignedUrl(r.file_path, 3600);
   if (error) { resourcesMsg = 'Could not open the file: ' + error.message; render(); return; }
@@ -16441,6 +16626,7 @@ async function spOpenPaper(assignmentId) {
   const { data: res, error } = await sb.rpc('qb_paper_for_student', { p_assignment_id: assignmentId });
   spLoading = false;
   if (error || !res) { spOpen = null; alert('Could not open the paper: ' + (error ? error.message : 'no data')); render(); return; }
+  trackUse('paper.open', true);
   const sections = [];
   (res.questions || []).forEach(q => {
     let s = sections.find(x => x.name === (q.section_name || ''));
@@ -16573,6 +16759,7 @@ async function spSubmit() {
   const { error } = await sb.rpc('qb_submit_attempt', { p_assignment_id: spOpen.assignmentId });
   spSubmitting = false;
   if (error) { alert('Could not submit: ' + error.message); render(); return; }
+  trackUse('paper.submit');
   const id = spOpen.assignmentId;
   await spOpenPaper(id);
   loadPracticeAssignments();
@@ -17600,6 +17787,7 @@ async function qbCreatePaper() {
   const notSaved = !!(error && build_options && /build_options/.test(error.message));
   if (notSaved) ({ data: paper, error } = await sb.from('qb_practice_papers').insert(row).select().single());
   if (error) { qbPaperMsg = 'Could not create paper: ' + error.message; qbPaperSaving = false; render(); return; }
+  trackUse('paper.make');
   const { picks, warnings } = qbAutoFill(g, qbPaperDraft.chapterIds, sections);
   if (notSaved) warnings.push('Your sections and lessons were used, but the paper can’t remember them yet (SQL 40 not run), so Re-run auto-fill and Swap will use the whole blueprint.');
   if (picks.length) {
@@ -17888,6 +18076,7 @@ async function qbAssignPaper() {
   const rows = ids.map(student_id => ({ paper_id: qbPaperId, student_id, assigned_by: currentUserId || null, assigned_at: now, available_until: until, status: 'assigned' }));
   const { data, error } = await sb.from('qb_student_assignments').insert(rows).select();
   if (error) { qbPaperMsg = 'Could not assign: ' + error.message; qbPaperSaving = false; render(); return; }
+  trackUse('paper.assign');
   qbPaperAssignments.push(...(data || []));
   // Count each question's use once per paper, when the paper is first handed out.
   if (firstAssignment) {
@@ -18193,6 +18382,7 @@ async function qbSaveReview(finish, next) {
   const wasSubmitted = a.status === 'submitted';
   const { error } = await sb.from('qb_student_assignments').update(fields).eq('id', a.id);
   if (error) { qbPaperMsg = 'Could not save review: ' + error.message; qbPaperSaving = false; render(); return; }
+  if (finish) trackUse('paper.mark');
   Object.assign(a, fields);
   if (finish && wasSubmitted && qbPaperCounts[qbPaperId]) qbPaperCounts[qbPaperId].submitted = Math.max(0, (qbPaperCounts[qbPaperId].submitted || 0) - 1);
   qbReviewAttempts.forEach(r => { const d = qbReviewDraft[r.question_id]; if (d) { r.marks_awarded = d.marks === '' ? null : Number(d.marks); r.teacher_comment = d.comment || null; } });
