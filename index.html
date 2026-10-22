@@ -269,7 +269,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 11:10 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 11:25 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -465,7 +465,7 @@ async function setTeacherQbAccess(teacherId, on) {
   qbAccessMsg = teacherName(teacherId) + (on ? ' can now use the Question Bank.' : ' no longer has the Question Bank.');
   render();
 }
-// Admin → AI → Research access: which teachers get the Research tab (teachers.ai_research, SQL 46).
+// Admin Setup → Research access: which teachers get the Research tab (teachers.ai_research, SQL 46).
 let researchAccessOpen = false;
 let researchAccessByTeacher = null; // { teacherId: true/false } once loaded; null = not loaded yet
 let researchAccessMsg = '';
@@ -1279,7 +1279,7 @@ async function loadTeacherQbAccess() {
   } catch (e) { teacherQbAccess = false; }
   if (!teacherQbAccess && teacherPortalTab === 'questionbank') teacherPortalTab = 'dashboard';
 }
-// Research tab (Lesson prep): only for teachers an admin has switched on (AI → Research access,
+// Research tab (Lesson prep): only for teachers an admin has switched on (Setup → Research access,
 // teachers.ai_research, SQL 46). The brief is written by the teacher-research Edge Function, which holds the AI key.
 let teacherResearchAccess = false;
 async function loadTeacherResearchAccess() {
@@ -12348,34 +12348,10 @@ function renderWixBookings() {
     </div>`;
 }
 
-// Admin → AI: AI on/off, key and cost prices; AI usage with estimated cost; which teachers get Research.
+// Admin → AI: AI on/off, key and cost prices; AI usage with estimated cost.
 function renderAiAdmin() {
   return `
     <div class="card"><h2>AI Settings</h2><div class="hint" style="margin-bottom:12px">AI features use Claude to improve messages, generate summaries and answer student questions.</div><label style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><input type="checkbox" id="aiMasterToggle" ${aiMasterEnabled?'checked':''} onchange="(async()=>{const k=document.getElementById('aiKeyInput').value.trim()||aiApiKey;await saveAiSettings(k,this.checked);render();})()"> <b>AI enabled (master switch)</b></label><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="password" autocomplete="new-password" id="aiKeyInput" placeholder="sk-ant-..." value="${esc(aiApiKey)}" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:monospace"><button class="btn-small btn-primary" onclick="(async()=>{const k=document.getElementById('aiKeyInput').value.trim();const en=document.getElementById('aiMasterToggle').checked;await saveAiSettings(k,en);render();})()">Save</button></div><div class="hint" style="margin-top:8px">Get key at <b>console.anthropic.com</b>. See real spend there under Usage / Cost.</div>${aiCostSettingsHtml()}</div>
-
-    <div class="card">
-      <h2 style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none" onclick="toggleResearchAccessCard()">
-        <span style="font-size:12px;color:var(--muted)">${researchAccessOpen ? '▼' : '▶'}</span>
-        Research access
-        ${!researchAccessOpen ? `<span class="tag" style="margin-left:auto;font-size:11px;font-weight:400">AI lesson prep</span>` : ''}
-      </h2>
-      ${researchAccessOpen ? `
-      <div class="hint">Tick the teachers who may use the Research tab. There they pick a subject, class and chapter and get an AI lesson brief (key points, common mistakes, examples, practice questions), which they can save. It uses the AI key from AI Settings, but the key stays on the server and the teacher never sees it. Each brief costs a few cents of AI credit. A teacher who is logged in sees the change after logging in again.</div>
-      ${researchAccessMsg ? `<div class="hint" style="color:${researchAccessMsg.startsWith('Could not')?'var(--brick)':'var(--forest)'}">${esc(researchAccessMsg)}</div>` : ''}
-      ${researchAccessByTeacher === null ? (researchAccessMsg ? '' : '<div class="hint">Loading…</div>') : `
-      <div class="table-scroll"><table>
-        <tr><th>Teacher</th><th>Subjects</th><th>Research</th></tr>
-        ${byName(data.teachers.filter(t=>!t.archived)).map(t=>`
-          <tr>
-            <td>${esc(teacherLabel(t))}</td>
-            <td style="font-size:12.5px;color:var(--muted)">${esc([...new Set(data.subjects.filter(s=>s.teacherId===t.id).map(s=>s.name))].join(', ') || '—')}</td>
-            <td><label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" ${researchAccessByTeacher[t.id]?'checked':''} onchange="setTeacherResearchAccess('${t.id}', this.checked)"> ${researchAccessByTeacher[t.id]?'On':'Off'}</label></td>
-          </tr>`).join('')}
-      </table></div>
-      <div class="hint">${data.teachers.filter(t=>!t.archived && researchAccessByTeacher[t.id]).length} of ${data.teachers.filter(t=>!t.archived).length} teachers switched on.</div>
-      `}
-      ` : ''}
-    </div>
 
     <div class="card">
       <h2 style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none" onclick="toggleAiUsageCard()">
@@ -12423,6 +12399,11 @@ function renderAiAdmin() {
 
   `;
 }
+// Audit Log page: each section folds open on a tap, like App usage.
+let auditCardOpen = false;
+let loginCardOpen = false;
+function toggleAuditCard() { auditCardOpen = !auditCardOpen; render(); }
+function toggleLoginCard() { loginCardOpen = !loginCardOpen; render(); }
 function renderAuditLog() {
   const tableFilterOptions = `<option value="">All areas</option>` + Object.keys(AUDIT_TABLE_LABELS).map(k=>`<option value="${k}" ${auditFilterTable===k?'selected':''}>${AUDIT_TABLE_LABELS[k]}</option>`).join('');
   const actionFilterOptions = `
@@ -12459,8 +12440,12 @@ function renderAuditLog() {
 
   return `
     <div class="card">
-      <h2>Audit Log</h2>
-      <div class="hint">Every change made anywhere in the app — additions, edits, and deletions — recorded automatically, including who made it and when. Showing up to 500 most recent matching entries.</div>
+      <h2 style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none" onclick="toggleAuditCard()">
+        <span style="font-size:12px;color:var(--muted)">${auditCardOpen ? '▼' : '▶'}</span>
+        Audit Log
+        ${!auditCardOpen ? `<span class="tag" style="margin-left:auto;font-size:11px;font-weight:400">every add, edit and delete</span>` : ''}
+      </h2>
+      ${auditCardOpen ? `      <div class="hint">Every change made anywhere in the app — additions, edits, and deletions — recorded automatically, including who made it and when. Showing up to 500 most recent matching entries.</div>
       ${auditMsg ? `<div class="hint" style="color:var(--brick)">${esc(auditMsg)}</div>` : ''}
       <div class="row-form">
         <label>From <input type="date" value="${auditFilterFrom}" onchange="auditSetFilter('from', this.value)"></label>
@@ -12472,11 +12457,16 @@ function renderAuditLog() {
       </div>
       ${rowsHtml}
       ${auditRows.length ? `<div class="row-form" style="margin-top:12px"><button class="btn-gold" onclick="exportAuditLog(auditRows)">Export this view</button></div>` : ''}
+      ` : ''}
     </div>
 
     <div class="card">
-      <h2>Login Activity</h2>
-      <div class="hint">Every login, logout, and failed login attempt, logged directly in this app's own database — showing up to 500 most recent matching entries.</div>
+      <h2 style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none" onclick="toggleLoginCard()">
+        <span style="font-size:12px;color:var(--muted)">${loginCardOpen ? '▼' : '▶'}</span>
+        Login Activity
+        ${!loginCardOpen ? `<span class="tag" style="margin-left:auto;font-size:11px;font-weight:400">logins and logouts</span>` : ''}
+      </h2>
+      ${loginCardOpen ? `      <div class="hint">Every login, logout, and failed login attempt, logged directly in this app's own database — showing up to 500 most recent matching entries.</div>
       ${loginLogMsg ? `<div class="hint" style="color:var(--brick)">${esc(loginLogMsg)}</div>` : ''}
       <div class="row-form">
         <label>From <input type="date" value="${loginLogFilterFrom}" onchange="loginLogSetFilter('from', this.value)"></label>
@@ -12487,6 +12477,7 @@ function renderAuditLog() {
       </div>
       ${loginRowsHtml}
       ${loginLogRows.length ? `<div class="row-form" style="margin-top:12px"><button class="btn-gold" onclick="exportLoginLog()">Export this view</button></div>` : ''}
+      ` : ''}
     </div>
 
     <div class="card">
@@ -12738,6 +12729,30 @@ function renderUsers() {
           </tr>`).join('')}
       </table></div>
       <div class="hint">${data.teachers.filter(t=>!t.archived && qbAccessByTeacher[t.id]).length} of ${data.teachers.filter(t=>!t.archived).length} teachers switched on.</div>
+      `}
+      ` : ''}
+    </div>
+
+    <div class="card">
+      <h2 style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none" onclick="toggleResearchAccessCard()">
+        <span style="font-size:12px;color:var(--muted)">${researchAccessOpen ? '▼' : '▶'}</span>
+        Research access
+        ${!researchAccessOpen ? `<span class="tag" style="margin-left:auto;font-size:11px;font-weight:400">AI lesson prep</span>` : ''}
+      </h2>
+      ${researchAccessOpen ? `
+      <div class="hint">Tick the teachers who may use the Research tab. There they pick a subject, class and chapter and get an AI lesson brief (key points, common mistakes, examples, practice questions), which they can save. It uses the AI key from AI Settings, but the key stays on the server and the teacher never sees it. Each brief costs a few cents of AI credit. A teacher who is logged in sees the change after logging in again.</div>
+      ${researchAccessMsg ? `<div class="hint" style="color:${researchAccessMsg.startsWith('Could not')?'var(--brick)':'var(--forest)'}">${esc(researchAccessMsg)}</div>` : ''}
+      ${researchAccessByTeacher === null ? (researchAccessMsg ? '' : '<div class="hint">Loading…</div>') : `
+      <div class="table-scroll"><table>
+        <tr><th>Teacher</th><th>Subjects</th><th>Research</th></tr>
+        ${byName(data.teachers.filter(t=>!t.archived)).map(t=>`
+          <tr>
+            <td>${esc(teacherLabel(t))}</td>
+            <td style="font-size:12.5px;color:var(--muted)">${esc([...new Set(data.subjects.filter(s=>s.teacherId===t.id).map(s=>s.name))].join(', ') || '—')}</td>
+            <td><label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" ${researchAccessByTeacher[t.id]?'checked':''} onchange="setTeacherResearchAccess('${t.id}', this.checked)"> ${researchAccessByTeacher[t.id]?'On':'Off'}</label></td>
+          </tr>`).join('')}
+      </table></div>
+      <div class="hint">${data.teachers.filter(t=>!t.archived && researchAccessByTeacher[t.id]).length} of ${data.teachers.filter(t=>!t.archived).length} teachers switched on.</div>
       `}
       ` : ''}
     </div>
