@@ -6127,7 +6127,17 @@ function hasUnsavedEditInProgress() {
   }
   return false;
 }
+// "Today" (todayStr) is worked out once when the page loads and many screens default to it. A phone can keep the
+// app open past midnight, so when the date has moved on, reload the page (only when nothing is being typed).
+function localDateStr() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function reloadIfDayChanged() {
+  if (localDateStr() === todayStr || hasUnsavedEditInProgress()) return false;
+  location.reload();
+  return true;
+}
+setInterval(() => { if (document.visibilityState === 'visible') reloadIfDayChanged(); }, 5 * 60 * 1000);
 document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && reloadIfDayChanged()) return;
   if (document.visibilityState === 'visible' && isLoggedIn && !hasUnsavedEditInProgress()) {
     refreshAllData(true);
   }
@@ -7838,7 +7848,7 @@ async function addSubscriptionPayment() {
     student_id: selectedStudentId, subject_id: d.subjectId, type: d.type, classes, amount_paid: amountPaid, date, kind: 'Payment',
     payment_reference: paymentReference || null, payment_remarks: paymentRemarks || null
   }).select().single();
-  if (error) { render(); return; }
+  if (error) { alert('Could not record this payment: ' + error.message); render(); return; }
   data.subscriptions.push({ id: row.id, studentId: row.student_id, subjectId: row.subject_id, type: row.type, classes: Number(row.classes), amountPaid: Number(row.amount_paid), date: row.date, kind: row.kind, paymentReference: row.payment_reference||'', paymentRemarks: row.payment_remarks||'', expiresOn: row.expires_on || '', expiredBatchId: '' });
   subDraft = { subjectId: '', type: 'Group', classes: '', amountPaid: '', date: todayStr };
   render();
@@ -9298,7 +9308,7 @@ async function confirmMarkPaid(id) {
   const paymentRemarks = remarksInput ? remarksInput.value.trim() : '';
   if (!date) return;
   const { error } = await sb.from('subscriptions').update({ kind: 'Payment', date, payment_reference: paymentReference || null, payment_remarks: paymentRemarks || null }).eq('id', id);
-  if (error) { render(); return; }
+  if (error) { alert('Could not mark this request paid: ' + error.message); render(); return; }
   const s = data.subscriptions.find(x=>x.id===id);
   if (s) { s.kind = 'Payment'; s.date = date; s.paymentReference = paymentReference; s.paymentRemarks = paymentRemarks; }
   await loadStudentsAndSubscriptions();   // the database sets the payment's expiry date; fetch it
@@ -9340,7 +9350,7 @@ async function saveRequestEdit(id) {
   // it must not be allowed to push any affected balance below zero.
   if (original.kind !== 'Request') {
     const otherRowsFor = (subjectId, type) => data.subscriptions
-      .filter(s => s.id !== id && s.subjectId === subjectId && s.type === type && s.kind !== 'Request')
+      .filter(s => s.id !== id && s.studentId === original.studentId && s.subjectId === subjectId && s.type === type && s.kind !== 'Request')
       .reduce((a,s) => a + s.classes, 0);
     const newComboSubscribed = otherRowsFor(d.subjectId, d.type) + storedClasses;
     const newComboUsed = studentUsed(original.studentId, d.subjectId, d.type);
@@ -9387,7 +9397,7 @@ async function saveRequestEdit(id) {
 }
 async function cancelFeeRequest(id) {
   const { error } = await sb.from('subscriptions').delete().eq('id', id);
-  if (error) { render(); return; }
+  if (error) { alert('Could not cancel this request: ' + error.message); render(); return; }
   data.subscriptions = data.subscriptions.filter(s=>s.id!==id);
   render();
 }
@@ -9483,8 +9493,17 @@ function transferConfirmModalHtml() {
     </div>`;
 }
 async function deleteSubscription(id) {
+  const sub = data.subscriptions.find(s => s.id === id);
+  if (!sub) return;
+  const what = sub.kind === 'Refund' ? 'refund' : 'payment';
+  // Deleting a payment takes its classes out of the balance; refuse if classes already given would then go negative.
+  if (sub.kind !== 'Refund' && sub.kind !== 'Request') {
+    const left = studentRemaining(sub.studentId, sub.subjectId, sub.type) - sub.classes;
+    if (left < 0) { alert(`Can't delete this payment: ${subjectName(sub.subjectId)} (${sub.type}) would be left at ${fmtN(left)} classes, because classes have already been given against it. Edit the payment instead.`); return; }
+  }
+  if (!confirm(`Delete this ${what} for good? ${subjectName(sub.subjectId)}, ${sub.type}, ${fmtN(Math.abs(sub.classes))} classes, ₹${Math.abs(sub.amountPaid || 0).toFixed(2)}, ${sub.date || ''}. This cannot be undone.`)) return;
   const { error } = await sb.from('subscriptions').delete().eq('id', id);
-  if (error) { render(); return; }
+  if (error) { alert('Could not delete: ' + error.message); render(); return; }
   data.subscriptions = data.subscriptions.filter(s=>s.id!==id && s.expiredBatchId!==id);   // its Expiry entry goes with it
   render();
 }
@@ -9957,6 +9976,24 @@ async function saveSessionEdit(id) {
       editSessionMsg = 'You can only edit attendance within the current month.';
       render();
       return;
+    }
+  }
+  // Same balance and duplicate checks as giving attendance, so an edit can't go past what was paid for.
+  const orig = data.sessions.find(x=>x.id===id);
+  if (orig) {
+    const giveBack = orig.classType === d.classType ? orig.count : 0;   // this class's own count is already in "used"
+    const leftAfter = studentRemaining(orig.studentId, orig.subjectId, d.classType) + giveBack - count;
+    if (count > giveBack && leftAfter < 0) {
+      const left = leftAfter + count;
+      if (currentRole === 'Teacher') {
+        editSessionMsg = `This student has ${fmtN(left)} ${d.classType} class${left===1?'':'es'} left for this subject — not enough for ${fmtN(count)}. Ask the Admin to add a subscription.`;
+        render();
+        return;
+      }
+      if (!confirm(`This student has ${fmtN(left)} ${d.classType} class${left===1?'':'es'} left for this subject. Saving takes the balance to ${fmtN(leftAfter)}. Save anyway?`)) return;
+    }
+    if (date !== orig.date && sessionDuplicateExists(orig.studentId, orig.teacherId, orig.subjectId, date, id)) {
+      if (!confirm('This student already has attendance for this teacher and subject on ' + date + '. Save anyway?')) return;
     }
   }
   if (d.status === 'Absent') {
@@ -10662,6 +10699,12 @@ function exportNetProfitReport() {
         });
       });
     });
+    payroll += data.demoLogs
+      .filter(d => d.teacherId === t.id && d.status === 'Converted' && inRange((d.convertedAt || d.date || '').slice(0, 10)))
+      .reduce((a, d) => a + (d.bonusAmount || 0), 0);
+    payroll += data.teacherPayrollRecords
+      .filter(r => r.teacherId === t.id && inRange(r.month + '-01'))
+      .reduce((a, r) => a + (r.adjustment || 0), 0);
   });
   const expenses = netProfitTeacherFilter === 'ALL' ? expenseList.filter(e => inRange(e.date)).reduce((a,e)=>a+e.amount, 0) : 0;
   const teacherLabelForFile = (netProfitTeacherFilter && netProfitTeacherFilter !== 'ALL') ? (teacherPool[0] ? teacherPool[0].name : 'Teacher') : 'All Teachers';
@@ -11853,6 +11896,13 @@ function renderReports() {
           });
         });
       });
+      // Same extras as the Teacher payroll card: converted-demo bonuses and the month's +/- adjustment.
+      netProfitPayroll += data.demoLogs
+        .filter(d => d.teacherId === t.id && d.status === 'Converted' && netProfitInRange((d.convertedAt || d.date || '').slice(0, 10)))
+        .reduce((a, d) => a + (d.bonusAmount || 0), 0);
+      netProfitPayroll += data.teacherPayrollRecords
+        .filter(r => r.teacherId === t.id && netProfitInRange(r.month + '-01'))
+        .reduce((a, r) => a + (r.adjustment || 0), 0);
     });
     // Institute-wide expenses (rent and so on) don't belong to any one teacher, so they are
     // only counted for the whole-institute view.
@@ -12166,7 +12216,7 @@ function renderReports() {
       ${netProfitTeacherFilter === '' ? '<div class="empty">Pick a teacher above to see net profit for them, or choose All Teachers for the whole institute.</div>' : `
       <div class="table-scroll"><table>
         <tr><td>Total fee collection</td><td style="text-align:right">${netProfitCollection.toFixed(2)}</td></tr>
-        <tr><td>Total teacher payroll</td><td style="text-align:right">${netProfitPayroll.toFixed(2)}</td></tr>
+        <tr><td>Total teacher payroll <span style="color:var(--muted);font-size:12px">(incl. demo bonuses and adjustments)</span></td><td style="text-align:right">${netProfitPayroll.toFixed(2)}</td></tr>
         <tr><td>Other expenses${netProfitTeacherFilter==='ALL'?'':' <span style="color:var(--muted);font-size:12px">(institute-wide — only counted under All Teachers)</span>'}</td><td style="text-align:right">${netProfitTeacherFilter==='ALL' ? netProfitExpenses.toFixed(2) : '—'}</td></tr>
         <tr class="total"><td>Net profit</td><td style="text-align:right;color:${netProfitValue<0?'var(--brick)':'var(--forest)'}">${netProfitValue.toFixed(2)}</td></tr>
       </table></div>
