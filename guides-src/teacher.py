@@ -213,10 +213,10 @@ def guide():
 
     # ---------------- Research ----------------
     g.add('research', 'Research', 'Research: lesson prep', 'An AI brief for the chapter you teach next.', steps([
-        ('Pick the subject', 'Then the grade (only if the subject has more than one) and, if you like, the board.'),
-        ('Choose the chapter', 'Pick from the list or type any topic. Add anything else to focus on, for example weak students or exam revision.'),
+        ('Pick the subject', 'Then the grade (only if the subject has more than one), a student if you like, and the board.'),
+        ('Choose the chapter', 'Pick from the list (Question Bank chapters, then Study Plan topics) or type any topic. Add anything else to focus on.'),
         ('Read the brief', 'Key points, a teaching order, common mistakes, examples and practice questions, plus matching questions from your Question Bank.'),
-        ('Save it', 'Tap <b>Save</b> to keep it under <b>Saved briefs</b>. Open, or delete, a saved brief at any time.'),
+        ('Save it', 'Tap <b>Save</b> to keep it under <b>Saved briefs</b>, with the student’s name. Filter saved briefs by student.'),
     ]) + note('Check before class', 'AI can get things wrong. Check the brief against the textbook before you use it.', 'warn')
         + note('Switched on by the admin', 'The Research tab appears only when the admin has turned it on for you and AI is on.', 'tip'), new=True)
 
