@@ -16,8 +16,10 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="My LIB">
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://kqkojscbaycolaioyarh.supabase.co" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Work+Sans:wght@400;500;600;700&family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" onerror="window.__cdnFailed=true"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js" onerror="window.__cdnFailed=true"></script>
 <style>
   :root {
@@ -269,7 +271,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 12:20 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 12:45 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -3582,22 +3584,41 @@ async function loadStudentsAndSubscriptions() {
   // Deliberately excludes photo (base64, can be large) — every login/refresh was downloading
   // every student's full photo even when nobody was viewing one. Loaded on demand instead,
   // via loadStudentPhotoOnDemand, only when a specific student's detail screen is opened.
-  const { data: studentRows, error: stErr } = await selectAllPaged('students', ['name'],
-    'id,name,archived,student_code,parent_name,mobile_number,email,address,grade_id,board_id,academic_year,mode_preference,class_type_preference');
+  // The four reads don't depend on each other, so they run at the same time instead of one after another.
+  const [stRes, phRes, enRes, subRes] = await Promise.all([
+    selectAllPaged('students', ['name'],
+      'id,name,archived,student_code,parent_name,mobile_number,email,address,grade_id,board_id,academic_year,mode_preference,class_type_preference'),
+    selectAllPaged('student_phone_numbers', ['created_at']),
+    selectAllPaged('student_subjects', []),
+    loadSubscriptionRows(),
+  ]);
+  const { data: studentRows, error: stErr } = stRes;
   if (!stErr && studentRows) {
     data.students = studentRows.map(r => {
       const existing = data.students.find(s=>s.id===r.id);
       return { id: r.id, name: r.name, archived: !!r.archived, code: r.student_code || '', parentName: r.parent_name || '', mobileNumber: r.mobile_number || '', email: r.email || '', address: r.address || '', photo: existing ? existing.photo : '', gradeId: r.grade_id || '', boardId: r.board_id || '', academicYear: r.academic_year || '', modePreference: r.mode_preference || '', classTypePreference: r.class_type_preference || '' };
     });
   }
-  const { data: phoneRows, error: phErr } = await selectAllPaged('student_phone_numbers', ['created_at']);
+  const { data: phoneRows, error: phErr } = phRes;
   if (!phErr && phoneRows) {
     data.studentPhoneNumbers = phoneRows.map(r => ({ id: r.id, studentId: r.student_id, type: r.phone_type, number: r.phone_number }));
   }
-  const { data: enrollRows, error: enErr } = await selectAllPaged('student_subjects', []);
+  const { data: enrollRows, error: enErr } = enRes;
   if (!enErr && enrollRows) {
     data.studentSubjects = enrollRows.map(r => ({ id: r.id, studentId: r.student_id, subjectId: r.subject_id, enrolledAt: r.enrolled_at || '' }));
   }
+  const { data: subRows, error: subErr } = subRes;
+  if (!subErr && subRows) {
+    data.subscriptions = subRows.map(r => ({
+      id: r.id, studentId: r.student_id, subjectId: r.subject_id, type: r.type,
+      classes: Number(r.classes), amountPaid: Number(r.amount_paid) || 0, date: r.date, kind: r.kind,
+      paymentReference: r.payment_reference || '', paymentRemarks: r.payment_remarks || '',
+      transferGroupId: r.transfer_group_id || '',
+      expiresOn: r.expires_on || '', expiredBatchId: r.expired_batch_id || ''
+    }));
+  }
+}
+async function loadSubscriptionRows() {
   // Teachers get subscriptions through teacher_my_subscriptions() (SQL 45): classes, dates and expiry only, never
   // amounts, payment references/remarks or fee requests. Until SQL 45 is run that function doesn't exist, so fall
   // back to the table and drop the money and fee requests here.
@@ -3612,15 +3633,7 @@ async function loadStudentsAndSubscriptions() {
   } else {
     ({ data: subRows, error: subErr } = await selectAllPaged('subscriptions', ['date']));
   }
-  if (!subErr && subRows) {
-    data.subscriptions = subRows.map(r => ({
-      id: r.id, studentId: r.student_id, subjectId: r.subject_id, type: r.type,
-      classes: Number(r.classes), amountPaid: Number(r.amount_paid) || 0, date: r.date, kind: r.kind,
-      paymentReference: r.payment_reference || '', paymentRemarks: r.payment_remarks || '',
-      transferGroupId: r.transfer_group_id || '',
-      expiresOn: r.expires_on || '', expiredBatchId: r.expired_batch_id || ''
-    }));
-  }
+  return { data: subRows, error: subErr };
 }
 let studyPlansAdminError = ''; // stores RLS/fetch error message for admin UI
 
@@ -4913,9 +4926,13 @@ async function studyPlanAiGapCall(subjectId) {
 
 async function loadTeachersAndSubjects() {
   // Same reasoning as students — photo excluded from the bulk load, fetched on demand instead.
-  const { data: teacherRows, error: tErr } = await sb.from('teachers')
-    .select('id,name,rates,archived,teacher_code,online_class_link,mobile_number,bank_account_number,bank_name,ifsc_code,upi_id,email,address')
-    .order('name');
+  const [tRes, sRes] = await Promise.all([
+    sb.from('teachers')
+      .select('id,name,rates,archived,teacher_code,online_class_link,mobile_number,bank_account_number,bank_name,ifsc_code,upi_id,email,address')
+      .order('name'),
+    selectAllPaged('subjects', ['name']),
+  ]);
+  const { data: teacherRows, error: tErr } = tRes;
   if (!tErr && teacherRows) {
     data.teachers = teacherRows.map(r => {
       const existing = data.teachers.find(t=>t.id===r.id);
@@ -4927,7 +4944,7 @@ async function loadTeachersAndSubjects() {
       };
     });
   }
-  const { data: subjectRows, error: sErr } = await selectAllPaged('subjects', ['name']);
+  const { data: subjectRows, error: sErr } = sRes;
   if (!sErr && subjectRows) {
     data.subjects = subjectRows.map(r => ({ id: r.id, name: r.name, category: r.category, teacherId: r.teacher_id }));
   }
@@ -5576,11 +5593,7 @@ async function loginWithBiometric() {
   currentUserId = userId;
   aiUserEnabled = profile.ai_enabled !== false;
   loginError = '';
-  await load();
-  await Promise.all([
-    loadCategories(), loadBoards(), loadGrades(), loadCategoryGrades(),
-    loadSubjectNames(), loadMyPhoto(), loadMyAnnouncements(), loadNotifications(),
-  ]);
+  await loadAfterLogin();
   if (currentRole === 'Student') {
     const linked = data.students.find(s => s.id === currentLinkedId);
     if (linked) loadStudentLeaderboard(linked);
@@ -5613,6 +5626,22 @@ function bioSettingsCardHtml() {
   </div>`;
 }
 // =================== END BIOMETRIC ===================
+// Everything a fresh login (password, fingerprint or a restored session) needs. The lookup lists, announcements and
+// notifications don't depend on load(), so they run alongside it; only loadMyPhoto waits, because it needs
+// data.teachers / data.students from load().
+async function loadAfterLogin() {
+  await Promise.all([
+    load(),
+    loadCategories(),
+    loadBoards(),
+    loadGrades(),
+    loadCategoryGrades(),
+    loadSubjectNames(),
+    loadMyAnnouncements(),
+    loadNotifications(),
+  ]);
+  await loadMyPhoto();
+}
 async function attemptLogin() {
   const u = document.getElementById('loginUser').value.trim();
   const p = document.getElementById('loginPass').value;
@@ -5646,24 +5675,8 @@ async function attemptLogin() {
   currentLinkedId = linkedId;
   currentUserId = authData.user.id;
   aiUserEnabled = profile.ai_enabled !== false;
-  await logLoginEvent('login', currentUserId, currentUsername, role);
-  // Everything up to here ran with a real session, but data.teachers/data.students/etc.
-  // may still only hold whatever the earlier, pre-login (unauthenticated) fetch returned —
-  // refetch now that we're actually authenticated, so RLS lets the real data through.
-  await load();
-  // These 8 are independent of each other and of data already loaded above (load() has
-  // already populated data.teachers/data.students, which loadMyPhoto needs) — parallel
-  // rather than sequential, same reasoning as load() itself.
-  await Promise.all([
-    loadCategories(),
-    loadBoards(),
-    loadGrades(),
-    loadCategoryGrades(),
-    loadSubjectNames(),
-    loadMyPhoto(),
-    loadMyAnnouncements(),
-    loadNotifications(),
-  ]);
+  logLoginEvent('login', currentUserId, currentUsername, role); // not awaited: the log write shouldn't hold up the login
+  await loadAfterLogin();
   if (role === 'Teacher') {
     const linked = data.teachers.find(t=>t.id===linkedId);
     if (linked && linked.archived) { await logout(); loginError = 'This account has been archived. Contact the admin.'; render(); return; }
@@ -5720,13 +5733,13 @@ async function refreshAllData(silent) {
       currentRole === 'Teacher' ? loadTeacherQbAccess() : Promise.resolve(),
       currentRole === 'Teacher' ? loadTeacherResearchAccess() : Promise.resolve(),
       currentRole === 'Student' || currentRole === 'Parent' ? loadResources() : Promise.resolve(),
-    ]);
-    await Promise.all([
-      loadMyPhoto(),
+      currentRole === 'Admin' ? loadUsersAndParents() : Promise.resolve(),
       loadMyAnnouncements(),
       loadNotifications(),
     ]);
-    if (currentRole === 'Admin') await loadUsersAndParents();
+    await Promise.all([
+      loadMyPhoto(),
+    ]);
     if (currentRole === 'Admin' && currentTab === 'audit') { await Promise.all([loadAuditLog(), loadLoginLog()]); }
     if (currentRole === 'Admin' && (currentTab === 'users' || currentTab === 'chat')) await loadAllAnnouncementsAdmin();
     // Only confirm success for an explicit click — the periodic and focus/visibility
@@ -7911,10 +7924,12 @@ async function loadAiSettings() {
       if(!error&&data){ if (currentRole === 'Admin') aiApiKey=data.api_key||''; aiKeySet=!!data.api_key; aiMasterEnabled=data.master_enabled!==false; }
     }
     if (currentRole === 'Admin') {
-      // Separate read: before SQL 50 these columns don't exist and the read just fails quietly.
-      const c = await sb.from('ai_settings').select('model_prices, usd_inr').eq('id', 1).maybeSingle();
+      // Separate reads (run together): before SQL 50 / 51 these columns don't exist and the read just fails quietly.
+      const [c, ra] = await Promise.all([
+        sb.from('ai_settings').select('model_prices, usd_inr').eq('id', 1).maybeSingle(),
+        sb.from('ai_settings').select('role_access').eq('id', 1).maybeSingle(),
+      ]);
       if (!c.error && c.data) { aiModelPrices = c.data.model_prices || {}; aiUsdInr = c.data.usd_inr != null ? Number(c.data.usd_inr) : null; }
-      const ra = await sb.from('ai_settings').select('role_access').eq('id', 1).maybeSingle();
       aiRoleAccess = !ra.error && ra.data && ra.data.role_access ? ra.data.role_access : null; // null = SQL 51 not run
     }
   } catch(e){}
@@ -19502,9 +19517,9 @@ function render() {
 }
 
 async function initApp() {
-  // Give the CDN scripts a moment, then check both libraries loaded correctly.
-  await new Promise(r => setTimeout(r, 300));
-  if (typeof window.supabase === 'undefined' || typeof window.XLSX === 'undefined') {
+  // The Supabase library is a normal <script> above, so it has either loaded or failed by now — no need to wait.
+  // The Excel library is deferred (only imports/exports use it) and finishes loading in the background.
+  if (typeof window.supabase === 'undefined') {
     const banner = document.getElementById('cdnStatus');
     banner.style.display = 'block';
     banner.innerHTML = '<b>A required library did not load.</b> Make sure this file was downloaded and opened directly in your browser, and that you have an internet connection. Try reloading the page.';
@@ -19549,17 +19564,14 @@ async function initApp() {
     studentRatesFeesPanelOpen = true;
   }
 
-  await load();
-  await Promise.all([
-    loadCategories(),
-    loadBoards(),
-    loadGrades(),
-    loadCategoryGrades(),
-    loadSubjectNames(),
-    loadMyPhoto(),
-    loadMyAnnouncements(),
-    loadNotifications(),
-  ]);
+  if (!isLoggedIn) {
+    // Nobody is logged in (or the fingerprint gate is up): show the login screen straight away. Loading data here
+    // only fetched empty lists (RLS) and kept the login screen waiting; login loads everything with a real session.
+    loaded = true;
+    render();
+    return;
+  }
+  await loadAfterLogin();
   render(); // re-render now that photo, announcements and notifications are loaded
   scrollToHashSection(); // honor #rates-fees (or any future data-section hash)
 }
