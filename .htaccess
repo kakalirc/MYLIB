@@ -1,0 +1,11 @@
+# Prevent browser from caching index.html so every open gets the latest version
+<FilesMatch "^index\.html$">
+  Header set Cache-Control "no-cache, no-store, must-revalidate"
+  Header set Pragma "no-cache"
+  Header set Expires "0"
+</FilesMatch>
+
+# Cache static assets normally (icons, PDFs, manifest, sw.js)
+<FilesMatch "\.(png|pdf|json|js)$">
+  Header set Cache-Control "public, max-age=86400"
+</FilesMatch>
