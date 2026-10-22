@@ -271,7 +271,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 19:05 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 19:20 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -8399,7 +8399,8 @@ const SUPPORT_KB = {
 - [research] Research (Teaching): Lesson prep (an AI brief for a chapter: key points, teaching order, common mistakes, examples, practice questions; save it to Saved briefs; optional "For student" picker shows that student's Study Plan topics as chapter suggestions and Saved briefs can be filtered by student) and Resource library (keep notes, worksheets and links; tick "Share with students" to show them to your students and their parents).
 - [research] [qb] Research also has Student insights (how each student did by chapter and question type on papers you marked, with "Make a paper on weak chapters") and Question research (how past papers ask each chapter).
 - Give Attendance (Attendance): record a class you gave. Current month records can be edited; earlier months are view only.
-- My Attendance Report (Attendance): your classes for the month and your earnings (classes × your rate, plus demo bonuses).
+- My Attendance Report (Attendance): your classes for the month, by student.
+- Earnings (Dashboard): tap to unlock with your password; shows classes × your rate, demo bonuses, adjustment, paid status and the 📄 Salary Slip once paid.
 - Availability (Attendance): your weekly teaching hours, leave dates and a free slots report.
 - My Profile (Account): your details and your online class link.
 - Setup (Account): change your password.
@@ -16042,51 +16043,6 @@ function teacherPortalBodyHtml(teacher) {
       }).join('')}
     </table></div>` : '<div class="empty">No students are mapped to you yet.</div>';
 
-  // ---- Teacher earnings for the month ----
-  const myTeacherId = teacher.id;
-  const tPaySessions = data.sessions.filter(s=>s.teacherId===myTeacherId && s.date.startsWith(teacherViewMonth) && s.status==='Present');
-  let tPay = 0;
-  const tRateMap = {};
-  categories.forEach(c=>{
-    TYPES.forEach(ty=>{
-      const inGroup = tPaySessions.filter(s=>{ const subj=subject(s.subjectId); return subj && subj.category===c.id && s.classType===ty; });
-      RATE_MODES.forEach(md=>{
-        const cnt = inGroup.filter(s=>s.mode===md).reduce((a,s)=>a+s.count,0);
-        const rate = teacher.rates ? (teacher.rates[rateKey(c.id,ty,md)]||0) : 0;
-        if (cnt > 0) { tRateMap[rate] = (tRateMap[rate]||0) + cnt; tPay += cnt * rate; }
-      });
-    });
-  });
-  const tDemoLines = data.demoLogs.filter(d=>d.teacherId===myTeacherId && d.status==='Converted' && (d.convertedAt||d.date||'').startsWith(teacherViewMonth))
-    .map(d=>({ name: d.studentName||'?', amount: d.bonusAmount }));
-  const tBonus = tDemoLines.reduce((a,l)=>a+l.amount,0);
-  tPay += tBonus;
-  const tPr = payrollRecord(myTeacherId, teacherViewMonth);
-  const tAdj = tPr ? tPr.adjustment : 0;
-  const tAdjNote = tPr ? tPr.adjustmentNote : '';
-  const tNet = tPay + tAdj;
-  const tPaid = tPr ? tPr.paid : false;
-  const tPaidDate = tPr ? tPr.paidDate : '';
-  const tPaidRef = tPr ? tPr.paidReference : '';
-  const tBreakdown = Object.entries(tRateMap).sort((a,b)=>Number(b[0])-Number(a[0]))
-    .map(([rate,cnt])=>`${fmtN(cnt)} × ₹${rate} = ₹${(Number(rate)*cnt).toFixed(2)}`).join('<br>');
-  const earningsHtml = `
-    <div class="card">
-      <h2>My Earnings — ${teacherViewMonth}</h2>
-      <table style="width:auto;min-width:260px">
-        <tr><th style="text-align:left;padding-right:24px">Base pay</th><td style="text-align:right"><b>₹${tPay.toFixed(2)}</b></td></tr>
-        ${tBreakdown ? `<tr><td colspan="2" style="font-size:12px;color:var(--hint);padding-bottom:4px">${tBreakdown}</td></tr>` : ''}
-        ${tDemoLines.map(l=>`<tr><td style="font-size:12px;color:var(--forest);padding-right:24px">+ Demo bonus — ${esc(l.name)}</td><td style="text-align:right;font-size:12px;color:var(--forest)">₹${l.amount.toFixed(0)}</td></tr>`).join('')}
-        <tr><th style="text-align:left;padding-right:24px">Adjustment</th><td style="text-align:right;color:${tAdj<0?'var(--brick)':tAdj>0?'var(--forest)':'var(--hint)'}">${tAdj!==0?(tAdj>0?'+':'')+'₹'+tAdj.toFixed(2):'—'}</td></tr>
-        ${tAdjNote ? `<tr><td colspan="2" style="font-size:11px;color:var(--hint);padding-bottom:4px">${esc(tAdjNote)}</td></tr>` : ''}
-        <tr style="border-top:2px solid var(--line)"><th style="text-align:left;padding-right:24px;padding-top:6px">Net payable</th><td style="text-align:right;padding-top:6px"><b style="font-size:16px">₹${tNet.toFixed(2)}</b></td></tr>
-        <tr><td colspan="2" style="padding-top:8px">
-          ${tPaid
-            ? `<span class="tag" style="background:var(--forest);color:#fff">✓ Paid${tPaidDate?' on '+tPaidDate:''}</span>${tPaidRef?`<span style="font-size:11px;color:var(--hint);margin-left:8px">${esc(tPaidRef)}</span>`:''}<br><button class="btn-small" style="margin-top:8px" onclick="printSalarySlip('${myTeacherId}','${teacherViewMonth}')">📄 Salary Slip</button>`
-            : '<span class="tag absent">Pending</span>'}
-        </td></tr>
-      </table>
-    </div>`;
 
   return `
     <div class="card">
@@ -16095,7 +16051,6 @@ function teacherPortalBodyHtml(teacher) {
       <div class="hint">${TYPES.map(ty=>`${ty}: <b>${byType[ty]}</b>`).join(' · ')} — Total: <b>${total}</b> classes${totalAbsent>0?` · <span style="color:var(--brick)">Absent: ${totalAbsent}</span>`:''} · ${distinctStudents} student${distinctStudents===1?'':'s'} taught</div>
       ${rows}
     </div>
-    ${earningsHtml}
     <div class="card">
       <h2>My Students — Subscription Overview</h2>
       <div class="hint">Subscription balances for every student mapped to you.</div>
