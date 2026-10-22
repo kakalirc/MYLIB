@@ -269,7 +269,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 08:40 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 09:10 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -746,7 +746,8 @@ let sCalcClasses = '';
 let demandPreviewRows = null;
 let demandMsg = '';
 let demandConfirming = false;
-let aiApiKey = '';
+let aiApiKey = '';    // the key itself: loaded for admins only (AI Settings card)
+let aiKeySet = false;  // whether a key is saved; AI calls go through the ai-proxy Edge Function, which holds it
 let aiMasterEnabled = false;
 let aiUserEnabled = true;
 let aiFeeMsg = {loading:false,result:'',error:''};
@@ -4370,16 +4371,7 @@ function studyPlanCancelExtraction() {
 async function studyPlanAiCallWithText(fileName) {
   // Shared AI call — uses studyPlanFullText, updates state, does NOT call render()
   const prompt = `Extract all chapter, lesson, unit, and section titles from this textbook text.\nReturn ONLY the titles, one per line, in the order they appear.\nNo numbering, no page numbers, no descriptions — just the title text.\nIf no titles found, reply with exactly: NONE\n\nText:\n${studyPlanFullText.substring(0, 15000)}`;
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': aiApiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 1024, messages: [{ role: 'user', content: prompt }] })
-  });
+  const r = await aiProxyFetch('studyPlanAiCallWithText', { max_tokens: 1024, messages: [{ role: 'user', content: prompt }] });
   if (!r.ok) throw new Error('AI error ' + r.status);
   const d = await r.json();
   const raw = (d.content?.[0]?.text || '').trim();
@@ -4396,7 +4388,7 @@ async function studyPlanAiCallWithText(fileName) {
   }
 }
 async function studyPlanExtractFromTextbookAI(id, filePath, fileName) {
-  if (studyPlanAiExtractingId || !aiApiKey) return;
+  if (studyPlanAiExtractingId || !aiKeySet) return;
   studyPlanAiExtractingId = id;
   studyPlanExtractedTopics = null;
   studyPlanExtractedFrom = fileName;
@@ -4470,7 +4462,7 @@ function studyPlanToggleTextbookPanel() {
   else { studyPlanExtractedTopics = null; studyPlanExtractedFrom = ''; studyPlanTextbookMsg = ''; studyPlanFullText = ''; studyPlanAiExtractingId = ''; render(); }
 }
 async function studyPlanGenerateTopics(subjectId, studentId) {
-  if (!aiApiKey || !aiMasterEnabled) {
+  if (!aiKeySet || !aiMasterEnabled) {
     studyPlanTextbookMsg = 'AI is not set up. Ask your admin to add an AI API key in AI Settings.';
     render();
     return;
@@ -4492,16 +4484,7 @@ async function studyPlanGenerateTopics(subjectId, studentId) {
   const prompt = `You are a curriculum expert for Indian and international school education.\nList the official chapter or topic titles for the subject below.\n\nSubject: ${subjName}${context ? '\nBoard / Grade: ' + context : ''}\n\nReturn ONLY the chapter or topic titles, one per line, in curriculum order.\nNo numbering, no page numbers, no descriptions — just the title text.\nIf the subject is very open-ended, return a sensible 10–20 topic outline.\nIf you cannot identify a standard syllabus, return your best topic outline for the subject.`;
 
   try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': aiApiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 1024, messages: [{ role: 'user', content: prompt }] })
-    });
+    const r = await aiProxyFetch('studyPlanGenerateTopics', { max_tokens: 1024, messages: [{ role: 'user', content: prompt }] });
     if (!r.ok) throw new Error('AI error ' + r.status);
     const d = await r.json();
     const raw = (d.content?.[0]?.text || '').trim();
@@ -4522,7 +4505,7 @@ async function studyPlanGenerateTopics(subjectId, studentId) {
 
 // ── AI: Progress Summary + Focus Next ──────────────────────────────────────
 async function studyPlanAiInsightCall() {
-  if (!aiApiKey || !aiMasterEnabled) { studyPlanAiInsight = { loading: false, result: '', error: 'AI is not set up. Ask your admin to add an AI API key in AI Settings.' }; render(); return; }
+  if (!aiKeySet || !aiMasterEnabled) { studyPlanAiInsight = { loading: false, result: '', error: 'AI is not set up. Ask your admin to add an AI API key in AI Settings.' }; render(); return; }
   if (studyPlanAiInsight.loading) return;
   const student = data.students.find(s => s.id === studyPlanTeacherStudentId);
   const subj = data.subjects.find(s => s.id === studyPlanTeacherSubjectId);
@@ -4535,11 +4518,7 @@ async function studyPlanAiInsightCall() {
   studyPlanAiInsight = { loading: true, result: '', error: '' };
   render();
   try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': aiApiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 600, messages: [{ role: 'user', content: prompt }] })
-    });
+    const r = await aiProxyFetch('studyPlanAiInsightCall', { max_tokens: 600, messages: [{ role: 'user', content: prompt }] });
     if (!r.ok) throw new Error('AI error ' + r.status);
     const d = await r.json();
     studyPlanAiInsight = { loading: false, result: (d.content?.[0]?.text || '').trim(), error: '' };
@@ -4551,7 +4530,7 @@ async function studyPlanAiInsightCall() {
 
 // ── AI: Notes Summary ──────────────────────────────────────────────────────
 async function studyPlanAiNotesCall() {
-  if (!aiApiKey || !aiMasterEnabled) { studyPlanAiNotes = { loading: false, result: '', error: 'AI is not set up. Ask your admin to add an AI API key in AI Settings.' }; render(); return; }
+  if (!aiKeySet || !aiMasterEnabled) { studyPlanAiNotes = { loading: false, result: '', error: 'AI is not set up. Ask your admin to add an AI API key in AI Settings.' }; render(); return; }
   if (studyPlanAiNotes.loading) return;
   const student = data.students.find(s => s.id === studyPlanTeacherStudentId);
   const subj = data.subjects.find(s => s.id === studyPlanTeacherSubjectId);
@@ -4563,11 +4542,7 @@ async function studyPlanAiNotesCall() {
   studyPlanAiNotes = { loading: true, result: '', error: '' };
   render();
   try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': aiApiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 400, messages: [{ role: 'user', content: prompt }] })
-    });
+    const r = await aiProxyFetch('studyPlanAiNotesCall', { max_tokens: 400, messages: [{ role: 'user', content: prompt }] });
     if (!r.ok) throw new Error('AI error ' + r.status);
     const d = await r.json();
     studyPlanAiNotes = { loading: false, result: (d.content?.[0]?.text || '').trim(), error: '' };
@@ -4579,7 +4554,7 @@ async function studyPlanAiNotesCall() {
 
 // ── AI: Class Gap Analysis ─────────────────────────────────────────────────
 async function studyPlanAiGapCall(subjectId) {
-  if (!aiApiKey || !aiMasterEnabled) { studyPlanAiGap = { loading: false, result: '', error: 'AI is not set up. Ask your admin to add an AI API key in AI Settings.', subjectId }; render(); return; }
+  if (!aiKeySet || !aiMasterEnabled) { studyPlanAiGap = { loading: false, result: '', error: 'AI is not set up. Ask your admin to add an AI API key in AI Settings.', subjectId }; render(); return; }
   if (studyPlanAiGap.loading) return;
   const subj = data.subjects.find(s => s.id === subjectId);
   if (!subj) return;
@@ -4609,11 +4584,7 @@ async function studyPlanAiGapCall(subjectId) {
   studyPlanAiGap = { loading: true, result: '', error: '', subjectId };
   render();
   try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': aiApiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 400, messages: [{ role: 'user', content: prompt }] })
-    });
+    const r = await aiProxyFetch('studyPlanAiGapCall', { max_tokens: 400, messages: [{ role: 'user', content: prompt }] });
     if (!r.ok) throw new Error('AI error ' + r.status);
     const d = await r.json();
     studyPlanAiGap = { loading: false, result: (d.content?.[0]?.text || '').trim(), error: '', subjectId };
@@ -7540,7 +7511,7 @@ function aiChatCardHtml(studentId) {
   return h;
 }
 function aiHowAmIDoingHtml(studentId) {
-  if (!(currentRole === 'Student' || currentRole === 'Parent') || !aiMasterEnabled || !aiApiKey) return '';
+  if (!(currentRole === 'Student' || currentRole === 'Parent') || !aiMasterEnabled || !aiKeySet) return '';
   // All three AI buttons in one row, matching mockup layout
   var h = '<div style="margin-bottom:20px;padding:0 4px">';
   h += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
@@ -7608,18 +7579,34 @@ function aiMonthlySummaryHtml() {
 }
 async function loadAiSettings() {
   try {
-    const {data,error}=await sb.from('ai_settings').select('api_key,master_enabled').maybeSingle();
-    if(!error&&data){aiApiKey=data.api_key||'';aiMasterEnabled=data.master_enabled!==false;}
+    // ai_status() (SQL 48) says whether AI is on and a key is saved, without handing anyone the key.
+    const st = await sb.rpc('ai_status');
+    if (!st.error && st.data) { aiMasterEnabled = st.data.master_enabled !== false; aiKeySet = !!st.data.has_key; }
+    // Only admins read the key itself (for the AI Settings card). Before SQL 48 this is also the fallback.
+    if (currentRole === 'Admin' || st.error) {
+      const {data,error}=await sb.from('ai_settings').select('api_key,master_enabled').maybeSingle();
+      if(!error&&data){ if (currentRole === 'Admin') aiApiKey=data.api_key||''; aiKeySet=!!data.api_key; aiMasterEnabled=data.master_enabled!==false; }
+    }
   } catch(e){}
 }
-function aiOn() { return aiMasterEnabled&&!!aiApiKey&&aiUserEnabled; }
+// Every AI call goes through the ai-proxy Edge Function, which adds the key on the server and logs usage.
+// Answers come back shaped like Anthropic's ({ content: [{ text }] } or { error: { message } }).
+async function aiProxyFetch(feature, body) {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) throw new Error('Not logged in');
+  const res = await fetch(SUPABASE_URL + '/functions/v1/ai-proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + session.access_token },
+    body: JSON.stringify({ feature, ...body }),
+  });
+  if (res.status === 404) throw new Error('the AI service is not set up yet (ask your admin to deploy ai-proxy)');
+  return res;
+}
+function aiOn() { return aiMasterEnabled&&aiKeySet&&aiUserEnabled; }
 async function callClaude(system,user,maxTokens=400) {
-  if(!aiApiKey) return {ok:false,text:'AI not configured.'};
+  if(!aiKeySet) return {ok:false,text:'AI not configured.'};
   try {
-    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',
-      headers:{'Content-Type':'application/json','x-api-key':aiApiKey,
-        'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:maxTokens,system,messages:[{role:'user',content:user}]})});
+    const r=await aiProxyFetch('callClaude', {max_tokens:maxTokens,system,messages:[{role:'user',content:user}]});
     const d=await r.json();
     if(d.error) return {ok:false,text:d.error.message||'API error'};
     return {ok:true,text:d.content?.[0]?.text||''};
@@ -7756,16 +7743,14 @@ async function aiHelpSend() {
   if (!aiHelp.input.trim() || aiHelp.loading) return;
   const q = aiHelp.input.trim();
   aiHelp = { ...aiHelp, messages: [...aiHelp.messages, { role:'user', content:q }], input:'', loading:true }; render();
-  if (!aiApiKey) {
+  if (!aiKeySet) {
     aiHelp = { ...aiHelp, messages: [...aiHelp.messages, { role:'assistant', content:'AI is not configured. Please contact your admin to enable it.' }], loading:false }; render(); return;
   }
   const kb = SUPPORT_KB[currentRole] || '';
   const sys = `You are a friendly in-app help assistant for LIB Education's My LIB management app. Answer the user's question about how to use the app using only the guide below. Be concise and clear — use numbered steps for how-to questions. If the question is not covered by the guide, say you're not sure and suggest contacting Admin.\n\n${kb}`;
   try {
     const msgs = aiHelp.messages.slice(-6).concat([{role:'user',content:q}]);
-    const r = await fetch('https://api.anthropic.com/v1/messages',{method:'POST',
-      headers:{'Content-Type':'application/json','x-api-key':aiApiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:500,system:sys,messages:msgs})});
+    const r = await aiProxyFetch('aiHelpSend', {max_tokens:500,system:sys,messages:msgs});
     const d = await r.json();
     const reply = d.content?.[0]?.text || 'Sorry, I could not get a response.';
     aiHelp = { ...aiHelp, messages:[...aiHelp.messages,{role:'assistant',content:reply}], loading:false };
@@ -7839,7 +7824,7 @@ function aiHelpPanelHtml() {
         aiHelp.messages.map(m=>`<div style="margin-bottom:8px"><b style="color:${m.role==='user'?'var(--forest)':'var(--ink)'}">${m.role==='user'?'You':'Help Bot'}:</b> <span style="white-space:pre-wrap">${esc(m.content)}</span></div>`).join('')}
       ${aiHelp.loading ? '<div class="hint" style="text-align:center;padding:4px">Thinking…</div>' : ''}
     </div>
-    ${aiApiKey ? `<div style="display:flex;gap:6px">
+    ${aiKeySet ? `<div style="display:flex;gap:6px">
       <input type="text" style="flex:1;padding:7px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;font-family:inherit" placeholder="Ask a how-to question…" value="${esc(aiHelp.input)}" oninput="aiHelp={...aiHelp,input:this.value}" onkeydown="if(event.key==='Enter')aiHelpSend()">
       <button class="btn-small btn-primary" onclick="aiHelpSend()" ${aiHelp.loading?'disabled':''}>Ask</button>
       ${aiHelp.messages.length?`<button class="btn-small" onclick="aiHelp={...aiHelp,messages:[]};render()">Clear</button>`:''}
@@ -7916,9 +7901,7 @@ async function aiChatSend(studentId) {
   const sys='You are a helpful assistant for LIB Education. You may ONLY answer questions about THIS student\'s own attendance and subscription data. Never reveal information about other students, teachers, fees, payroll, or institute financials. If asked about anything outside this student\'s own data, say: "I can only help with your own account details." Student:'+(st?st.name:'?')+'. Balances:'+(bal||'none')+'. Recent sessions:'+(recent||'none')+'.';
   const msgs=[...aiChat.messages.slice(-5),{role:'user',content:q}];
   try {
-    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',
-      headers:{'Content-Type':'application/json','x-api-key':aiApiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:300,system:sys,messages:msgs})});
+    const res=await aiProxyFetch('aiChatSend', {max_tokens:300,system:sys,messages:msgs});
     const dd=await res.json();
     const reply=dd.content?.[0]?.text||dd.error?.message||'Sorry, could not answer that.';
     aiChat={...aiChat,messages:[...aiChat.messages,{role:'assistant',content:reply}],loading:false};
@@ -8418,7 +8401,7 @@ function openReceipt(paymentId) {
 }
 async function saveAiSettings(key,enabled) {
   const {error}=await sb.from('ai_settings').upsert({id:1,api_key:key,master_enabled:enabled},{onConflict:'id'});
-  if(!error){aiApiKey=key;aiMasterEnabled=enabled;} return !error;
+  if(!error){aiApiKey=key;aiKeySet=!!key;aiMasterEnabled=enabled;} return !error;
 }
 async function saveUserAiEnabled(val) {
   await sb.from('profiles').update({ai_enabled:val}).eq('id',currentUserId);
@@ -13536,7 +13519,7 @@ function renderTeacherStudyPlans(teacher) {
               <span style="flex:1;font-size:13px;color:var(--ink);min-width:120px;word-break:break-word" title="${escAttr(tb.fileName)}">${esc(tb.fileName)}</span>
               <span style="font-size:11px;color:var(--muted);flex-shrink:0">${formatBytes(tb.fileSize)}</span>
               <button class="btn-small" onclick="studyPlanExtractFromTextbook('${tb.id}','${escAttr(tb.filePath)}','${escAttr(tb.fileName)}')" ${(studyPlanExtractingId===tb.id||studyPlanAiExtractingId===tb.id)?'disabled':''} style="flex-shrink:0">${studyPlanExtractingId===tb.id?'⏳ Extracting…':'✨ Extract Topics'}</button>
-              ${aiApiKey && aiMasterEnabled ? `<button class="btn-small" onclick="studyPlanExtractFromTextbookAI('${tb.id}','${escAttr(tb.filePath)}','${escAttr(tb.fileName)}')" ${(studyPlanExtractingId===tb.id||studyPlanAiExtractingId===tb.id)?'disabled':''} style="flex-shrink:0">${studyPlanAiExtractingId===tb.id?'🤖 Asking AI…':'🤖 AI Extract'}</button>` : ''}
+              ${aiKeySet && aiMasterEnabled ? `<button class="btn-small" onclick="studyPlanExtractFromTextbookAI('${tb.id}','${escAttr(tb.filePath)}','${escAttr(tb.fileName)}')" ${(studyPlanExtractingId===tb.id||studyPlanAiExtractingId===tb.id)?'disabled':''} style="flex-shrink:0">${studyPlanAiExtractingId===tb.id?'🤖 Asking AI…':'🤖 AI Extract'}</button>` : ''}
               <button class="btn-small" onclick="studyPlanDownloadTextbook('${escAttr(tb.filePath)}','${escAttr(tb.fileName)}')" style="flex-shrink:0">⬇ Download</button>
               <button class="btn-small" onclick="studyPlanDeleteTextbook('${tb.id}','${escAttr(tb.filePath)}')" style="flex-shrink:0;color:var(--brick)">✕ Delete</button>
             </div>`).join('');
