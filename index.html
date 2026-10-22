@@ -269,7 +269,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 05:10 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 07:00 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1203,7 +1203,7 @@ function setTeacherPortalTab(t) {
   if (t === 'homework') { hwShowForm = false; hwMsg = ''; hwFilterStudentId = ''; hwFilterStatus = 'assigned'; loadHomework().then(() => render()); return; }
   if (t === 'questionbank' && !teacherQbAccess) { teacherPortalTab = 'dashboard'; render(); return; }
   if (t === 'research' && !teacherResearchAccess) { teacherPortalTab = 'dashboard'; render(); return; }
-  if (t === 'research') { researchNotesMsg = ''; researchOpenNoteId = ''; loadResearchData(); return; }
+  if (t === 'research') { researchNotesMsg = ''; researchOpenNoteId = ''; insightsStudentId = ''; if (teacherQbAccess) loadInsights(); loadResearchData(); return; }
   if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); return; }
   render();
 }
@@ -15438,7 +15438,145 @@ const HELP = {
 // HOMEWORK RENDER FUNCTIONS
 // ════════════════════════════════════════════════════════════════
 
-// Research tab: Lesson prep form, the brief just written, and this teacher's saved briefs.
+// Research → Student insights: marks per chapter and question type from this teacher's reviewed practice papers.
+// Read only, no AI. Needs Question Bank access (the qb_ tables are closed to teachers without it).
+let insights = null;            // { students: { studentId: stat }, chapters: { chapterId: row } } once loaded
+let insightsLoading = false;
+let insightsMsg = '';
+let insightsStudentId = '';
+let insightsChapterNames = {};  // chapter id → "1. Title"
+const INSIGHTS_WEAK = 60;       // a chapter under this % counts as weak
+// Rows of table where col is in ids, 100 ids per request (keeps URLs short), every page.
+async function insightsSelectIn(table, columns, col, ids) {
+  let all = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const part = ids.slice(i, i + 100);
+    for (let from = 0; ; from += 1000) {
+      const { data: rows, error } = await sb.from(table).select(columns).in(col, part).order('id').range(from, from + 999);
+      if (error) throw error;
+      all = all.concat(rows || []);
+      if (!rows || rows.length < 1000) break;
+    }
+  }
+  return all;
+}
+async function loadInsights() {
+  if (!teacherQbAccess) return;
+  insightsLoading = true; insightsMsg = ''; render();
+  try {
+    const { data: papers, error } = await sb.from('qb_practice_papers').select('id,subject_name,grade_id,board_id').eq('created_by_teacher_id', currentLinkedId);
+    if (error) throw error;
+    const paperById = new Map((papers || []).map(p => [p.id, p]));
+    const assigns = (await insightsSelectIn('qb_student_assignments', 'id,paper_id,student_id,total_score,reviewed_at,status', 'paper_id', [...paperById.keys()]))
+      .filter(a => a.status === 'reviewed');
+    const [pqs, attempts] = await Promise.all([
+      insightsSelectIn('qb_paper_questions', 'id,paper_id,question_id,marks_override,section_name,choice', 'paper_id', [...new Set(assigns.map(a => a.paper_id))]),
+      insightsSelectIn('qb_student_attempts', 'id,assignment_id,question_id,marks_awarded', 'assignment_id', assigns.map(a => a.id)),
+    ]);
+    const qs = await insightsSelectIn('qb_questions', 'id,chapter_id,question_type,marks', 'id', [...new Set(pqs.map(r => r.question_id))]);
+    const qById = new Map(qs.map(q => [q.id, q]));
+    const chapIds = [...new Set(qs.map(q => q.chapter_id).filter(id => id && !insightsChapterNames[id]))];
+    if (chapIds.length) (await insightsSelectIn('qb_chapters', 'id,chapter_number,title', 'id', chapIds)).forEach(c => { insightsChapterNames[c.id] = qbChapterLabel(c); });
+    const pqByPaper = new Map();
+    pqs.forEach(r => { if (!pqByPaper.has(r.paper_id)) pqByPaper.set(r.paper_id, []); pqByPaper.get(r.paper_id).push(r); });
+    const gotBy = new Map(attempts.map(t => [t.assignment_id + '|' + t.question_id, t]));
+    const students = {}, chapters = {};
+    const add = (bucket, key, got, max) => { const r = bucket[key] || (bucket[key] = { got: 0, max: 0, n: 0 }); r.got += got; r.max += max; r.n++; };
+    assigns.forEach(a => {
+      const p = paperById.get(a.paper_id), rows = pqByPaper.get(a.paper_id) || [];
+      const st = students[a.student_id] || (students[a.student_id] = { papers: 0, got: 0, max: 0, chapters: {}, types: {}, last: null, lastAt: '' });
+      st.papers++;
+      if (String(a.reviewed_at || '') >= st.lastAt) { st.lastAt = String(a.reviewed_at || ''); st.last = p; }
+      // An either/or pair counts only the side the student answered (side अ when they answered neither).
+      const answered = new Set(rows.filter(r => r.choice && gotBy.has(a.id + '|' + r.question_id)).map(r => (r.section_name || '') + '|' + r.choice));
+      rows.forEach(r => {
+        if (r.choice) {
+          const sec = r.section_name || '', other = r.choice === 'a' ? 'b' : 'a';
+          if (answered.has(sec + '|' + other) && !answered.has(sec + '|' + r.choice)) return;
+          if (!answered.has(sec + '|a') && !answered.has(sec + '|b') && r.choice !== 'a') return;
+        }
+        const q = qById.get(r.question_id) || {};
+        const max = Number(r.marks_override != null ? r.marks_override : q.marks) || 0;
+        if (!max) return;
+        const t = gotBy.get(a.id + '|' + r.question_id);
+        const got = Math.min(max, Number(t && t.marks_awarded) || 0);
+        st.got += got; st.max += max;
+        add(st.chapters, q.chapter_id || 'none', got, max);
+        add(st.types, q.question_type || 'other', got, max);
+        add(chapters, q.chapter_id || 'none', got, max);
+      });
+    });
+    insights = { students, chapters };
+  } catch (e) { insightsMsg = 'Could not load insights: ' + (e.message || e); insights = null; }
+  insightsLoading = false; render();
+}
+function insightsPct(r) { return r && r.max ? Math.round(100 * r.got / r.max) : null; }
+function insightsChapterName(id) { return id === 'none' ? 'No chapter' : (insightsChapterNames[id] || 'Unknown chapter'); }
+// Opens the Question Bank's new-paper form for the student's latest subject / class, with their weak lessons ticked.
+async function insightsMakePaper(studentId) {
+  const st = insights && insights.students[studentId];
+  if (!st || !st.last) return;
+  const p = st.last;
+  const weak = Object.entries(st.chapters).filter(([id, r]) => id !== 'none' && insightsPct(r) < INSIGHTS_WEAK).map(([id]) => id);
+  teacherPortalTab = 'questionbank'; qbSubTab = 'papers'; qbPaperView = 'list'; qbPaperId = null; qbReviewId = null; qbEditId = null;
+  qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch=''; qbFilterDup=false; qbFilterZero=false; qbFilterOld=false; qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade='';
+  await Promise.all([loadQBQuestions(), loadQbPapers()]);
+  qbStartNewPaper();
+  const g = qbBlueprintGroups().filter(x => qbSameSubject(x.subject_name, p.subject_name) && x.grade_id === p.grade_id && (!p.board_id || !x.board_id || x.board_id === p.board_id))
+    .sort((a, b) => (Number(b.effective_year) || 0) - (Number(a.effective_year) || 0))[0];
+  const s = data.students.find(x => x.id === studentId);
+  if (!g) { qbPaperMsg = 'No blueprint for ' + [p.subject_name, qbByName(grades, p.grade_id)].filter(Boolean).join(' ') + '. Pick one below.'; render(); return; }
+  qbPaperDraft.blueprintKey = g.key;
+  qbPaperDraft.title = (s ? s.name + ' — ' : '') + 'weak chapters practice';
+  const lessons = weak.filter(id => qbIsLesson(id));
+  lessons.forEach(id => qbToggleDraftChapter(id, true));
+  qbPaperMsg = lessons.length ? `Ticked ${lessons.length} weak lesson${lessons.length === 1 ? '' : 's'}. Check the sections and press Create.` : 'No weak lessons to tick (the weak ones are grammar or other skill chapters, which always fill their own sections).';
+  render();
+}
+function insightsHtml() {
+  if (!teacherQbAccess) return '';
+  const head = `<h3 style="font-family:'Zilla Slab',serif;margin:0 0 6px">Student insights</h3>
+    <div class="hint" style="margin-bottom:10px">How your students did on the practice papers you marked, by chapter and question type. A chapter under ${INSIGHTS_WEAK}% is shown as weak.</div>`;
+  if (insightsLoading) return `<div class="card">${head}<div class="hint">Loading…</div></div>`;
+  if (insightsMsg) return `<div class="card">${head}<div class="hint" style="color:var(--brick)">${esc(insightsMsg)}</div></div>`;
+  if (!insights) return `<div class="card">${head}<button class="btn-small" onclick="loadInsights()">Show insights</button></div>`;
+  const ids = Object.keys(insights.students);
+  if (!ids.length) return `<div class="card">${head}<div class="empty">No marked practice papers yet. Insights appear once you mark a student's paper in the Question Bank.</div></div>`;
+  const nameOf = id => (data.students.find(s => s.id === id) || {}).name || 'Unknown student';
+  const pctCell = r => { const v = insightsPct(r); if (v == null) return '—'; return `<b style="color:${v < INSIGHTS_WEAK ? 'var(--brick)' : 'var(--forest)'}">${v}%</b>`; };
+  const weakest = st => Object.entries(st.chapters).filter(([id]) => id !== 'none').sort((a, b) => insightsPct(a[1]) - insightsPct(b[1]))[0];
+  const sel = insightsStudentId && insights.students[insightsStudentId];
+  let body;
+  if (sel) {
+    const chRows = Object.entries(sel.chapters).sort((a, b) => insightsPct(a[1]) - insightsPct(b[1]));
+    const tyRows = Object.entries(sel.types).sort((a, b) => insightsPct(a[1]) - insightsPct(b[1]));
+    const weakCount = chRows.filter(([id, r]) => id !== 'none' && insightsPct(r) < INSIGHTS_WEAK).length;
+    body = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+        <button class="btn-small" onclick="insightsStudentId='';render()">← All students</button>
+        <b style="flex:1">${esc(nameOf(insightsStudentId))}: ${pctCell(sel)} over ${sel.papers} paper${sel.papers === 1 ? '' : 's'}</b>
+        ${weakCount ? `<button class="btn-small" onclick="insightsMakePaper('${insightsStudentId}')">Make a paper on weak chapters</button>` : ''}
+      </div>
+      <div class="table-scroll"><table>
+        <tr><th>Chapter</th><th>Questions</th><th>Marks</th><th>Score</th></tr>
+        ${chRows.map(([id, r]) => `<tr><td>${esc(insightsChapterName(id))}</td><td>${r.n}</td><td>${r.got} / ${r.max}</td><td>${pctCell(r)}</td></tr>`).join('')}
+      </table></div>
+      <div class="table-scroll" style="margin-top:10px"><table>
+        <tr><th>Question type</th><th>Questions</th><th>Marks</th><th>Score</th></tr>
+        ${tyRows.map(([t, r]) => `<tr><td>${esc(QB_TYPE_LABELS[t] || t)}</td><td>${r.n}</td><td>${r.got} / ${r.max}</td><td>${pctCell(r)}</td></tr>`).join('')}
+      </table></div>`;
+  } else {
+    const hardest = Object.entries(insights.chapters).filter(([id]) => id !== 'none').sort((a, b) => insightsPct(a[1]) - insightsPct(b[1])).slice(0, 5);
+    body = `<div class="table-scroll"><table>
+        <tr><th>Student</th><th>Papers marked</th><th>Average</th><th>Weakest chapter</th></tr>
+        ${ids.sort((a, b) => nameOf(a).localeCompare(nameOf(b))).map(id => { const st = insights.students[id], w = weakest(st); return `
+          <tr style="cursor:pointer" onclick="insightsStudentId='${id}';render()"><td><a>${esc(nameOf(id))}</a></td><td>${st.papers}</td><td>${pctCell(st)}</td><td>${w ? esc(insightsChapterName(w[0])) + ' (' + insightsPct(w[1]) + '%)' : '—'}</td></tr>`; }).join('')}
+      </table></div>
+      ${hardest.length ? `<h3 style="font-size:15px;margin:14px 0 6px">Chapters your students find hardest</h3>
+      <ol style="margin:4px 0 0 20px;padding:0;font-size:14px;line-height:1.6">${hardest.map(([id, r]) => `<li>${esc(insightsChapterName(id))}: ${insightsPct(r)}% of marks</li>`).join('')}</ol>` : ''}`;
+  }
+  return `<div class="card">${head}${body}</div>`;
+}
+// Research tab: Lesson prep form, the brief just written, this teacher's saved briefs, then Student insights.
 function renderTeacherResearch(teacher) {
   const mySubjects = data.subjects.filter(s => s.teacherId === teacher.id && !s.archived);
   const subj = mySubjects.find(s => s.id === researchDraft.subjectId);
@@ -15498,7 +15636,7 @@ function renderTeacherResearch(teacher) {
     <h3 style="font-size:15px;margin:16px 0 6px">From your Question Bank</h3>
     <div class="hint" style="margin-bottom:6px">Approved questions on this chapter from past papers. Build a practice paper from them in the Question Bank tab.</div>
     <ol style="margin:4px 0 0 20px;padding:0;font-size:14px;line-height:1.6">
-      ${researchBankQs.map(q => `<li style="margin-bottom:6px">${esc(q.question_text)} <span style="font-size:12px;color:var(--muted)">(${esc([q.question_type, q.marks != null ? q.marks + ' marks' : '', q.source_year].filter(Boolean).join(' · '))})</span></li>`).join('')}
+      ${researchBankQs.map(q => `<li style="margin-bottom:6px">${esc(q.question_text)} <span style="font-size:12px;color:var(--muted)">(${esc([QB_TYPE_LABELS[q.question_type] || q.question_type, q.marks != null ? q.marks + ' marks' : '', q.source_year].filter(Boolean).join(' · '))})</span></li>`).join('')}
     </ol>` : ''}
   </div>` : ''}
   <div class="card">
@@ -15522,7 +15660,8 @@ function renderTeacherResearch(teacher) {
           </div>
         </div>` : ''}
       </div>`).join('')}
-  </div>`;
+  </div>
+  ${insightsHtml()}`;
 }
 function renderTeacherHomework(teacher) {
   const myStudents = byName(data.students.filter(s => {
