@@ -5,6 +5,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const MODEL = "claude-sonnet-5-5";
 const MAX_TOKENS = 3000;
+const DAILY_LIMIT = 30;          // briefs per teacher per 24 hours (admins have no limit)
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -49,6 +50,12 @@ Deno.serve(async (req) => {
   // Per-role and per-person AI switches (SQL 51). Before SQL 51 the function is missing and everyone stays allowed.
   const { data: allowed } = await admin.rpc("ai_allowed_for", { p_user: userData.user.id });
   if (allowed === false) return reply(403, { error: "AI is switched off for you. Ask your admin." });
+  if (prof.role !== "Admin") {
+    const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const { count } = await admin.from("ai_usage_log").select("id", { count: "exact", head: true })
+      .eq("user_id", userData.user.id).eq("feature", "research").gte("created_at", since);
+    if ((count || 0) >= DAILY_LIMIT) return reply(429, { error: `You have made ${DAILY_LIMIT} briefs in the last 24 hours. Please try again tomorrow.` });
+  }
 
   let body: Record<string, unknown>;
   try { body = await req.json(); } catch { return reply(400, { error: "Bad request." }); }
