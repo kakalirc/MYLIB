@@ -9,8 +9,8 @@ def guide():
     common.getting_started(g, 'the admin or your child’s teacher')
 
     g.add('whatsnew', 'Start here', 'What’s new in this edition', 'The biggest additions since the last guide.', g2(
-        box('Practice papers', 'Teachers now set full board-style papers. You can follow each one and see the score.'),
-        box('Faster feedback', 'Multiple-choice answers are marked the moment your child submits.'),
+        box('From your teachers', 'Notes, worksheets and links your child’s teachers share appear on your child’s page too.'),
+        box('Practice papers', 'Follow each board-style paper the teacher sets. MCQs are marked the moment your child submits.'),
     ) + g2(
         box('Teacher feedback', 'See the score, an overall comment and marks for every question once the teacher has marked it.'),
         box('Private photos', 'Homework and answer photos are private: only your family, the teacher and the centre can open them.'),
@@ -58,6 +58,12 @@ def guide():
                                'A paper marked <b>Overdue</b> has passed its due date without being submitted.',
                                'Questions about a mark? Message the teacher on Chat.']), new=True)
 
+    g.add('resources', 'Learning', 'From your teachers', 'Study material the teachers share.', bullets([
+        'Notes, worksheets, pictures and links the teachers shared for your child’s subjects.',
+        'Tap an item to open or download it, for example to print a worksheet.',
+        'The card appears once a teacher shares something.',
+    ]) + note('Quick help in the app', 'Tap the small <b>?</b> next to a heading for help on that card.', 'tip'), new=True)
+
     g.add('fees', 'Fees', 'Fees, receipts and paying', 'Pay from your phone; the admin confirms.', steps([
         ('See your requests', 'Fee Requests lists each request with its classes and amount.'),
         ('Select and pay', 'Tick what you are paying for and tap <b>Pay</b>.'),
@@ -82,6 +88,7 @@ def guide():
         ['See homework', 'Homework on the home screen'],
         ['See practice paper scores', 'Practice Papers › View'],
         ['See the study plan', 'Study Plans'],
+        ['Find teachers’ notes', 'From your teachers card'],
         ['Pay fees', 'Fee Requests › Pay'],
         ['Print a receipt', 'Payment history › Receipt'],
         ['Switch child', 'Selector at the top'],

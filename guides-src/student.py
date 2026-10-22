@@ -9,12 +9,12 @@ def guide():
     common.getting_started(g, 'your teacher or the admin')
 
     g.add('whatsnew', 'Start here', 'What’s new in this edition', 'The biggest additions since the last guide.', g2(
-        box('Practice papers', 'Your teacher can now set full board-style papers. Do them section by section on your phone.'),
-        box('Instant MCQ marks', 'Multiple-choice questions are marked the moment you submit.'),
+        box('From your teachers', 'Notes, worksheets, pictures and links your teachers share for your subjects, right on your home screen.'),
+        box('Practice papers', 'Board-style papers from your teacher, done section by section on your phone. MCQs are marked the moment you submit.'),
     ) + g2(
         box('Photo answers', 'Write long answers on paper and send a photo, just like homework.'),
-        box('Private photos', 'Your homework and answer photos are private: only you, your parent, your teacher and the centre can open them.'),
-    ) + note('Where to find it', 'Practice papers appear on your home screen as soon as your teacher assigns one.', 'tip'), new=True)
+        box('Help on every card', 'Tap the small <b>?</b> next to a heading in the app for quick help on it.'),
+    ) + note('Where to find it', 'Everything is on your home screen. Scroll down to find each card.', 'tip'), new=True)
 
     g.add('home', 'Home', 'Your home screen', 'Top to bottom, what you will see.', table(['Card', 'What it shows'], [
         ['Welcome and theme', 'A greeting, your subjects and 6 colour themes'],
@@ -26,6 +26,7 @@ def guide():
         ['Today’s class', 'Time, subject and teacher'],
         ['Teacher’s note', 'A short note when your teacher writes one'],
         ['Study plan, homework, practice papers', 'What your teacher has set for you'],
+        ['From your teachers', 'Notes, worksheets and links your teachers shared'],
         ['Leaderboard', 'Overall and by subject'],
     ]))
 
@@ -93,6 +94,12 @@ def guide():
                                          'Make photos clear and well lit, one page at a time. Tap ✕ to remove a bad photo and try again.',
                                          'Check the due date: papers past it show <b>Overdue</b>.'], 'tip'), new=True)
 
+    g.add('resources', 'Learn', 'From your teachers', 'Study material your teachers share with you.', bullets([
+        'Notes, worksheets, pictures and links your teachers have shared for your subjects.',
+        'Each item shows its subject and chapter. Tap it to open or download it.',
+        'The card appears on your home screen once a teacher shares something.',
+    ]), new=True)
+
     g.add('fees', 'Pay', 'Paying your fees', 'Pay from your own login; the admin confirms.', steps([
         ('See your requests', 'Fee Requests lists each request with its classes and amount.'),
         ('Select and pay', 'Tick what you are paying for and tap <b>Pay</b>.'),
@@ -128,6 +135,7 @@ def guide():
         ['See my practice score', 'Practice Papers › Reviewed paper › View'],
         ['Submit homework', 'Homework › Submit'],
         ['See my study plan', 'Study Plans'],
+        ['Find notes from my teacher', 'From your teachers card'],
         ['Pay my fees', 'Fee Requests › Pay'],
         ['Print a receipt', 'Payment history › Receipt'],
         ['Check my level', 'XP card'],
