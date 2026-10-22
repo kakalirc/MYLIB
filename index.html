@@ -271,7 +271,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 19:20 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 20:30 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -3434,6 +3434,18 @@ async function scheduleWixBooking() {
   wixBookingActionId = null; wixBookingScheduleDraft = {};
   wixBookingsMsg = 'Demo scheduled ✓ — also visible in Class Log → Demo Log.'; render();
 }
+// Wix bookings come from a public web form, so their text is never pasted into an onclick: the button passes only the id.
+function wixScheduleInDemoRegister(id) {
+  const b = data.wixBookings.find(x => x.id === id); if (!b) return;
+  wixBookingFromId = id;
+  demoLogDraft = { ...demoLogDraft, studentName: b.studentName, parentMobile: b.phone, notes: 'Wix booking' };
+  render();
+  setTimeout(() => { const el = document.getElementById('demo-register-heading'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 150);
+}
+function wixStartConvert(id) {
+  const b = data.wixBookings.find(x => x.id === id); if (!b) return;
+  wixConvertingId = id; wixConvertDraft = { studentName: b.studentName, confirmed: false }; wixConvertMsg = ''; render();
+}
 async function cancelWixBooking(id) {
   const wb = data.wixBookings.find(x => x.id === id);
   const name = wb ? wb.studentName : 'this student';
@@ -5252,10 +5264,17 @@ async function studyPlanAiGapCall(subjectId) {
 
 async function loadTeachersAndSubjects() {
   // Same reasoning as students — photo excluded from the bulk load, fetched on demand instead.
+  // Students and parents get teachers through teachers_public_list() (SQL 54): name, ID and class link only, never
+  // pay rates, bank details or contact details. Until SQL 54 is run that function doesn't exist, so fall back to the table.
+  const isStudentOrParent = currentRole === 'Student' || currentRole === 'Parent';
+  const teacherSelect = () => sb.from('teachers')
+    .select(isStudentOrParent ? 'id,name,archived,teacher_code,online_class_link'
+      : 'id,name,rates,archived,teacher_code,online_class_link,mobile_number,bank_account_number,bank_name,ifsc_code,upi_id,email,address')
+    .order('name');
   const [tRes, sRes] = await Promise.all([
-    sb.from('teachers')
-      .select('id,name,rates,archived,teacher_code,online_class_link,mobile_number,bank_account_number,bank_name,ifsc_code,upi_id,email,address')
-      .order('name'),
+    isStudentOrParent
+      ? sb.rpc('teachers_public_list').then(r => (!r.error && Array.isArray(r.data)) ? r : teacherSelect())
+      : teacherSelect(),
     selectAllPaged('subjects', ['name']),
   ]);
   const { data: teacherRows, error: tErr } = tRes;
@@ -11920,7 +11939,7 @@ function renderReports() {
           <td style="text-align:right;white-space:nowrap">₹${r.pay.toFixed(2)}</td>
           <td style="font-size:12px;color:var(--hint);padding-left:8px">
             ${r.breakdown.map(b=>`${fmtN(b.cnt)} × ₹${b.rate} = ₹${b.earn.toFixed(2)}`).join('<br>')}
-            ${r.demoLines && r.demoLines.length ? r.demoLines.map(l=>`<br><span style="color:var(--forest)">+ ₹${l.amount.toFixed(0)} demo bonus — ${l.studentName}</span>`).join('') : ''}
+            ${r.demoLines && r.demoLines.length ? r.demoLines.map(l=>`<br><span style="color:var(--forest)">+ ₹${l.amount.toFixed(0)} demo bonus — ${esc(l.studentName)}</span>`).join('') : ''}
             ${r.demoLines && r.demoLines.length ? `<br><b style="color:var(--ink)">= ₹${r.pay.toFixed(0)} total</b>` : ''}
             ${r.breakdown.length===0 && !(r.demoLines&&r.demoLines.length) ? '<span style="color:var(--brick)">No rates set — check Fee setup</span>' : ''}
           </td>
@@ -12613,7 +12632,7 @@ function renderWixBookings() {
       } else {
         scheduleBlock = `
           <div style="margin-top:10px">
-            <button class="btn-small btn-primary" onclick="wixBookingFromId='${b.id}';demoLogDraft={...demoLogDraft,studentName:'${b.studentName.replace(/'/g,"\\'")}',parentMobile:'${b.phone.replace(/'/g,"\\'")}',notes:'Wix booking'};render();setTimeout(()=>{const el=document.getElementById('demo-register-heading');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},150)">📅 Schedule in Demo Register ↓</button>
+            <button class="btn-small btn-primary" onclick="wixScheduleInDemoRegister('${b.id}')">📅 Schedule in Demo Register ↓</button>
             <div style="margin-top:14px;padding-top:10px;border-top:1px dashed var(--border)">
               <span class="hint" style="font-size:11px">Student won't be coming?</span>
               <button class="btn-small" style="color:var(--brick);border-color:var(--brick);margin-left:8px;font-size:11px" onclick="cancelWixBooking('${b.id}')">✕ Cancel Booking</button>
@@ -12670,7 +12689,7 @@ function renderWixBookings() {
             </div>
           </div>`;
       } else {
-        convertBlock = `<div style="margin-top:8px"><button class="btn-small btn-primary" style="background:var(--forest)" onclick="wixConvertingId='${b.id}';wixConvertDraft={studentName:'${b.studentName.replace(/'/g,"\\'")}',confirmed:false};wixConvertMsg='';render()">🎓 Convert to Student</button></div>`;
+        convertBlock = `<div style="margin-top:8px"><button class="btn-small btn-primary" style="background:var(--forest)" onclick="wixStartConvert('${b.id}')">🎓 Convert to Student</button></div>`;
       }
     }
 
