@@ -269,7 +269,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 11:25 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 11:45 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -961,6 +961,82 @@ function aiCostSettingsHtml() {
     ${aiCostMsg ? `<div class="hint" style="color:${aiCostMsg.startsWith('Saved') ? 'var(--forest)' : 'var(--brick)'}">${esc(aiCostMsg)}</div>` : ''}
     <div class="hint">Without a rate, costs show in $. Your Anthropic bill can differ a little (tax, rounding).</div>
   </div>`;
+}
+// AI access (SQL 51): admin switches AI on/off per role and per person. Admin only.
+let aiRoleAccess = null;     // { Teacher, Student, Parent } → true/false; null until SQL 51 is run
+let aiAccessOpen = false;
+let aiAccessPeople = null;   // logins (not admins, not archived); null = loading
+let aiAccessByUser = {};     // user id → false when switched off (no entry = on)
+let aiAccessMsg = '';
+let aiAccessQuery = '';
+let aiAccessRoleFilter = '';
+async function loadAiAccess() {
+  aiAccessPeople = null; aiAccessMsg = ''; render();
+  const [profs, acc] = await Promise.all([
+    sb.from('profiles').select('id, username, admin_name, role, linked_teacher_id, linked_student_id, archived'),
+    sb.from('ai_user_access').select('user_id, allowed'),
+  ]);
+  if (acc.error) aiAccessMsg = 'Run SQL 51 in Supabase first. (' + acc.error.message + ')';
+  aiAccessByUser = {};
+  (acc.data || []).forEach(r => { if (r.allowed === false) aiAccessByUser[r.user_id] = false; });
+  aiAccessPeople = (profs.data || []).filter(p => !p.archived && p.role && p.role !== 'Admin');
+  render();
+}
+function toggleAiAccessCard() { aiAccessOpen = !aiAccessOpen; if (aiAccessOpen) loadAiAccess(); render(); }
+function aiAccessName(p) {
+  if (p.role === 'Teacher') { const t = data.teachers.find(x => x.id === p.linked_teacher_id); if (t) return teacherLabel(t); }
+  if (p.role === 'Student') { const st = data.students.find(x => x.id === p.linked_student_id); if (st) return studentLabel(st); }
+  return p.admin_name || p.username || 'Unknown';
+}
+async function setAiRoleAccess(role, on) {
+  const next = { Teacher: true, Student: true, Parent: true, ...(aiRoleAccess || {}), [role]: on };
+  const { error } = await sb.from('ai_settings').update({ role_access: next }).eq('id', 1);
+  if (error) { aiAccessMsg = 'Could not save. Run SQL 51 in Supabase first. (' + error.message + ')'; render(); return; }
+  aiRoleAccess = next; aiAccessMsg = 'AI is now ' + (on ? 'on' : 'off') + ' for all ' + role + 's.';
+  render();
+}
+async function setAiUserAccess(userId, on) {
+  const { error } = await sb.from('ai_user_access').upsert({ user_id: userId, allowed: on, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+  if (error) { aiAccessMsg = 'Could not save. Run SQL 51 in Supabase first. (' + error.message + ')'; render(); return; }
+  if (on) delete aiAccessByUser[userId]; else aiAccessByUser[userId] = false;
+  const p = (aiAccessPeople || []).find(x => x.id === userId);
+  aiAccessMsg = (p ? aiAccessName(p) : 'This person') + (on ? ' can use AI again.' : ' can no longer use AI.');
+  render();
+}
+function setAiAccessQuery(v) { aiAccessQuery = v; render(); const el = document.getElementById('aiAccessSearch'); if (el) { el.focus(); el.setSelectionRange(v.length, v.length); } }
+function setAiAccessRoleFilter(v) { aiAccessRoleFilter = v; render(); }
+function aiAccessCardHtml() {
+  const roles = ['Teacher', 'Student', 'Parent'];
+  const roleOn = r => !aiRoleAccess || aiRoleAccess[r] !== false;
+  let body = '';
+  if (aiAccessOpen) {
+    const q = aiAccessQuery.trim().toLowerCase();
+    const list = (aiAccessPeople || []).filter(p => (!aiAccessRoleFilter || p.role === aiAccessRoleFilter) && (!q || aiAccessName(p).toLowerCase().includes(q) || (p.username || '').toLowerCase().includes(q)))
+      .sort((a, b) => a.role.localeCompare(b.role) || aiAccessName(a).localeCompare(aiAccessName(b)));
+    const offCount = Object.keys(aiAccessByUser).length;
+    body = `
+      <div class="hint">Who may use AI. A person can use it only when the master switch (above), their role and they themselves are all on. Admins always can. This covers every AI button, including the teachers' Research tab. People see the change after logging in again.${aiMasterEnabled ? '' : ' <b>The master switch is off, so nobody can use AI right now.</b>'}</div>
+      ${aiAccessMsg ? `<div class="hint" style="color:${/Could not|Run SQL/.test(aiAccessMsg) ? 'var(--brick)' : 'var(--forest)'}">${esc(aiAccessMsg)}</div>` : ''}
+      <div style="margin:8px 0"><b>By role</b></div>
+      <div class="row-form">${roles.map(r => `<label style="display:inline-flex;align-items:center;gap:6px;margin-right:14px"><input type="checkbox" ${roleOn(r) ? 'checked' : ''} onchange="setAiRoleAccess('${r}', this.checked)"> All ${r}s</label>`).join('')}</div>
+      <div style="margin:12px 0 8px"><b>By person</b> <span class="tag" style="font-size:11px">${offCount} switched off</span></div>
+      <div class="row-form">
+        <input type="text" id="aiAccessSearch" value="${escAttr(aiAccessQuery)}" placeholder="Search name…" oninput="setAiAccessQuery(this.value)" style="width:200px">
+        <select onchange="setAiAccessRoleFilter(this.value)"><option value="">All roles</option>${roles.map(r => `<option value="${r}" ${aiAccessRoleFilter === r ? 'selected' : ''}>${r}s</option>`).join('')}</select>
+      </div>
+      ${aiAccessPeople === null ? '<div class="hint">Loading…</div>' : !list.length ? '<div class="empty">No one matches.</div>' : `<div class="table-scroll" style="max-height:420px;overflow-y:auto"><table>
+        <tr><th>Name</th><th>Role</th><th>AI</th></tr>
+        ${list.map(p => { const on = aiAccessByUser[p.id] !== false; return `<tr><td>${esc(aiAccessName(p))}</td><td>${esc(p.role)}</td>
+          <td><label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" ${on ? 'checked' : ''} onchange="setAiUserAccess('${p.id}', this.checked)"> ${on ? 'On' : 'Off'}</label>${on && !roleOn(p.role) ? ` <span style="font-size:12px;color:var(--muted)">(off: all ${esc(p.role)}s are off)</span>` : ''}</td></tr>`; }).join('')}
+      </table></div>`}`;
+  }
+  return `<div class="card">
+      <h2 style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none" onclick="toggleAiAccessCard()">
+        <span style="font-size:12px;color:var(--muted)">${aiAccessOpen ? '▼' : '▶'}</span>
+        AI access
+        ${!aiAccessOpen ? `<span class="tag" style="margin-left:auto;font-size:11px;font-weight:400">per role and per person</span>` : ''}
+      </h2>${body}
+    </div>`;
 }
 let aiApiKey = '';    // the key itself: loaded for admins only (AI Settings card)
 let aiKeySet = false;  // whether a key is saved; AI calls go through the ai-proxy Edge Function, which holds it
@@ -5479,6 +5555,7 @@ async function loginWithBiometric() {
   currentLinkedId = profile.role === 'Teacher' ? (profile.linked_teacher_id || '') :
                     profile.role === 'Student' ? (profile.linked_student_id || '') : '';
   currentUserId = userId;
+  aiUserEnabled = profile.ai_enabled !== false;
   loginError = '';
   await load();
   await Promise.all([
@@ -5549,6 +5626,7 @@ async function attemptLogin() {
   currentRole = role;
   currentLinkedId = linkedId;
   currentUserId = authData.user.id;
+  aiUserEnabled = profile.ai_enabled !== false;
   await logLoginEvent('login', currentUserId, currentUsername, role);
   // Everything up to here ran with a real session, but data.teachers/data.students/etc.
   // may still only hold whatever the earlier, pre-login (unauthenticated) fetch returned —
@@ -7805,6 +7883,9 @@ async function loadAiSettings() {
     // ai_status() (SQL 48) says whether AI is on and a key is saved, without handing anyone the key.
     const st = await sb.rpc('ai_status');
     if (!st.error && st.data) { aiMasterEnabled = st.data.master_enabled !== false; aiKeySet = !!st.data.has_key; }
+    // SQL 51: the admin can switch AI off for a whole role or one person. Treat that like the master switch being off,
+    // so every AI button hides for them. The server refuses their AI calls too.
+    if (!st.error && st.data && st.data.allowed === false && currentRole !== 'Admin') aiMasterEnabled = false;
     // Only admins read the key itself (for the AI Settings card). Before SQL 48 this is also the fallback.
     if (currentRole === 'Admin' || st.error) {
       const {data,error}=await sb.from('ai_settings').select('api_key,master_enabled').maybeSingle();
@@ -7814,6 +7895,8 @@ async function loadAiSettings() {
       // Separate read: before SQL 50 these columns don't exist and the read just fails quietly.
       const c = await sb.from('ai_settings').select('model_prices, usd_inr').eq('id', 1).maybeSingle();
       if (!c.error && c.data) { aiModelPrices = c.data.model_prices || {}; aiUsdInr = c.data.usd_inr != null ? Number(c.data.usd_inr) : null; }
+      const ra = await sb.from('ai_settings').select('role_access').eq('id', 1).maybeSingle();
+      aiRoleAccess = !ra.error && ra.data && ra.data.role_access ? ra.data.role_access : null; // null = SQL 51 not run
     }
   } catch(e){}
 }
@@ -12352,6 +12435,7 @@ function renderWixBookings() {
 function renderAiAdmin() {
   return `
     <div class="card"><h2>AI Settings</h2><div class="hint" style="margin-bottom:12px">AI features use Claude to improve messages, generate summaries and answer student questions.</div><label style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><input type="checkbox" id="aiMasterToggle" ${aiMasterEnabled?'checked':''} onchange="(async()=>{const k=document.getElementById('aiKeyInput').value.trim()||aiApiKey;await saveAiSettings(k,this.checked);render();})()"> <b>AI enabled (master switch)</b></label><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="password" autocomplete="new-password" id="aiKeyInput" placeholder="sk-ant-..." value="${esc(aiApiKey)}" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:monospace"><button class="btn-small btn-primary" onclick="(async()=>{const k=document.getElementById('aiKeyInput').value.trim();const en=document.getElementById('aiMasterToggle').checked;await saveAiSettings(k,en);render();})()">Save</button></div><div class="hint" style="margin-top:8px">Get key at <b>console.anthropic.com</b>. See real spend there under Usage / Cost.</div>${aiCostSettingsHtml()}</div>
+    ${aiAccessCardHtml()}
 
     <div class="card">
       <h2 style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none" onclick="toggleAiUsageCard()">
@@ -15432,7 +15516,7 @@ function renderTeacherPortal() {
       ['studyplans', 'Study Plans'],
       ['homework', 'Homework'],
       ...(teacherQbAccess ? [['questionbank', 'Question Bank']] : []),
-      ...(teacherResearchAccess ? [['research', 'Research']] : []),
+      ...(teacherResearchAccess && aiMasterEnabled ? [['research', 'Research']] : []),
     ]},
     { label: 'Attendance', tabs: [
       ['attendance', 'Give Attendance'],
@@ -15453,7 +15537,7 @@ function renderTeacherPortal() {
     ['studyplans', 'Study Plans'],
     ['homework', 'Homework'],
     ...(teacherQbAccess ? [['questionbank', 'Question Bank']] : []),
-    ...(teacherResearchAccess ? [['research', 'Research']] : []),
+    ...(teacherResearchAccess && aiMasterEnabled ? [['research', 'Research']] : []),
     ['availability', 'Availability'],
     ['report', 'My Attendance Report'],
     ['attendance', 'Give Attendance'],
@@ -19432,6 +19516,7 @@ async function initApp() {
         currentRole = role;
         currentLinkedId = linkedId;
         currentUserId = session.user.id;
+        aiUserEnabled = profile.ai_enabled !== false;
       }
     }
   }

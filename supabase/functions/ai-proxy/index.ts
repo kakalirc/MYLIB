@@ -35,6 +35,9 @@ Deno.serve(async (req) => {
 
   const { data: ai } = await admin.from("ai_settings").select("api_key, master_enabled").eq("id", 1).maybeSingle();
   if (!ai?.api_key || ai.master_enabled === false) return fail(400, "AI is not set up. Ask your admin to add an AI API key in AI Settings.");
+  // Per-role and per-person switches (SQL 51). Before SQL 51 the function is missing and everyone stays allowed.
+  const { data: allowed } = await admin.rpc("ai_allowed_for", { p_user: userId });
+  if (allowed === false) return fail(403, "AI is switched off for you. Ask your admin.");
 
   if (prof.role !== "Admin") {
     const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
