@@ -271,7 +271,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 21:25 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 21:45 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1212,7 +1212,7 @@ let transferDraft = { fromSubjectId: '', toSubjectId: '', type: 'Group', classes
 let transferConfirmModal = null; // set when the To subject is a different teacher, to warn before confirming
 let transferMsg = '';
 let refundMsg = '';
-let requestDraft = { subjectId: '', type: 'Group', classes: '', amountPaid: '', date: todayStr };
+let requestDraft = { subjectId: '', type: 'Group', mode: '', classes: '', amountPaid: '', amountEdited: false, date: todayStr };
 let requestMsg = '';
 let markingPaidId = null;
 let editingRequestId = null;
@@ -7845,12 +7845,88 @@ async function removeStudentPhoneNumberAdmin(id) {
   data.studentPhoneNumbers = data.studentPhoneNumbers.filter(p=>p.id!==id);
   render();
 }
-function selectStudent(id) { selectedStudentId = id; subDraft = { subjectId: '', type: 'Group', classes: '', amountPaid: '', date: todayStr }; subPayPendingWarning = null; refundDraft = { subjectId: '', type: 'Group', date: todayStr }; refundMsg = ''; enrollDraft = { teacherId: '', subjectId: '' }; enrollShowAllSubjects = false; addConfirmMsg.student = ''; contactMsg = ''; render(); loadStudentPhotoOnDemand(id); }
+function selectStudent(id) { selectedStudentId = id; subDraft = { subjectId: '', type: 'Group', classes: '', amountPaid: '', date: todayStr }; subPayPendingWarning = null; refundDraft = { subjectId: '', type: 'Group', date: todayStr }; refundMsg = ''; requestDraft = { subjectId: '', type: 'Group', mode: '', classes: '', amountPaid: '', amountEdited: false, date: todayStr }; requestMsg = ''; enrollDraft = { teacherId: '', subjectId: '' }; enrollShowAllSubjects = false; addConfirmMsg.student = ''; contactMsg = ''; render(); loadStudentPhotoOnDemand(id); }
 function backToStudentList() { selectedStudentId = ''; addConfirmMsg.student = ''; contactMsg = ''; render(); }
 function subDraftSet(field, val) { subDraft[field] = val; render(); }
 function refundDraftSet(field, val) { refundDraft[field] = val; refundMsg = ''; render(); }
-function requestDraftSet(field, val) { requestDraft[field] = val; requestMsg = ''; render(); }
-function editRequestDraftSet(field, val) { editRequestDraft[field] = val; render(); }
+function requestDraftSet(field, val) {
+  requestDraft[field] = val; requestMsg = '';
+  if (field === 'subjectId' || field === 'type') requestDraft.mode = studentUsualMode(selectedStudentId, requestDraft.subjectId, requestDraft.type);
+  refillRequestAmount(requestDraft);
+  render();
+}
+function editRequestDraftSet(field, val) {
+  editRequestDraft[field] = val;
+  // Pending requests only: changing what is asked for re-prices it from Fee setup.
+  if (editRequestDraft.kind === 'Request') {
+    if (field === 'subjectId' || field === 'type') editRequestDraft.mode = studentUsualMode(selectedStudentId, editRequestDraft.subjectId, editRequestDraft.type);
+    editRequestDraft.amountEdited = false;
+    refillRequestAmount(editRequestDraft);
+  }
+  render();
+}
+// ---------- fee request amount auto-fill ----------
+// Same sum as the Fee calculator: Fee setup rate (subject category × type × mode)
+// × classes, less the one discount tier the class count reaches.
+function feeQuote(subjectId, type, mode, classes) {
+  const subj = subject(subjectId);
+  const n = Number(classes) || 0;
+  if (!subj || !type || !mode || n <= 0) return null;
+  const rate = Number(feeRates[rateKey(subj.category, type, mode)]) || 0;
+  const base = rate * n;
+  const eligible = discountTiers.filter(t => n >= Number(t.minClasses));
+  const tier = eligible.length ? eligible.reduce((best,t) => Number(t.minClasses) > Number(best.minClasses) ? t : best) : null;
+  const amount = tier ? base * (1 - Number(tier.percent)/100) : base;
+  return { subj, type, mode, rate, classes: n, tier, amount: Math.round(amount * 100) / 100 };
+}
+// Online/Offline the student used most in their last 20 classes of this subject
+// and type (any type if none yet); Offline when they have no classes at all.
+function studentUsualMode(studentId, subjectId, type) {
+  if (!studentId || !subjectId) return 'Offline';
+  const mine = data.sessions.filter(x => x.studentId === studentId && x.subjectId === subjectId && x.mode);
+  const pool = mine.filter(x => x.classType === type).length ? mine.filter(x => x.classType === type) : mine;
+  const counts = {};
+  pool.slice().sort((a,b) => (b.date||'').localeCompare(a.date||'')).slice(0, 20).forEach(x => { counts[x.mode] = (counts[x.mode]||0) + 1; });
+  const best = Object.entries(counts).sort((a,b) => b[1]-a[1])[0];
+  return best && RATE_MODES.includes(best[0]) ? best[0] : 'Offline';
+}
+function refillRequestAmount(d) {
+  if (d.amountEdited) return;
+  const q = feeQuote(d.subjectId, d.type, d.mode, d.classes);
+  d.amountPaid = q && q.rate ? q.amount : '';
+}
+function feeQuoteHintHtml(d, which) {
+  const q = feeQuote(d.subjectId, d.type, d.mode, d.classes);
+  if (!q) return '';
+  if (!q.rate) return `<span style="color:var(--brick)">⚠ No rate in Fee setup for ${esc(catLabel(q.subj.category))}, ${q.type}, ${q.mode} — type the amount yourself.</span>`;
+  const sum = `Fee setup: ₹${q.rate.toFixed(2)} × ${q.classes} class${q.classes===1?'':'es'}${q.tier ? `, ${q.tier.percent}% discount (${q.tier.minClasses}+ classes)` : ''} = <b>₹${q.amount.toFixed(2)}</b>`;
+  const differs = d.amountPaid !== '' && Math.abs(Number(d.amountPaid) - q.amount) > 0.009;
+  return differs ? `${sum} — you've entered your own amount. <button type="button" class="btn-small" onclick="useQuoteAmount('${which}')">Use ₹${q.amount.toFixed(2)}</button>` : sum;
+}
+function requestFormDraft(which) { return which === 'edit' ? editRequestDraft : requestDraft; }
+// Typing in Classes/Amount updates the draft and the hint in place (no full
+// render, so the cursor stays in the box).
+function requestQuoteInput(which, field, val) {
+  const d = requestFormDraft(which);
+  const amountBox = document.getElementById(which === 'edit' ? 'editReqAmount_' + editingRequestId : 'reqAmount');
+  if (field === 'classes') {
+    d.classes = val;
+    if (which === 'edit') d.amountEdited = false;
+    refillRequestAmount(d);
+    if (amountBox && !d.amountEdited) amountBox.value = d.amountPaid;
+  } else {
+    d.amountPaid = val;
+    d.amountEdited = val !== '';
+  }
+  const hint = document.getElementById(which === 'edit' ? 'editReqQuoteHint' : 'reqQuoteHint');
+  if (hint) hint.innerHTML = feeQuoteHintHtml(d, which);
+}
+function useQuoteAmount(which) {
+  const d = requestFormDraft(which);
+  d.amountEdited = false;
+  refillRequestAmount(d);
+  render();
+}
 async function addSubscriptionPayment() {
   const d = subDraft;
   let classes, amountPaid, date, paymentReference, paymentRemarks;
@@ -9336,7 +9412,7 @@ async function addFeeRequest() {
   }).select().single();
   if (error) { requestMsg = 'Could not add fee request: ' + error.message; render(); return; }
   data.subscriptions.push({ id: row.id, studentId: row.student_id, subjectId: row.subject_id, type: row.type, classes: Number(row.classes), amountPaid: Number(row.amount_paid), date: row.date, kind: row.kind, paymentReference: '', paymentRemarks: '' });
-  requestDraft = { subjectId: '', type: 'Group', classes: '', amountPaid: '', date: todayStr };
+  requestDraft = { subjectId: '', type: 'Group', mode: '', classes: '', amountPaid: '', amountEdited: false, date: todayStr };
   render();
 }
 function startMarkPaid(id) { markingPaidId = id; render(); }
@@ -9368,6 +9444,8 @@ function startEditRequest(id) {
   // is re-applied automatically on save.
   const sign = s.kind === 'Refund' ? -1 : 1;
   editRequestDraft = { subjectId: s.subjectId, type: s.type, classes: s.classes * sign, amountPaid: s.amountPaid * sign, date: s.date };
+  // A pending request keeps its saved amount until classes/subject/type/mode change.
+  if (s.kind === 'Request') Object.assign(editRequestDraft, { kind: 'Request', mode: studentUsualMode(s.studentId, s.subjectId, s.type), amountEdited: true });
   render();
 }
 function cancelEditRequest() { editingRequestId = null; editRequestMsg = ''; render(); }
@@ -11303,12 +11381,14 @@ function renderStudents() {
       <div class="row-form">
         <select onchange="requestDraftSet('subjectId', this.value)">${requestSubjectOptions}</select>
         <select onchange="requestDraftSet('type', this.value)">${TYPES.map(ty=>`<option value="${ty}" ${requestDraft.type===ty?'selected':''}>${ty}</option>`).join('')}</select>
-        <label>Classes <input type="number" id="reqClasses" min="0.5" step="0.5" style="width:80px"></label>
-        <label>Amount <input type="number" id="reqAmount" min="0" step="1" style="width:100px"></label>
-        <label>Requested date <input type="date" id="reqDate" value="${todayStr}"></label>
-        <button type="button" class="btn-small" onclick="document.getElementById('reqDate').value='${todayStr}'">Today</button>
+        <select onchange="requestDraftSet('mode', this.value)" ${requestDraft.subjectId?'':'disabled'} title="Online/Offline — sets the Fee setup rate used for the amount">${RATE_MODES.map(md=>`<option value="${md}" ${(requestDraft.mode||'Offline')===md?'selected':''}>${md}</option>`).join('')}</select>
+        <label>Classes <input type="number" id="reqClasses" value="${escAttr(String(requestDraft.classes))}" min="0.5" step="0.5" style="width:80px" oninput="requestQuoteInput('new','classes',this.value)"></label>
+        <label>Amount <input type="number" id="reqAmount" value="${escAttr(String(requestDraft.amountPaid))}" min="0" step="any" style="width:100px" oninput="requestQuoteInput('new','amount',this.value)"></label>
+        <label>Requested date <input type="date" id="reqDate" value="${requestDraft.date||todayStr}" onchange="requestDraft.date=this.value"></label>
+        <button type="button" class="btn-small" onclick="requestDraft.date='${todayStr}';document.getElementById('reqDate').value='${todayStr}'">Today</button>
         <button class="btn-primary" ${requestDraft.subjectId?'':'disabled'} onclick="addFeeRequest()">Add fee request</button>
-      </div>`}
+      </div>
+      <div class="hint" id="reqQuoteHint">${feeQuoteHintHtml(requestDraft, 'new')}</div>`}
       ${(() => {
         const pending = pendingFeeRequests(student.id);
         if (!pending.length) return '<div class="empty">No pending fee requests.</div>';
@@ -11358,12 +11438,14 @@ function renderStudents() {
           <div class="row-form" style="margin-bottom:0">
             <select onchange="editRequestDraftSet('subjectId', this.value)">${editSubjectOptions}</select>
             <select onchange="editRequestDraftSet('type', this.value)">${TYPES.map(ty=>`<option value="${ty}" ${d.type===ty?'selected':''}>${ty}</option>`).join('')}</select>
-            <label>Classes <input type="number" id="editReqClasses_${r.id}" value="${d.classes}" min="0.5" step="0.5" style="width:80px"></label>
-            <label>Amount <input type="number" id="editReqAmount_${r.id}" value="${d.amountPaid}" min="0" step="1" style="width:100px"></label>
-            <label>Date <input type="date" id="editReqDate_${r.id}" value="${d.date}"></label>
+            <select onchange="editRequestDraftSet('mode', this.value)" title="Online/Offline — sets the Fee setup rate used for the amount">${RATE_MODES.map(md=>`<option value="${md}" ${(d.mode||'Offline')===md?'selected':''}>${md}</option>`).join('')}</select>
+            <label>Classes <input type="number" id="editReqClasses_${r.id}" value="${d.classes}" min="0.5" step="0.5" style="width:80px" oninput="requestQuoteInput('edit','classes',this.value)"></label>
+            <label>Amount <input type="number" id="editReqAmount_${r.id}" value="${d.amountPaid}" min="0" step="any" style="width:100px" oninput="requestQuoteInput('edit','amount',this.value)"></label>
+            <label>Date <input type="date" id="editReqDate_${r.id}" value="${d.date}" onchange="editRequestDraft.date=this.value"></label>
             <button class="btn-small btn-primary" onclick="saveRequestEdit('${r.id}')">Save</button>
             <button class="btn-small" onclick="cancelEditRequest()">Cancel</button>
           </div>
+          <div class="hint" id="editReqQuoteHint">${feeQuoteHintHtml(d, 'edit')}</div>
         </div>`;
         }).join('')}
         ${pending.filter(r => r.id === markingPaidId).map(r => `
@@ -16258,7 +16340,7 @@ function renderPortalShell(bodyHtml) {
 const HELP = {
   'sub-enrollment': { t:'Subject enrollment', b:'<ul><li>Lists subjects this student is currently studying.</li><li>Add a subject to allow payments, scheduling and attendance for it.</li><li>Remove to stop new scheduling — existing records are kept.</li><li>The Online Class Link column shows the teacher\'s join link (Zoom/Meet) — click Join ↗ to open it directly.</li></ul>' },
   'sub-balances': { t:'Subscription balances', b:'<ul><li>Shows subscribed, used and remaining classes per subject and class type.</li><li>Classes are drawn from the oldest payment first.</li><li>A balance of 0 or below means the student needs to renew.</li><li>Pending fee requests are not counted until marked Paid.</li></ul>' },
-  'fee-requests': { t:'Fee requests', b:"<ul><li>A placeholder for an expected payment — doesn't add to the class count until marked Paid.</li><li>Use it when a parent confirms they will pay soon.</li><li>Once marked Paid it becomes a real payment and classes are added.</li><li>Message generates a WhatsApp-ready reminder with UPI details.</li></ul>" },
+  'fee-requests': { t:'Fee requests', b:"<ul><li>A placeholder for an expected payment — doesn't add to the class count until marked Paid.</li><li>Use it when a parent confirms they will pay soon.</li><li>Amount fills in by itself from Fee setup (rate for the subject's category, Group/Individual and Online/Offline × classes, with the discount tier applied). Online/Offline starts on the mode the student uses most. You can type your own amount for a special price.</li><li>Once marked Paid it becomes a real payment and classes are added.</li><li>Message generates a WhatsApp-ready reminder with UPI details.</li></ul>" },
   'record-payment': { t:'Record subscription payment', b:'<ul><li>Records a new class purchase for this student.</li><li>Pick subject, class type, number of classes and amount paid.</li><li>The payment date sets the expiry date (120 to 365 days depending on batch size).</li><li>Reference and Remarks are optional, for your records.</li></ul>' },
   'issue-refund': { t:'Issue a refund', b:'<ul><li>Reduces a student\'s unused class count for a specific subject and type.</li><li>Only unused classes can be refunded — cannot refund classes already given.</li><li>The original payment record is unchanged; a Refund entry is created.</li></ul>' },
   'transfer-credits': { t:'Transfer class credits', b:"<ul><li>Moves already-purchased classes from one subject to another — no money involved.</li><li>Both subjects must be the same class type (Group or Individual).</li><li>If subjects have different teachers you'll be asked to confirm, since it changes who gets paid.</li></ul>" },
