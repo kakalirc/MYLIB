@@ -269,7 +269,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 07:55 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 08:15 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1155,8 +1155,12 @@ async function saveResearchBrief() {
     chapter: b.ask.chapter, focus: b.ask.focus || null, brief: b.text,
   }).select().single();
   if (error) { researchBrief = { ...b, error: 'Could not save: ' + error.message }; render(); return; }
-  researchBrief = { ...b, savedId: row.id, error: '' };
+  // The brief moves into Saved briefs (opened there) instead of showing twice.
+  researchBrief = { loading: false, text: '', error: '', savedId: '', ask: null };
+  researchBankQs = [];
   researchNotes = [row, ...(researchNotes || [])];
+  researchOpenNoteId = row.id;
+  researchNotesMsg = '✓ Saved.';
   render();
 }
 async function deleteResearchNote(id) {
@@ -1165,8 +1169,18 @@ async function deleteResearchNote(id) {
   if (error) { researchNotesMsg = 'Could not delete: ' + error.message; render(); return; }
   researchNotes = (researchNotes || []).filter(n => n.id !== id);
   if (researchOpenNoteId === id) researchOpenNoteId = '';
-  if (researchBrief.savedId === id) researchBrief = { ...researchBrief, savedId: '' };
   render();
+}
+function closeResearchBrief() { researchBrief = { loading: false, text: '', error: '', savedId: '', ask: null }; researchBankQs = []; render(); }
+// Logout: forget everything the Research tab loaded, so the next login starts clean.
+function resetResearchState() {
+  researchBrief = { loading: false, text: '', error: '', savedId: '', ask: null }; researchBankQs = [];
+  researchDraft = { subjectId: '', gradeId: '', boardId: '', chapter: '', focus: '' };
+  researchNotes = null; researchNotesMsg = ''; researchOpenNoteId = '';
+  insights = null; insightsStudentId = ''; insightsMsg = '';
+  qrRows = null; qrMsg = ''; qrOpenChapter = ''; qrDraft = { subjectId: '', gradeId: '', boardId: '', examType: '' };
+  resources = null; resourcesMsg = ''; resFile = null; resFilterSubjectId = '';
+  resDraft = { subjectId: '', gradeId: '', chapter: '', title: '', link: '', note: '', shared: false };
 }
 function toggleResearchNote(id) { researchOpenNoteId = researchOpenNoteId === id ? '' : id; render(); }
 // Copies the brief just written ('') or a saved one (its id) as plain text.
@@ -5540,6 +5554,7 @@ async function logout() {
       sb.auth.signOut(),
     ]);
   }
+  resetResearchState();
   isLoggedIn = false; currentUsername = ''; currentRole = ''; currentLinkedId = ''; currentUserId = ''; parentSelectedChildId = ''; userMsg.changePw = ''; spAssignments = []; spPapers = {}; spOpen = null; spPhotoUrls = {};
   biometricOfferShown = false; // allow the enrollment banner on the next password login
   dangerZoneUnlocked = false; unlockPasswordAttempt = ''; unlockMsg = '';
@@ -15857,8 +15872,9 @@ function renderTeacherResearch(teacher) {
   <div class="card">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
       <h3 style="font-family:'Zilla Slab',serif;margin:0;flex:1">${esc([b.ask.chapter, b.ask.subjectName, qbByName(grades, b.ask.gradeId)].filter(Boolean).join(' · '))}</h3>
-      ${b.savedId ? `<span class="tag">Saved</span>` : `<button class="btn-small" onclick="saveResearchBrief()">Save</button>`}
+      <button class="btn-small" onclick="saveResearchBrief()">Save</button>
       <button class="btn-small" onclick="copyResearchBrief('')">Copy</button>
+      <button class="btn-small" onclick="closeResearchBrief()">Close</button>
     </div>
     ${researchMdHtml(b.text)}
     ${researchBankQs.length ? `
