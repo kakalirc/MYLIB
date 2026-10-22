@@ -269,7 +269,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 07:00 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 07:30 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -15576,7 +15576,98 @@ function insightsHtml() {
   }
   return `<div class="card">${head}${body}</div>`;
 }
-// Research tab: Lesson prep form, the brief just written, this teacher's saved briefs, then Student insights.
+// Research → Question research: how past papers in the Question Bank ask each chapter (approved, current-syllabus
+// questions that came from a past paper). Read only, no AI. Needs Question Bank access.
+let qrDraft = { subjectId: '', gradeId: '', boardId: '', examType: '' };
+let qrRows = null;          // questions for the picked subject + class; null = nothing loaded
+let qrLoading = false;
+let qrMsg = '';
+let qrOpenChapter = '';
+let qrChapterNames = {};    // chapter id → "1. Title"
+function setQrField(field, value) {
+  qrDraft[field] = value;
+  if (field === 'subjectId') { const subj = data.subjects.find(s => s.id === value); const gs = subj ? gradesForCategory(subj.category) : []; qrDraft.gradeId = gs.length === 1 ? gs[0] : ''; }
+  qrOpenChapter = '';
+  if (field === 'examType') { render(); return; }
+  loadQuestionResearch();
+}
+async function loadQuestionResearch() {
+  const subj = data.subjects.find(s => s.id === qrDraft.subjectId);
+  if (!subj || !qrDraft.gradeId) { qrRows = null; qrMsg = ''; render(); return; }
+  qrLoading = true; qrMsg = ''; render();
+  try {
+    let rows = [];
+    for (let from = 0; ; from += 1000) {
+      let q = sb.from('qb_questions').select('id,chapter_id,question_text,question_type,marks,source_year,source_exam_type,source_paper_id,syllabus_status,archived,board_id')
+        .ilike('subject_name', subj.name.replace(/[%_\\]/g, '\\$&')).eq('grade_id', qrDraft.gradeId).eq('approved', true).not('source_year', 'is', null);
+      if (qrDraft.boardId) q = q.eq('board_id', qrDraft.boardId);
+      const { data: page, error } = await q.order('id').range(from, from + 999);
+      if (error) throw error;
+      rows = rows.concat(page || []);
+      if (!page || page.length < 1000) break;
+    }
+    qrRows = rows.filter(q => !q.archived && !qbIsOld(q));
+    const ids = [...new Set(qrRows.map(q => q.chapter_id).filter(id => id && !qrChapterNames[id]))];
+    if (ids.length) (await insightsSelectIn('qb_chapters', 'id,chapter_number,title', 'id', ids)).forEach(c => { qrChapterNames[c.id] = qbChapterLabel(c); });
+    if (qrDraft.examType && !qrRows.some(q => q.source_exam_type === qrDraft.examType)) qrDraft.examType = '';
+  } catch (e) { qrRows = null; qrMsg = 'Could not load questions: ' + (e.message || e); }
+  qrLoading = false; render();
+}
+function qrPaperKey(q) { return q.source_paper_id || [q.source_year, q.source_exam_type || ''].join('|'); }
+function qrChapterNum(id) { const m = String(qrChapterNames[id] || '').match(/^(\d+)\./); return m ? Number(m[1]) : Infinity; }
+function questionResearchHtml(teacher) {
+  if (!teacherQbAccess) return '';
+  const mySubjects = data.subjects.filter(s => s.teacherId === teacher.id && !s.archived);
+  const subj = mySubjects.find(s => s.id === qrDraft.subjectId);
+  const gradeIds = subj ? gradesForCategory(subj.category) : [];
+  const head = `<h3 style="font-family:'Zilla Slab',serif;margin:0 0 6px">Question research</h3>
+    <div class="hint" style="margin-bottom:10px">How past papers in the Question Bank ask each chapter: how often it comes, how many marks, and in what form. Only approved, current-syllabus questions from past papers count.</div>
+    <div class="row-form" style="flex-wrap:wrap;gap:8px">
+      <select onchange="setQrField('subjectId', this.value)"><option value="">Subject…</option>${mySubjects.map(s => `<option value="${s.id}" ${s.id === qrDraft.subjectId ? 'selected' : ''}>${esc(s.name)} (${esc(catLabel(s.category))})</option>`).join('')}</select>
+      <select onchange="setQrField('gradeId', this.value)" ${subj ? '' : 'disabled'}><option value="">Class…</option>${gradeIds.map(id => `<option value="${id}" ${id === qrDraft.gradeId ? 'selected' : ''}>${esc(qbByName(grades, id))}</option>`).join('')}</select>
+      <select onchange="setQrField('boardId', this.value)"><option value="">Any board</option>${boards.filter(x => !x.archived).map(x => `<option value="${x.id}" ${x.id === qrDraft.boardId ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
+      ${qrRows && qrRows.length ? `<select onchange="setQrField('examType', this.value)"><option value="">All exam types</option>${[...new Set(qrRows.map(q => q.source_exam_type).filter(Boolean))].sort().map(t => `<option value="${escAttr(t)}" ${t === qrDraft.examType ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}
+    </div>`;
+  if (qrLoading) return `<div class="card">${head}<div class="hint">Loading…</div></div>`;
+  if (qrMsg) return `<div class="card">${head}<div class="hint" style="color:var(--brick)">${esc(qrMsg)}</div></div>`;
+  if (!qrRows) return `<div class="card">${head}</div>`;
+  const rows = qrRows.filter(q => !qrDraft.examType || q.source_exam_type === qrDraft.examType);
+  if (!rows.length) return `<div class="card">${head}<div class="empty">No past-paper questions in the bank for this subject and class yet.</div></div>`;
+  const papers = new Map();
+  rows.forEach(q => { const k = qrPaperKey(q); if (!papers.has(k)) papers.set(k, { year: q.source_year, type: q.source_exam_type }); });
+  const nPapers = papers.size;
+  const byCh = new Map();
+  rows.forEach(q => {
+    const k = q.chapter_id || 'none';
+    const c = byCh.get(k) || { qs: [], papers: new Set(), marks: 0, types: {} };
+    c.qs.push(q); c.papers.add(qrPaperKey(q)); c.marks += Number(q.marks) || 0;
+    const t = q.question_type || 'other'; c.types[t] = (c.types[t] || 0) + 1;
+    byCh.set(k, c);
+  });
+  const list = [...byCh.entries()].sort((a, b) => b[1].marks - a[1].marks || qrChapterNum(a[0]) - qrChapterNum(b[0]));
+  const name = id => id === 'none' ? 'No chapter yet' : (qrChapterNames[id] || 'Unknown chapter');
+  const years = [...new Set([...papers.values()].map(p => p.year))].sort();
+  const avg = c => Math.round(10 * c.marks / nPapers) / 10;
+  return `<div class="card">${head}
+    <div class="hint" style="margin-bottom:8px">${rows.length} questions from ${nPapers} paper${nPapers === 1 ? '' : 's'} (${esc(years.join(', '))}). Sorted by marks, most first. Tap a chapter to see its questions.</div>
+    <div class="table-scroll"><table>
+      <tr><th>Chapter</th><th>Came in</th><th>Questions</th><th>Avg marks per paper</th><th>Asked as</th></tr>
+      ${list.map(([id, c]) => `
+        <tr style="cursor:pointer" onclick="qrOpenChapter=qrOpenChapter==='${id}'?'':'${id}';render()">
+          <td><a>${esc(name(id))}</a></td>
+          <td>${c.papers.size} of ${nPapers} papers</td>
+          <td>${c.qs.length}</td>
+          <td><b>${avg(c)}</b></td>
+          <td style="font-size:12.5px;color:var(--muted)">${esc(Object.entries(c.types).sort((a, b) => b[1] - a[1]).map(([t, n]) => (QB_TYPE_LABELS[t] || t) + ' ' + n).join(', '))}</td>
+        </tr>
+        ${qrOpenChapter === id ? `<tr><td colspan="5" style="background:var(--soft)">
+          <ol style="margin:4px 0 4px 20px;padding:0;font-size:14px;line-height:1.6">
+            ${[...c.qs].sort((a, b) => (b.source_year || 0) - (a.source_year || 0)).map(q => `<li style="margin-bottom:6px">${esc(q.question_text)} <span style="font-size:12px;color:var(--muted)">(${esc([q.source_year, q.source_exam_type, QB_TYPE_LABELS[q.question_type] || q.question_type, q.marks != null ? q.marks + ' marks' : ''].filter(Boolean).join(' · '))})</span></li>`).join('')}
+          </ol></td></tr>` : ''}`).join('')}
+    </table></div>
+  </div>`;
+}
+// Research tab: Lesson prep form, the brief just written, this teacher's saved briefs, then Student insights and Question research.
 function renderTeacherResearch(teacher) {
   const mySubjects = data.subjects.filter(s => s.teacherId === teacher.id && !s.archived);
   const subj = mySubjects.find(s => s.id === researchDraft.subjectId);
@@ -15661,7 +15752,8 @@ function renderTeacherResearch(teacher) {
         </div>` : ''}
       </div>`).join('')}
   </div>
-  ${insightsHtml()}`;
+  ${insightsHtml()}
+  ${questionResearchHtml(teacher)}`;
 }
 function renderTeacherHomework(teacher) {
   const myStudents = byName(data.students.filter(s => {
