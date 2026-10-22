@@ -271,7 +271,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 16:15 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 17:03 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -4265,6 +4265,7 @@ function setStudyPlanStudent(val) {
   studyPlanTextbooks = [];
   studyPlanTextbookMsg = '';
   studyPlanShowTextbookPanel = false;
+  tbLinkGrade = null; tbUploadTags = { gradeId: null, boardId: null };
   studyPlanExtractingId = '';
   studyPlanExtractedTopics = null;
   studyPlanExtractedFrom = '';
@@ -4276,6 +4277,7 @@ function setStudyPlanSubject(val) {
   studyPlanTextbooks = [];
   studyPlanTextbookMsg = '';
   studyPlanShowTextbookPanel = false;
+  tbLinkGrade = null; tbUploadTags = { gradeId: null, boardId: null };
   studyPlanExtractingId = '';
   studyPlanExtractedTopics = null;
   studyPlanExtractedFrom = '';
@@ -4525,18 +4527,84 @@ function formatBytes(b) {
   if (b < 1048576) return (b/1024).toFixed(0) + ' KB';
   return (b/1048576).toFixed(1) + ' MB';
 }
+// ── Textbook library (SQL 53) ─────────────────────────────────────────────────
+// Each uploaded book is stored once in textbook_library; a study_plan_textbooks row only links a book
+// to a student + subject. Teachers see books for the subjects they teach (any grade) and can link or
+// unlink them; only the admin renames, retags or deletes a book. Until SQL 53 is run tbLibrary stays
+// null and the panel works the old way (upload and delete per student).
+let tbLibrary = null;          // textbook_library rows this user can see; null = not loaded / SQL 53 not run
+let tbLinkCounts = {};         // admin: library_id → number of student links
+let tbLinkGrade = null;        // "Add from library" grade filter: null = the student's grade, '' = all grades
+let tbUploadTags = { gradeId: null, boardId: null }; // tags for a new upload; null = the student's grade/board
+let tbAdminEditId = '';
+let tbAdminDraft = {};
+let tbAdminMsg = '';
+let tbAdminSearch = '';
+let tbJustLinked = new Set();  // books linked during the current upload
+async function loadTextbookLibrary() {
+  const { data: rows, error } = await selectAllPaged('textbook_library', ['file_name']);
+  tbLibrary = error ? null : rows;
+  if (!error && currentRole === 'Admin') {
+    const { data: links } = await selectAllPaged('study_plan_textbooks', [], 'id,library_id');
+    tbLinkCounts = {};
+    (links || []).forEach(l => { if (l.library_id) tbLinkCounts[l.library_id] = (tbLinkCounts[l.library_id] || 0) + 1; });
+  }
+}
 async function loadStudyPlanTextbooks() {
   if (!studyPlanTeacherStudentId || !studyPlanTeacherSubjectId) { studyPlanTextbooks = []; render(); return; }
   const teacher = data.teachers.find(t=>t.id===currentLinkedId);
   if (!teacher) { render(); return; }
-  const { data: rows } = await sb.from('study_plan_textbooks')
-    .select('id,file_name,file_path,file_size,uploaded_at')
+  const linkQuery = cols => sb.from('study_plan_textbooks').select(cols)
     .eq('teacher_id', teacher.id)
     .eq('student_id', studyPlanTeacherStudentId)
     .eq('subject_id', studyPlanTeacherSubjectId)
     .order('uploaded_at', { ascending: true });
-  studyPlanTextbooks = (rows||[]).map(r=>({ id:r.id, fileName:r.file_name, filePath:r.file_path, fileSize:r.file_size, uploadedAt:r.uploaded_at }));
+  let [{ data: rows, error }] = await Promise.all([linkQuery('id,file_name,file_path,file_size,uploaded_at,library_id'), loadTextbookLibrary()]);
+  if (error) ({ data: rows } = await linkQuery('id,file_name,file_path,file_size,uploaded_at')); // SQL 53 not run yet
+  studyPlanTextbooks = (rows||[]).map(r=>({ id:r.id, fileName:r.file_name, filePath:r.file_path, fileSize:r.file_size, uploadedAt:r.uploaded_at, libraryId:r.library_id || '' }));
   render();
+}
+// Tags a new upload gets: the subject being planned, and the grade/board picked (default: the student's).
+function tbNewBookTags() {
+  const subj = data.subjects.find(s => s.id === studyPlanTeacherSubjectId);
+  const st = data.students.find(s => s.id === studyPlanTeacherStudentId) || {};
+  return {
+    subject_name: subj ? subj.name : '',
+    grade_id: (tbUploadTags.gradeId === null ? st.gradeId : tbUploadTags.gradeId) || null,
+    board_id: (tbUploadTags.boardId === null ? st.boardId : tbUploadTags.boardId) || null,
+  };
+}
+// Adds one file for the current student + subject. With the library: reuse a book with the same
+// name and size, else store it once in the library; then link it. Returns 'uploaded', 'linked' or 'skipped'.
+async function tbAddFile(teacher, blob, fileName) {
+  const link = { teacher_id: teacher.id, student_id: studyPlanTeacherStudentId, subject_id: studyPlanTeacherSubjectId, file_name: fileName, file_size: blob.size };
+  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g,'_');
+  if (tbLibrary === null) {
+    const path = `${teacher.id}/${studyPlanTeacherStudentId}_${studyPlanTeacherSubjectId}/${Date.now()}_${Math.random().toString(36).slice(2, 6)}_${safeName}`;
+    const { error: upErr } = await sb.storage.from('textbooks').upload(path, blob, { cacheControl:'3600', upsert:false });
+    if (upErr) throw upErr;
+    const { error: dbErr } = await sb.from('study_plan_textbooks').insert({ ...link, file_path: path });
+    if (dbErr) { await sb.storage.from('textbooks').remove([path]); throw dbErr; }
+    return 'uploaded';
+  }
+  const tags = tbNewBookTags();
+  let book = tbLibrary.find(b => b.file_name === fileName && Number(b.file_size) === blob.size && qbSameSubject(b.subject_name, tags.subject_name));
+  let result = 'linked';
+  if (!book) {
+    const path = `${teacher.id}/library/${Date.now()}_${Math.random().toString(36).slice(2, 6)}_${safeName}`;
+    const { error: upErr } = await sb.storage.from('textbooks').upload(path, blob, { cacheControl:'3600', upsert:false });
+    if (upErr) throw upErr;
+    const { data: row, error: libErr } = await sb.from('textbook_library').insert({ ...tags, file_path: path, file_name: fileName, file_size: blob.size, uploaded_by: teacher.id }).select().single();
+    if (libErr) { await sb.storage.from('textbooks').remove([path]); throw libErr; }
+    tbLibrary.push(row);
+    book = row;
+    result = 'uploaded';
+  }
+  if (studyPlanTextbooks.some(t => t.libraryId === book.id) || tbJustLinked.has(book.id)) return 'skipped';
+  const { error: linkErr } = await sb.from('study_plan_textbooks').insert({ ...link, file_name: book.file_name, file_size: book.file_size, file_path: book.file_path, library_id: book.id });
+  if (linkErr) throw linkErr;
+  tbJustLinked.add(book.id);  // so a ZIP with the same book twice links it once
+  return result;
 }
 async function studyPlanUploadTextbook(input) {
   const file = input.files && input.files[0];
@@ -4545,11 +4613,12 @@ async function studyPlanUploadTextbook(input) {
   if (!teacher || !studyPlanTeacherStudentId || !studyPlanTeacherSubjectId) return;
   studyPlanTextbookUploading = true;
   studyPlanTextbookMsg = '';
+  tbJustLinked = new Set();
   render();
   const isZip = file.name.toLowerCase().endsWith('.zip') || file.type === 'application/zip' || file.type === 'application/x-zip-compressed';
   try {
     if (isZip) {
-      // Extract ZIP and upload each PDF/TXT inside as a separate entry
+      // Extract ZIP and add each PDF/TXT inside as a separate book
       const JSZip = await loadJSZip();
       const zip = await JSZip.loadAsync(file);
       const entries = [];
@@ -4566,38 +4635,21 @@ async function studyPlanUploadTextbook(input) {
         try { input.value = ''; } catch(_) {}
         return;
       }
-      const base = Date.now();
-      let uploaded = 0, failed = 0;
-      const dbRows = [];
+      const counts = { uploaded: 0, linked: 0, skipped: 0, failed: 0 };
       for (let i = 0; i < entries.length; i++) {
         const { relPath, zipEntry } = entries[i];
         const entryName = relPath.split('/').pop(); // just the filename, not the folder path
         studyPlanTextbookMsg = `Uploading ${i+1}/${entries.length}: ${entryName}…`;
         render();
-        try {
-          const blob = await zipEntry.async('blob');
-          const safeName = entryName.replace(/[^a-zA-Z0-9._-]/g,'_');
-          const storagePath = `${teacher.id}/${studyPlanTeacherStudentId}_${studyPlanTeacherSubjectId}/${base+i}_${safeName}`;
-          const { error: upErr } = await sb.storage.from('textbooks').upload(storagePath, blob, { cacheControl:'3600', upsert:false });
-          if (upErr) throw upErr;
-          dbRows.push({ teacher_id:teacher.id, student_id:studyPlanTeacherStudentId, subject_id:studyPlanTeacherSubjectId, file_name:entryName, file_path:storagePath, file_size:blob.size });
-          uploaded++;
-        } catch(e) { failed++; }
+        try { counts[await tbAddFile(teacher, await zipEntry.async('blob'), entryName)]++; }
+        catch(e) { counts.failed++; }
       }
-      if (dbRows.length) await sb.from('study_plan_textbooks').insert(dbRows);
-      studyPlanTextbookMsg = `Extracted from ZIP: ${uploaded} file${uploaded!==1?'s':''} uploaded${failed?`, ${failed} failed`:''}`;
+      studyPlanTextbookMsg = `From the ZIP: ${counts.uploaded} uploaded` + (counts.linked ? `, ${counts.linked} already in the library (linked)` : '')
+        + (counts.skipped ? `, ${counts.skipped} already linked` : '') + (counts.failed ? `, ${counts.failed} failed` : '');
     } else {
-      // Single PDF or TXT upload
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
-      const path = `${teacher.id}/${studyPlanTeacherStudentId}_${studyPlanTeacherSubjectId}/${Date.now()}_${safeName}`;
-      const { error: upErr } = await sb.storage.from('textbooks').upload(path, file, { cacheControl:'3600', upsert:false });
-      if (upErr) throw upErr;
-      const { error: dbErr } = await sb.from('study_plan_textbooks').insert({
-        teacher_id: teacher.id, student_id: studyPlanTeacherStudentId, subject_id: studyPlanTeacherSubjectId,
-        file_name: file.name, file_path: path, file_size: file.size,
-      });
-      if (dbErr) { await sb.storage.from('textbooks').remove([path]); throw dbErr; }
-      studyPlanTextbookMsg = 'Uploaded: ' + file.name;
+      const r = await tbAddFile(teacher, file, file.name);
+      studyPlanTextbookMsg = r === 'linked' ? 'This book was already in the library, so it is linked now: ' + file.name
+        : r === 'skipped' ? 'This book is already linked: ' + file.name : 'Uploaded: ' + file.name;
     }
     await loadStudyPlanTextbooks();
   } catch(e) {
@@ -4607,6 +4659,32 @@ async function studyPlanUploadTextbook(input) {
   studyPlanTextbookUploading = false;
   render();
   try { input.value = ''; } catch(_) {}
+}
+async function studyPlanLinkTextbook(libraryId) {
+  const teacher = data.teachers.find(t=>t.id===currentLinkedId);
+  const book = (tbLibrary || []).find(b => b.id === libraryId);
+  if (!teacher || !book || !studyPlanTeacherStudentId || !studyPlanTeacherSubjectId) return;
+  const { error } = await sb.from('study_plan_textbooks').insert({
+    teacher_id: teacher.id, student_id: studyPlanTeacherStudentId, subject_id: studyPlanTeacherSubjectId,
+    file_name: book.file_name, file_path: book.file_path, file_size: book.file_size, library_id: book.id,
+  });
+  studyPlanTextbookMsg = error ? 'Upload error: ' + error.message : 'Linked: ' + book.file_name;
+  await loadStudyPlanTextbooks();
+}
+function tbClearExtractedFor(id) {
+  if (studyPlanExtractedTopics && studyPlanExtractedFrom && studyPlanTextbooks.find(t=>t.id===id)?.fileName === studyPlanExtractedFrom) {
+    studyPlanExtractedTopics = null; studyPlanExtractedFrom = '';
+  }
+}
+// Library books: the link goes, the book stays in the library for other students and teachers.
+async function studyPlanUnlinkTextbook(id) {
+  const st = data.students.find(s => s.id === studyPlanTeacherStudentId);
+  if (!confirm(`Unlink this book from ${st ? st.name : 'this student'}? The book stays in the textbook library.`)) return;
+  studyPlanTextbookMsg = '';
+  const { error } = await sb.from('study_plan_textbooks').delete().eq('id', id);
+  if (error) { studyPlanTextbookMsg = 'Upload error: ' + error.message; render(); return; }
+  tbClearExtractedFor(id);
+  await loadStudyPlanTextbooks();
 }
 async function studyPlanDownloadTextbook(filePath, fileName) {
   try {
@@ -4629,9 +4707,7 @@ async function studyPlanDeleteTextbook(id, filePath) {
   studyPlanTextbookMsg = '';
   await sb.storage.from('textbooks').remove([filePath]);
   await sb.from('study_plan_textbooks').delete().eq('id', id);
-  if (studyPlanExtractedTopics && studyPlanExtractedFrom && studyPlanTextbooks.find(t=>t.id===id)?.fileName === studyPlanExtractedFrom) {
-    studyPlanExtractedTopics = null; studyPlanExtractedFrom = '';
-  }
+  tbClearExtractedFor(id);
   await loadStudyPlanTextbooks();
 }
 async function studyPlanExtractFromTextbook(id, filePath, fileName) {
@@ -4834,6 +4910,118 @@ async function studyPlanExtractFromTextbookAI(id, filePath, fileName) {
     studyPlanExtractedTopics = [];
   }
   studyPlanAiExtractingId = '';
+  render();
+}
+function tbBookMeta(b) {
+  const by = b.uploaded_by ? ((data.teachers.find(t => t.id === b.uploaded_by) || {}).name || '') : '';
+  return [qbByName(grades, b.grade_id), qbByName(boards, b.board_id), formatBytes(b.file_size), by ? 'added by ' + by : ''].filter(Boolean).join(' · ');
+}
+// Grade/board tags a new upload gets (default: the student's), shown above the linked books.
+function tbUploadTagsHtml() {
+  const t = tbNewBookTags();
+  return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-bottom:8px">
+    New books go into the shared library for every ${esc(t.subject_name)} teacher, tagged:
+    <select style="font-size:12px" onchange="tbUploadTags.gradeId = this.value; render()">
+      <option value="">No grade</option>
+      ${grades.filter(g => !g.archived || g.id === t.grade_id).map(g => `<option value="${g.id}" ${g.id === t.grade_id ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}
+    </select>
+    <select style="font-size:12px" onchange="tbUploadTags.boardId = this.value; render()">
+      <option value="">No board</option>
+      ${boards.filter(b => !b.archived || b.id === t.board_id).map(b => `<option value="${b.id}" ${b.id === t.board_id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}
+    </select>
+  </div>`;
+}
+// Library books for this subject that aren't linked to the student yet, filtered by grade (default: the student's).
+function tbLibraryPickHtml(subj) {
+  if (!subj) return '';
+  const st = data.students.find(s => s.id === studyPlanTeacherStudentId) || {};
+  const gradeId = tbLinkGrade === null ? (st.gradeId || '') : tbLinkGrade;
+  const linked = new Set(studyPlanTextbooks.map(t => t.libraryId).filter(Boolean));
+  const forSubject = (tbLibrary || []).filter(b => qbSameSubject(b.subject_name, subj.name) && !linked.has(b.id));
+  const shown = forSubject.filter(b => !gradeId || b.grade_id === gradeId);
+  const gradeOpts = [...new Set(forSubject.map(b => b.grade_id).filter(Boolean).concat(gradeId ? [gradeId] : []))];
+  return `<div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <span style="font-size:13px;font-weight:700;color:var(--ink)">📖 From the ${esc(subj.name)} library</span>
+      <select style="font-size:12px" onchange="tbLinkGrade = this.value; render()">
+        <option value="" ${!gradeId ? 'selected' : ''}>All grades</option>
+        ${gradeOpts.map(id => `<option value="${id}" ${id === gradeId ? 'selected' : ''}>${esc(qbByName(grades, id))}</option>`).join('')}
+      </select>
+    </div>
+    ${!shown.length ? `<div style="font-size:12px;color:var(--muted)">${forSubject.length ? 'No library books for this grade. Pick All grades to see the rest.' : 'No other ' + esc(subj.name) + ' books in the library yet.'}</div>` :
+      shown.map(b => `<div style="display:flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;flex-wrap:wrap">
+        <span style="flex:1;font-size:13px;min-width:120px;word-break:break-word">${esc(b.file_name)} <span style="font-size:11px;color:var(--muted)">${esc(tbBookMeta(b))}</span></span>
+        <button class="btn-small" onclick="studyPlanLinkTextbook('${b.id}')" style="flex-shrink:0">＋ Link to this student</button>
+      </div>`).join('')}
+  </div>`;
+}
+// Admin → Study Plans: every book in the library, how many students use it; rename, retag or delete.
+function textbookLibraryAdminHtml() {
+  if (tbLibrary === null) return `<div class="card"><h2>📚 Textbook library</h2><div class="hint">Run SQL 53 in Supabase to turn on the shared textbook library.</div></div>`;
+  const q = tbAdminSearch.trim().toLowerCase();
+  const list = tbLibrary.filter(b => !q || [b.file_name, b.subject_name, qbByName(grades, b.grade_id)].join(' ').toLowerCase().includes(q))
+    .sort((a, b) => String(a.subject_name).localeCompare(String(b.subject_name)) || String(a.file_name).localeCompare(String(b.file_name)));
+  const names = [...new Set(subjectNames.filter(n => !n.archived).map(n => n.name).concat(data.subjects.map(s => s.name)))].sort();
+  const row = b => tbAdminEditId === b.id ? `
+      <div style="border-top:1px solid var(--line);padding:8px 0;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <input type="text" value="${escAttr(tbAdminDraft.file_name)}" oninput="tbAdminDraft.file_name = this.value" style="flex:1;min-width:160px">
+        <select onchange="tbAdminDraft.subject_name = this.value">${names.concat(names.some(n => qbSameSubject(n, tbAdminDraft.subject_name)) ? [] : [tbAdminDraft.subject_name]).map(n => `<option value="${escAttr(n)}" ${qbSameSubject(n, tbAdminDraft.subject_name) ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
+        <select onchange="tbAdminDraft.grade_id = this.value"><option value="">No grade</option>${grades.map(g => `<option value="${g.id}" ${g.id === tbAdminDraft.grade_id ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select>
+        <select onchange="tbAdminDraft.board_id = this.value"><option value="">No board</option>${boards.map(x => `<option value="${x.id}" ${x.id === tbAdminDraft.board_id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
+        <button class="btn-small btn-primary" onclick="tbAdminSave()">Save</button>
+        <button class="btn-small" onclick="tbAdminEditId = ''; render()">Cancel</button>
+      </div>` : `
+      <div style="border-top:1px solid var(--line);padding:8px 0;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <span style="flex:1;min-width:180px;font-size:13px;word-break:break-word"><b>${esc(b.file_name)}</b><br><span style="font-size:12px;color:var(--muted)">${esc([b.subject_name, tbBookMeta(b), String(b.created_at || '').slice(0, 10)].filter(Boolean).join(' · '))}</span></span>
+        <span style="font-size:12px;color:var(--muted)">${tbLinkCounts[b.id] || 0} student link${(tbLinkCounts[b.id] || 0) === 1 ? '' : 's'}</span>
+        <button class="btn-small" onclick="studyPlanDownloadTextbook('${escAttr(b.file_path)}','${escAttr(b.file_name)}')">⬇</button>
+        <button class="btn-small" onclick="tbAdminEdit('${b.id}')">Edit</button>
+        <button class="btn-small btn-danger" onclick="tbAdminDelete('${b.id}')">Delete</button>
+      </div>`;
+  return `<div class="card">
+    <h2>📚 Textbook library ${helpBtn('textbook-library')}</h2>
+    <div class="hint" style="margin-bottom:8px">Books teachers uploaded for Study Plans. A teacher sees the books for the subjects they teach and can link or unlink them for a student. Only you can rename, retag or delete a book.</div>
+    ${tbAdminMsg ? `<div class="hint" style="color:${tbAdminMsg.startsWith('Could not') ? 'var(--brick)' : 'var(--forest)'}">${esc(tbAdminMsg)}</div>` : ''}
+    <input type="text" placeholder="Search by name, subject or grade" value="${escAttr(tbAdminSearch)}" oninput="tbAdminSearch = this.value; tbAdminRenderKeepFocus(this)" style="width:100%;box-sizing:border-box;margin-bottom:6px">
+    ${!tbLibrary.length ? '<div class="empty">No books yet.</div>' : !list.length ? '<div class="empty">No books match.</div>' : list.map(row).join('')}
+  </div>`;
+}
+function tbAdminRenderKeepFocus(el) {
+  const pos = el.selectionStart;
+  render();
+  const again = document.querySelector('input[placeholder="Search by name, subject or grade"]');
+  if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch (_) {} }
+}
+function tbAdminEdit(id) {
+  const b = (tbLibrary || []).find(x => x.id === id);
+  if (!b) return;
+  tbAdminEditId = id;
+  tbAdminDraft = { file_name: b.file_name, subject_name: b.subject_name, grade_id: b.grade_id || '', board_id: b.board_id || '' };
+  render();
+}
+async function tbAdminSave() {
+  const d = tbAdminDraft;
+  if (!String(d.file_name || '').trim()) { tbAdminMsg = 'Could not save: the name is empty.'; render(); return; }
+  const fields = { file_name: d.file_name.trim(), subject_name: d.subject_name, grade_id: d.grade_id || null, board_id: d.board_id || null };
+  const { error } = await sb.from('textbook_library').update(fields).eq('id', tbAdminEditId);
+  if (error) { tbAdminMsg = 'Could not save: ' + error.message; render(); return; }
+  // Keep the name the teachers see on their linked copies in step.
+  await sb.from('study_plan_textbooks').update({ file_name: fields.file_name }).eq('library_id', tbAdminEditId);
+  tbLibrary = tbLibrary.map(b => b.id === tbAdminEditId ? { ...b, ...fields } : b);
+  tbAdminEditId = ''; tbAdminMsg = '✓ Saved.';
+  render();
+}
+async function tbAdminDelete(id) {
+  const b = (tbLibrary || []).find(x => x.id === id);
+  if (!b) return;
+  const n = tbLinkCounts[id] || 0;
+  if (!confirm(`Delete "${b.file_name}" from the library?` + (n ? `\n\n${n} student link${n === 1 ? '' : 's'} will be removed too. Topics already added to study plans stay.` : '') + '\n\nThis cannot be undone.')) return;
+  const { error } = await sb.from('textbook_library').delete().eq('id', id);
+  if (error) { tbAdminMsg = 'Could not delete: ' + error.message; render(); return; }
+  await sb.storage.from('textbooks').remove([b.file_path]);
+  tbLibrary = tbLibrary.filter(x => x.id !== id);
+  delete tbLinkCounts[id];
+  tbAdminMsg = '✓ Deleted.';
   render();
 }
 function studyPlanToggleTextbookPanel() {
@@ -8103,7 +8291,7 @@ const SUPPORT_KB = {
 - Teachers & Subjects (People): add teachers and subjects, and set which teacher teaches each subject.
 - Parents (People): parent contact details and which children they are linked to.
 - Manage Admins (People): add or remove admin accounts.
-- Study Plans (People): read-only view of every teacher's study plans and progress.
+- Study Plans (People): read-only view of every teacher's study plans and progress, plus the Textbook library (every uploaded book; rename, retag or delete).
 - Homework (People): every homework set by teachers, with filters by teacher, student and status.
 - Question Bank (People): Review Queue (approve new or edited questions), Full Question Bank, Archived, Practice Papers and Past Papers. Pick board, subject and grade to see questions. Old-syllabus questions stay hidden unless you tick "Old syllabus only".
 - Setup (System): grades, categories, boards and subject names; Question Bank access and Research access (which teachers get those tabs); add users and manage their logins; change your password; backups.
@@ -8114,7 +8302,7 @@ const SUPPORT_KB = {
 - Dashboard: today's classes, students needing renewal, low balances, students not seen in a while, your demo classes and student notes.
 - Class Schedule (Teaching): your classes by day or month. Set up a weekly schedule, add an extra class, mark a class done or remove a pending one.
 - My Students (Teaching): contact details, subjects and class balances (subscribed, used, left, next expiry) for students enrolled in your subjects. Use the search box to find one.
-- Study Plans (Teaching): make a topic list per student and subject, and mark each topic Not started / In progress / Done. You can export a plan as PDF.
+- Study Plans (Teaching): make a topic list per student and subject, and mark each topic Not started / In progress / Done. You can export a plan as PDF. Add topics from textbook: upload a book or link one from the shared library (books for the subjects you teach), then Extract Topics; Unlink takes a book off that student only.
 - Homework (Teaching): + Assign homework to a student (title, subject, due date, study plan topic, attached file). When a student submits, review it, give marks and feedback, then Mark reviewed.
 - [qb] Question Bank (Teaching): Review Queue (check and approve questions for your subject and grade), Full Question Bank, Archived, Practice Papers and Past Papers. Pick board, subject and grade first. Old-syllabus questions stay hidden unless you tick "Old syllabus only".
 - [qb] Practice papers: Question Bank → Practice Papers → New paper. Pick a blueprint, tick the sections you want, and tick lessons for a lesson-only paper (none ticked = all lessons). Create and auto-fill, then Swap, Remove or Re-run auto-fill, Mark ready, and Assign to students with a due date.
@@ -9688,7 +9876,7 @@ async function actuallySaveSessionEdit(id, count, date) {
 // so Teachers & Subjects (key 'setup') shows as #teachers-subjects. Old #users links still work.
 const TAB_HASH = { users: 'setup', setup: 'teachers-subjects' };
 function tabFromHash(h) { const k = Object.keys(TAB_HASH).find(k => TAB_HASH[k] === h); return k || h; }
-function setTab(t) { currentTab = t; trackUse('tab:' + t, true); location.hash = TAB_HASH[t] || t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; loadStudyPlans().then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
+function setTab(t) { currentTab = t; trackUse('tab:' + t, true); location.hash = TAB_HASH[t] || t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; tbAdminEditId=''; tbAdminMsg=''; Promise.all([loadStudyPlans(), loadTextbookLibrary()]).then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
   if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); } }
 function setPayrollMonth(v) { payrollMonth = v; render(); }
 function setNetProfitMonth(v) { netProfitMonth = v; render(); }
@@ -14000,7 +14188,7 @@ function renderTeacherStudyPlans(teacher) {
         const tbMsg = studyPlanTextbookMsg
           ? `<div style="font-size:12px;margin-bottom:8px;color:${tbMsgIsError?'var(--brick)':'var(--forest)'}">${esc(studyPlanTextbookMsg)}</div>` : '';
         const tbList = studyPlanTextbooks.length === 0
-          ? `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">No textbooks uploaded yet for this student + subject.</div>`
+          ? `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">${tbLibrary !== null ? 'No books linked to this student + subject yet. Upload one, or link one from the library below.' : 'No textbooks uploaded yet for this student + subject.'}</div>`
           : studyPlanTextbooks.map(tb=>`
             <div style="display:flex;align-items:center;gap:6px;padding:7px 10px;background:var(--paper);border:1px solid var(--line);border-radius:8px;margin-bottom:6px;flex-wrap:wrap">
               <span style="flex:1;font-size:13px;color:var(--ink);min-width:120px;word-break:break-word" title="${escAttr(tb.fileName)}">${esc(tb.fileName)}</span>
@@ -14008,7 +14196,8 @@ function renderTeacherStudyPlans(teacher) {
               <button class="btn-small" onclick="studyPlanExtractFromTextbook('${tb.id}','${escAttr(tb.filePath)}','${escAttr(tb.fileName)}')" ${(studyPlanExtractingId===tb.id||studyPlanAiExtractingId===tb.id)?'disabled':''} style="flex-shrink:0">${studyPlanExtractingId===tb.id?'⏳ Extracting…':'✨ Extract Topics'}</button>
               ${aiKeySet && aiMasterEnabled ? `<button class="btn-small" onclick="studyPlanExtractFromTextbookAI('${tb.id}','${escAttr(tb.filePath)}','${escAttr(tb.fileName)}')" ${(studyPlanExtractingId===tb.id||studyPlanAiExtractingId===tb.id)?'disabled':''} style="flex-shrink:0">${studyPlanAiExtractingId===tb.id?'🤖 Asking AI…':'🤖 AI Extract'}</button>` : ''}
               <button class="btn-small" onclick="studyPlanDownloadTextbook('${escAttr(tb.filePath)}','${escAttr(tb.fileName)}')" style="flex-shrink:0">⬇ Download</button>
-              <button class="btn-small" onclick="studyPlanDeleteTextbook('${tb.id}','${escAttr(tb.filePath)}')" style="flex-shrink:0;color:var(--brick)">✕ Delete</button>
+              ${tb.libraryId ? `<button class="btn-small" onclick="studyPlanUnlinkTextbook('${tb.id}')" style="flex-shrink:0;color:var(--brick)" title="Take this book off this student. It stays in the library.">✕ Unlink</button>`
+                : tbLibrary !== null ? '' : `<button class="btn-small" onclick="studyPlanDeleteTextbook('${tb.id}','${escAttr(tb.filePath)}')" style="flex-shrink:0;color:var(--brick)">✕ Delete</button>`}
             </div>`).join('');
         textbookPanel = `
           <div style="margin-top:14px;padding:14px;background:rgba(0,0,0,0.02);border:1px solid var(--line);border-radius:10px">
@@ -14016,11 +14205,13 @@ function renderTeacherStudyPlans(teacher) {
               <span style="font-size:13px;font-weight:700;color:var(--ink)">📚 Textbooks</span>
               <label style="cursor:pointer">
                 <input type="file" accept=".pdf,.txt,.zip" style="display:none" onchange="studyPlanUploadTextbook(this)">
-                <span class="btn-small btn-secondary" style="pointer-events:none">${studyPlanTextbookUploading?'Uploading…':'+ Upload textbook (PDF / TXT / ZIP)'}</span>
+                <span class="btn-small btn-secondary" style="pointer-events:none">${studyPlanTextbookUploading?'Uploading…':tbLibrary !== null ? '+ Upload a new book (PDF / TXT / ZIP)' : '+ Upload textbook (PDF / TXT / ZIP)'}</span>
               </label>
             </div>
+            ${tbLibrary !== null ? tbUploadTagsHtml() : ''}
             ${tbMsg}
             ${tbList}
+            ${tbLibrary !== null ? tbLibraryPickHtml(subj) : ''}
           </div>`;
       }
       // ── Extracted topics panel — shown regardless of textbook panel state ──
@@ -15926,10 +16117,11 @@ const HELP = {
   'qb-papers': { t:'Practice Papers', b:'<ul><li><b>New paper</b>: pick a blueprint (e.g. CBSE 80 marks), then tick the sections you want. The paper total updates as you tick.</li><li><b>Lessons to include</b>: tick lessons for a lesson-only paper (none ticked = all). Ticking a lesson unticks Grammar, Writing, Unseen Passage and Translation; tick them back to add them, and they use all chapters.</li><li>Create and auto-fill picks approved questions spread across chapters. Use Swap or Remove on any question, or Re-run auto-fill. Your section and lesson choice is kept.</li><li>Mark ready, then Assign to students with a due date. You can change the due date or Remove a student later.</li><li><b>Marking</b>: under Needs marking, open a student, give marks for each written question and overall feedback, then Mark as reviewed. MCQs are marked automatically when the student submits, and you can change those marks too.</li><li>Download the question paper PDF, with answer key, or Word with answers.</li></ul>' },
   'qb-past': { t:'Past Papers', b:'<ul><li>The board papers and sample papers the questions were imported from.</li><li>Open a PDF to see the original paper.</li></ul>' },
   'my-students': { t:'My Students', b:'<ul><li>Every active student enrolled in one of your subjects.</li><li>Shows contact details, subjects, and classes subscribed, used and left, with the next expiry date.</li><li>Search by student name, parent, phone or email.</li><li>Fees and payments are not shown here; ask the Admin about those.</li></ul>' },
-  'study-plans': { t:'Study Plans', b:'<ul><li>A topic list per student and subject. + New plan, pick the student and subject, then + Add topic.</li><li>Set each topic to Not started, In progress or Done; the progress bar updates.</li><li>Tick several topics to change or delete them together.</li><li>Students and parents see the plan on their page. Export PDF to share it.</li><li>Topics also appear in the Homework form, so homework can be linked to a topic.</li></ul>' },
+  'study-plans': { t:'Study Plans', b:'<ul><li>A topic list per student and subject. + New plan, pick the student and subject, then + Add topic.</li><li>Set each topic to Not started, In progress or Done; the progress bar updates.</li><li>Tick several topics to change or delete them together.</li><li>Students and parents see the plan on their page. Export PDF to share it.</li><li>Topics also appear in the Homework form, so homework can be linked to a topic.</li><li><b>Add topics from textbook</b>: upload a book (PDF, TXT or a ZIP of several) or link one from the shared library, then Extract Topics. New books go into the library for every teacher of that subject, tagged with grade and board. <b>Unlink</b> takes a book off this student only; the book stays in the library.</li></ul>' },
   'hw-teacher': { t:'Homework', b:'<ul><li>+ Assign homework: pick the student and subject, add a title, due date and description, and optionally a study plan topic or an attached file.</li><li>The student uploads a photo (or marks it submitted). It then shows under Awaiting review.</li><li>Open it, give marks and feedback, then Mark reviewed. The student and parent see the feedback.</li><li>Late means the due date has passed and it is not submitted yet.</li></ul>' },
   'hw-admin': { t:'Homework (all teachers)', b:'<ul><li>Every homework set by every teacher.</li><li>Filter by teacher, student or status to follow up.</li><li>Teachers set and review homework from their own Homework tab.</li></ul>' },
   'sp-admin': { t:'Study Plans (all teachers)', b:'<ul><li>Read-only view of every study plan and how far each student has got.</li><li>Only the teacher can edit a plan, from their own Study Plans tab.</li></ul>' },
+  'textbook-library': { t:'Textbook library', b:'<ul><li>Every book teachers uploaded for Study Plans, once each, with how many student links it has.</li><li>Teachers see the books for the subjects they teach (all grades) and can link or unlink them; they cannot change or delete a book.</li><li><b>Edit</b> fixes a book\'s name, subject, grade or board. The subject decides which teachers see it.</li><li><b>Delete</b> removes the book and its student links. Topics already added to plans stay.</li></ul>' },
   'research': { t:'Research', b:'<ul><li><b>Lesson prep</b>: pick subject, grade and chapter (or type a topic) to get an AI brief: key points, teaching order, common mistakes, examples and practice questions. Check it against the textbook. Save keeps it in Saved briefs.</li><li><b>For student</b> (optional): pick one of your students to see their Study Plan topics in the chapter list (done topics last) and fill in their grade and board. With no student picked, the list shows all your students’ topics with their names. Question Bank chapters come first. Saved briefs remember the student and can be filtered by student.</li><li><b>Student insights</b>: how each student did, by chapter and question type, on the practice papers you marked. Under 60% shows as weak; Make a paper on weak chapters starts a practice paper with those lessons ticked.</li><li><b>Question research</b>: per chapter, which past papers asked it, average marks and question types.</li><li><b>Resource library</b>: keep notes, worksheets, pictures and links by subject and chapter. Tick Share with students to show an item to your students and their parents.</li><li>Student insights and Question research need Question Bank access.</li></ul>' },
   'student-homework': { t:'Homework', b:'<ul><li>Homework your teachers have set, with the due date.</li><li>Upload a photo of your work, or Mark submitted if there is nothing to photograph.</li><li>Once the teacher reviews it you see the marks and feedback here.</li></ul>' },
   'student-practice': { t:'Practice Papers', b:'<ul><li>Papers your teacher assigned. Start (or Continue) opens the paper.</li><li>Go section by section. Tap the answer for MCQs, type short answers, and upload a photo for long answers.</li><li>Answers save automatically, so you can stop and come back before the due date.</li><li>Submit paper when finished. MCQs are marked at once; the full score shows after the teacher reviews it.</li></ul>' },
@@ -19431,7 +19623,8 @@ function renderAdminStudyPlans() {
     ${plans.length > 0 ? summaryLine : ''}
     ${plans.length > 0 ? filterBar : ''}
     ${plans.length > 0 ? tableHtml : ''}
-  </div>`;
+  </div>
+  ${textbookLibraryAdminHtml()}`;
 }
 function renderAdminSupport() {
   const allTickets = data.supportTickets;

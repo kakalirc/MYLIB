@@ -89,14 +89,14 @@ def guide():
     g.add('studyplans', 'Students', 'Study Plans', 'A topic roadmap for each student and subject.', steps([
         ('Open the plan', 'In the Study Plans tab (it opens in Report view), tap a student’s row, then pick the subject.'),
         ('Switch to edit', 'Tap <b>Edit</b>. Tap <b>+ Add topic</b> to add topics one at a time, with optional notes.'),
-        ('Or let AI suggest topics', 'On an empty plan, tap <b>✨ Suggest topics</b>. Review the list, then save.'),
+        ('Or fill it for you', 'Tap <b>✨ Suggest topics</b> or <b>📚 Add topics from textbook</b>.'),
         ('Order and tidy', 'Drag the ☰ handle to reorder; tap ✕ to delete a topic.'),
         ('Save', 'Students and parents can see the plan straight away.'),
     ]) + h3('Topic status') + chips([
         ('Not started', 'c-grey', 'The default when a topic is created'),
         ('In progress', 'c-gold', 'Currently being covered'),
         ('Done', 'c-green', 'Topic completed'),
-    ]) + note('Good to know', ['One plan per student per subject.', 'Filter the report by status, subject or student name.',
+    ]) + note('Good to know', ['One plan per student per subject.', 'Unlinking a textbook keeps it in the library.',
                                'Students and parents see the plan read-only.']))
 
     g.add('homework', 'Students', 'Homework: assigning', 'Tap <b>+ Add Homework</b> in the Homework tab.', steps([
