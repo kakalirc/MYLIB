@@ -271,7 +271,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 17:54 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 19:05 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -2770,120 +2770,177 @@ async function markPayrollUnpaid(teacherId) {
   render();
 }
 
-function generateSalarySlipHtml(teacherId, month) {
+// Company details printed on salary slips (same as on ID cards and certificates)
+const SLIP_COMPANY = { name: 'LIBXL-Education Private Limited', address: 'No 6, 4th Floor, 2nd Main Road, Arakere, off Bannerghatta Road, Bangalore 560076' };
+
+// One teacher's pay for one month, worked out the same way as the Payroll page and the
+// teacher's Earnings card: every logged class counts (times its class count), split by
+// category, class type and mode. Classes with no rate set are kept apart so the slip can warn.
+function salarySlipFigures(teacherId, month) {
   const teacher = data.teachers.find(t => t.id === teacherId);
   if (!teacher) return null;
-  const pr = payrollRecord(teacherId, month);
-  // Earnings calculation
-  const monthSessions = data.sessions.filter(s => s.teacherId === teacherId && s.date.startsWith(month) && s.status === 'Present');
-  const rMap = {};
+  const mine = data.sessions.filter(s => s.teacherId === teacherId && s.date.startsWith(month));
+  const lines = [], unrated = [];
   let basePay = 0;
-  for (const s of monthSessions) {
-    const subj = subject(s.subjectId);
-    if (!subj) continue;
-    const ty = s.classType || 'Group';
-    const md = s.mode || 'Offline';
-    const rk = subj.category + '_' + ty + '_' + md;
-    const rate = teacher.rates ? (teacher.rates[rk] || 0) : 0;
-    if (rate > 0) { rMap[rate] = (rMap[rate] || 0) + 1; basePay += rate; }
-  }
-  const breakdown = Object.entries(rMap).sort((a, b) => Number(b[0]) - Number(a[0]));
-  const demoLines = data.demoLogs.filter(d => d.teacherId === teacherId && d.status === 'Converted' && (d.convertedAt || d.date || '').startsWith(month));
-  const demoBonus = demoLines.reduce((a, d) => a + (d.bonusAmount || 0), 0);
+  categories.forEach(c => TYPES.forEach(ty => RATE_MODES.forEach(md => {
+    const cnt = mine.filter(s => { const subj = subject(s.subjectId); return subj && subj.category === c.id && s.classType === ty && s.mode === md; })
+      .reduce((a, s) => a + s.count, 0);
+    if (!cnt) return;
+    const rate = (teacher.rates || {})[rateKey(c.id, ty, md)] || 0;
+    const label = c.name + ' · ' + ty + ' · ' + md;
+    if (rate > 0) { lines.push({ label, cnt, rate, earn: cnt * rate }); basePay += cnt * rate; }
+    else unrated.push({ label, cnt });
+  })));
+  const demoLines = data.demoLogs.filter(d => d.teacherId === teacherId && d.status === 'Converted' && (d.convertedAt || d.date || '').startsWith(month))
+    .map(d => ({ studentName: d.studentName || (d.linkedStudentId ? (data.students.find(s => s.id === d.linkedStudentId) || { name: '' }).name : ''), amount: d.bonusAmount || 0 }));
+  const demoBonus = demoLines.reduce((a, d) => a + d.amount, 0);
+  const pr = payrollRecord(teacherId, month);
   const grossPay = basePay + demoBonus;
   const adjustment = pr ? pr.adjustment : 0;
-  const adjNote = pr ? (pr.adjustmentNote || '') : '';
-  const netPayable = grossPay + adjustment;
-  const paid = pr ? pr.paid : false;
-  const paidDate = pr ? pr.paidDate : '';
-  const paidRef = pr ? pr.paidReference : '';
-  const [yr, mo] = month.split('-');
-  const monthDisplay = new Date(Number(yr), Number(mo) - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
-  const today = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
-  const e = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  const classWord = n => n === 1 ? 'class' : 'classes';
-  return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Salary Slip — ${e(teacher.name)} — ${monthDisplay}</title>
-<style>
+  return {
+    teacher, month, lines, unrated, demoLines, demoBonus, basePay, grossPay, adjustment,
+    adjNote: pr ? (pr.adjustmentNote || '') : '',
+    netPayable: grossPay + adjustment,
+    paid: pr ? pr.paid : false, paidDate: pr ? pr.paidDate : '', paidRef: pr ? pr.paidReference : ''
+  };
+}
+
+const SALARY_SLIP_CSS = `
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Segoe UI',Arial,sans-serif;background:#f2f4f0;color:#222;padding:24px}
-.slip{background:#fff;max-width:660px;margin:0 auto;border-radius:10px;box-shadow:0 3px 18px rgba(0,0,0,.11);overflow:hidden}
-.slip-head{background:#1a1a1a;color:#fff;padding:20px 40px 20px;display:flex;justify-content:space-between;align-items:center}
-
-.org-sub{font-size:12px;opacity:.65;margin-top:2px;color:#ccc}
+.slip{background:#fff;max-width:660px;margin:0 auto 28px;border-radius:10px;box-shadow:0 3px 18px rgba(0,0,0,.11);overflow:hidden}
+.slip-head{background:#1a1a1a;color:#fff;padding:20px 40px;display:flex;justify-content:space-between;align-items:center;gap:16px}
+.org-sub{font-size:12px;color:#aaa;margin-top:3px}
 .slip-title{text-align:right}
 .slip-label{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;opacity:.75}
 .slip-month{font-size:20px;font-weight:700;margin-top:2px}
-.slip-body{padding:32px 40px}
+.slip-no{font-size:11px;color:#bbb;margin-top:4px;font-variant-numeric:tabular-nums}
+.company{padding:12px 40px;background:#f7f6f2;border-bottom:1px solid #eee;font-size:12px;color:#555;line-height:1.5}
+.company b{color:#222;font-size:13px}
+.slip-body{padding:28px 40px 32px}
+.who{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
 .teacher-label{font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.09em;margin-bottom:4px}
 .teacher-name{font-size:20px;font-weight:700;margin-bottom:2px}
-.teacher-qual{font-size:13px;color:#888}
-.section{margin-top:28px}
+.teacher-meta{font-size:13px;color:#888}
+.section{margin-top:26px}
 .section-title{font-size:11px;font-weight:700;color:#2a5c2a;text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px;border-bottom:2px solid #d6e8d6;padding-bottom:6px}
 table{width:100%;border-collapse:collapse}
-tr td,tr th{padding:7px 0;font-size:14px;vertical-align:middle}
+tr td,tr th{padding:7px 0;font-size:14px;vertical-align:middle;text-align:left}
 tr td.r,tr th.r{text-align:right;font-weight:600;white-space:nowrap}
-.hint-row td{font-size:12px;color:#999;padding-top:2px;padding-bottom:6px}
+td.calc{font-size:12px;color:#888;text-align:right;white-space:nowrap;padding-right:14px}
 .sep td{border-top:1px dashed #ddd;padding:0}
 .total-row th{font-size:16px;font-weight:800;padding-top:14px}
 .total-row td{font-size:20px;font-weight:800;color:#2a5c2a;padding-top:14px}
 .pos{color:#237a23}.neg{color:#c0392b}
+.warn-box{background:#fdecea;border:1.5px solid #f5b7b1;border-radius:8px;padding:12px 16px;margin-top:18px;font-size:12px;color:#922b21;line-height:1.5}
 .paid-box{background:#edf6ed;border:1.5px solid #a3cfa3;border-radius:8px;padding:16px 20px;margin-top:24px}
 .paid-top{font-size:13px;font-weight:700;color:#2a5c2a;margin-bottom:10px}
 .paid-fields{display:flex;gap:32px;flex-wrap:wrap}
 .paid-field .lbl{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.07em;margin-bottom:2px}
 .paid-field .val{font-size:14px;font-weight:600}
 .pending-box{background:#fff8e1;border:1.5px solid #ffe082;border-radius:8px;padding:14px 20px;margin-top:24px;font-size:13px;font-weight:600;color:#7a5c00}
-.footer{margin-top:32px;padding-top:16px;border-top:1px solid #eee;display:flex;justify-content:space-between;font-size:11px;color:#bbb}
-.print-btn{position:fixed;top:18px;right:18px;padding:10px 22px;background:#2a5c2a;color:#fff;border:none;border-radius:7px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.footer{margin-top:28px;padding-top:14px;border-top:1px solid #eee;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:11px;color:#aaa}
+.print-btn{position:fixed;top:18px;right:18px;padding:10px 22px;background:#2a5c2a;color:#fff;border:none;border-radius:7px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:5}
 .print-btn:hover{background:#1e4620}
-@media print{.print-btn{display:none}body{background:#fff;padding:0}.slip{box-shadow:none;border-radius:0}}
-</style>
+@media (max-width:600px){body{padding:10px}.slip-head,.company,.slip-body{padding-left:18px;padding-right:18px}}
+@media print{.print-btn{display:none}body{background:#fff;padding:0}.slip{box-shadow:none;border-radius:0;margin:0 auto}.slip+.slip{page-break-before:always;break-before:page}}
+`;
+
+function salarySlipSheetHtml(f) {
+  const { teacher, month } = f;
+  const e = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const money = n => '₹' + Number(n).toFixed(2);
+  const classWord = n => n === 1 ? 'class' : 'classes';
+  const [yr, mo] = month.split('-');
+  const monthDisplay = new Date(Number(yr), Number(mo) - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+  const today = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
+  const slipNo = 'SAL-' + yr + mo + '-' + (teacher.code || teacher.id.slice(0, 6).toUpperCase());
+  const unratedTotal = f.unrated.reduce((a, u) => a + u.cnt, 0);
+  return `<div class="slip">
+  <div class="slip-head">
+    <div><img src="${LOGO_SRC}" alt="LIB" style="height:44px;display:block;object-fit:contain"><div class="org-sub">Salary Slip · Part-time</div></div>
+    <div class="slip-title"><div class="slip-label">Period</div><div class="slip-month">${monthDisplay}</div><div class="slip-no">Slip no. ${e(slipNo)}</div></div>
+  </div>
+  <div class="company"><b>${e(SLIP_COMPANY.name)}</b><br>${e(SLIP_COMPANY.address)}</div>
+  <div class="slip-body">
+    <div class="who">
+      <div>
+        <div class="teacher-label">Part-time teacher · paid per class</div>
+        <div class="teacher-name">${e(teacher.name)}</div>
+        ${teacher.code ? `<div class="teacher-meta">Teacher ID: ${e(teacher.code)}</div>` : ''}
+        ${teacher.mobileNumber ? `<div class="teacher-meta">Mobile: ${e(teacher.mobileNumber)}</div>` : ''}
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">Per-class fees</div>
+      <table>
+        ${f.lines.map(l => `<tr><td>${e(l.label)}</td><td class="calc">${fmtN(l.cnt)} ${classWord(l.cnt)} × ₹${l.rate}</td><td class="r">${money(l.earn)}</td></tr>`).join('')}
+        ${f.demoLines.map(d => `<tr><td class="pos">Demo bonus${d.studentName ? ' — ' + e(d.studentName) : ''}</td><td></td><td class="r pos">${money(d.amount)}</td></tr>`).join('')}
+        ${!f.lines.length && !f.demoLines.length ? `<tr><td colspan="3" style="color:#999">No paid classes this month.</td></tr>` : ''}
+        ${(f.lines.length > 1 || f.demoBonus > 0) ? `<tr class="sep"><td colspan="3"></td></tr><tr><th colspan="2">Gross earnings</th><td class="r">${money(f.grossPay)}</td></tr>` : ''}
+        ${f.adjustment !== 0 ? `<tr><th colspan="2" class="${f.adjustment > 0 ? 'pos' : 'neg'}">${f.adjustment > 0 ? 'Bonus / addition' : 'Deduction'}${f.adjNote ? ' — ' + e(f.adjNote) : ''}</th><td class="r ${f.adjustment > 0 ? 'pos' : 'neg'}">${f.adjustment > 0 ? '+' : '−'}${money(Math.abs(f.adjustment))}</td></tr>` : ''}
+        <tr class="sep"><td colspan="3"></td></tr>
+        <tr class="total-row"><th colspan="2">Net Payable</th><td class="r">${money(f.netPayable)}</td></tr>
+      </table>
+      ${unratedTotal ? `<div class="warn-box"><b>⚠ ${fmtN(unratedTotal)} ${classWord(unratedTotal)} not included — no rate set:</b> ${f.unrated.map(u => e(u.label) + ' (' + fmtN(u.cnt) + ')').join(', ')}. Set the rate in Fees → Fee setup and open the slip again.</div>` : ''}
+    </div>
+    ${f.paid ? `<div class="paid-box"><div class="paid-top">✓ Payment Made</div><div class="paid-fields">
+      ${f.paidDate ? `<div class="paid-field"><div class="lbl">Date</div><div class="val">${e(f.paidDate)}</div></div>` : ''}
+      ${f.paidRef ? `<div class="paid-field"><div class="lbl">Reference / Mode</div><div class="val">${e(f.paidRef)}</div></div>` : ''}
+      <div class="paid-field"><div class="lbl">Amount Paid</div><div class="val">${money(f.netPayable)}</div></div>
+    </div></div>` : `<div class="pending-box">⏳ Payment pending for ${monthDisplay}</div>`}
+    <div class="footer"><span>${e(SLIP_COMPANY.name)} · Confidential · Computer-generated slip, no signature needed</span><span>Generated ${today}</span></div>
+  </div>
+</div>`;
+}
+
+function salarySlipDocHtml(title, sheets) {
+  const e = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${e(title)}</title>
+<style>${SALARY_SLIP_CSS}</style>
 </head>
 <body>
 <button class="print-btn" onclick="window.print()">🖨 Print / Save PDF</button>
-<div class="slip">
-  <div class="slip-head">
-    <div><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 56" height="52" style="display:block"><rect width="180" height="56" fill="#1a1a1a" rx="4"/><polygon points="24,8 36,8 22,48 10,48" fill="#E84530"/><polygon points="40,8 52,8 38,48 26,48" fill="#E84530"/><text x="62" y="42" font-family="Georgia,serif" font-size="36" font-weight="900" font-style="italic" fill="#E8E2D5" letter-spacing="-1">LIB</text></svg><div class="org-sub" style="color:#aaa;font-size:12px;margin-top:3px">Salary Slip</div></div>
-    <div class="slip-title"><div class="slip-label">Period</div><div class="slip-month">${monthDisplay}</div></div>
-  </div>
-  <div class="slip-body">
-    <div class="teacher-label">Teacher</div>
-    <div class="teacher-name">${e(teacher.name)}</div>
-    ${teacher.qualification ? `<div class="teacher-qual">${e(teacher.qualification)}</div>` : ''}
-    <div class="section">
-      <div class="section-title">Earnings Breakdown</div>
-      <table>
-        ${breakdown.map(([rate, cnt]) => `<tr><td>${fmtN(cnt)} ${classWord(cnt)} × ₹${rate} per class</td><td class="r">₹${(Number(rate)*cnt).toFixed(2)}</td></tr>`).join('')}
-        ${demoLines.map(d => `<tr><td class="pos">+ Demo bonus${d.studentName ? ' — ' + e(d.studentName) : ''}</td><td class="r pos">₹${(d.bonusAmount||0).toFixed(2)}</td></tr>`).join('')}
-        ${(breakdown.length > 1 || demoBonus > 0) ? `<tr class="sep"><td colspan="2"></td></tr><tr><th>Gross earnings</th><td class="r">₹${grossPay.toFixed(2)}</td></tr>` : ''}
-        ${adjustment !== 0 ? `<tr><th class="${adjustment>0?'pos':'neg'}">${adjustment>0?'Bonus / addition':'Deduction'}${adjNote?' — '+e(adjNote):''}</th><td class="r ${adjustment>0?'pos':'neg'}">${adjustment>0?'+':''}₹${adjustment.toFixed(2)}</td></tr>` : ''}
-        <tr class="sep"><td colspan="2"></td></tr>
-        <tr class="total-row"><th>Net Payable</th><td class="r">₹${netPayable.toFixed(2)}</td></tr>
-      </table>
-    </div>
-    ${paid ? `<div class="paid-box"><div class="paid-top">✓ Payment Received</div><div class="paid-fields">
-      ${paidDate?`<div class="paid-field"><div class="lbl">Date</div><div class="val">${e(paidDate)}</div></div>`:''}
-      ${paidRef?`<div class="paid-field"><div class="lbl">Reference / Mode</div><div class="val">${e(paidRef)}</div></div>`:''}
-      <div class="paid-field"><div class="lbl">Amount Paid</div><div class="val">₹${netPayable.toFixed(2)}</div></div>
-    </div></div>` : `<div class="pending-box">⏳ Payment pending for ${monthDisplay}</div>`}
-    <div class="footer"><span>LIB Education · Confidential</span><span>Generated ${today}</span></div>
-  </div>
-</div>
+${sheets.join('\n')}
 </body>
 </html>`;
 }
 
-function printSalarySlip(teacherId, month) {
-  const html = generateSalarySlipHtml(teacherId, month);
-  if (!html) return;
+function generateSalarySlipHtml(teacherId, month) {
+  const f = salarySlipFigures(teacherId, month);
+  if (!f) return null;
+  const [yr, mo] = month.split('-');
+  const monthDisplay = new Date(Number(yr), Number(mo) - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+  return salarySlipDocHtml('Salary Slip — ' + f.teacher.name + ' — ' + monthDisplay, [salarySlipSheetHtml(f)]);
+}
+
+function openSlipWindow(html) {
   const w = window.open('', '_blank', 'width=780,height=920,scrollbars=yes');
   if (!w) { payrollMsg = 'Pop-up blocked — please allow pop-ups for this site and try again.'; render(); return; }
   w.document.open(); w.document.write(html); w.document.close();
+}
+
+function printSalarySlip(teacherId, month) {
+  const html = generateSalarySlipHtml(teacherId, month);
+  if (html) openSlipWindow(html);
+}
+
+// Every teacher shown on the Payroll page for the month, one slip per page.
+// Teachers with nothing to pay and no classes that month are skipped.
+function printAllSalarySlips() {
+  const pool = payrollTeacherFilter === '' ? [] : byName(payrollTeacherFilter === 'ALL' ? data.teachers : data.teachers.filter(t => t.id === payrollTeacherFilter));
+  const figs = pool.map(t => salarySlipFigures(t.id, payrollMonth))
+    .filter(f => f && (f.netPayable !== 0 || f.lines.length || f.unrated.length || f.demoLines.length));
+  if (!figs.length) { payrollMsg = 'No teacher has classes or pay for this month.'; render(); return; }
+  const [yr, mo] = payrollMonth.split('-');
+  const monthDisplay = new Date(Number(yr), Number(mo) - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+  trackUse('payroll_all_slips');
+  openSlipWindow(salarySlipDocHtml('Salary Slips — ' + monthDisplay, figs.map(salarySlipSheetHtml)));
 }
 
 // -------- Student ID Card --------
@@ -12070,7 +12127,7 @@ function renderReports() {
       </div>
       ${payrollMsg ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${esc(payrollMsg)}</div>` : ''}
       ${payrollHtml}
-      ${payrollTeacherPool.length ? `<div class="row-form" style="margin-top:12px"><button class="btn-gold" onclick="exportTeacherPayroll()">Export Teacher Payroll report</button></div>` : ''}
+      ${payrollTeacherPool.length ? `<div class="row-form" style="margin-top:12px"><button class="btn-gold" onclick="exportTeacherPayroll()">Export Teacher Payroll report</button>${payrollTeacherPool.length > 1 ? `<button class="btn-small" onclick="printAllSalarySlips()">📄 Print all salary slips</button>` : ''}</div>` : ''}
     </div>
     <div class="card">
       <h2>Net profit — fee collection minus teacher payroll and other expenses</h2>
@@ -16132,7 +16189,7 @@ const HELP = {
   'pending-fees': { t:'Pending fee requests', b:"<ul><li>All fee requests across all students not yet marked Paid.</li><li>To confirm a payment, open the student's page and click Mark as Paid on the request.</li></ul>" },
   'all-payments': { t:'All subscription payments', b:'<ul><li>Every payment recorded for the selected month, across all students.</li><li>Use the filters to narrow by teacher or subject.</li><li>Export downloads the filtered list as Excel.</li></ul>' },
   'refunds': { t:'Refunds issued', b:'<ul><li>All refunds recorded for the selected month.</li><li>Export downloads the list as Excel.</li></ul>' },
-  'payroll': { t:'Teacher payroll', b:'<ul><li>Each teacher\'s earnings for the selected month — classes given multiplied by their per-class rate.</li><li>A ₹100 demo bonus is added for each demo that was Converted to a student that month.</li><li>Rates are set in the Fees tab under Fee setup.</li><li>Toggle the breakdown by category and class type with the Show/Hide button.</li></ul>' },
+  'payroll': { t:'Teacher payroll', b:'<ul><li>Each teacher\'s earnings for the selected month — classes given multiplied by their per-class rate.</li><li>A ₹100 demo bonus is added for each demo that was Converted to a student that month.</li><li>Rates are set in the Fees tab under Fee setup.</li><li>Toggle the breakdown by category and class type with the Show/Hide button.</li><li>📄 Salary Slip opens a printable slip for one teacher. With All Teachers picked, 📄 Print all salary slips puts every teacher\'s slip in one window, one per page, so you can save them as a single PDF.</li></ul>' },
   'weekly-setup': { t:'Set up weekly schedule', b:"<ul><li>Creates recurring classes for one student on the same day and time each week, until their subscribed count runs out.</li><li>To re-plan, remove upcoming classes with X in Class Schedule, then generate again.</li></ul>" },
   'extra-class': { t:'Schedule an extra class', b:"<ul><li>Adds a single one-off class — useful for makeup or exam-time sessions.</li><li>Still counts within the student's subscribed limit.</li></ul>" },
   'class-schedule': { t:'Class Schedule', b:'<ul><li><b>Pending</b> — upcoming or overdue (date passed, not yet marked done).</li><li><b>Done</b> — marked done; attendance is on record.</li><li>Click X to remove a pending class. Overdue classes still count against the limit.</li></ul>' },
