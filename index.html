@@ -269,7 +269,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-21 20:40 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 05:10 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -464,6 +464,67 @@ async function setTeacherQbAccess(teacherId, on) {
   qbAccessByTeacher[teacherId] = on;
   qbAccessMsg = teacherName(teacherId) + (on ? ' can now use the Question Bank.' : ' no longer has the Question Bank.');
   render();
+}
+// Admin Setup → Research access: which teachers get the Research tab (teachers.ai_research, SQL 46).
+let researchAccessOpen = false;
+let researchAccessByTeacher = null; // { teacherId: true/false } once loaded; null = not loaded yet
+let researchAccessMsg = '';
+async function loadResearchAccessList() {
+  const { data: rows, error } = await sb.from('teachers').select('id,ai_research');
+  if (error) { researchAccessByTeacher = null; researchAccessMsg = 'Could not load the list. Run SQL 46 in Supabase first. (' + error.message + ')'; render(); return; }
+  researchAccessByTeacher = {};
+  (rows || []).forEach(r => { researchAccessByTeacher[r.id] = !!r.ai_research; });
+  researchAccessMsg = '';
+  render();
+}
+function toggleResearchAccessCard() {
+  researchAccessOpen = !researchAccessOpen;
+  if (researchAccessOpen) loadResearchAccessList();
+  render();
+}
+async function setTeacherResearchAccess(teacherId, on) {
+  const { error } = await sb.from('teachers').update({ ai_research: on }).eq('id', teacherId);
+  if (error) { researchAccessMsg = 'Could not save: ' + error.message; render(); return; }
+  researchAccessByTeacher[teacherId] = on;
+  researchAccessMsg = teacherName(teacherId) + (on ? ' can now use Research.' : ' no longer has Research.');
+  render();
+}
+// Admin Setup → AI usage: AI calls made through the server, per user per month (ai_usage_log, SQL 46).
+let aiUsageOpen = false;
+let aiUsageMonth = todayStr.slice(0, 7);
+let aiUsageRows = null; // log rows for aiUsageMonth; null = not loaded yet
+let aiUsageMsg = '';
+let aiUsageNames = {};  // profile id → login name
+async function loadAiUsage() {
+  aiUsageRows = null; aiUsageMsg = ''; render();
+  const [y, m] = aiUsageMonth.split('-').map(Number);
+  // Month boundaries in IST. Paged: one request stops at 1,000 rows.
+  const from = aiUsageMonth + '-01T00:00:00+05:30', to = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10) + 'T00:00:00+05:30';
+  let rows = [], error = null;
+  for (let i = 0; i < 100000; i += 1000) {
+    const r = await sb.from('ai_usage_log').select('*').gte('created_at', from).lt('created_at', to).order('created_at').order('id').range(i, i + 999);
+    if (r.error) { error = r.error; break; }
+    rows = rows.concat(r.data || []);
+    if (!r.data || r.data.length < 1000) break;
+  }
+  if (error) { aiUsageMsg = 'Could not load AI usage. Run SQL 46 in Supabase first. (' + error.message + ')'; aiUsageRows = []; render(); return; }
+  aiUsageRows = rows || [];
+  const ids = [...new Set(aiUsageRows.map(r => r.user_id).filter(id => id && !aiUsageNames[id]))];
+  if (ids.length) {
+    const { data: profs } = await sb.from('profiles').select('id, username, admin_name').in('id', ids);
+    (profs || []).forEach(p => { aiUsageNames[p.id] = p.admin_name || p.username; });
+  }
+  render();
+}
+function toggleAiUsageCard() {
+  aiUsageOpen = !aiUsageOpen;
+  if (aiUsageOpen) loadAiUsage();
+  render();
+}
+function setAiUsageMonth(v) { if (v) { aiUsageMonth = v; loadAiUsage(); } }
+function aiUsageUserLabel(r) {
+  if (r.teacher_id) { const t = data.teachers.find(x => x.id === r.teacher_id); if (t) return teacherLabel(t); }
+  return aiUsageNames[r.user_id] || 'Unknown user';
 }
 let discountTiers = []; // [{ minClasses, percent }, ...] — bulk-class discount structure
 let newTierMinClasses = '';
@@ -1001,6 +1062,136 @@ async function loadTeacherQbAccess() {
   } catch (e) { teacherQbAccess = false; }
   if (!teacherQbAccess && teacherPortalTab === 'questionbank') teacherPortalTab = 'dashboard';
 }
+// Research tab (Lesson prep): only for teachers an admin has switched on (Setup → Research access,
+// teachers.ai_research, SQL 46). The brief is written by the teacher-research Edge Function, which holds the AI key.
+let teacherResearchAccess = false;
+async function loadTeacherResearchAccess() {
+  if (!sb || !currentLinkedId) { teacherResearchAccess = false; return; }
+  try {
+    const { data: on, error } = await sb.rpc('my_ai_research_access');
+    teacherResearchAccess = !error && on === true;
+  } catch (e) { teacherResearchAccess = false; }
+  if (!teacherResearchAccess && teacherPortalTab === 'research') teacherPortalTab = 'dashboard';
+}
+let researchDraft = { subjectId: '', gradeId: '', boardId: '', chapter: '', focus: '' };
+let researchBrief = { loading: false, text: '', error: '', savedId: '', ask: null };
+let researchBankQs = [];
+let researchNotes = null;      // this teacher's saved briefs, newest first; null = not loaded yet
+let researchNotesMsg = '';
+let researchOpenNoteId = '';
+let researchChapterList = null; // { chapters, textbooks } from the Question Bank, for chapter suggestions
+async function loadResearchData() {
+  const [notes, chaps, tbs] = await Promise.all([
+    sb.from('teacher_research_notes').select('*').order('created_at', { ascending: false }).limit(100),
+    researchChapterList ? Promise.resolve(null) : sb.from('qb_chapters').select('id,textbook_id,chapter_number,title,is_current_syllabus'),
+    researchChapterList ? Promise.resolve(null) : sb.from('qb_textbooks').select('id,board_id,grade_id,subject_name,is_current'),
+  ]);
+  if (notes.error) { researchNotes = []; researchNotesMsg = 'Could not load saved briefs. Run SQL 46 in Supabase first. (' + notes.error.message + ')'; }
+  else { researchNotes = notes.data || []; researchNotesMsg = ''; }
+  if (chaps) researchChapterList = { chapters: (chaps.data || []), textbooks: ((tbs && tbs.data) || []) };
+  render();
+}
+// Question Bank chapters for the picked subject + class (current syllabus first), used as suggestions only.
+function researchChaptersFor(subjectName, gradeId) {
+  if (!researchChapterList || !subjectName || !gradeId) return [];
+  const tbIds = new Set(researchChapterList.textbooks.filter(tb => qbSameSubject(tb.subject_name, subjectName) && tb.grade_id === gradeId
+    && (!researchDraft.boardId || !tb.board_id || tb.board_id === researchDraft.boardId)).map(tb => tb.id));
+  return researchChapterList.chapters.filter(c => tbIds.has(c.textbook_id) && c.is_current_syllabus !== false)
+    .sort((a, b) => (Number(a.chapter_number) || 999) - (Number(b.chapter_number) || 999) || String(a.title || '').localeCompare(String(b.title || '')));
+}
+function setResearchField(field, value) {
+  researchDraft[field] = value;
+  if (field === 'subjectId') {
+    const subj = data.subjects.find(s => s.id === value);
+    const gs = subj ? gradesForCategory(subj.category) : [];
+    researchDraft.gradeId = gs.length === 1 ? gs[0] : '';
+    researchDraft.chapter = '';
+  }
+  if (field === 'gradeId' || field === 'boardId') researchDraft.chapter = '';
+  if (field !== 'focus' && field !== 'chapter') render();
+}
+async function callResearchFunction(body) {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) return { error: 'Not logged in.' };
+  try {
+    const res = await fetch(SUPABASE_URL + '/functions/v1/teacher-research', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + session.access_token },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 404) return { error: 'The Research service is not set up yet. Ask your admin to deploy the teacher-research function.' };
+    const responseBody = await res.json().catch(() => ({}));
+    if (!res.ok) return { error: responseBody.error || res.statusText };
+    return { data: responseBody };
+  } catch (e) { return { error: 'Network error: ' + e.message }; }
+}
+async function generateResearchBrief() {
+  const subj = data.subjects.find(s => s.id === researchDraft.subjectId);
+  const chapter = researchDraft.chapter.trim();
+  if (!subj || !chapter) { researchBrief = { ...researchBrief, error: 'Pick a subject and type or pick a chapter.' }; render(); return; }
+  const ask = { subjectName: subj.name, gradeId: researchDraft.gradeId, chapter, focus: researchDraft.focus.trim() };
+  researchBrief = { loading: true, text: '', error: '', savedId: '', ask };
+  researchBankQs = [];
+  render();
+  const matched = researchChaptersFor(subj.name, researchDraft.gradeId).filter(c => qbChapterLabel(c) === chapter || c.title === chapter).map(c => c.id);
+  const [r] = await Promise.all([
+    callResearchFunction({ subject: subj.name, grade: qbByName(grades, researchDraft.gradeId), board: qbByName(boards, researchDraft.boardId), chapter, focus: ask.focus }),
+    matched.length && teacherQbAccess ? loadResearchBankQuestions(matched) : Promise.resolve(),
+  ]);
+  researchBrief = r.error ? { loading: false, text: '', error: r.error, savedId: '', ask } : { loading: false, text: r.data.text || '', error: '', savedId: '', ask };
+  render();
+}
+// A few approved, current-syllabus questions from the Question Bank for the chapter (newest papers first).
+async function loadResearchBankQuestions(chapterIds) {
+  const { data: rows } = await sb.from('qb_questions').select('id,question_text,question_type,marks,source_year,source_exam_type,archived,syllabus_status')
+    .in('chapter_id', chapterIds).eq('approved', true).order('source_year', { ascending: false, nullsFirst: false }).limit(60);
+  researchBankQs = (rows || []).filter(q => !q.archived && q.syllabus_status !== 'old').slice(0, 10);
+}
+async function saveResearchBrief() {
+  const b = researchBrief;
+  if (!b.text || !b.ask || b.savedId) return;
+  const { data: row, error } = await sb.from('teacher_research_notes').insert({
+    teacher_id: currentLinkedId, subject_name: b.ask.subjectName, grade_id: b.ask.gradeId || null,
+    chapter: b.ask.chapter, focus: b.ask.focus || null, brief: b.text,
+  }).select().single();
+  if (error) { researchBrief = { ...b, error: 'Could not save: ' + error.message }; render(); return; }
+  researchBrief = { ...b, savedId: row.id, error: '' };
+  researchNotes = [row, ...(researchNotes || [])];
+  render();
+}
+async function deleteResearchNote(id) {
+  if (!confirm('Delete this saved brief?')) return;
+  const { error } = await sb.from('teacher_research_notes').delete().eq('id', id);
+  if (error) { researchNotesMsg = 'Could not delete: ' + error.message; render(); return; }
+  researchNotes = (researchNotes || []).filter(n => n.id !== id);
+  if (researchOpenNoteId === id) researchOpenNoteId = '';
+  if (researchBrief.savedId === id) researchBrief = { ...researchBrief, savedId: '' };
+  render();
+}
+function toggleResearchNote(id) { researchOpenNoteId = researchOpenNoteId === id ? '' : id; render(); }
+// Copies the brief just written ('') or a saved one (its id) as plain text.
+function copyResearchBrief(id) {
+  const text = id ? ((researchNotes || []).find(n => n.id === id) || {}).brief : researchBrief.text;
+  if (!text || !navigator.clipboard) return;
+  navigator.clipboard.writeText(text).then(() => { researchNotesMsg = 'Copied.'; render(); }, () => {});
+}
+// Small Markdown → HTML for AI briefs: headings, bullet / numbered lists, **bold**. Text is escaped first.
+function researchMdHtml(md) {
+  const inline = s => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  let html = '', list = '';
+  const close = () => { if (list) { html += '</' + list + '>'; list = ''; } };
+  String(md || '').split('\n').forEach(line => {
+    const t = line.trim();
+    let m;
+    if (!t) { close(); return; }
+    if ((m = t.match(/^#{1,4}\s+(.*)$/))) { close(); html += '<h3 style="font-size:15px;margin:14px 0 6px">' + inline(m[1]) + '</h3>'; return; }
+    if ((m = t.match(/^[-*•]\s+(.*)$/))) { if (list !== 'ul') { close(); html += '<ul style="margin:4px 0 8px 20px;padding:0">'; list = 'ul'; } html += '<li>' + inline(m[1]) + '</li>'; return; }
+    if ((m = t.match(/^\d+[.)]\s+(.*)$/))) { if (list !== 'ol') { close(); html += '<ol style="margin:4px 0 8px 20px;padding:0">'; list = 'ol'; } html += '<li>' + inline(m[1]) + '</li>'; return; }
+    close(); html += '<p style="margin:4px 0 8px">' + inline(t) + '</p>';
+  });
+  close();
+  return '<div style="font-size:14px;line-height:1.6;color:var(--ink)">' + html + '</div>';
+}
 function toggleTeacherMobileTabMenu() { teacherMobileTabMenuOpen = !teacherMobileTabMenuOpen; render(); }
 function setTeacherPortalTab(t) {
   teacherPortalTab = t;
@@ -1011,6 +1202,8 @@ function setTeacherPortalTab(t) {
   if (t === 'studyplans') { studyPlanTeacherStudentId = ''; studyPlanTeacherSubjectId = ''; studyPlanDraftItems = []; studyPlanMsg = ''; studyPlanViewMode = 'report'; studyPlanFilterStatus = 'all'; studyPlanFilterSubjectId = ''; studyPlanFilterStudent = ''; loadStudyPlans().then(() => render()); return; }
   if (t === 'homework') { hwShowForm = false; hwMsg = ''; hwFilterStudentId = ''; hwFilterStatus = 'assigned'; loadHomework().then(() => render()); return; }
   if (t === 'questionbank' && !teacherQbAccess) { teacherPortalTab = 'dashboard'; render(); return; }
+  if (t === 'research' && !teacherResearchAccess) { teacherPortalTab = 'dashboard'; render(); return; }
+  if (t === 'research') { researchNotesMsg = ''; researchOpenNoteId = ''; loadResearchData(); return; }
   if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); return; }
   render();
 }
@@ -1074,6 +1267,7 @@ async function load() {
     loadHomework(),
     loadPracticeAssignments(),
     currentRole === 'Teacher' ? loadTeacherQbAccess() : Promise.resolve(),
+    currentRole === 'Teacher' ? loadTeacherResearchAccess() : Promise.resolve(),
   ]);
 
   loaded = true;
@@ -5219,6 +5413,7 @@ async function refreshAllData(silent) {
       loadPracticeAssignments(),
       // Picks up an admin switching this teacher's Question Bank on/off without a fresh login.
       currentRole === 'Teacher' ? loadTeacherQbAccess() : Promise.resolve(),
+      currentRole === 'Teacher' ? loadTeacherResearchAccess() : Promise.resolve(),
     ]);
     await Promise.all([
       loadMyPhoto(),
@@ -12213,6 +12408,60 @@ function renderUsers() {
     </div>
 
     <div class="card">
+      <h2 style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none" onclick="toggleResearchAccessCard()">
+        <span style="font-size:12px;color:var(--muted)">${researchAccessOpen ? '▼' : '▶'}</span>
+        Research access
+        ${!researchAccessOpen ? `<span class="tag" style="margin-left:auto;font-size:11px;font-weight:400">AI lesson prep</span>` : ''}
+      </h2>
+      ${researchAccessOpen ? `
+      <div class="hint">Tick the teachers who may use the Research tab. There they pick a subject, class and chapter and get an AI lesson brief (key points, common mistakes, examples, practice questions), which they can save. It uses the AI key from AI Settings, but the key stays on the server and the teacher never sees it. Each brief costs a few cents of AI credit. A teacher who is logged in sees the change after logging in again.</div>
+      ${researchAccessMsg ? `<div class="hint" style="color:${researchAccessMsg.startsWith('Could not')?'var(--brick)':'var(--forest)'}">${esc(researchAccessMsg)}</div>` : ''}
+      ${researchAccessByTeacher === null ? (researchAccessMsg ? '' : '<div class="hint">Loading…</div>') : `
+      <div class="table-scroll"><table>
+        <tr><th>Teacher</th><th>Subjects</th><th>Research</th></tr>
+        ${byName(data.teachers.filter(t=>!t.archived)).map(t=>`
+          <tr>
+            <td>${esc(teacherLabel(t))}</td>
+            <td style="font-size:12.5px;color:var(--muted)">${esc([...new Set(data.subjects.filter(s=>s.teacherId===t.id).map(s=>s.name))].join(', ') || '—')}</td>
+            <td><label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" ${researchAccessByTeacher[t.id]?'checked':''} onchange="setTeacherResearchAccess('${t.id}', this.checked)"> ${researchAccessByTeacher[t.id]?'On':'Off'}</label></td>
+          </tr>`).join('')}
+      </table></div>
+      <div class="hint">${data.teachers.filter(t=>!t.archived && researchAccessByTeacher[t.id]).length} of ${data.teachers.filter(t=>!t.archived).length} teachers switched on.</div>
+      `}
+      ` : ''}
+    </div>
+
+    <div class="card">
+      <h2 style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none" onclick="toggleAiUsageCard()">
+        <span style="font-size:12px;color:var(--muted)">${aiUsageOpen ? '▼' : '▶'}</span>
+        AI usage
+        ${!aiUsageOpen ? `<span class="tag" style="margin-left:auto;font-size:11px;font-weight:400">by user</span>` : ''}
+      </h2>
+      ${aiUsageOpen ? `
+      <div class="hint">AI calls made through the server, per user. Today that is the teachers' Research tab. Tokens are what the AI provider bills for; the exact cost is on your Anthropic billing page.</div>
+      <div class="row-form"><label>Month</label><input type="month" value="${escAttr(aiUsageMonth)}" onchange="setAiUsageMonth(this.value)"></div>
+      ${aiUsageMsg ? `<div class="hint" style="color:var(--brick)">${esc(aiUsageMsg)}</div>` : ''}
+      ${aiUsageRows === null ? '<div class="hint">Loading…</div>' : !aiUsageRows.length ? (aiUsageMsg ? '' : '<div class="empty">No AI calls this month.</div>') : (() => {
+        const byUser = {};
+        aiUsageRows.forEach(r => {
+          const k = r.user_id || 'none';
+          const u = byUser[k] || (byUser[k] = { label: aiUsageUserLabel(r), role: r.role || '', calls: 0, failed: 0, inTok: 0, outTok: 0, last: '' });
+          u.calls++; if (!r.ok) u.failed++;
+          u.inTok += r.input_tokens || 0; u.outTok += r.output_tokens || 0;
+          if (String(r.created_at) > u.last) u.last = String(r.created_at);
+        });
+        const list = Object.values(byUser).sort((a, b) => (b.inTok + b.outTok) - (a.inTok + a.outTok));
+        const fmt = n => n.toLocaleString('en-IN');
+        return `<div class="table-scroll"><table>
+          <tr><th>User</th><th>Role</th><th>Calls</th><th>Tokens in</th><th>Tokens out</th><th>Last used</th></tr>
+          ${list.map(u => `<tr><td>${esc(u.label)}</td><td>${esc(u.role)}</td><td>${u.calls}${u.failed ? ` <span style="font-size:12px;color:var(--brick)">(${u.failed} failed)</span>` : ''}</td><td>${fmt(u.inTok)}</td><td>${fmt(u.outTok)}</td><td>${esc(u.last.slice(0, 10))}</td></tr>`).join('')}
+          <tr><td><b>Total</b></td><td></td><td><b>${aiUsageRows.length}</b></td><td><b>${fmt(list.reduce((a, u) => a + u.inTok, 0))}</b></td><td><b>${fmt(list.reduce((a, u) => a + u.outTok, 0))}</b></td><td></td></tr>
+        </table></div>`;
+      })()}
+      ` : ''}
+    </div>
+
+    <div class="card">
       <h2>Add user</h2>
       <div class="hint">Admin has full access. Student and Teacher accounts only see their own attendance and (for students) subscription details.</div>
       ${userMsg.addUser ? `<div class="hint" style="color:var(--forest)">${esc(userMsg.addUser)}</div>` : ''}
@@ -14886,6 +15135,7 @@ function renderTeacherPortal() {
       ['studyplans', 'Study Plans'],
       ['homework', 'Homework'],
       ...(teacherQbAccess ? [['questionbank', 'Question Bank']] : []),
+      ...(teacherResearchAccess ? [['research', 'Research']] : []),
     ]},
     { label: 'Attendance', tabs: [
       ['attendance', 'Give Attendance'],
@@ -14906,6 +15156,7 @@ function renderTeacherPortal() {
     ['studyplans', 'Study Plans'],
     ['homework', 'Homework'],
     ...(teacherQbAccess ? [['questionbank', 'Question Bank']] : []),
+    ...(teacherResearchAccess ? [['research', 'Research']] : []),
     ['availability', 'Availability'],
     ['report', 'My Attendance Report'],
     ['attendance', 'Give Attendance'],
@@ -14965,6 +15216,9 @@ function teacherPortalBodyHtml(teacher) {
   }
   if (teacherPortalTab === 'questionbank' && teacherQbAccess) {
     return renderTeacherQuestionBank(teacher);
+  }
+  if (teacherPortalTab === 'research' && teacherResearchAccess) {
+    return renderTeacherResearch(teacher);
   }
   if (teacherPortalTab === 'availability') {
     return teacherLeaveManageHtml(teacher.id) + availabilityManageHtml(teacher.id) + availabilityReportHtml(teacher.id);
@@ -15184,6 +15438,92 @@ const HELP = {
 // HOMEWORK RENDER FUNCTIONS
 // ════════════════════════════════════════════════════════════════
 
+// Research tab: Lesson prep form, the brief just written, and this teacher's saved briefs.
+function renderTeacherResearch(teacher) {
+  const mySubjects = data.subjects.filter(s => s.teacherId === teacher.id && !s.archived);
+  const subj = mySubjects.find(s => s.id === researchDraft.subjectId);
+  const gradeIds = subj ? gradesForCategory(subj.category) : [];
+  const chapters = subj ? researchChaptersFor(subj.name, researchDraft.gradeId) : [];
+  const b = researchBrief;
+  const noteTitle = n => [n.chapter, n.subject_name, qbByName(grades, n.grade_id)].filter(Boolean).join(' · ');
+  return `
+  <div class="card">
+    <h3 style="font-family:'Zilla Slab',serif;margin:0 0 6px">Lesson prep</h3>
+    <div class="hint" style="margin-bottom:12px">Pick what you're teaching next. You get a short brief with key points, a teaching order, common mistakes, examples and practice questions. AI can get things wrong, so check it against the textbook before class.</div>
+    ${!mySubjects.length ? `<div class="empty">No subjects are mapped to you yet.</div>` : `
+    <div class="row-form">
+      <label>Subject *</label>
+      <select onchange="setResearchField('subjectId', this.value)">
+        <option value="">Select subject…</option>
+        ${mySubjects.map(s => `<option value="${s.id}" ${s.id === researchDraft.subjectId ? 'selected' : ''}>${esc(s.name)} (${esc(catLabel(s.category))})</option>`).join('')}
+      </select>
+    </div>
+    <div class="row-form">
+      <label>Class</label>
+      <select onchange="setResearchField('gradeId', this.value)" ${!subj ? 'disabled' : ''}>
+        <option value="">${subj ? (gradeIds.length ? 'Select class…' : 'Any class') : '— select subject first —'}</option>
+        ${gradeIds.map(id => `<option value="${id}" ${id === researchDraft.gradeId ? 'selected' : ''}>${esc(qbByName(grades, id))}</option>`).join('')}
+      </select>
+    </div>
+    <div class="row-form">
+      <label>Board <span class="hint" style="font-size:11px">(optional)</span></label>
+      <select onchange="setResearchField('boardId', this.value)">
+        <option value="">Any board</option>
+        ${boards.filter(x => !x.archived).map(x => `<option value="${x.id}" ${x.id === researchDraft.boardId ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="row-form">
+      <label>Chapter or topic *</label>
+      <input type="text" list="researchChapterOptions" value="${escAttr(researchDraft.chapter)}" placeholder="${chapters.length ? 'Pick from the list or type a topic' : 'e.g. Photosynthesis, Quadratic equations'}" oninput="setResearchField('chapter', this.value)">
+      <datalist id="researchChapterOptions">${chapters.map(c => `<option value="${escAttr(qbChapterLabel(c))}"></option>`).join('')}</datalist>
+    </div>
+    <div class="row-form">
+      <label>Anything else <span class="hint" style="font-size:11px">(optional)</span></label>
+      <textarea rows="2" style="width:100%;box-sizing:border-box;flex:1;min-width:130px;resize:vertical" placeholder="e.g. weak students, revision before exam, focus on grammar" oninput="setResearchField('focus', this.value)">${esc(researchDraft.focus)}</textarea>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button class="btn-primary" onclick="generateResearchBrief()" ${b.loading ? 'disabled' : ''}>${b.loading ? 'Writing the brief… (up to a minute)' : '✨ Make lesson brief'}</button>
+    </div>`}
+    ${b.error ? `<div class="hint" style="color:var(--brick);margin-top:8px">${esc(b.error)}</div>` : ''}
+  </div>
+  ${b.text ? `
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <h3 style="font-family:'Zilla Slab',serif;margin:0;flex:1">${esc([b.ask.chapter, b.ask.subjectName, qbByName(grades, b.ask.gradeId)].filter(Boolean).join(' · '))}</h3>
+      ${b.savedId ? `<span class="tag">Saved</span>` : `<button class="btn-small" onclick="saveResearchBrief()">Save</button>`}
+      <button class="btn-small" onclick="copyResearchBrief('')">Copy</button>
+    </div>
+    ${researchMdHtml(b.text)}
+    ${researchBankQs.length ? `
+    <h3 style="font-size:15px;margin:16px 0 6px">From your Question Bank</h3>
+    <div class="hint" style="margin-bottom:6px">Approved questions on this chapter from past papers. Build a practice paper from them in the Question Bank tab.</div>
+    <ol style="margin:4px 0 0 20px;padding:0;font-size:14px;line-height:1.6">
+      ${researchBankQs.map(q => `<li style="margin-bottom:6px">${esc(q.question_text)} <span style="font-size:12px;color:var(--muted)">(${esc([q.question_type, q.marks != null ? q.marks + ' marks' : '', q.source_year].filter(Boolean).join(' · '))})</span></li>`).join('')}
+    </ol>` : ''}
+  </div>` : ''}
+  <div class="card">
+    <h3 style="font-family:'Zilla Slab',serif;margin:0 0 8px">Saved briefs</h3>
+    ${researchNotesMsg ? `<div class="hint" style="color:${researchNotesMsg.startsWith('Could not') ? 'var(--brick)' : 'var(--forest)'}">${esc(researchNotesMsg)}</div>` : ''}
+    ${researchNotes === null ? '<div class="hint">Loading…</div>' : !researchNotes.length ? '<div class="empty">Nothing saved yet. Make a brief and press Save to keep it here.</div>' :
+      researchNotes.map(n => `
+      <div style="border-top:1px solid var(--line);padding:8px 0">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;cursor:pointer" onclick="toggleResearchNote('${n.id}')">
+          <span style="font-size:12px;color:var(--muted)">${researchOpenNoteId === n.id ? '▼' : '▶'}</span>
+          <b style="flex:1">${esc(noteTitle(n))}</b>
+          <span style="font-size:12px;color:var(--muted)">${esc(String(n.created_at || '').slice(0, 10))}</span>
+        </div>
+        ${researchOpenNoteId === n.id ? `
+        <div style="margin:8px 0 0 20px">
+          ${n.focus ? `<div class="hint">You asked: ${esc(n.focus)}</div>` : ''}
+          ${researchMdHtml(n.brief)}
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <button class="btn-small" onclick="copyResearchBrief('${n.id}')">Copy</button>
+            <button class="btn-small btn-danger" onclick="deleteResearchNote('${n.id}')">Delete</button>
+          </div>
+        </div>` : ''}
+      </div>`).join('')}
+  </div>`;
+}
 function renderTeacherHomework(teacher) {
   const myStudents = byName(data.students.filter(s => {
     const subjIds = data.subjects.filter(sub=>sub.teacherId===teacher.id).map(s=>s.id);
