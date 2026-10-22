@@ -9,26 +9,29 @@ def guide():
     common.getting_started(g, 'the admin or your colleagues')
 
     g.add('whatsnew', 'Start here', 'What’s new in this edition', 'The biggest additions since the last guide.', g2(
-        box('Question Bank', 'Review questions taken from past CBSE board papers, fix them and approve them for use.'),
-        box('Practice papers', 'Build a full board-style paper in one tap, assign it to students and download it as a PDF.'),
+        box('Research tab', 'AI lesson prep briefs, student insights by chapter, question research from past papers and your own resource library.'),
+        box('My Students tab', 'Contact details, subjects and class balances for every student enrolled with you.'),
     ) + g2(
-        box('Marking attempts', 'MCQs are marked for you. Mark the written answers, add feedback and the student sees the score straight away.'),
-        box('Private homework photos', 'Homework photos and files now open through secure links that only signed-in users can use.'),
-    ) + note('Where to find it', 'Everything new is in the <b>Question Bank</b> tab. Practice papers are its <b>Practice Papers</b> sub-tab.', 'tip'), new=True)
+        box('Smarter practice papers', 'Tick the sections you want and the lessons to cover. Old-syllabus questions stay out unless you ask for them.'),
+        box('Change MCQ marks', 'MCQs are still marked for you, but you can now change those marks when you review a paper.'),
+    ) + note('Where to find it', 'The <b>Question Bank</b> and <b>Research</b> tabs appear once the admin switches them on for you. '
+             'Tap <b>?</b> next to a heading in the app for quick help on that screen.', 'tip'), new=True)
 
-    g.add('portal', 'Overview', 'Your portal', 'Ten tabs. Everything is limited to your own classes and students.', table(
+    g.add('portal', 'Overview', 'Your portal', 'Up to twelve tabs. Everything is limited to your own classes and students.', table(
         ['Tab', 'What you do there'], [
             ['Dashboard', 'Today’s classes, earnings, alerts and AI tools'],
             ['Class Schedule', 'Create, run and export your timetable'],
+            ['My Students', 'Contacts, subjects and class balances of your students'],
             ['Study Plans', 'Topic roadmap for each student and subject'],
             ['Homework', 'Assign, track and review homework'],
-            ['Question Bank', 'Review questions, build practice papers, mark attempts'],
+            ['Question Bank*', 'Review questions, build practice papers, mark attempts'],
+            ['Research*', 'Lesson prep, student insights, question research, resources'],
             ['Availability', 'Weekly windows, leave and the free-slots report'],
             ['My Attendance Report', 'Your history and your students’ balances'],
             ['Give Attendance', 'Record the classes you have held'],
             ['My Profile', 'Contact details, bank and UPI, online class link, photo'],
             ['Setup', 'Change your password'],
-        ]))
+        ]) + note('* Switched on by the admin', 'You see the Question Bank and Research tabs only when the admin has turned them on for you.', 'tip'))
 
     g.add('dashboard', 'Overview', 'Dashboard', 'Everything you need at the start of the day.', g3(
         '<div class="stat"><div class="big">Given</div><div class="s">Classes given today</div></div>',
@@ -75,6 +78,13 @@ def guide():
         box('Leave', ['From and to dates, with a reason', 'Blocks new scheduling in that window', 'Classes already booked stay as they are']),
         box('Free slots report', ['Free time inside your availability, after booked classes', 'For one day, or the month from today']),
     ))
+
+    g.add('mystudents', 'Students', 'My Students', 'Everything about the students enrolled with you, in one list.', bullets([
+        'One card per active student in your subjects: student and parent contact details, and their subjects.',
+        'For each subject: classes subscribed, used and left, and the next expiry date.',
+        'Search by student name, parent, phone or email.',
+        'Fees and payments are not shown. Ask the admin about those.',
+    ]), new=True)
 
     g.add('studyplans', 'Students', 'Study Plans', 'A topic roadmap for each student and subject.', steps([
         ('Open the plan', 'In the Study Plans tab (it opens in Report view), tap a student’s row, then pick the subject.'),
@@ -138,7 +148,8 @@ def guide():
         ('Open the details', 'Tap the question text or <b>Show details</b> to see the passage, answer and explanation.'),
         ('Fix anything wrong', 'Tap <b>Edit</b>: change the text, type, marks (half marks such as 1.5 are fine), difficulty, chapter or answer key. Tap Save.'),
         ('Approve', 'Tap <b>✓ Approve</b>. The question moves to the Full Question Bank and can be used in papers.'),
-    ]), new=True)
+    ]) + note('Old syllabus', 'These questions are hidden; tick <b>Old syllabus only</b> to see them. Auto-fill never uses them, '
+              'but <b>Swap</b> can add one.', 'tip'), new=True)
 
     g.add('qbchapters', 'Question Bank', 'Chapters and duplicates', 'Keep the bank tidy so papers are balanced across chapters.', h3('Chapters') + bullets([
         'Every question should belong to a textbook chapter. <b>No chapter</b> in red means it isn’t linked yet.',
@@ -153,9 +164,10 @@ def guide():
     ]) + note('Tip', 'Tick <b>Duplicates only</b> next to the filters to see just the repeated questions.', 'tip'), new=True)
 
     g.add('papers', 'Question Bank', 'Building a practice paper', 'A full board-style paper, filled from the approved bank in one tap.', steps([
-        ('Start a paper', 'In <b>Practice Papers</b>, tap <b>+ New paper</b>.'),
-        ('Pick a blueprint', 'For example CBSE Class 10 Sanskrit, 80 marks. Each section shows its marks and how many questions the bank has.'),
-        ('Title, time and chapters', 'Title and minutes are optional. Tick chapters to include; none ticked means all.'),
+        ('Start a paper', 'In <b>Practice Papers</b>, tap <b>+ New paper</b> and pick a blueprint, for example CBSE Class 10 Sanskrit, 80 marks. '
+                          'Title and minutes are optional.'),
+        ('Tick sections and lessons', 'Untick sections you don’t want; the total updates. Tick lessons for a lesson-only paper (none = all): '
+                                      'this unticks Grammar, Writing, Unseen Passage and Translation, which use all chapters if you tick them back.'),
         ('Create and auto-fill', 'The app fills every section, balanced across chapters. If the bank runs short, the gap shows in red, '
                                  'for example “Section C: 12 of 15 marks”.'),
         ('Mark ready', 'When you’re happy, tap <b>Mark ready</b>: the paper changes from <b>Draft</b> to <b>Ready</b>. '
@@ -164,7 +176,7 @@ def guide():
         ['Swap', 'Replace it with another approved question of the same type'],
         ['↑ ↓', 'Move it up or down'],
         ['Remove, + Add', 'Take one out, or add one to a section'],
-        ['Re-run auto-fill', 'Fill the whole paper again'],
+        ['Re-run auto-fill', 'Fill the whole paper again, using the same sections and lessons'],
     ]), new=True)
 
     g.add('assign', 'Question Bank', 'Assigning and downloading papers', 'Send a ready paper to your students, or print it.', steps([
@@ -189,7 +201,7 @@ def guide():
         '<p>A gold number on the <b>Practice Papers</b> tab shows how many papers are waiting. Open a paper, then its <b>Students</b> tab, '
         'and pick <b>Needs marking</b>.</p>' + steps([
         ('Tap Review', 'Next to a student who has submitted. Oldest submissions come first.'),
-        ('Check MCQs', 'Already marked: you see the option picked and the correct one.'),
+        ('Check MCQs', 'Already marked: you see the option picked and the correct one. Change the <b>Marks</b> or add a comment if needed.'),
         ('Mark written answers', 'Read the typed answer or tap a photo to open it full size; <b>Model answer</b> is there if you need it. '
                                  'Enter <b>Marks</b> and an optional comment.'),
         ('Add overall feedback', 'What went well and what to revise.'),
@@ -198,6 +210,24 @@ def guide():
     ]) + note('Good to know', ['Answers you leave unmarked count as 0; the app asks before you finish.',
                                'The student and parent see the score and feedback as soon as you mark it reviewed.',
                                'Reopen a reviewed paper with <b>View / edit marks</b> to change it.']), new=True)
+
+    # ---------------- Research ----------------
+    g.add('research', 'Research', 'Research: lesson prep', 'An AI brief for the chapter you teach next.', steps([
+        ('Pick the subject', 'Then the grade (only if the subject has more than one) and, if you like, the board.'),
+        ('Choose the chapter', 'Pick from the list or type any topic. Add anything else to focus on, for example weak students or exam revision.'),
+        ('Read the brief', 'Key points, a teaching order, common mistakes, examples and practice questions, plus matching questions from your Question Bank.'),
+        ('Save it', 'Tap <b>Save</b> to keep it under <b>Saved briefs</b>. Open, or delete, a saved brief at any time.'),
+    ]) + note('Check before class', 'AI can get things wrong. Check the brief against the textbook before you use it.', 'warn')
+        + note('Switched on by the admin', 'The Research tab appears only when the admin has turned it on for you and AI is on.', 'tip'), new=True)
+
+    g.add('research2', 'Research', 'Research: insights, question research, resources', 'Know where students struggle and what the board asks.', g3(
+        box('Student insights', ['Marks by chapter and question type, from practice papers you marked', 'Under 60% shows as weak',
+                                 'Filter by subject, grade, period or student', '<b>Make a paper on weak chapters</b> starts a practice paper with those lessons ticked']),
+        box('Question research', ['Per chapter: which past papers asked it', 'Average marks per paper and question types',
+                                  'The past questions themselves']),
+        box('Resource library', ['Keep notes, worksheets, pictures and links by subject and chapter',
+                                 'Tick <b>Share with students</b> to show an item to your students and their parents under “From your teachers”']),
+    ) + note('Good to know', 'Student insights and Question research use the Question Bank, so they need Question Bank access too.'), new=True)
 
     # ---------------- money and more ----------------
     g.add('earnings', 'Money', 'Earnings, salary slip and demos', 'See what you have earned, and when you were paid.', g2(
@@ -244,6 +274,8 @@ def guide():
         ['Make a practice paper', 'Question Bank › Practice Papers › + New paper'],
         ['Print a paper or answer key', 'Open the paper › ⬇ Question paper PDF / With answer key'],
         ['Mark submitted papers', 'Practice Papers › paper › Students › Review'],
+        ['See a student’s contacts and balance', 'My Students'],
+        ['Prepare a lesson', 'Research › Lesson prep'],
         ['See what I earned', 'Dashboard › My earnings'],
         ['Print my salary slip', 'My Attendance Report'],
         ['Update my bank details', 'My Profile'],
