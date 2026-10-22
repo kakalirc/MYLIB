@@ -271,7 +271,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 17:50 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 17:54 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1397,11 +1397,14 @@ let researchNotesMsg = '';
 let researchOpenNoteId = '';
 let researchChapterList = null; // { chapters, textbooks } from the Question Bank, for chapter suggestions
 async function loadResearchData() {
-  const [notes, chaps, tbs] = await Promise.all([
-    sb.from('teacher_research_notes').select('*').order('created_at', { ascending: false }).limit(100),
-    researchChapterList ? Promise.resolve(null) : sb.from('qb_chapters').select('id,textbook_id,chapter_number,title,is_current_syllabus'),
-    researchChapterList ? Promise.resolve(null) : sb.from('qb_textbooks').select('id,board_id,grade_id,subject_name,is_current'),
-  ]);
+  let notes, chaps, tbs;
+  try {
+    [notes, chaps, tbs] = await Promise.all([
+      sb.from('teacher_research_notes').select('*').order('created_at', { ascending: false }).limit(100),
+      researchChapterList ? Promise.resolve(null) : sb.from('qb_chapters').select('id,textbook_id,chapter_number,title,is_current_syllabus'),
+      researchChapterList ? Promise.resolve(null) : sb.from('qb_textbooks').select('id,board_id,grade_id,subject_name,is_current'),
+    ]);
+  } catch (e) { researchNotes = []; researchNotesMsg = 'Could not load saved briefs: ' + (e.message || e); render(); return; }
   if (notes.error) { researchNotes = []; researchNotesMsg = 'Could not load saved briefs. Run SQL 46 in Supabase first. (' + notes.error.message + ')'; }
   else { researchNotes = notes.data || []; researchNotesMsg = ''; }
   if (chaps) researchChapterList = { chapters: (chaps.data || []), textbooks: ((tbs && tbs.data) || []) };
@@ -6124,6 +6127,7 @@ async function logout() {
     ]);
   }
   resetResearchState();
+  teacherPortalTab = 'dashboard'; // the next login starts on the Dashboard, so a tab's data is loaded when it is opened
   isLoggedIn = false; currentUsername = ''; currentRole = ''; currentLinkedId = ''; currentUserId = ''; parentSelectedChildId = ''; userMsg.changePw = ''; spAssignments = []; spPapers = {}; spOpen = null; spPhotoUrls = {};
   biometricOfferShown = false; // allow the enrollment banner on the next password login
   dangerZoneUnlocked = false; unlockPasswordAttempt = ''; unlockMsg = '';
