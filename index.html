@@ -269,7 +269,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 10:20 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 10:45 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -912,6 +912,56 @@ let sCalcClasses = '';
 let demandPreviewRows = null;
 let demandMsg = '';
 let demandConfirming = false;
+// Estimated AI cost (SQL 50): $ per million tokens per model, and the ₹ per $ rate. Admin only.
+const AI_DEFAULT_PRICES = { 'claude-haiku-4-5': { in: 1, out: 5 }, 'claude-sonnet-5-5': { in: 2, out: 10 } }; // Anthropic list prices, Oct 2026
+let aiModelPrices = {};   // saved prices; model → { in, out }
+let aiUsdInr = null;      // ₹ per $; null = not set (costs then show in $)
+let aiCostMsg = '';
+function aiPrice(model) { return aiModelPrices[model] || AI_DEFAULT_PRICES[model] || null; }
+function aiRowCostUsd(r) { const p = aiPrice(r.model); return p ? ((r.input_tokens || 0) * p.in + (r.output_tokens || 0) * p.out) / 1e6 : null; }
+function aiCostFmt(usd) {
+  if (usd == null) return '—';
+  if (aiUsdInr) { const v = usd * aiUsdInr; return '₹' + v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  return '$' + usd.toFixed(usd > 0 && usd < 0.01 ? 4 : 2);
+}
+function aiCostModels() { return [...new Set([...Object.keys(AI_DEFAULT_PRICES), ...Object.keys(aiModelPrices), ...(aiUsageRows || []).map(r => r.model).filter(Boolean)])]; }
+async function saveAiCostSettings() {
+  const prices = {};
+  let bad = '';
+  aiCostModels().forEach((m, i) => {
+    const a = document.getElementById('aiPriceIn' + i), b = document.getElementById('aiPriceOut' + i);
+    if (!a || !b) return;
+    const pin = a.value.trim(), pout = b.value.trim();
+    if (pin === '' && pout === '') return;
+    if (!(Number(pin) >= 0) || !(Number(pout) >= 0) || pin === '' || pout === '') { bad = m; return; }
+    prices[m] = { in: Number(pin), out: Number(pout) };
+  });
+  const rateTxt = (document.getElementById('aiUsdInr') || {}).value || '';
+  const rate = rateTxt.trim() === '' ? null : Number(rateTxt);
+  if (bad) { aiCostMsg = 'Fill both prices for ' + bad + ', or leave both empty.'; render(); return; }
+  if (rate !== null && !(rate > 0)) { aiCostMsg = 'The ₹ per $ rate must be a number above 0.'; render(); return; }
+  const { error } = await sb.from('ai_settings').update({ model_prices: prices, usd_inr: rate }).eq('id', 1);
+  if (error) { aiCostMsg = 'Could not save. Run SQL 50 in Supabase first. (' + error.message + ')'; render(); return; }
+  aiModelPrices = prices; aiUsdInr = rate; aiCostMsg = 'Saved ✓';
+  render();
+}
+function aiCostSettingsHtml() {
+  const models = aiCostModels();
+  return `<div style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
+    <b>Cost estimate</b>
+    <div class="hint">Used only to show an estimated cost in Users → AI usage. Prices are US$ per million tokens, from Anthropic's price list (anthropic.com/pricing). Empty boxes use the built-in price.</div>
+    <div class="table-scroll"><table>
+      <tr><th>Model</th><th>$ / million in</th><th>$ / million out</th></tr>
+      ${models.map((m, i) => { const p = aiModelPrices[m] || {}, d = AI_DEFAULT_PRICES[m] || {}; return `<tr><td style="font-family:monospace;font-size:12.5px">${esc(m)}</td>
+        <td><input type="number" min="0" step="0.01" id="aiPriceIn${i}" value="${p.in ?? ''}" placeholder="${d.in ?? ''}" style="width:90px"></td>
+        <td><input type="number" min="0" step="0.01" id="aiPriceOut${i}" value="${p.out ?? ''}" placeholder="${d.out ?? ''}" style="width:90px"></td></tr>`; }).join('')}
+    </table></div>
+    <div class="row-form"><label>₹ per $</label><input type="number" min="0" step="0.01" id="aiUsdInr" value="${aiUsdInr ?? ''}" placeholder="e.g. 88" style="width:100px">
+      <button class="btn-small btn-primary" onclick="saveAiCostSettings()">Save cost settings</button></div>
+    ${aiCostMsg ? `<div class="hint" style="color:${aiCostMsg.startsWith('Saved') ? 'var(--forest)' : 'var(--brick)'}">${esc(aiCostMsg)}</div>` : ''}
+    <div class="hint">Without a rate, costs show in $. Your Anthropic bill can differ a little (tax, rounding).</div>
+  </div>`;
+}
 let aiApiKey = '';    // the key itself: loaded for admins only (AI Settings card)
 let aiKeySet = false;  // whether a key is saved; AI calls go through the ai-proxy Edge Function, which holds it
 let aiMasterEnabled = false;
@@ -7760,6 +7810,11 @@ async function loadAiSettings() {
       const {data,error}=await sb.from('ai_settings').select('api_key,master_enabled').maybeSingle();
       if(!error&&data){ if (currentRole === 'Admin') aiApiKey=data.api_key||''; aiKeySet=!!data.api_key; aiMasterEnabled=data.master_enabled!==false; }
     }
+    if (currentRole === 'Admin') {
+      // Separate read: before SQL 50 these columns don't exist and the read just fails quietly.
+      const c = await sb.from('ai_settings').select('model_prices, usd_inr').eq('id', 1).maybeSingle();
+      if (!c.error && c.data) { aiModelPrices = c.data.model_prices || {}; aiUsdInr = c.data.usd_inr != null ? Number(c.data.usd_inr) : null; }
+    }
   } catch(e){}
 }
 // Every AI call goes through the ai-proxy Edge Function, which adds the key on the server and logs usage.
@@ -12613,25 +12668,39 @@ function renderUsers() {
         ${!aiUsageOpen ? `<span class="tag" style="margin-left:auto;font-size:11px;font-weight:400">by user</span>` : ''}
       </h2>
       ${aiUsageOpen ? `
-      <div class="hint">AI calls made through the server, per user. Today that is the teachers' Research tab. Tokens are what the AI provider bills for; the exact cost is on your Anthropic billing page.</div>
+      <div class="hint">Every AI call in the app, per user and per feature, with an estimated cost. The real bill is at console.anthropic.com under Usage / Cost.</div>
       <div class="row-form"><label>Month</label><input type="month" value="${escAttr(aiUsageMonth)}" onchange="setAiUsageMonth(this.value)"></div>
       ${aiUsageMsg ? `<div class="hint" style="color:var(--brick)">${esc(aiUsageMsg)}</div>` : ''}
       ${aiUsageRows === null ? '<div class="hint">Loading…</div>' : !aiUsageRows.length ? (aiUsageMsg ? '' : '<div class="empty">No AI calls this month.</div>') : (() => {
         const byUser = {};
         aiUsageRows.forEach(r => {
           const k = r.user_id || 'none';
-          const u = byUser[k] || (byUser[k] = { label: aiUsageUserLabel(r), role: r.role || '', calls: 0, failed: 0, inTok: 0, outTok: 0, last: '' });
+          const u = byUser[k] || (byUser[k] = { label: aiUsageUserLabel(r), role: r.role || '', calls: 0, failed: 0, inTok: 0, outTok: 0, cost: 0, unpriced: false, last: '' });
           u.calls++; if (!r.ok) u.failed++;
+          const c = aiRowCostUsd(r); if (c == null) { if (r.input_tokens || r.output_tokens) u.unpriced = true; } else u.cost += c;
           u.inTok += r.input_tokens || 0; u.outTok += r.output_tokens || 0;
           if (String(r.created_at) > u.last) u.last = String(r.created_at);
         });
-        const list = Object.values(byUser).sort((a, b) => (b.inTok + b.outTok) - (a.inTok + a.outTok));
+        const list = Object.values(byUser).sort((a, b) => b.cost - a.cost || (b.inTok + b.outTok) - (a.inTok + a.outTok));
         const fmt = n => n.toLocaleString('en-IN');
+        const byFeat = {};
+        aiUsageRows.forEach(r => {
+          const f = byFeat[r.feature || 'other'] || (byFeat[r.feature || 'other'] = { calls: 0, cost: 0 });
+          f.calls++; f.cost += aiRowCostUsd(r) || 0;
+        });
+        const totalCost = list.reduce((a, u) => a + u.cost, 0);
+        const missing = [...new Set(aiUsageRows.filter(r => (r.input_tokens || r.output_tokens) && !aiPrice(r.model)).map(r => r.model || '(no model)'))];
         return `<div class="table-scroll"><table>
-          <tr><th>User</th><th>Role</th><th>Calls</th><th>Tokens in</th><th>Tokens out</th><th>Last used</th></tr>
-          ${list.map(u => `<tr><td>${esc(u.label)}</td><td>${esc(u.role)}</td><td>${u.calls}${u.failed ? ` <span style="font-size:12px;color:var(--brick)">(${u.failed} failed)</span>` : ''}</td><td>${fmt(u.inTok)}</td><td>${fmt(u.outTok)}</td><td>${esc(u.last.slice(0, 10))}</td></tr>`).join('')}
-          <tr><td><b>Total</b></td><td></td><td><b>${aiUsageRows.length}</b></td><td><b>${fmt(list.reduce((a, u) => a + u.inTok, 0))}</b></td><td><b>${fmt(list.reduce((a, u) => a + u.outTok, 0))}</b></td><td></td></tr>
-        </table></div>`;
+          <tr><th>User</th><th>Role</th><th>Calls</th><th>Tokens in</th><th>Tokens out</th><th>Est. cost</th><th>Last used</th></tr>
+          ${list.map(u => `<tr><td>${esc(u.label)}</td><td>${esc(u.role)}</td><td>${u.calls}${u.failed ? ` <span style="font-size:12px;color:var(--brick)">(${u.failed} failed)</span>` : ''}</td><td>${fmt(u.inTok)}</td><td>${fmt(u.outTok)}</td><td>${u.unpriced && !u.cost ? '—' : aiCostFmt(u.cost)}${u.unpriced ? '*' : ''}</td><td>${esc(u.last.slice(0, 10))}</td></tr>`).join('')}
+          <tr><td><b>Total</b></td><td></td><td><b>${aiUsageRows.length}</b></td><td><b>${fmt(list.reduce((a, u) => a + u.inTok, 0))}</b></td><td><b>${fmt(list.reduce((a, u) => a + u.outTok, 0))}</b></td><td><b>${aiCostFmt(totalCost)}</b></td><td></td></tr>
+        </table></div>
+        <div style="margin-top:12px"><b>By feature</b></div>
+        <div class="table-scroll"><table>
+          <tr><th>Feature</th><th>Calls</th><th>Est. cost</th></tr>
+          ${Object.entries(byFeat).sort((a, b) => b[1].cost - a[1].cost).map(([k, f]) => `<tr><td>${esc(k)}</td><td>${f.calls}</td><td>${aiCostFmt(f.cost)}</td></tr>`).join('')}
+        </table></div>
+        <div class="hint">Est. cost = tokens × the prices in AI Settings → Cost estimate${aiUsdInr ? `, at ₹${esc(String(aiUsdInr))} per $` : ' (in $ until you enter a ₹ per $ rate there)'}. Your Anthropic bill can differ a little (tax, rounding).${missing.length ? ` * No price yet for ${esc(missing.join(', '))}, so those calls are left out; add it in AI Settings.` : ''}</div>`;
       })()}
       ` : ''}
     </div>
@@ -12767,7 +12836,7 @@ function renderUsers() {
     </div>
     ` : ''}
     ${photoSizeErrorPopupHtml()}
-    <div class="card"><h2>AI Settings</h2><div class="hint" style="margin-bottom:12px">AI features use Claude to improve messages, generate summaries and answer student questions.</div><label style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><input type="checkbox" id="aiMasterToggle" ${aiMasterEnabled?'checked':''} onchange="(async()=>{const k=document.getElementById('aiKeyInput').value.trim()||aiApiKey;await saveAiSettings(k,this.checked);render();})()"> <b>AI enabled (master switch)</b></label><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="password" autocomplete="new-password" id="aiKeyInput" placeholder="sk-ant-..." value="${esc(aiApiKey)}" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:monospace"><button class="btn-small btn-primary" onclick="(async()=>{const k=document.getElementById('aiKeyInput').value.trim();const en=document.getElementById('aiMasterToggle').checked;await saveAiSettings(k,en);render();})()">Save</button></div><div class="hint" style="margin-top:8px">Get key at <b>console.anthropic.com</b>. Est. Rs25-40/month.</div></div>
+    <div class="card"><h2>AI Settings</h2><div class="hint" style="margin-bottom:12px">AI features use Claude to improve messages, generate summaries and answer student questions.</div><label style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><input type="checkbox" id="aiMasterToggle" ${aiMasterEnabled?'checked':''} onchange="(async()=>{const k=document.getElementById('aiKeyInput').value.trim()||aiApiKey;await saveAiSettings(k,this.checked);render();})()"> <b>AI enabled (master switch)</b></label><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="password" autocomplete="new-password" id="aiKeyInput" placeholder="sk-ant-..." value="${esc(aiApiKey)}" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:monospace"><button class="btn-small btn-primary" onclick="(async()=>{const k=document.getElementById('aiKeyInput').value.trim();const en=document.getElementById('aiMasterToggle').checked;await saveAiSettings(k,en);render();})()">Save</button></div><div class="hint" style="margin-top:8px">Get key at <b>console.anthropic.com</b>. See real spend there under Usage / Cost.</div>${aiCostSettingsHtml()}</div>
   `;
 }
 
