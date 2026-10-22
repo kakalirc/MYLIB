@@ -271,7 +271,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 12:45 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 15:55 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -318,6 +318,7 @@ function confirmArchiveStudent(id) {
   if (hasUnused) { archiveStudentConfirmId = id; render(); } else toggleArchiveStudent(id);
 }
 function cancelArchiveStudent() { archiveStudentConfirmId = null; render(); }
+function helpBtn(key) { return `<button class="help-btn" onclick="openHelp('${key}',event)">?</button>`; }
 function openHelp(s, e) { helpOpenSection = s; if(e) e.stopPropagation(); render(); }
 function closeHelp() { helpOpenSection = ''; render(); }
 let sidebarCollapsedGroups = {}; // groupLabel -> true if manually collapsed. The group containing the active tab is always shown regardless.
@@ -1054,7 +1055,7 @@ function aiAccessCardHtml() {
   return `<div class="card">
       <h2 style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none" onclick="toggleAiAccessCard()">
         <span style="font-size:12px;color:var(--muted)">${aiAccessOpen ? '▼' : '▶'}</span>
-        AI access
+        AI access ${helpBtn('ai-access')}
         ${!aiAccessOpen ? `<span class="tag" style="margin-left:auto;font-size:11px;font-weight:400">per role and per person</span>` : ''}
       </h2>${body}
     </div>`;
@@ -8038,52 +8039,76 @@ async function adminUpdateTicket() {
 }
 
 // ── AI HELP PANEL ────────────────────────────────────────────────────────────
+// Quick Guide shown under "? Help", and the only guide the Help bot answers from. Keep it in step with the menus.
+// Lines tagged [qb] or [research] are shown to a teacher only when that tab is switched on for them.
 const SUPPORT_KB = {
   Admin: `My LIB app guide for Admin:
-- Dashboard: at-a-glance stats, AI summaries, students at risk.
-- Class Log: record daily attendance — select date, find student, mark Present/Absent/Holiday.
-- Chat: message teachers, students or parents directly.
-- Students & Subscriptions: add/edit students, manage class packages (30/50/60/100), view fee history, generate receipts.
-- Wix Bookings: demo bookings from your website arrive here (New → Scheduled → Converted/Cancelled).
-- Fees: monthly fee records per student — mark Paid/Pending/Overdue, print receipts.
-- Expenses: monthly overhead costs (rent, electricity etc.) — Admin only.
-- Reports & Export: monthly summary, payroll report, Excel export.
-- Teachers & Subjects: add teachers, add subjects, assign teacher per subject.
-- Parents: view parent contact details linked to students.
-- Manage Admins: add or remove admin accounts.
-- Login & Access Setup: create/manage login credentials for all roles.
-- Audit Log: full history of every change made in the system.
-- Support: view and resolve issues raised by teachers, students or parents.`,
+- Dashboard: at-a-glance stats, AI summaries and students at risk.
+- Class Log (Daily work): record daily attendance. Pick the date, find the student, mark Present/Absent/Holiday.
+- Communication (Daily work): chat with teachers, students and parents, and post announcements.
+- Students & Subscriptions (Daily work): add or edit students, enrol them in subjects, record payments, refunds and credit transfers, see subscription history and receipts.
+- Demo Bookings (Daily work): demo bookings from the website arrive here (New → Scheduled → Converted/Cancelled). A converted demo gives the teacher a demo bonus.
+- Fees (Money): per-class rates (Fee setup), discount structure, fee calculator and the UPI / contact details used in fee messages.
+- Expenses (Money): monthly overhead costs such as rent and electricity.
+- Reports & Export (Money): students needing renewal, pending fee requests, all payments, refunds, teacher payroll and Excel export.
+- Teachers & Subjects (People): add teachers and subjects, and set which teacher teaches each subject.
+- Parents (People): parent contact details and which children they are linked to.
+- Manage Admins (People): add or remove admin accounts.
+- Study Plans (People): read-only view of every teacher's study plans and progress.
+- Homework (People): every homework set by teachers, with filters by teacher, student and status.
+- Question Bank (People): Review Queue (approve new or edited questions), Full Question Bank, Archived, Practice Papers and Past Papers. Pick board, subject and grade to see questions. Old-syllabus questions stay hidden unless you tick "Old syllabus only".
+- Setup (System): grades, categories, boards and subject names; Question Bank access and Research access (which teachers get those tabs); add users and manage their logins; change your password; backups.
+- AI (System): AI Settings (master switch, API key, cost estimate prices), AI access (per role and per person) and AI usage (calls and estimated cost per user and feature).
+- Audit Log (System): every change made in the app, login activity, and App usage (which features each person uses). Each part opens with a tap.
+- Support (System): view and resolve issues raised by teachers, students or parents.`,
   Teacher: `My LIB app guide for Teacher:
-- Dashboard: your monthly class overview and AI tools.
-- Class Log tab: mark attendance for your students — select date, tap Present/Absent.
-- Class Schedule tab: your weekly timetable, recurring and one-off classes.
-- Availability & Leave tab: set the days/times you're available; mark leave days.
-- All Students tab: see all students assigned to your subjects.
-- My Attendance Report tab: your full attendance history.
-- Payroll tab: your monthly earnings — base salary + ₹100 bonus per converted demo.
-- Chat: message Admin or colleagues directly (💬 Chat button top-right).
-- Report an Issue: use the Support button at top-right if something looks wrong.`,
-  Student: `My LIB app guide for Student:
-- Dashboard (home): your attendance this month, XP level card, subscription balance.
+- Dashboard: today's classes, students needing renewal, low balances, students not seen in a while, your demo classes and student notes.
+- Class Schedule (Teaching): your classes by day or month. Set up a weekly schedule, add an extra class, mark a class done or remove a pending one.
+- My Students (Teaching): contact details, subjects and class balances (subscribed, used, left, next expiry) for students enrolled in your subjects. Use the search box to find one.
+- Study Plans (Teaching): make a topic list per student and subject, and mark each topic Not started / In progress / Done. You can export a plan as PDF.
+- Homework (Teaching): + Assign homework to a student (title, subject, due date, study plan topic, attached file). When a student submits, review it, give marks and feedback, then Mark reviewed.
+- [qb] Question Bank (Teaching): Review Queue (check and approve questions for your subject and grade), Full Question Bank, Archived, Practice Papers and Past Papers. Pick board, subject and grade first. Old-syllabus questions stay hidden unless you tick "Old syllabus only".
+- [qb] Practice papers: Question Bank → Practice Papers → New paper. Pick a blueprint, tick the sections you want, and tick lessons for a lesson-only paper (none ticked = all lessons). Create and auto-fill, then Swap, Remove or Re-run auto-fill, Mark ready, and Assign to students with a due date.
+- [qb] Marking practice papers: open the paper, tap a student under Needs marking, give marks for each written question and overall feedback, then Mark as reviewed. MCQs are marked automatically, and you can change those marks too.
+- [research] Research (Teaching): Lesson prep (an AI brief for a chapter: key points, teaching order, common mistakes, examples, practice questions; save it to Saved briefs) and Resource library (keep notes, worksheets and links; tick "Share with students" to show them to your students and their parents).
+- [research] [qb] Research also has Student insights (how each student did by chapter and question type on papers you marked, with "Make a paper on weak chapters") and Question research (how past papers ask each chapter).
+- Give Attendance (Attendance): record a class you gave. Current month records can be edited; earlier months are view only.
+- My Attendance Report (Attendance): your classes for the month and your earnings (classes × your rate, plus demo bonuses).
+- Availability (Attendance): your weekly teaching hours, leave dates and a free slots report.
+- My Profile (Account): your details and your online class link.
+- Setup (Account): change your password.
+- Chat: message Admin and others (💬 Chat button at the top).
+- Report an Issue: use the Support button at the top if something looks wrong.`,
+  Student: `My LIB app guide for Student (everything is on one page, scroll down):
+- Top of the page: your classes remaining, classes attended this month, XP level, badges and streak. Tap a colour dot next to Theme to change your colours.
 - XP & Levels: earn XP for every class you attend. Levels go Beginner → Learner → Scholar → Expert → Master → Legend.
-- Achievement Badges: earned automatically for attendance milestones, subject variety, and streaks.
-- Subject Leaderboard: see your rank vs other students in each subject. Updates after each class.
-- Fee History tab: all your past payments. Tap the Receipt button on any paid row to view/print it.
-- My Class Schedule card: your weekly timetable shown on the dashboard.
-- Ask AI chat: ask anything about your progress, classes remaining, or what to focus on.
-- Accent Colour Picker: personalise your app colour theme (bottom of dashboard).
-- Change Password: scroll to the bottom of the page.
-- Report an Issue: use the Support button at top-right if something looks wrong.`,
-  Parent: `My LIB app guide for Parent:
-- Dashboard (home): your child's attendance this month and subscription status.
-- Class Schedule tab: your child's weekly timetable (read-only view).
-- Fee History tab: all payments made. Tap Receipt to download/print any receipt.
-- UPI Payment tab: pay fees directly — amount is pre-filled, just scan the QR code or use the UPI ID.
-- Chat: message your child's teacher or Admin directly (💬 Chat button top-right).
-- Change Password: scroll to the bottom of the page.
-- Report an Issue: use the Support button at top-right if something looks wrong.`
+- My Study Plan: the topics your teacher planned for you and how far you've got.
+- Homework: homework from your teachers. Upload a photo of your work (or Mark submitted) before the due date; marks and feedback show once your teacher reviews it.
+- Practice Papers: papers your teacher assigned. Tap Start (or Continue), go section by section, tap the MCQ answer, type short answers or upload a photo. Answers save automatically. Tap Submit paper when done. MCQs are marked at once; your total shows after your teacher reviews it.
+- From your teachers: notes, worksheets and links your teachers shared for your subjects.
+- Ask AI: ask about your own progress, classes remaining or what to focus on.
+- Leaderboard: your rank among students in each subject.
+- Further down: online class links, fee requests, subscription and attendance reports for the month, class schedule, payment history with receipts, and the fee calculator.
+- Change Password: at the bottom of the page.
+- Chat (💬 at the top) to message your teacher or Admin. Support (at the top) to report a problem.`,
+  Parent: `My LIB app guide for Parent (everything is on one page, scroll down):
+- If you have more than one child, pick the child at the top (Viewing).
+- Your child's classes remaining, attendance this month and any fee due.
+- Study Plan, Homework and Practice Papers: what your child's teachers have set and how your child is doing.
+- From your teachers: notes, worksheets and links the teachers shared.
+- Further down: online class links, fee requests, subscription and attendance reports, class schedule, payment history with receipts (tap Receipt to download or print) and the fee calculator.
+- Paying fees: a fee request shows the amount with the UPI ID / QR code. Send the payment screenshot to the contact number shown so the Admin can mark it paid.
+- Change Password: at the bottom of the page.
+- Chat (💬 at the top) to message the teacher or Admin. Support (at the top) to report a problem.`
 };
+// The guide for the logged-in person: teachers only get the Question Bank / Research lines for tabs they can open.
+function supportKb() {
+  const guide = SUPPORT_KB[currentRole] || '';
+  if (currentRole !== 'Teacher') return guide;
+  const can = { qb: teacherQbAccess, research: teacherResearchAccess && aiMasterEnabled };
+  return guide.split('\n').filter(l => { const tags = l.match(/\[(qb|research)\]/g) || []; return tags.every(t => can[t.slice(1, -1)]); })
+    .map(l => l.replace(/\[(qb|research)\] /g, '')).join('\n');
+}
 
 async function aiHelpSend() {
   if (!aiHelp.input.trim() || aiHelp.loading) return;
@@ -8092,7 +8117,7 @@ async function aiHelpSend() {
   if (!aiKeySet) {
     aiHelp = { ...aiHelp, messages: [...aiHelp.messages, { role:'assistant', content:'AI is not configured. Please contact your admin to enable it.' }], loading:false }; render(); return;
   }
-  const kb = SUPPORT_KB[currentRole] || '';
+  const kb = supportKb();
   const sys = `You are a friendly in-app help assistant for LIB Education's My LIB management app. Answer the user's question about how to use the app using only the guide below. Be concise and clear — use numbered steps for how-to questions. If the question is not covered by the guide, say you're not sure and suggest contacting Admin.\n\n${kb}`;
   try {
     const msgs = aiHelp.messages.slice(-6).concat([{role:'user',content:q}]);
@@ -8156,7 +8181,7 @@ function supportModalHtml() {
 
 function aiHelpPanelHtml() {
   if (!aiHelp.open) return '';
-  const kb = SUPPORT_KB[currentRole] || '';
+  const kb = supportKb();
   // Build static FAQ lines from KB for display when AI not configured
   const faqLines = kb.split('\n').filter(l=>l.startsWith('-')).map(l=>l.slice(2));
   return `<div class="help-backdrop" onclick="toggleHelpAi()"></div>
@@ -12468,7 +12493,7 @@ function renderWixBookings() {
 // Admin → AI: AI on/off, key and cost prices; AI usage with estimated cost.
 function renderAiAdmin() {
   return `
-    <div class="card"><h2>AI Settings</h2><div class="hint" style="margin-bottom:12px">AI features use Claude to improve messages, generate summaries and answer student questions.</div><label style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><input type="checkbox" id="aiMasterToggle" ${aiMasterEnabled?'checked':''} onchange="(async()=>{const k=document.getElementById('aiKeyInput').value.trim()||aiApiKey;await saveAiSettings(k,this.checked);render();})()"> <b>AI enabled (master switch)</b></label><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="password" autocomplete="new-password" id="aiKeyInput" placeholder="sk-ant-..." value="${esc(aiApiKey)}" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:monospace"><button class="btn-small btn-primary" onclick="(async()=>{const k=document.getElementById('aiKeyInput').value.trim();const en=document.getElementById('aiMasterToggle').checked;await saveAiSettings(k,en);render();})()">Save</button></div><div class="hint" style="margin-top:8px">Get key at <b>console.anthropic.com</b>. See real spend there under Usage / Cost.</div>${aiCostSettingsHtml()}</div>
+    <div class="card"><h2>AI Settings ${helpBtn('ai-settings')}</h2><div class="hint" style="margin-bottom:12px">AI features use Claude to improve messages, generate summaries and answer student questions.</div><label style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><input type="checkbox" id="aiMasterToggle" ${aiMasterEnabled?'checked':''} onchange="(async()=>{const k=document.getElementById('aiKeyInput').value.trim()||aiApiKey;await saveAiSettings(k,this.checked);render();})()"> <b>AI enabled (master switch)</b></label><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="password" autocomplete="new-password" id="aiKeyInput" placeholder="sk-ant-..." value="${esc(aiApiKey)}" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:monospace"><button class="btn-small btn-primary" onclick="(async()=>{const k=document.getElementById('aiKeyInput').value.trim();const en=document.getElementById('aiMasterToggle').checked;await saveAiSettings(k,en);render();})()">Save</button></div><div class="hint" style="margin-top:8px">Get key at <b>console.anthropic.com</b>. See real spend there under Usage / Cost.</div>${aiCostSettingsHtml()}</div>
     ${aiAccessCardHtml()}
 
     <div class="card">
@@ -13853,7 +13878,7 @@ function renderTeacherStudents(teacher) {
   const anyShown = cards.some(c => !c.includes(';display:none"'));
   return `
     <div class="card">
-      <h2>My Students <span class="hint" style="font-weight:400">(${list.length})</span></h2>
+      <h2>My Students <span class="hint" style="font-weight:400">(${list.length})</span> ${helpBtn('my-students')}</h2>
       <div class="hint" style="margin:0 0 8px">Contact details and class balances for students enrolled in your subjects.</div>
       <input type="search" placeholder="Search name, parent, phone or email…" value="${escAttr(teacherStudentSearch)}" oninput="teacherStudentsFilter(this.value)" style="width:100%;max-width:360px">
     </div>
@@ -14163,7 +14188,7 @@ function renderTeacherStudyPlans(teacher) {
     </div>` : '';
 
   return `<div class="card">
-    <h2>Study Plans</h2>
+    <h2>Study Plans ${helpBtn('study-plans')}</h2>
     ${summaryLine}
     ${atRiskCard}
     ${gapCard}
@@ -15846,6 +15871,22 @@ const HELP = {
   'leave': { t:'Leave', b:'<ul><li>Marks a date range as leave. New scheduling into that window is blocked.</li><li>Classes already scheduled inside a leave period are left unchanged — nothing cancels automatically.</li><li>Overlapping with an existing leave period is not allowed.</li></ul>' },
   'give-attendance': { t:'Give Attendance', b:"<ul><li>Record a class you gave for a student.</li><li>The student dropdown shows each student's lowest remaining balance in [ ] brackets — ⚠ means zero or below (needs renewal).</li><li>Recording a class deducts from the student's balance. A warning appears if they have no classes left.</li></ul>" },
   'attendance-record': { t:'Attendance Records', b:'<ul><li><b>Selected day</b> — shows records for the date chosen in the form above.</li><li><b>Whole month</b> — switch to this view and pick any month to see all records for that month.</li><li>Current month records can be edited or deleted. Previous months are <b>view only</b> — to make a correction, contact admin on <b>9845393178</b>.</li></ul>' },
+  'qb-review': { t:'Review Queue', b:'<ul><li>New and edited questions wait here until someone checks them.</li><li>Pick board, subject and grade first; then narrow by type, difficulty, chapter, topic or search.</li><li>Open a question to fix its text, answer, marks or chapter, then Approve it. Only approved questions go into practice papers.</li><li>Duplicates only and 0 marks only appear when there are questions like that to clean up.</li></ul>' },
+  'qb-bank': { t:'Full Question Bank', b:'<ul><li>All approved questions, ready for practice papers.</li><li>Old-syllabus questions are hidden. Tick <b>Old syllabus only</b> to see them; they are never auto-filled into papers, but you can add one by hand with Swap.</li><li>Edit a question here, or ↩ Re-review to send it back to the Review Queue.</li><li>Archive a question to stop it being offered for new papers.</li></ul>' },
+  'qb-archived': { t:'Archived questions', b:'<ul><li>Archived questions are not offered for new practice papers.</li><li>Papers that already use them keep them.</li><li>Restore a question to bring it back into the bank.</li></ul>' },
+  'qb-papers': { t:'Practice Papers', b:'<ul><li><b>New paper</b>: pick a blueprint (e.g. CBSE 80 marks), then tick the sections you want. The paper total updates as you tick.</li><li><b>Lessons to include</b>: tick lessons for a lesson-only paper (none ticked = all). Ticking a lesson unticks Grammar, Writing, Unseen Passage and Translation; tick them back to add them, and they use all chapters.</li><li>Create and auto-fill picks approved questions spread across chapters. Use Swap or Remove on any question, or Re-run auto-fill. Your section and lesson choice is kept.</li><li>Mark ready, then Assign to students with a due date. You can change the due date or Remove a student later.</li><li><b>Marking</b>: under Needs marking, open a student, give marks for each written question and overall feedback, then Mark as reviewed. MCQs are marked automatically when the student submits, and you can change those marks too.</li><li>Download the question paper PDF, with answer key, or Word with answers.</li></ul>' },
+  'qb-past': { t:'Past Papers', b:'<ul><li>The board papers and sample papers the questions were imported from.</li><li>Open a PDF to see the original paper.</li></ul>' },
+  'my-students': { t:'My Students', b:'<ul><li>Every active student enrolled in one of your subjects.</li><li>Shows contact details, subjects, and classes subscribed, used and left, with the next expiry date.</li><li>Search by student name, parent, phone or email.</li><li>Fees and payments are not shown here; ask the Admin about those.</li></ul>' },
+  'study-plans': { t:'Study Plans', b:'<ul><li>A topic list per student and subject. + New plan, pick the student and subject, then + Add topic.</li><li>Set each topic to Not started, In progress or Done; the progress bar updates.</li><li>Tick several topics to change or delete them together.</li><li>Students and parents see the plan on their page. Export PDF to share it.</li><li>Topics also appear in the Homework form, so homework can be linked to a topic.</li></ul>' },
+  'hw-teacher': { t:'Homework', b:'<ul><li>+ Assign homework: pick the student and subject, add a title, due date and description, and optionally a study plan topic or an attached file.</li><li>The student uploads a photo (or marks it submitted). It then shows under Awaiting review.</li><li>Open it, give marks and feedback, then Mark reviewed. The student and parent see the feedback.</li><li>Late means the due date has passed and it is not submitted yet.</li></ul>' },
+  'hw-admin': { t:'Homework (all teachers)', b:'<ul><li>Every homework set by every teacher.</li><li>Filter by teacher, student or status to follow up.</li><li>Teachers set and review homework from their own Homework tab.</li></ul>' },
+  'sp-admin': { t:'Study Plans (all teachers)', b:'<ul><li>Read-only view of every study plan and how far each student has got.</li><li>Only the teacher can edit a plan, from their own Study Plans tab.</li></ul>' },
+  'research': { t:'Research', b:'<ul><li><b>Lesson prep</b>: pick subject, grade and chapter (or type a topic) to get an AI brief: key points, teaching order, common mistakes, examples and practice questions. Check it against the textbook. Save keeps it in Saved briefs.</li><li><b>Student insights</b>: how each student did, by chapter and question type, on the practice papers you marked. Under 60% shows as weak; Make a paper on weak chapters starts a practice paper with those lessons ticked.</li><li><b>Question research</b>: per chapter, which past papers asked it, average marks and question types.</li><li><b>Resource library</b>: keep notes, worksheets, pictures and links by subject and chapter. Tick Share with students to show an item to your students and their parents.</li><li>Student insights and Question research need Question Bank access.</li></ul>' },
+  'student-homework': { t:'Homework', b:'<ul><li>Homework your teachers have set, with the due date.</li><li>Upload a photo of your work, or Mark submitted if there is nothing to photograph.</li><li>Once the teacher reviews it you see the marks and feedback here.</li></ul>' },
+  'student-practice': { t:'Practice Papers', b:'<ul><li>Papers your teacher assigned. Start (or Continue) opens the paper.</li><li>Go section by section. Tap the answer for MCQs, type short answers, and upload a photo for long answers.</li><li>Answers save automatically, so you can stop and come back before the due date.</li><li>Submit paper when finished. MCQs are marked at once; the full score shows after the teacher reviews it.</li></ul>' },
+  'student-resources': { t:'From your teachers', b:'<ul><li>Notes, worksheets, pictures and links your teachers shared for your subjects.</li><li>Tap an item to open or download it.</li></ul>' },
+  'ai-settings': { t:'AI Settings', b:'<ul><li>The master switch turns every AI feature on or off for everyone.</li><li>The API key is kept on the server and is never sent to teachers, students or parents.</li><li><b>Cost estimate</b>: the price per model and the ₹ per $ rate used to estimate costs in AI usage.</li><li>Each person can make up to 200 AI calls a day.</li></ul>' },
+  'ai-access': { t:'AI access', b:'<ul><li>Turn AI on or off for a whole role (Teacher, Student, Parent), then for single people.</li><li>A person can use AI only when the master switch, their role and they themselves are all on. Admins always can.</li><li>When a role is off, everyone in it shows a locked Off.</li><li>People see a change after they log in again.</li></ul>' },
   'payment-history': { t:'Subscription Payment History', b:'<ul><li><b>Active</b> — this payment\'s classes are being used now.</li><li><b>Expired</b> — unused classes were removed after the expiry date.</li><li>The Expires on date shows when unused classes will be lost.</li><li>Contact the Admin to correct any details.</li></ul>' },
 };
 
@@ -16251,7 +16292,7 @@ function renderStudentResourcesSection(student) {
   const subjIds = new Set(data.studentSubjects.filter(ss => ss.studentId === student.id).map(ss => ss.subjectId));
   const list = resources.filter(r => subjIds.has(r.subject_id));
   if (!list.length) return '';
-  return `<div class="card"><h2>📚 From your teachers</h2>
+  return `<div class="card"><h2>📚 From your teachers ${helpBtn('student-resources')}</h2>
     <div class="hint">Notes, worksheets and links your teachers shared for your subjects.</div>
     ${resourcesMsg ? `<div class="hint" style="color:var(--brick)">${esc(resourcesMsg)}</div>` : ''}
     ${list.map(r => resItemHtml(r, false)).join('')}</div>`;
@@ -16266,7 +16307,7 @@ function renderTeacherResearch(teacher) {
   const noteTitle = n => [n.chapter, n.subject_name, qbByName(grades, n.grade_id)].filter(Boolean).join(' · ');
   return `
   <div class="card">
-    <h3 style="font-family:'Zilla Slab',serif;margin:0 0 6px">Lesson prep</h3>
+    <h3 style="font-family:'Zilla Slab',serif;margin:0 0 6px">Lesson prep ${helpBtn('research')}</h3>
     <div class="hint" style="margin-bottom:12px">Pick the subject and chapter you're teaching next. You get a short brief with key points, a teaching order, common mistakes, examples and practice questions. AI can get things wrong, so check it against the textbook before class.</div>
     ${!mySubjects.length ? `<div class="empty">No subjects are mapped to you yet.</div>` : `
     <div class="row-form">
@@ -16465,6 +16506,7 @@ function renderTeacherHomework(teacher) {
   </div>`;
 
   const statsHtml = `
+  <h2 style="font-family:'Zilla Slab',serif;margin:0 0 12px">Homework ${helpBtn('hw-teacher')}</h2>
   <div class="stat-grid" style="margin-bottom:18px">
     <div class="stat-card"><div class="num ${totalAssigned===0?'zero':''}">${totalAssigned}</div><div class="label">Total assigned</div></div>
     <div class="stat-card" onclick="hwFilterStatus='submitted';render()" style="cursor:pointer;${awaitingReview?'border-color:var(--gold)':''}"><div class="num ${awaitingReview===0?'zero':''}">${awaitingReview}</div><div class="label">Awaiting review</div></div>
@@ -16599,7 +16641,7 @@ function renderStudentHomeworkSection(student) {
 
   return `
   <div class="card">
-    <h2 style="font-family:'Zilla Slab',serif;margin:0 0 4px">📚 Homework</h2>
+    <h2 style="font-family:'Zilla Slab',serif;margin:0 0 4px">📚 Homework ${helpBtn('student-homework')}</h2>
     <div style="font-size:13px;color:var(--muted);margin-bottom:14px">${pending.length} pending · ${done.length} completed</div>
     ${rows3}
   </div>`;
@@ -16847,7 +16889,7 @@ function renderStudentPracticeSection(student) {
     </div>`;
   }).join('');
   return `<div class="card">
-    <h2 style="font-family:'Zilla Slab',serif;margin:0 0 4px">📝 Practice Papers</h2>
+    <h2 style="font-family:'Zilla Slab',serif;margin:0 0 4px">📝 Practice Papers ${helpBtn('student-practice')}</h2>
     <div style="font-size:13px;color:var(--muted);margin-bottom:14px">${open.length} to do · ${mine.length - open.length} done</div>
     ${rows}
   </div>`;
@@ -17586,7 +17628,7 @@ function renderAdminQuestionBank() {
 
   if (qbSubTab === 'past') return `<div class="card">
     <div class="row-form" style="justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h2 style="font-family:'Zilla Slab',serif;margin:0">Question Bank</h2>
+      <h2 style="font-family:'Zilla Slab',serif;margin:0">Question Bank ${helpBtn('qb-' + qbSubTab)}</h2>
     </div>
     ${subTabsHtml}
     ${qbMsg ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${esc(qbMsg)}</div>` : ''}
@@ -17595,7 +17637,7 @@ function renderAdminQuestionBank() {
 
   if (qbSubTab === 'papers') return `<div class="card">
     <div class="row-form" style="justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h2 style="font-family:'Zilla Slab',serif;margin:0">Question Bank</h2>
+      <h2 style="font-family:'Zilla Slab',serif;margin:0">Question Bank ${helpBtn('qb-' + qbSubTab)}</h2>
       <button class="btn-small" onclick="${qbPaperView === 'edit' && qbPaperId ? `qbOpenPaper('${qbPaperId}')` : 'loadQbPapers()'}">↻ Refresh</button>
     </div>
     ${subTabsHtml}
@@ -17607,7 +17649,7 @@ function renderAdminQuestionBank() {
 
   return `<div class="card">
     <div class="row-form" style="justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h2 style="font-family:'Zilla Slab',serif;margin:0">Question Bank</h2>
+      <h2 style="font-family:'Zilla Slab',serif;margin:0">Question Bank ${helpBtn('qb-' + qbSubTab)}</h2>
       <button class="btn-small" onclick="loadQBQuestions()" ${qbLoading?'disabled':''}>↻ Refresh</button>
     </div>
     ${statsHtml}
@@ -17661,7 +17703,7 @@ function renderTeacherQuestionBank(teacher) {
 
   if (qbSubTab === 'past') return `<div class="card">
     <div class="row-form" style="justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h2 style="font-family:'Zilla Slab',serif;margin:0">Question Bank</h2>
+      <h2 style="font-family:'Zilla Slab',serif;margin:0">Question Bank ${helpBtn('qb-' + qbSubTab)}</h2>
     </div>
     ${subTabsHtml}
     ${qbMsg ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${esc(qbMsg)}</div>` : ''}
@@ -17670,7 +17712,7 @@ function renderTeacherQuestionBank(teacher) {
 
   if (qbSubTab === 'papers') return `<div class="card">
     <div class="row-form" style="justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h2 style="font-family:'Zilla Slab',serif;margin:0">Question Bank</h2>
+      <h2 style="font-family:'Zilla Slab',serif;margin:0">Question Bank ${helpBtn('qb-' + qbSubTab)}</h2>
     </div>
     ${subTabsHtml}
     ${qbPapersHtml()}
@@ -17681,7 +17723,7 @@ function renderTeacherQuestionBank(teacher) {
 
   return `<div class="card">
     <div class="row-form" style="justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h2 style="font-family:'Zilla Slab',serif;margin:0">Question Bank</h2>
+      <h2 style="font-family:'Zilla Slab',serif;margin:0">Question Bank ${helpBtn('qb-' + qbSubTab)}</h2>
       <button class="btn-small" onclick="loadQBQuestions()" ${qbLoading?'disabled':''}>↻ Refresh</button>
     </div>
     ${statsHtml}
@@ -19178,7 +19220,7 @@ function renderAdminHomework() {
     ${late?`<div class="stat-card" style="border-color:var(--brick)"><div class="num">${late}</div><div class="label">Late</div></div>`:''}
   </div>`;
 
-  if (!hw.length) return `<div class="card"><h2 style="font-family:'Zilla Slab',serif;margin:0 0 16px">Homework</h2>${statsHtml2}${filtersHtml2}<div class="empty">No homework found${total?' matching these filters':' — teachers assign homework from their portal'}.</div></div>`;
+  if (!hw.length) return `<div class="card"><h2 style="font-family:'Zilla Slab',serif;margin:0 0 16px">Homework ${helpBtn('hw-admin')}</h2>${statsHtml2}${filtersHtml2}<div class="empty">No homework found${total?' matching these filters':' — teachers assign homework from their portal'}.</div></div>`;
 
   const tableRows = hw.map(h=>{
     const teacher = data.teachers.find(t=>t.id===h.teacherId);
@@ -19199,7 +19241,7 @@ function renderAdminHomework() {
   }).join('');
 
   return `<div class="card">
-    <h2 style="font-family:'Zilla Slab',serif;margin:0 0 16px">Homework</h2>
+    <h2 style="font-family:'Zilla Slab',serif;margin:0 0 16px">Homework ${helpBtn('hw-admin')}</h2>
     ${statsHtml2}
     ${filtersHtml2}
     <div class="table-scroll"><table>
@@ -19311,7 +19353,7 @@ function renderAdminStudyPlans() {
     </div>` : '';
 
   return `<div class="card">
-    <h2>📋 Study Plans — All Teachers</h2>
+    <h2>📋 Study Plans — All Teachers ${helpBtn('sp-admin')}</h2>
     <div class="hint" style="margin-bottom:14px">Read-only overview of all study plans created by teachers. To edit a plan, the teacher must do so from their Study Plans tab.</div>
     ${rlsWarning}
     ${plans.length > 0 ? summaryLine : ''}
