@@ -269,7 +269,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 11:45 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 12:00 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1015,7 +1015,7 @@ function aiAccessCardHtml() {
       .sort((a, b) => a.role.localeCompare(b.role) || aiAccessName(a).localeCompare(aiAccessName(b)));
     const offCount = Object.keys(aiAccessByUser).length;
     body = `
-      <div class="hint">Who may use AI. A person can use it only when the master switch (above), their role and they themselves are all on. Admins always can. This covers every AI button, including the teachers' Research tab. People see the change after logging in again.${aiMasterEnabled ? '' : ' <b>The master switch is off, so nobody can use AI right now.</b>'}</div>
+      <div class="hint">Who may use AI. A person can use it only when the master switch (above), their role and they themselves are all on. When a role is off, everyone in it shows Off; tick the role back on to switch people one by one. Admins always can. This covers every AI button, including the teachers' Research tab. People see the change after logging in again.${aiMasterEnabled ? '' : ' <b>The master switch is off, so nobody can use AI right now.</b>'}</div>
       ${aiAccessMsg ? `<div class="hint" style="color:${/Could not|Run SQL/.test(aiAccessMsg) ? 'var(--brick)' : 'var(--forest)'}">${esc(aiAccessMsg)}</div>` : ''}
       <div style="margin:8px 0"><b>By role</b></div>
       <div class="row-form">${roles.map(r => `<label style="display:inline-flex;align-items:center;gap:6px;margin-right:14px"><input type="checkbox" ${roleOn(r) ? 'checked' : ''} onchange="setAiRoleAccess('${r}', this.checked)"> All ${r}s</label>`).join('')}</div>
@@ -1026,8 +1026,11 @@ function aiAccessCardHtml() {
       </div>
       ${aiAccessPeople === null ? '<div class="hint">Loading…</div>' : !list.length ? '<div class="empty">No one matches.</div>' : `<div class="table-scroll" style="max-height:420px;overflow-y:auto"><table>
         <tr><th>Name</th><th>Role</th><th>AI</th></tr>
-        ${list.map(p => { const on = aiAccessByUser[p.id] !== false; return `<tr><td>${esc(aiAccessName(p))}</td><td>${esc(p.role)}</td>
-          <td><label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" ${on ? 'checked' : ''} onchange="setAiUserAccess('${p.id}', this.checked)"> ${on ? 'On' : 'Off'}</label>${on && !roleOn(p.role) ? ` <span style="font-size:12px;color:var(--muted)">(off: all ${esc(p.role)}s are off)</span>` : ''}</td></tr>`; }).join('')}
+        ${list.map(p => { const on = aiAccessByUser[p.id] !== false; const rOn = roleOn(p.role);
+          // When the whole role is off, nobody in it can use AI, so show Off and lock the person's tick.
+          return `<tr><td>${esc(aiAccessName(p))}</td><td>${esc(p.role)}</td>
+          <td>${rOn ? `<label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" ${on ? 'checked' : ''} onchange="setAiUserAccess('${p.id}', this.checked)"> ${on ? 'On' : 'Off'}</label>`
+            : `<label style="display:inline-flex;align-items:center;gap:6px;color:var(--muted)"><input type="checkbox" disabled> Off</label> <span style="font-size:12px;color:var(--muted)">(all ${esc(p.role)}s are off)</span>`}</td></tr>`; }).join('')}
       </table></div>`}`;
   }
   return `<div class="card">
