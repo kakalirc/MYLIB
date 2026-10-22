@@ -271,7 +271,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 21:45 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 22:10 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1062,6 +1062,7 @@ function aiAccessCardHtml() {
       </h2>${body}
     </div>`;
 }
+let aiKeyMsg = '';     // result of the last AI Settings save, shown under the key box
 let aiApiKey = '';    // the key itself: loaded for admins only (AI Settings card)
 let aiKeySet = false;  // whether a key is saved; AI calls go through the ai-proxy Edge Function, which holds it
 let aiMasterEnabled = false;
@@ -9246,7 +9247,9 @@ function openReceipt(paymentId) {
 }
 async function saveAiSettings(key,enabled) {
   const {error}=await sb.from('ai_settings').upsert({id:1,api_key:key,master_enabled:enabled},{onConflict:'id'});
-  if(!error){aiApiKey=key;aiKeySet=!!key;aiMasterEnabled=enabled;} return !error;
+  if(!error){aiApiKey=key;aiKeySet=!!key;aiMasterEnabled=enabled;}
+  aiKeyMsg = error ? 'Could not save: ' + error.message : 'Saved.';
+  return !error;
 }
 async function saveUserAiEnabled(val) {
   await sb.from('profiles').update({ai_enabled:val}).eq('id',currentUserId);
@@ -13029,7 +13032,7 @@ function renderWixBookings() {
 // Admin → AI: AI on/off, key and cost prices; AI usage with estimated cost.
 function renderAiAdmin() {
   return `
-    <div class="card"><h2>AI Settings ${helpBtn('ai-settings')}</h2><div class="hint" style="margin-bottom:12px">AI features use Claude to improve messages, generate summaries and answer student questions.</div><label style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><input type="checkbox" id="aiMasterToggle" ${aiMasterEnabled?'checked':''} onchange="(async()=>{const k=document.getElementById('aiKeyInput').value.trim()||aiApiKey;await saveAiSettings(k,this.checked);render();})()"> <b>AI enabled (master switch)</b></label><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="password" autocomplete="new-password" id="aiKeyInput" placeholder="sk-ant-..." value="${esc(aiApiKey)}" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:monospace"><button class="btn-small btn-primary" onclick="(async()=>{const k=document.getElementById('aiKeyInput').value.trim();const en=document.getElementById('aiMasterToggle').checked;await saveAiSettings(k,en);render();})()">Save</button></div><div class="hint" style="margin-top:8px">Get key at <b>console.anthropic.com</b>. See real spend there under Usage / Cost.</div>${aiCostSettingsHtml()}</div>
+    <div class="card"><h2>AI Settings ${helpBtn('ai-settings')}</h2><div class="hint" style="margin-bottom:12px">AI features use Claude to improve messages, generate summaries and answer student questions.</div><label style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><input type="checkbox" id="aiMasterToggle" ${aiMasterEnabled?'checked':''} onchange="(async()=>{const k=document.getElementById('aiKeyInput').value.trim()||aiApiKey;await saveAiSettings(k,this.checked);render();})()"> <b>AI enabled (master switch)</b></label><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="password" autocomplete="new-password" id="aiKeyInput" placeholder="sk-ant-..." value="${esc(aiApiKey)}" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:monospace"><button class="btn-small btn-primary" onclick="(async()=>{const k=document.getElementById('aiKeyInput').value.trim();const en=document.getElementById('aiMasterToggle').checked;await saveAiSettings(k,en);render();})()">Save</button></div>${aiKeyMsg?`<div class="hint" style="margin-top:8px;color:${aiKeyMsg==='Saved.'?'var(--forest)':'var(--brick)'}">${esc(aiKeyMsg)}</div>`:''}<div class="hint" style="margin-top:8px">Get key at <b>console.anthropic.com</b>. See real spend there under Usage / Cost.</div>${aiCostSettingsHtml()}</div>
     ${aiAccessCardHtml()}
 
     <div class="card">
@@ -13703,7 +13706,7 @@ function renderStudentReportCards(student, viewMonth, monthSetterFn, titlePrefix
           <td>${esc(r.subjectName)}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td>
           <td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${subscriptionStatusCellHtml(r)}</td><td>${r.status==='Refund'?'—':r.usedHere}</td><td>${r.status==='Refund'||!r.expiredClasses?'—':`<span style="color:var(--brick)">${r.expiredClasses}</span>`}</td><td>${r.status==='Refund'?'—':r.remainingHere}</td>
           <td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${r.paymentRemarks ? `<div class="hint">${esc(r.paymentRemarks)}</div>` : ''}</td>
-          <td>${r.status==='Refund'?'':"<button class='btn-small' onclick='openReceipt(\'"+(r.id||'')+"\')'  style='font-size:11px'>Receipt</button>"}</td>
+          <td>${r.status==='Refund'?'':`<button class="btn-small" onclick="openReceipt('${escAttr(r.id||'')}')" style="font-size:11px">Receipt</button>`}</td>
         </tr>`).join('')}
       ${transferRowsHtml(myTransfers, 10, false)}
     </table></div>` : '<div class="empty">No subscription payments recorded yet.</div>';
