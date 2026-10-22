@@ -271,7 +271,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 15:55 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-22 16:15 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1388,7 +1388,8 @@ async function loadTeacherResearchAccess() {
   } catch (e) { teacherResearchAccess = false; }
   if (!teacherResearchAccess && teacherPortalTab === 'research') teacherPortalTab = 'dashboard';
 }
-let researchDraft = { subjectId: '', gradeId: '', boardId: '', chapter: '', focus: '' };
+let researchDraft = { subjectId: '', gradeId: '', boardId: '', studentId: '', chapter: '', focus: '' };
+let researchNotesStudent = ''; // Saved briefs filter: '' = all, 'none' = no student, else a student id
 let researchBrief = { loading: false, text: '', error: '', savedId: '', ask: null };
 let researchBankQs = [];
 let researchNotes = null;      // this teacher's saved briefs, newest first; null = not loaded yet
@@ -1414,15 +1415,55 @@ function researchChaptersFor(subjectName, gradeId) {
   return researchChapterList.chapters.filter(c => tbIds.has(c.textbook_id) && c.is_current_syllabus !== false)
     .sort((a, b) => (Number(a.chapter_number) || 999) - (Number(b.chapter_number) || 999) || String(a.title || '').localeCompare(String(b.title || '')));
 }
+// Students this teacher teaches in the subject (and grade, when the subject has more than one), for the "For student" picker.
+function researchStudentsFor(subjectId, gradeId) {
+  const subj = data.subjects.find(s => s.id === subjectId);
+  if (!subj) return [];
+  const ids = new Set(data.studentSubjects.filter(ss => ss.subjectId === subjectId).map(ss => ss.studentId));
+  const multiGrade = gradesForCategory(subj.category).length > 1;
+  return byName(data.students.filter(st => ids.has(st.id) && !st.archived && (!multiGrade || !gradeId || !st.gradeId || st.gradeId === gradeId)));
+}
+// Study plan topics for the chapter box. A picked student: their topics in plan order, done ones last.
+// No student: every student's topics once each, with the names of the students who have it.
+function researchPlanTopics(subjectId, studentId, gradeId) {
+  const plans = (data.studyPlans || []).filter(p => p.subjectId === subjectId);
+  const isDone = i => i.status === 'done' || i.status === 'completed';
+  if (studentId) {
+    const plan = plans.find(p => p.studentId === studentId);
+    const items = ((plan && plan.items) || []).filter(i => String(i.topic || '').trim());
+    return [...items.filter(i => !isDone(i)), ...items.filter(isDone)]
+      .map(i => ({ value: String(i.topic).trim(), label: isDone(i) ? 'done' : '' }));
+  }
+  const allowed = new Map(researchStudentsFor(subjectId, gradeId).map(st => [st.id, st.name]));
+  const byTopic = new Map();
+  plans.filter(p => allowed.has(p.studentId)).forEach(p => (p.items || []).forEach(i => {
+    const t = String(i.topic || '').trim();
+    if (!t) return;
+    const key = t.toLowerCase();
+    if (!byTopic.has(key)) byTopic.set(key, { value: t, names: [] });
+    const e = byTopic.get(key);
+    if (!e.names.includes(allowed.get(p.studentId))) e.names.push(allowed.get(p.studentId));
+  }));
+  return [...byTopic.values()].map(e => ({ value: e.value, label: e.names.join(', ') }));
+}
 function setResearchField(field, value) {
   researchDraft[field] = value;
   if (field === 'subjectId') {
     const subj = data.subjects.find(s => s.id === value);
     const gs = subj ? gradesForCategory(subj.category) : [];
     researchDraft.gradeId = gs.length === 1 ? gs[0] : '';
+    researchDraft.studentId = '';
     researchDraft.chapter = '';
   }
-  if (field === 'gradeId' || field === 'boardId') researchDraft.chapter = '';
+  if (field === 'gradeId' && researchDraft.studentId && !researchStudentsFor(researchDraft.subjectId, value).some(st => st.id === researchDraft.studentId)) researchDraft.studentId = '';
+  if (field === 'studentId' && value) {
+    // Prefill grade and board from the student's record when they're set.
+    const st = data.students.find(x => x.id === value);
+    const subj = data.subjects.find(s => s.id === researchDraft.subjectId);
+    if (st && st.gradeId && subj && gradesForCategory(subj.category).includes(st.gradeId)) researchDraft.gradeId = st.gradeId;
+    if (st && st.boardId && boards.some(b => b.id === st.boardId && !b.archived)) researchDraft.boardId = st.boardId;
+  }
+  if (field === 'gradeId' || field === 'boardId' || field === 'studentId') researchDraft.chapter = '';
   if (field !== 'focus' && field !== 'chapter') render();
 }
 async function callResearchFunction(body) {
@@ -1444,7 +1485,7 @@ async function generateResearchBrief() {
   const subj = data.subjects.find(s => s.id === researchDraft.subjectId);
   const chapter = researchDraft.chapter.trim();
   if (!subj || !chapter) { researchBrief = { ...researchBrief, error: 'Pick a subject and type or pick a chapter.' }; render(); return; }
-  const ask = { subjectName: subj.name, gradeId: researchDraft.gradeId, chapter, focus: researchDraft.focus.trim() };
+  const ask = { subjectName: subj.name, gradeId: researchDraft.gradeId, studentId: researchDraft.studentId || '', chapter, focus: researchDraft.focus.trim() };
   researchBrief = { loading: true, text: '', error: '', savedId: '', ask };
   researchBankQs = [];
   render();
@@ -1466,17 +1507,24 @@ async function loadResearchBankQuestions(chapterIds) {
 async function saveResearchBrief() {
   const b = researchBrief;
   if (!b.text || !b.ask || b.savedId) return;
-  const { data: row, error } = await sb.from('teacher_research_notes').insert({
+  const fields = {
     teacher_id: currentLinkedId, subject_name: b.ask.subjectName, grade_id: b.ask.gradeId || null,
     chapter: b.ask.chapter, focus: b.ask.focus || null, brief: b.text,
-  }).select().single();
+  };
+  let { data: row, error } = await sb.from('teacher_research_notes').insert(b.ask.studentId ? { ...fields, student_id: b.ask.studentId } : fields).select().single();
+  let savedMsg = '✓ Saved.';
+  if (error && b.ask.studentId && /student_id/.test(error.message || '')) {
+    // SQL 52 not run yet: keep the brief, just without the student.
+    ({ data: row, error } = await sb.from('teacher_research_notes').insert(fields).select().single());
+    savedMsg = '✓ Saved, but without the student name. Ask your admin to run SQL 52 in Supabase.';
+  }
   if (error) { researchBrief = { ...b, error: 'Could not save: ' + error.message }; render(); return; }
   // The brief moves into Saved briefs (opened there) instead of showing twice.
   researchBrief = { loading: false, text: '', error: '', savedId: '', ask: null };
   researchBankQs = [];
   researchNotes = [row, ...(researchNotes || [])];
   researchOpenNoteId = row.id;
-  researchNotesMsg = '✓ Saved.';
+  researchNotesMsg = savedMsg;
   render();
 }
 async function deleteResearchNote(id) {
@@ -1491,7 +1539,8 @@ function closeResearchBrief() { researchBrief = { loading: false, text: '', erro
 // Logout: forget everything the Research tab loaded, so the next login starts clean.
 function resetResearchState() {
   researchBrief = { loading: false, text: '', error: '', savedId: '', ask: null }; researchBankQs = [];
-  researchDraft = { subjectId: '', gradeId: '', boardId: '', chapter: '', focus: '' };
+  researchDraft = { subjectId: '', gradeId: '', boardId: '', studentId: '', chapter: '', focus: '' };
+  researchNotesStudent = '';
   researchNotes = null; researchNotesMsg = ''; researchOpenNoteId = '';
   insights = null; insightsRaw = null; insightsFilter = { subject: '', gradeId: '', days: '', search: '' }; insightsStudentId = ''; insightsMsg = '';
   qrRows = null; qrMsg = ''; qrOpenChapter = ''; qrDraft = { subjectId: '', gradeId: '', boardId: '', examType: '' };
@@ -1534,7 +1583,7 @@ function setTeacherPortalTab(t) {
   if (t === 'homework') { hwShowForm = false; hwMsg = ''; hwFilterStudentId = ''; hwFilterStatus = 'assigned'; loadHomework().then(() => render()); return; }
   if (t === 'questionbank' && !teacherQbAccess) { teacherPortalTab = 'dashboard'; render(); return; }
   if (t === 'research' && !teacherResearchAccess) { teacherPortalTab = 'dashboard'; render(); return; }
-  if (t === 'research') { researchNotesMsg = ''; researchOpenNoteId = ''; insightsStudentId = ''; if (teacherQbAccess) loadInsights(); loadResources().then(render); loadResearchData(); return; }
+  if (t === 'research') { researchNotesMsg = ''; researchOpenNoteId = ''; insightsStudentId = ''; if (teacherQbAccess) loadInsights(); loadResources().then(render); loadStudyPlans().then(render); loadResearchData(); return; }
   if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); return; }
   render();
 }
@@ -8070,7 +8119,7 @@ const SUPPORT_KB = {
 - [qb] Question Bank (Teaching): Review Queue (check and approve questions for your subject and grade), Full Question Bank, Archived, Practice Papers and Past Papers. Pick board, subject and grade first. Old-syllabus questions stay hidden unless you tick "Old syllabus only".
 - [qb] Practice papers: Question Bank → Practice Papers → New paper. Pick a blueprint, tick the sections you want, and tick lessons for a lesson-only paper (none ticked = all lessons). Create and auto-fill, then Swap, Remove or Re-run auto-fill, Mark ready, and Assign to students with a due date.
 - [qb] Marking practice papers: open the paper, tap a student under Needs marking, give marks for each written question and overall feedback, then Mark as reviewed. MCQs are marked automatically, and you can change those marks too.
-- [research] Research (Teaching): Lesson prep (an AI brief for a chapter: key points, teaching order, common mistakes, examples, practice questions; save it to Saved briefs) and Resource library (keep notes, worksheets and links; tick "Share with students" to show them to your students and their parents).
+- [research] Research (Teaching): Lesson prep (an AI brief for a chapter: key points, teaching order, common mistakes, examples, practice questions; save it to Saved briefs; optional "For student" picker shows that student's Study Plan topics as chapter suggestions and Saved briefs can be filtered by student) and Resource library (keep notes, worksheets and links; tick "Share with students" to show them to your students and their parents).
 - [research] [qb] Research also has Student insights (how each student did by chapter and question type on papers you marked, with "Make a paper on weak chapters") and Question research (how past papers ask each chapter).
 - Give Attendance (Attendance): record a class you gave. Current month records can be edited; earlier months are view only.
 - My Attendance Report (Attendance): your classes for the month and your earnings (classes × your rate, plus demo bonuses).
@@ -15881,7 +15930,7 @@ const HELP = {
   'hw-teacher': { t:'Homework', b:'<ul><li>+ Assign homework: pick the student and subject, add a title, due date and description, and optionally a study plan topic or an attached file.</li><li>The student uploads a photo (or marks it submitted). It then shows under Awaiting review.</li><li>Open it, give marks and feedback, then Mark reviewed. The student and parent see the feedback.</li><li>Late means the due date has passed and it is not submitted yet.</li></ul>' },
   'hw-admin': { t:'Homework (all teachers)', b:'<ul><li>Every homework set by every teacher.</li><li>Filter by teacher, student or status to follow up.</li><li>Teachers set and review homework from their own Homework tab.</li></ul>' },
   'sp-admin': { t:'Study Plans (all teachers)', b:'<ul><li>Read-only view of every study plan and how far each student has got.</li><li>Only the teacher can edit a plan, from their own Study Plans tab.</li></ul>' },
-  'research': { t:'Research', b:'<ul><li><b>Lesson prep</b>: pick subject, grade and chapter (or type a topic) to get an AI brief: key points, teaching order, common mistakes, examples and practice questions. Check it against the textbook. Save keeps it in Saved briefs.</li><li><b>Student insights</b>: how each student did, by chapter and question type, on the practice papers you marked. Under 60% shows as weak; Make a paper on weak chapters starts a practice paper with those lessons ticked.</li><li><b>Question research</b>: per chapter, which past papers asked it, average marks and question types.</li><li><b>Resource library</b>: keep notes, worksheets, pictures and links by subject and chapter. Tick Share with students to show an item to your students and their parents.</li><li>Student insights and Question research need Question Bank access.</li></ul>' },
+  'research': { t:'Research', b:'<ul><li><b>Lesson prep</b>: pick subject, grade and chapter (or type a topic) to get an AI brief: key points, teaching order, common mistakes, examples and practice questions. Check it against the textbook. Save keeps it in Saved briefs.</li><li><b>For student</b> (optional): pick one of your students to see their Study Plan topics in the chapter list (done topics last) and fill in their grade and board. With no student picked, the list shows all your students’ topics with their names. Question Bank chapters come first. Saved briefs remember the student and can be filtered by student.</li><li><b>Student insights</b>: how each student did, by chapter and question type, on the practice papers you marked. Under 60% shows as weak; Make a paper on weak chapters starts a practice paper with those lessons ticked.</li><li><b>Question research</b>: per chapter, which past papers asked it, average marks and question types.</li><li><b>Resource library</b>: keep notes, worksheets, pictures and links by subject and chapter. Tick Share with students to show an item to your students and their parents.</li><li>Student insights and Question research need Question Bank access.</li></ul>' },
   'student-homework': { t:'Homework', b:'<ul><li>Homework your teachers have set, with the due date.</li><li>Upload a photo of your work, or Mark submitted if there is nothing to photograph.</li><li>Once the teacher reviews it you see the marks and feedback here.</li></ul>' },
   'student-practice': { t:'Practice Papers', b:'<ul><li>Papers your teacher assigned. Start (or Continue) opens the paper.</li><li>Go section by section. Tap the answer for MCQs, type short answers, and upload a photo for long answers.</li><li>Answers save automatically, so you can stop and come back before the due date.</li><li>Submit paper when finished. MCQs are marked at once; the full score shows after the teacher reviews it.</li></ul>' },
   'student-resources': { t:'From your teachers', b:'<ul><li>Notes, worksheets, pictures and links your teachers shared for your subjects.</li><li>Tap an item to open or download it.</li></ul>' },
@@ -16303,8 +16352,15 @@ function renderTeacherResearch(teacher) {
   const subj = mySubjects.find(s => s.id === researchDraft.subjectId);
   const gradeIds = subj ? gradesForCategory(subj.category) : [];
   const chapters = subj ? researchChaptersFor(subj.name, researchDraft.gradeId) : [];
+  const myStudents = subj ? researchStudentsFor(subj.id, researchDraft.gradeId) : [];
+  if (researchDraft.studentId && !myStudents.some(st => st.id === researchDraft.studentId)) researchDraft.studentId = '';
+  const chapterLabels = new Set(chapters.map(c => qbChapterLabel(c).toLowerCase()));
+  const planTopics = subj ? researchPlanTopics(subj.id, researchDraft.studentId, researchDraft.gradeId).filter(t => !chapterLabels.has(t.value.toLowerCase())) : [];
+  const studentName = id => ((data.students.find(st => st.id === id) || {}).name || '');
   const b = researchBrief;
-  const noteTitle = n => [n.chapter, n.subject_name, qbByName(grades, n.grade_id)].filter(Boolean).join(' · ');
+  const noteTitle = n => [n.chapter, n.subject_name, qbByName(grades, n.grade_id), n.student_id ? studentName(n.student_id) : ''].filter(Boolean).join(' · ');
+  const noteStudentIds = [...new Set((researchNotes || []).map(n => n.student_id).filter(Boolean))];
+  const shownNotes = (researchNotes || []).filter(n => !researchNotesStudent || (researchNotesStudent === 'none' ? !n.student_id : n.student_id === researchNotesStudent));
   return `
   <div class="card">
     <h3 style="font-family:'Zilla Slab',serif;margin:0 0 6px">Lesson prep ${helpBtn('research')}</h3>
@@ -16324,6 +16380,13 @@ function renderTeacherResearch(teacher) {
         ${gradeIds.map(id => `<option value="${id}" ${id === researchDraft.gradeId ? 'selected' : ''}>${esc(qbByName(grades, id))}</option>`).join('')}
       </select>
     </div>` : ''}
+    ${subj ? `<div class="row-form">
+      <label>For student <span class="hint" style="font-size:11px">(optional)</span></label>
+      <select onchange="setResearchField('studentId', this.value)">
+        <option value="">Any student</option>
+        ${myStudents.map(st => `<option value="${st.id}" ${st.id === researchDraft.studentId ? 'selected' : ''}>${esc(st.name)}</option>`).join('')}
+      </select>
+    </div>` : ''}
     <div class="row-form">
       <label>Board <span class="hint" style="font-size:11px">(optional)</span></label>
       <select onchange="setResearchField('boardId', this.value)">
@@ -16333,9 +16396,10 @@ function renderTeacherResearch(teacher) {
     </div>
     <div class="row-form">
       <label>Chapter or topic *</label>
-      <input type="text" list="researchChapterOptions" value="${escAttr(researchDraft.chapter)}" placeholder="${chapters.length ? 'Pick from the list or type a topic' : 'e.g. Photosynthesis, Quadratic equations'}" oninput="setResearchField('chapter', this.value)">
-      <datalist id="researchChapterOptions">${chapters.map(c => `<option value="${escAttr(qbChapterLabel(c))}"></option>`).join('')}</datalist>
+      <input type="text" list="researchChapterOptions" value="${escAttr(researchDraft.chapter)}" placeholder="${chapters.length || planTopics.length ? 'Pick from the list or type a topic' : 'e.g. Photosynthesis, Quadratic equations'}" oninput="setResearchField('chapter', this.value)">
+      <datalist id="researchChapterOptions">${chapters.map(c => `<option value="${escAttr(qbChapterLabel(c))}"></option>`).join('')}${planTopics.map(t => `<option value="${escAttr(t.value)}" label="${escAttr(t.label ? 'Study plan · ' + t.label : 'Study plan')}"></option>`).join('')}</datalist>
     </div>
+    ${subj && !chapters.length && !planTopics.length ? `<div class="hint" style="margin:-4px 0 8px">${researchDraft.studentId ? 'This student has no study plan topics for this subject yet.' : 'No chapter suggestions yet.'} Add topics in Study Plans to see them here, or type a topic.</div>` : ''}
     <div class="row-form">
       <label>Anything else <span class="hint" style="font-size:11px">(optional)</span></label>
       <textarea rows="2" style="width:100%;box-sizing:border-box;flex:1;min-width:130px;resize:vertical" placeholder="e.g. weak students, revision before exam, focus on grammar" oninput="setResearchField('focus', this.value)">${esc(researchDraft.focus)}</textarea>
@@ -16348,7 +16412,7 @@ function renderTeacherResearch(teacher) {
   ${b.text ? `
   <div class="card">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-      <h3 style="font-family:'Zilla Slab',serif;margin:0;flex:1">${esc([b.ask.chapter, b.ask.subjectName, qbByName(grades, b.ask.gradeId)].filter(Boolean).join(' · '))}</h3>
+      <h3 style="font-family:'Zilla Slab',serif;margin:0;flex:1">${esc([b.ask.chapter, b.ask.subjectName, qbByName(grades, b.ask.gradeId), b.ask.studentId ? studentName(b.ask.studentId) : ''].filter(Boolean).join(' · '))}</h3>
       <button class="btn-small" onclick="saveResearchBrief()">Save</button>
       <button class="btn-small" onclick="copyResearchBrief('')">Copy</button>
       <button class="btn-small" onclick="closeResearchBrief()">Close</button>
@@ -16362,10 +16426,18 @@ function renderTeacherResearch(teacher) {
     </ol>` : ''}
   </div>` : ''}
   <div class="card">
-    <h3 style="font-family:'Zilla Slab',serif;margin:0 0 8px">Saved briefs</h3>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px">
+      <h3 style="font-family:'Zilla Slab',serif;margin:0;flex:1">Saved briefs</h3>
+      ${noteStudentIds.length ? `<select onchange="researchNotesStudent = this.value; render()" style="max-width:200px">
+        <option value="">All students</option>
+        ${byName(noteStudentIds.map(id => ({ id, name: studentName(id) || 'Student (removed)' }))).map(st => `<option value="${st.id}" ${st.id === researchNotesStudent ? 'selected' : ''}>${esc(st.name)}</option>`).join('')}
+        <option value="none" ${researchNotesStudent === 'none' ? 'selected' : ''}>No student</option>
+      </select>` : ''}
+    </div>
     ${researchNotesMsg ? `<div class="hint" style="color:${researchNotesMsg.startsWith('Could not') ? 'var(--brick)' : 'var(--forest)'}">${esc(researchNotesMsg)}</div>` : ''}
     ${researchNotes === null ? '<div class="hint">Loading…</div>' : !researchNotes.length ? '<div class="empty">Nothing saved yet. Make a brief and press Save to keep it here.</div>' :
-      researchNotes.map(n => `
+      !shownNotes.length ? '<div class="empty">No saved briefs for this student.</div>' :
+      shownNotes.map(n => `
       <div style="border-top:1px solid var(--line);padding:8px 0">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;cursor:pointer" onclick="toggleResearchNote('${n.id}')">
           <span style="font-size:12px;color:var(--muted)">${researchOpenNoteId === n.id ? '▼' : '▶'}</span>
