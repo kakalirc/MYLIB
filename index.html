@@ -274,7 +274,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-23 18:55 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-23 19:45 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1179,7 +1179,12 @@ let wixBookingFromId = null;   // set when navigating to Demo Register to schedu
 let wixConvertingId = null;    // booking id currently being converted to student
 let wixConvertDraft = {};      // { studentName, enrollDate, confirmed }
 let wixConvertMsg = '';
-let wixLastCreatedStudentId = '';  // id of student just created via Convert to Student or createAndLinkDemo
+let wixLastCreatedStudentId = '';
+// Razorpay (SQL 61): paid columns on bookings + payments the webhook could not match to one booking.
+let wixPaidReady = false;          // SQL 61 run (bookings carry the paid column)
+let wixPaidFilter = 'All';         // All | Paid | Not paid
+let rzpWaiting = [];               // razorpay_payments still unmatched / ambiguous
+let rzpLinkPick = {};              // payment id -> booking id picked in "Needs a look"  // id of student just created via Convert to Student or createAndLinkDemo
 let demoLinkingId = ''; // demo log id currently being linked to a student
 let demoLinkStudentId = '';
 let demoLinkMsg = '';
@@ -2750,9 +2755,76 @@ async function loadWixBookings() {
       scheduledDate: r.scheduled_date || '', scheduledTime: r.scheduled_time || '',
       demoLogId: r.demo_log_id || '', notes: r.notes || '',
       createdAt: r.created_at || '',
-      convertedStudentId: r.converted_student_id || ''
+      convertedStudentId: r.converted_student_id || '',
+      paid: !!r.paid, paidAt: r.paid_at || '', paymentId: r.payment_id || '', paidVia: r.paid_via || ''
     }));
+    wixPaidReady = rows.length ? ('paid' in rows[0]) : wixPaidReady;
   }
+  await loadRazorpayWaiting();
+}
+async function loadRazorpayWaiting() {
+  const { data: rows, error } = await sb.from('razorpay_payments')
+    .select('id,amount,email,contact,method,description,notes,captured_at,match_status')
+    .in('match_status', ['unmatched', 'ambiguous']).order('captured_at', { ascending: false }).limit(50);
+  rzpWaiting = error || !rows ? [] : rows;   // table missing = SQL 61 not run yet
+  if (!error) wixPaidReady = true;
+}
+async function markWixBookingPaid(id, paid) {
+  const wb = data.wixBookings.find(x => x.id === id);
+  if (!wb) return;
+  if (!paid && !confirm(`Mark the booking for ${wb.studentName} as NOT paid?`)) return;
+  const row = paid ? { paid: true, paid_at: new Date().toISOString(), paid_via: 'Manual' } : { paid: false, paid_at: null, payment_id: null, paid_via: null };
+  const { error } = await sb.from('wix_demo_bookings').update(row).eq('id', id);
+  if (error) { wixBookingsMsg = /paid/.test(error.message || '') ? 'Run SQL 61 (razorpay/61-razorpay-demo-payments.sql) in Supabase first.' : 'Could not save: ' + error.message; render(); return; }
+  Object.assign(wb, { paid: !!paid, paidAt: row.paid_at || '', paidVia: row.paid_via || '', paymentId: paid ? wb.paymentId : '' });
+  wixBookingsMsg = paid ? 'Marked paid ✓' : 'Marked not paid ✓';
+  render();
+}
+async function linkRazorpayPayment(paymentId) {
+  const bookingId = rzpLinkPick[paymentId];
+  if (!bookingId) { wixBookingsMsg = 'Pick the booking this payment is for.'; render(); return; }
+  const { error } = await sb.rpc('razorpay_link_payment', { p_payment: paymentId, p_booking: bookingId });
+  if (error) { wixBookingsMsg = 'Could not link: ' + error.message; render(); return; }
+  delete rzpLinkPick[paymentId];
+  await loadWixBookings();
+  wixBookingsMsg = 'Payment linked, booking marked paid ✓';
+  render();
+}
+async function ignoreRazorpayPayment(paymentId) {
+  const { error } = await sb.rpc('razorpay_ignore_payment', { p_payment: paymentId, p_ignore: true });
+  if (error) { wixBookingsMsg = 'Could not set aside: ' + error.message; render(); return; }
+  rzpWaiting = rzpWaiting.filter(p => p.id !== paymentId);
+  wixBookingsMsg = 'Set aside ✓';
+  render();
+}
+function rzpNotesText(p) {
+  const bits = [];
+  if (p.description) bits.push(p.description);
+  if (p.notes && typeof p.notes === 'object') Object.entries(p.notes).forEach(([k, v]) => { if (v !== '' && v != null) bits.push(`${k.replace(/_/g, ' ')}: ${v}`); });
+  return bits.join(' · ');
+}
+function razorpayWaitingHtml() {
+  if (!rzpWaiting.length) return '';
+  const unpaid = data.wixBookings.filter(b => !b.paid).slice().sort((a, b) => (b.submittedAt || b.createdAt || '').localeCompare(a.submittedAt || a.createdAt || ''));
+  return `
+    <div style="border:1px solid var(--brick);border-radius:8px;padding:12px;margin-bottom:14px;background:rgba(166,67,46,0.05)">
+      <div style="font-weight:700;color:var(--brick);margin-bottom:4px">Needs a look: ${rzpWaiting.length} Razorpay payment${rzpWaiting.length === 1 ? '' : 's'} not matched to a booking</div>
+      <div class="hint" style="margin-bottom:8px">Pick the booking it is for and click Link, or click Not a demo for other payments (e.g. tuition fees).</div>
+      ${rzpWaiting.map(p => `
+        <div style="border-top:1px dashed var(--border);padding:8px 0;font-size:13px">
+          <div><b>₹${Number(p.amount || 0).toFixed(2)}</b> · ${p.captured_at ? new Date(p.captured_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''} · ${esc(p.contact || '')} ${p.email ? '· ' + esc(p.email) : ''} ${p.match_status === 'ambiguous' ? '<span class="tag" style="font-size:10px">more than one booking fits</span>' : ''}</div>
+          ${rzpNotesText(p) ? `<div class="hint" style="font-size:11px;margin:4px 0 0">${esc(rzpNotesText(p))}</div>` : ''}
+          <div class="hint" style="font-size:11px;margin:2px 0 0">${esc(p.id)}${p.method ? ' · ' + esc(p.method) : ''}</div>
+          <div class="row-form" style="gap:6px;margin:6px 0 0;flex-wrap:wrap">
+            <select onchange="rzpLinkPick['${p.id}']=this.value" style="max-width:260px">
+              <option value="">Booking…</option>
+              ${unpaid.map(b => `<option value="${b.id}" ${rzpLinkPick[p.id] === b.id ? 'selected' : ''}>${esc(b.studentName)}${b.phone ? ' · ' + esc(b.phone) : ''}${b.submittedAt ? ' · ' + new Date(b.submittedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : ''}</option>`).join('')}
+            </select>
+            <button class="btn-small btn-primary" onclick="linkRazorpayPayment('${p.id}')">Link</button>
+            <button class="btn-small" onclick="ignoreRazorpayPayment('${p.id}')">Not a demo</button>
+          </div>
+        </div>`).join('')}
+    </div>`;
 }
 
 function payrollRecord(teacherId, month) {
@@ -13409,7 +13481,7 @@ function renderFees() {
 function renderWixBookings() {
   const filters = ['New', 'Scheduled', 'Converted', 'Cancelled', 'All'];
   const newCount = data.wixBookings.filter(b => b.status === 'New').length;
-  const list = data.wixBookings.filter(b => wixBookingsFilter === 'All' || b.status === wixBookingsFilter);
+  const list = data.wixBookings.filter(b => (wixBookingsFilter === 'All' || b.status === wixBookingsFilter) && (!wixPaidReady || wixPaidFilter === 'All' || (wixPaidFilter === 'Paid') === !!b.paid));
   const d = wixBookingScheduleDraft;
   const ed = wixBookingEditDraft;
   const statusColor = s => s === 'New' ? 'var(--brick)' : s === 'Scheduled' ? 'var(--accent)' : s === 'Converted' ? 'var(--green)' : '#888';
@@ -13511,6 +13583,9 @@ function renderWixBookings() {
     }
 
     const showAge = b.status === 'New' || b.status === 'Scheduled';
+    const paidBlock = !wixPaidReady ? '' : b.paid
+      ? `<div style="margin-top:6px;font-size:12px;color:var(--green)">✓ Paid${b.paidVia ? ' · ' + esc(b.paidVia) : ''}${b.paidAt ? ' · ' + new Date(b.paidAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}${b.paymentId ? ` · <span class="hint" style="font-size:11px">${esc(b.paymentId)}</span>` : ''} <button class="btn-small" style="font-size:10px;margin-left:6px" onclick="markWixBookingPaid('${b.id}', false)">Undo</button></div>`
+      : `<div style="margin-top:6px;font-size:12px;color:var(--brick)">Not paid yet <button class="btn-small" style="font-size:10px;margin-left:6px" onclick="markWixBookingPaid('${b.id}', true)">Mark paid</button></div>`;
     return `
       <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
@@ -13523,6 +13598,7 @@ function renderWixBookings() {
             ${b.phone ? `<span>📞 ${esc(b.phone)}</span>` : ''}
             ${b.email ? `<span style="color:var(--muted)">✉ ${esc(b.email)}</span>` : ''}
           </div>
+          ${paidBlock}
         </div>
         ${scheduleBlock}
         ${convertBlock}
@@ -13537,8 +13613,10 @@ function renderWixBookings() {
       ${wixConvertMsg && !wixConvertingId ? `<div style="margin-bottom:10px;font-size:13px;font-weight:500;${wixConvertMsg.startsWith('✓') ? 'color:var(--green)' : 'color:var(--brick)'}">${esc(wixConvertMsg)}${wixConvertMsg.startsWith('✓') && wixLastCreatedStudentId ? ` <button class="btn-small btn-primary" style="font-size:12px;margin-left:8px" onclick="setTab('students');selectStudent('${wixLastCreatedStudentId}');wixConvertMsg='';wixLastCreatedStudentId='';render()">→ Open student record</button>` : ''}</div>` : ''}
       <div class="row-form" style="gap:6px;flex-wrap:wrap;margin-bottom:14px">
         ${filters.map(f => { const cnt = f === 'All' ? data.wixBookings.length : data.wixBookings.filter(b => b.status === f).length; return `<button class="btn-small ${wixBookingsFilter===f?'btn-primary':''}" onclick="wixBookingsFilter='${f}';wixBookingsMsg='';wixBookingActionId=null;wixBookingEditId=null;render()">${f}${cnt > 0 ? ` (${cnt})` : ''}</button>`; }).join('')}
+        ${wixPaidReady ? `<select onchange="wixPaidFilter=this.value;render()" style="font-size:12px">${['All', 'Paid', 'Not paid'].map(f => `<option value="${f}" ${wixPaidFilter === f ? 'selected' : ''}>${f === 'All' ? 'Paid or not' : f}</option>`).join('')}</select>` : ''}
         <button class="btn-small" style="margin-left:auto" onclick="loadWixBookings().then(()=>{wixBookingsMsg='';render()})">↻ Refresh</button>
       </div>
+      ${razorpayWaitingHtml()}
       ${list.length === 0 ? `<div class="empty">No ${wixBookingsFilter === 'All' ? '' : wixBookingsFilter.toLowerCase() + ' '}bookings.</div>` : cards}
     </div>
     <div class="card">
