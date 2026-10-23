@@ -274,7 +274,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-23 14:55 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-23 15:20 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -6110,6 +6110,7 @@ async function attemptLogin() {
   currentRole = role;
   currentLinkedId = linkedId;
   currentUserId = authData.user.id;
+  pwIsDefault = role === 'Parent' && p === u;   // bulk-made parent logins start with password = login ID
   aiUserEnabled = profile.ai_enabled !== false;
   logLoginEvent('login', currentUserId, currentUsername, role); // not awaited: the log write shouldn't hold up the login
   await loadAfterLogin();
@@ -6304,7 +6305,7 @@ async function logout() {
   }
   resetResearchState();
   teacherPortalTab = 'dashboard'; // the next login starts on the Dashboard, so a tab's data is loaded when it is opened
-  isLoggedIn = false; currentUsername = ''; currentRole = ''; currentLinkedId = ''; currentUserId = ''; parentSelectedChildId = ''; userMsg.changePw = ''; spAssignments = []; spPapers = {}; spOpen = null; spPhotoUrls = {};
+  isLoggedIn = false; currentUsername = ''; currentRole = ''; currentLinkedId = ''; currentUserId = ''; parentSelectedChildId = ''; pwIsDefault = false; userMsg.changePw = ''; spAssignments = []; spPapers = {}; spOpen = null; spPhotoUrls = {};
   biometricOfferShown = false; // allow the enrollment banner on the next password login
   dangerZoneUnlocked = false; unlockPasswordAttempt = ''; unlockMsg = '';
   // Financial records shouldn't linger in memory once someone has signed out.
@@ -6385,6 +6386,159 @@ async function removeChildFromParent(mappingId) {
   data.parentStudents = data.parentStudents.filter(m=>m.id!==mappingId);
   render();
 }
+// ---------- parents: create every family's parent login in one go ----------
+// One login per family (brothers and sisters found by shared parent mobile / main mobile / existing parent login,
+// last 10 digits). Login ID = the parent's mobile and the password is the same (Rishin's choice); the parent is asked
+// to change it after the first login (pwIsDefault). A family that already has a parent login only gets missing
+// children linked. Each row then gets 📤 WhatsApp buttons; the parent's own page has the same button for later.
+let bulkParentRows = null, bulkParentSkipped = [], bulkParentAlreadyDone = 0, bulkParentRunning = false, bulkParentStop = false, bulkParentMsg = '';
+let pwIsDefault = false;
+function bulkParentPlan() {
+  const active = data.students.filter(s => !s.archived);
+  const up = new Map(), find = id => { while (up.get(id) !== id) { up.set(id, up.get(up.get(id))); id = up.get(id); } return id; };
+  active.forEach(s => up.set(s.id, s.id));
+  const byKey = new Map();
+  const add = (key, sid) => { if (!key || !up.has(sid)) return; (byKey.get(key) || byKey.set(key, new Set()).get(key)).add(sid); };
+  (data.parentStudents || []).forEach(m => add('login:' + m.parentUserId, m.studentId));
+  active.forEach(s => { const k = phoneKey(s.mobileNumber); if (k) add('ph:' + k, s.id); });
+  data.studentPhoneNumbers.filter(p => p.type === 'parent').forEach(p => { const k = phoneKey(p.number); if (k) add('ph:' + k, p.studentId); });
+  const shared = new Set();
+  byKey.forEach((ids, key) => {
+    if (ids.size > FAMILY_MAX_CHILDREN) { shared.add(key); return; }
+    const list = [...ids], a = find(list[0]);
+    list.slice(1).forEach(id => { const b = find(id); if (b !== a) up.set(b, a); });
+  });
+  const groups = new Map();
+  active.forEach(s => { const r = find(s.id); (groups.get(r) || groups.set(r, []).get(r)).push(s); });
+  const rows = [], skipped = [];
+  let done = 0;
+  groups.forEach(kids => {
+    kids.sort((a, b) => a.name.localeCompare(b.name));
+    const ids = new Set(kids.map(s => s.id));
+    const logins = [...new Set((data.parentStudents || []).filter(m => ids.has(m.studentId)).map(m => m.parentUserId))]
+      .map(id => data.users.find(u => u.id === id)).filter(Boolean);
+    const parentName = (kids.find(s => s.parentName) || {}).parentName || '';
+    const phones = familyPhoneKeys(kids);
+    const unlinked = u => kids.filter(s => !data.parentStudents.some(m => m.parentUserId === u.id && m.studentId === s.id));
+    if (logins.length > 1) { done++; return; }   // already split over two logins: left as the admin set it
+    if (logins.length === 1) {
+      const toLink = unlinked(logins[0]);
+      if (!toLink.length) { done++; return; }
+      rows.push({ kids, parentName, phones, username: logins[0].username, userId: logins[0].id, action: 'link', toLink, include: true, status: '' });
+      return;
+    }
+    // Login ID: the parent number found on the most children, else the main mobile; never a number shared by > 4 students.
+    const count = new Map();
+    kids.forEach(s => phoneNumbersFor(s.id, 'parent').forEach(p => { const k = phoneKey(p.number); if (k && !shared.has('ph:' + k)) count.set(k, (count.get(k) || 0) + 2); }));
+    kids.forEach(s => { const k = phoneKey(s.mobileNumber); if (k && !shared.has('ph:' + k)) count.set(k, (count.get(k) || 0) + 1); });
+    const best = [...count.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (!best) { skipped.push({ kids, reason: phones.length ? 'Its number is shared by more than ' + FAMILY_MAX_CHILDREN + ' students' : 'No main mobile or parent number saved' }); return; }
+    const username = best[0];
+    const taken = data.users.find(u => (u.username || '').toLowerCase() === username);
+    if (taken && taken.role === 'Parent') { rows.push({ kids, parentName, phones, username, userId: taken.id, action: 'link', toLink: kids, include: true, status: '' }); return; }
+    if (taken) { skipped.push({ kids, reason: `Login ID ${username} is already used by a ${taken.role} login` }); return; }
+    rows.push({ kids, parentName, phones, username, userId: '', action: 'create', toLink: kids, include: true, status: '' });
+  });
+  rows.sort((a, b) => (a.parentName || a.kids[0].name).localeCompare(b.parentName || b.kids[0].name));
+  return { rows, skipped, done };
+}
+function previewBulkParents() {
+  const p = bulkParentPlan();
+  bulkParentRows = p.rows; bulkParentSkipped = p.skipped; bulkParentAlreadyDone = p.done; bulkParentMsg = '';
+  render();
+}
+function closeBulkParents() { if (bulkParentRunning) return; bulkParentRows = null; bulkParentSkipped = []; bulkParentMsg = ''; render(); }
+function toggleBulkParentRow(i, on) { if (bulkParentRows && bulkParentRows[i]) bulkParentRows[i].include = on; render(); }
+function stopBulkParents() { bulkParentStop = true; }
+async function runBulkParents() {
+  if (bulkParentRunning || !bulkParentRows) return;
+  const todo = bulkParentRows.filter(r => r.include && !r.status);
+  if (!todo.length) return;
+  const nNew = todo.filter(r => r.action === 'create').length;
+  if (!confirm(`Create ${nNew} new parent login${nNew === 1 ? '' : 's'} and link children for ${todo.length - nNew} existing one${todo.length - nNew === 1 ? '' : 's'}?\n\nEach new login ID and password is the parent's mobile number.`)) return;
+  bulkParentRunning = true; bulkParentStop = false; bulkParentMsg = '';
+  let ok = 0, failed = 0;
+  for (const r of todo) {
+    if (bulkParentStop) break;
+    if (r.action === 'create') {
+      if (data.users.some(u => (u.username || '').toLowerCase() === r.username)) { r.status = 'Error: login ID already exists'; failed++; render(); continue; }
+      const { data: result, error } = await callAdminFunction({ action: 'create', username: r.username, password: r.username, role: 'Parent' });
+      if (error) { r.status = 'Error: ' + error; failed++; render(); continue; }
+      r.userId = result.userId;
+      data.users.push({ id: result.userId, username: r.username, role: 'Parent', linkedId: '' });
+    }
+    const need = r.toLink.filter(s => !data.parentStudents.some(m => m.parentUserId === r.userId && m.studentId === s.id));
+    if (need.length) {
+      const { data: links, error } = await sb.from('parent_students').insert(need.map(s => ({ parent_user_id: r.userId, student_id: s.id }))).select();
+      if (error) { r.status = (r.action === 'create' ? 'Login created, but children not linked: ' : 'Error: ') + error.message; failed++; render(); continue; }
+      (links || []).forEach(l => data.parentStudents.push({ id: l.id, parentUserId: l.parent_user_id, studentId: l.student_id }));
+    }
+    r.status = r.action === 'create' ? 'Created' : 'Children linked';
+    ok++;
+    render();
+  }
+  bulkParentRunning = false;
+  bulkParentMsg = `${ok} done${failed ? `, ${failed} with errors (see the list)` : ''}${bulkParentStop ? ' (stopped)' : ''}. Send each family their login with the 📤 buttons below.`;
+  trackUse('bulk-parent-logins');
+  render();
+}
+function bulkParentMessage(r) {
+  const names = r.kids.map(s => s.name);
+  const nameList = names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] : names[0];
+  const link = location.origin + location.pathname;
+  const lines = [`Dear ${r.parentName || 'Parent'},`, ''];
+  if (r.action === 'create') {
+    lines.push(`Your My LIB parent login is ready. You can see ${nameList}'s classes, attendance, homework and fees.`, '', `Open: ${link}`, `Login ID: ${r.username}`, `Password: ${r.username}${r.resend ? ' (unless you have already changed it)' : ''}`, '', 'Please change your password after you log in (Change your password, at the bottom of the page).');
+  } else {
+    lines.push(`${nameList} ${names.length > 1 ? 'are' : 'is'} now on your My LIB parent login.`, '', `Open: ${link}`, `Login ID: ${r.username}`, 'Password: the one you already use.');
+  }
+  return lines.join('\n');
+}
+function familyPhoneKeys(kids) { return [...new Set(kids.flatMap(s => phoneNumbersFor(s.id, 'parent').map(p => p.number).concat(s.mobileNumber || '')).map(phoneKey).filter(Boolean))]; }
+// Parents → a parent's page: send the login again (password assumed still = login ID).
+function parentLoginWaHtml(u) {
+  const kids = byName(data.parentStudents.filter(m => m.parentUserId === u.id).map(m => data.students.find(s => s.id === m.studentId)).filter(Boolean));
+  if (!kids.length) return '';
+  const phones = familyPhoneKeys(kids);
+  if (!phones.length) return '<span class="hint">No phone number saved for these children.</span>';
+  return bulkParentWaHtml({ kids, phones, username: u.username, action: 'create', resend: true, parentName: (kids.find(s => s.parentName) || {}).parentName || '' });
+}
+function bulkParentWaHtml(r) {
+  const encoded = encodeURIComponent(bulkParentMessage(r));
+  const chipStyle = 'text-decoration:none;display:inline-flex;align-items:center';
+  return r.phones.map(k => `<a href="https://wa.me/91${k}?text=${encoded}" target="_blank" class="btn-small" style="${chipStyle}">📤 ${esc(k)}</a>`).join(' ');
+}
+function bulkParentCardHtml() {
+  const head = `<h2>Create all parent logins <button class="help-btn" onclick="openHelp('bulk-parents',event)">?</button></h2>
+      <div class="hint">One login per family for every active student. Brothers and sisters (same parent mobile or main mobile) share one login. Login ID and password are the parent's mobile number; parents are asked to change the password after they log in.</div>`;
+  if (!bulkParentRows) return `<div class="card">${head}<div class="row-form"><button class="btn-primary" onclick="previewBulkParents()">Preview</button></div><div class="hint">Preview saves nothing.</div></div>`;
+  const pending = bulkParentRows.filter(r => r.include && !r.status);
+  const nNew = bulkParentRows.filter(r => r.action === 'create').length;
+  const table = bulkParentRows.length ? `<div class="table-scroll"><table>
+      <tr><th></th><th>Parent</th><th>Children</th><th>Login ID</th><th>What happens</th><th>Status / send</th></tr>
+      ${bulkParentRows.map((r, i) => `<tr>
+        <td><input type="checkbox" ${r.include ? 'checked' : ''} ${r.status || bulkParentRunning ? 'disabled' : ''} onchange="toggleBulkParentRow(${i},this.checked)"></td>
+        <td>${esc(r.parentName || '—')}</td>
+        <td>${r.kids.map(s => esc(studentLabel(s))).join('<br>')}</td>
+        <td>${esc(r.username)}</td>
+        <td>${r.action === 'create' ? 'New login' : 'Existing login: link ' + esc(r.toLink.map(s => s.name).join(', '))}</td>
+        <td>${r.status ? `<span style="color:${r.status.startsWith('Error') || r.status.includes('not linked') ? 'var(--brick)' : 'var(--forest)'}">${esc(r.status)}</span>${r.status.startsWith('Error') ? '' : '<div class="row-form" style="margin:4px 0 0">' + bulkParentWaHtml(r) + '</div>'}` : ''}</td>
+      </tr>`).join('')}
+    </table></div>` : '<div class="hint">Nothing to do: every family with a phone number already has a parent login.</div>';
+  const skipped = bulkParentSkipped.length ? `<h3>Skipped (${bulkParentSkipped.length})</h3><div class="hint">Add a parent number on the student's page, then Preview again.</div>
+      <ul style="margin:4px 0 0 18px;font-size:13px">${bulkParentSkipped.map(x => `<li>${esc(x.kids.map(s => s.name).join(', '))}: ${esc(x.reason)}</li>`).join('')}</ul>` : '';
+  return `<div class="card">${head}
+      <div class="hint" style="margin-top:6px"><b>${nNew}</b> new login${nNew === 1 ? '' : 's'} · <b>${bulkParentRows.length - nNew}</b> existing login${bulkParentRows.length - nNew === 1 ? '' : 's'} getting more children · ${bulkParentAlreadyDone} famil${bulkParentAlreadyDone === 1 ? 'y' : 'ies'} already done · ${bulkParentSkipped.length} skipped</div>
+      ${bulkParentMsg ? `<div class="hint" style="color:var(--forest)">${esc(bulkParentMsg)}</div>` : ''}
+      <div class="row-form">
+        ${bulkParentRunning ? `<button class="btn-small" onclick="stopBulkParents()">Stop</button><span class="hint">Working… ${bulkParentRows.filter(r => r.status).length} of ${bulkParentRows.filter(r => r.include).length}</span>`
+          : `<button class="btn-primary" ${pending.length ? '' : 'disabled'} onclick="runBulkParents()">Create ${pending.length} ${pending.length === 1 ? 'login' : 'logins'}</button>
+             <button class="btn-small" onclick="previewBulkParents()">Preview again</button>
+             <button class="btn-small" onclick="closeBulkParents()">Close</button>`}
+      </div>
+      ${table}${skipped}
+    </div>`;
+}
 function setParentSelectedChild(v) { parentSelectedChildId = v; spOpen = null; render(); }
 
 function selectParentFromDropdown(userId) {
@@ -6451,6 +6605,7 @@ async function changePassword() {
   const { error } = await sb.auth.updateUser({ password: n1 });
   if (error) { userMsg.changePw = 'Could not update password: ' + error.message; render(); return; }
   userMsg.changePw = 'Password updated.';
+  pwIsDefault = false;
   curInput.value=''; n1Input.value=''; n2Input.value='';
   render();
 }
@@ -12838,7 +12993,7 @@ function renderParents() {
     </div>
   `;
 
-  if (!selectedParent) return block1 + searchBlock;
+  if (!selectedParent) return block1 + bulkParentCardHtml() + searchBlock;
 
   const links = data.parentStudents.filter(m=>m.parentUserId===selectedParent.id);
   const linkedIds = new Set(links.map(m=>m.studentId));
@@ -12876,6 +13031,10 @@ function renderParents() {
           <button class="btn-small" onclick="cancelAddChildToParent()">Cancel</button>
         ` : `<button class="btn-small" onclick="startAddChildToParent('${selectedParent.id}')">+ Add child</button>`}
       </div>
+
+      <h3>Send login on WhatsApp</h3>
+      <div class="hint">Login ID ${esc(selectedParent.username)}. The message gives the password as the login ID (unless they changed it); if you reset the password to something else, tell them yourself.</div>
+      <div class="row-form" style="margin-top:4px">${parentLoginWaHtml(selectedParent) || '<span class="hint">Link a child first.</span>'}</div>
 
       <h3>Password</h3>
       ${isResetting ? `
@@ -16750,6 +16909,7 @@ function renderPortalShell(bodyHtml) {
       <button class="btn-logout btn-small" onclick="logout()">Log out</button>
     </div>
     <div class="tagline">${currentRole==='Student' ? 'Your attendance and subscription details.' : currentRole==='Parent' ? "Your child's attendance and subscription details." : 'Your classes for the selected month.'}</div>
+    ${pwIsDefault ? `<div class="card" style="border-color:var(--brick)"><b>Please change your password.</b> It is still the same as your login ID, so anyone who knows your number could log in. <button class="btn-small btn-primary" onclick="document.getElementById('curPass').scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('curPass').focus()">Change it now</button></div>` : ''}
     ${currentRole === 'Student' ? '' : aiHowAmIDoingHtml(currentLinkedId)}
     ${chatPanelOpen ? renderChat() : bodyHtml}
     ${currentRole === 'Teacher' ? '' : `
@@ -16785,6 +16945,7 @@ const HELP = {
   'discount': { t:'Discount structure', b:'<ul><li>Optional discounts when a student subscribes to multiple subjects.</li><li>Used in the Fee Calculator as a reference — does not automatically apply to recorded payments.</li></ul>' },
   'fee-calc': { t:'Fee calculator', b:"<ul><li>Calculates the expected fee based on a student's enrolled subjects and class type.</li><li>Click Push fee request to send the amount straight to the student's fee requests.</li></ul>" },
   'renewal': { t:'Students needing renewal', b:'<ul><li>Active students with 0 or fewer classes remaining in any subject.</li><li>Also shows students enrolled in a subject who have never bought classes (Never subscribed).</li><li>Click Request Fees to jump to the Fee Calculator for that student.</li></ul>' },
+  'bulk-parents': { t:'Create all parent logins', b:"<ul><li>Preview lists every active student's family that needs a parent login. Nothing is saved until you press Create.</li><li>Brothers and sisters with the same parent mobile or main mobile share one login with all of them linked.</li><li>Login ID and password are the parent's 10-digit mobile. When the parent logs in with it, the app asks them to change the password.</li><li>A family that already has a parent login is not given a second one; only children missing from it are linked.</li><li>Skipped: students with no phone number, or a number saved on more than 4 students.</li><li>After Create, each family's row has 📤 WhatsApp buttons with the message ready (app link, login ID, password). Later, open a parent from Manage parent logins to send it again.</li></ul>" },
   'pending-fees': { t:'Pending fee requests', b:"<ul><li>All fee requests across all students not yet marked Paid, grouped by family.</li><li>Brothers and sisters are one family when they share a parent login or a parent mobile number (main Mobile or any Parent number). Tick <b>Bill separately</b> on a student's page to keep them out of the family.</li><li>Message makes one WhatsApp message for the whole family with every subject and the total.</li><li>Mark paid marks one request; Mark all paid marks every request of the family with one date and reference.</li></ul>" },
   'all-payments': { t:'All subscription payments', b:'<ul><li>Every payment recorded for the selected month, across all students.</li><li>Use the filters to narrow by teacher or subject.</li><li>Export downloads the filtered list as Excel.</li></ul>' },
   'refunds': { t:'Refunds issued', b:'<ul><li>All refunds recorded for the selected month.</li><li>Export downloads the list as Excel.</li></ul>' },
