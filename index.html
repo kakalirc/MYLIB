@@ -274,7 +274,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-23 13:30 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-23 14:30 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -3795,23 +3795,26 @@ async function loadTeacherLeave() {
     teacherLeave = rows.map(r => ({ id: r.id, teacherId: r.teacher_id, startDate: r.start_date, endDate: r.end_date, reason: r.reason || '', createdAt: r.created_at || '' }));
   }
 }
+const STUDENT_COLUMNS = 'id,name,archived,student_code,parent_name,mobile_number,email,address,grade_id,board_id,academic_year,mode_preference,class_type_preference';
 async function loadStudentsAndSubscriptions() {
   // Deliberately excludes photo (base64, can be large) — every login/refresh was downloading
   // every student's full photo even when nobody was viewing one. Loaded on demand instead,
   // via loadStudentPhotoOnDemand, only when a specific student's detail screen is opened.
   // The four reads don't depend on each other, so they run at the same time instead of one after another.
-  const [stRes, phRes, enRes, subRes] = await Promise.all([
+  let [stRes, phRes, enRes, subRes] = await Promise.all([
     selectAllPaged('students', ['name'],
-      'id,name,archived,student_code,parent_name,mobile_number,email,address,grade_id,board_id,academic_year,mode_preference,class_type_preference'),
+      STUDENT_COLUMNS + ',bill_separately'),
     selectAllPaged('student_phone_numbers', ['created_at']),
     selectAllPaged('student_subjects', []),
     loadSubscriptionRows(),
   ]);
+  // bill_separately comes with SQL 60; until it is run, read the students without it.
+  if (stRes.error && /bill_separately/.test(stRes.error.message || '')) stRes = await selectAllPaged('students', ['name'], STUDENT_COLUMNS);
   const { data: studentRows, error: stErr } = stRes;
   if (!stErr && studentRows) {
     data.students = studentRows.map(r => {
       const existing = data.students.find(s=>s.id===r.id);
-      return { id: r.id, name: r.name, archived: !!r.archived, code: r.student_code || '', parentName: r.parent_name || '', mobileNumber: r.mobile_number || '', email: r.email || '', address: r.address || '', photo: existing ? existing.photo : '', gradeId: r.grade_id || '', boardId: r.board_id || '', academicYear: r.academic_year || '', modePreference: r.mode_preference || '', classTypePreference: r.class_type_preference || '' };
+      return { id: r.id, name: r.name, archived: !!r.archived, code: r.student_code || '', parentName: r.parent_name || '', mobileNumber: r.mobile_number || '', email: r.email || '', address: r.address || '', photo: existing ? existing.photo : '', gradeId: r.grade_id || '', boardId: r.board_id || '', academicYear: r.academic_year || '', modePreference: r.mode_preference || '', classTypePreference: r.class_type_preference || '', billSeparately: !!r.bill_separately };
     });
   }
   const { data: phoneRows, error: phErr } = phRes;
@@ -7968,7 +7971,7 @@ function feeQuoteHintHtml(d, which) {
   return differs ? `${sum} — you've entered your own amount. <button type="button" class="btn-small" onclick="useQuoteAmount('${which}')">Use ₹${q.amount.toFixed(2)}</button>` : sum;
 }
 // The saved working of an auto-raised fee request (SQL 59); stays on the row after it is marked paid.
-function calcNoteHtml(r) { return r && r.calcNote ? `<div class="hint" style="font-size:11px">🧮 ${esc(r.calcNote)}</div>` : ''; }
+function calcNoteHtml(r) { return r && r.calcNote ? `<div class="hint" style="font-size:11px;white-space:normal;min-width:220px;max-width:360px">🧮 ${esc(r.calcNote)}</div>` : ''; }
 function requestFormDraft(which) { return which === 'edit' ? editRequestDraft : which === 'pay' ? subDraft : requestDraft; }
 // Typing in Classes/Amount updates the draft and the hint in place (no full
 // render, so the cursor stays in the box).
@@ -8218,7 +8221,8 @@ async function calculatorPushFeeRequest() {
 }
 
 function generateFeeMessageForRequest(requestId) {
-  feeMessageDraft = feeMessageTextForRequest(requestId);
+  const r = data.subscriptions.find(x => x.id === requestId);
+  feeMessageDraft = r ? familyFeeMessage(r.studentId) : '';   // the whole family's pending requests in one message
   feeMessageForRequestId = requestId;
   feeMessageCopyStatus = '';
   render();
@@ -8299,6 +8303,188 @@ function feeMessageTextForRequest(requestId) {
     else { out.push(l); prevBlank = false; }
   }
   return out.join('\n').trim();
+}
+// ---------- families: one combined fee message per family ----------
+// Students are one family when they share a parent login, or any parent phone number or main mobile (compared on
+// the last 10 digits). Requests stay one per subject; only the screens and the message are combined.
+let familyCache = null, familyCacheSig = '';
+function phoneKey(n) { const d = String(n || '').replace(/\D/g, ''); return d.length >= 10 ? d.slice(-10) : ''; }
+function familyIndex() {
+  const sig = data.students.map(s => s.id + ':' + (s.mobileNumber || '') + (s.billSeparately ? ':sep' : '')).join(',') + '|' + data.studentPhoneNumbers.map(p => p.studentId + ':' + p.type + ':' + p.number).join(',') + '|' + (data.parentStudents || []).map(m => m.parentUserId + ':' + m.studentId).join(',');
+  if (familyCache && sig === familyCacheSig) return familyCache;
+  const up = new Map();
+  const find = id => { while (up.get(id) !== id) { up.set(id, up.get(up.get(id))); id = up.get(id); } return id; };
+  data.students.forEach(s => up.set(s.id, s.id));
+  const firstByKey = new Map();
+  const separate = new Set(data.students.filter(s => s.billSeparately).map(s => s.id));   // "Bill separately" (SQL 60)
+  const link = (key, studentId) => {
+    if (!key || !up.has(studentId) || separate.has(studentId)) return;
+    if (!firstByKey.has(key)) { firstByKey.set(key, studentId); return; }
+    const a = find(firstByKey.get(key)), b = find(studentId);
+    if (a !== b) up.set(b, a);
+  };
+  (data.parentStudents || []).forEach(m => link('login:' + m.parentUserId, m.studentId));
+  data.students.forEach(s => link('ph:' + phoneKey(s.mobileNumber), s.id));
+  data.studentPhoneNumbers.filter(p => p.type === 'parent').forEach(p => { const k = phoneKey(p.number); if (k) link('ph:' + k, p.studentId); });
+  const members = new Map();
+  data.students.forEach(s => { const r = find(s.id); (members.get(r) || members.set(r, []).get(r)).push(s); });
+  members.forEach(list => list.sort((a, b) => a.name.localeCompare(b.name)));
+  const keyOf = new Map(data.students.map(s => [s.id, find(s.id)]));
+  familyCache = { keyOf, members }; familyCacheSig = sig;
+  return familyCache;
+}
+function familyKeyOf(studentId) { return familyIndex().keyOf.get(studentId) || studentId; }
+function familyMembers(studentId) { return familyIndex().members.get(familyKeyOf(studentId)) || data.students.filter(s => s.id === studentId); }
+// Pending requests of the whole family, child by child (alphabetical), oldest first within a child.
+function familyPendingRequests(studentId) {
+  const order = familyMembers(studentId).map(s => s.id);
+  return data.subscriptions.filter(r => r.kind === 'Request' && order.includes(r.studentId))
+    .sort((a, b) => order.indexOf(a.studentId) - order.indexOf(b.studentId) || (a.date || '').localeCompare(b.date || ''));
+}
+function familyParentName(studentId) { const m = familyMembers(studentId); const p = m.find(s => s.parentName); return p ? p.parentName : (m[0] ? m[0].name : ''); }
+// Every parent number in the family (each once), else the main mobiles.
+function familyPhones(studentId) {
+  const seen = new Set(), out = [];
+  const add = n => { const k = phoneKey(n); if (k && !seen.has(k)) { seen.add(k); out.push(n); } };
+  const m = familyMembers(studentId);
+  m.forEach(s => phoneNumbersFor(s.id, 'parent').forEach(p => add(p.number)));
+  if (!out.length) m.forEach(s => add(s.mobileNumber));
+  return out;
+}
+function familyWaChips(studentId, messageText) {
+  if (!messageText) return '';
+  const encoded = encodeURIComponent(messageText);
+  const chipStyle = 'text-decoration:none;display:inline-flex;align-items:center';
+  const phones = familyPhones(studentId);
+  if (!phones.length) return `<a href="https://wa.me/?text=${encoded}" target="_blank" class="btn-small" style="${chipStyle}">📤 WhatsApp</a>`;
+  return phones.map(ph => { const clean = ph.replace(/\D/g, ''); const num = clean.length === 10 ? '91' + clean : clean; return `<a href="https://wa.me/${num}?text=${encoded}" target="_blank" class="btn-small" style="${chipStyle}">📤 ${esc(ph)}</a>`; }).join('');
+}
+function requestMonthLong(r) {
+  const ym = r.paymentReference && r.paymentReference.startsWith('AUTO-') ? r.paymentReference.slice(5) : (r.date || '').slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(ym)) return '';
+  const [yr, mo] = ym.split('-').map(Number);
+  return new Date(yr, mo - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+}
+function inrText(n) { return 'Rs ' + (Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+// One message for every pending request in the family; a single request keeps the usual one-subject message.
+function familyFeeMessage(studentId) {
+  const reqs = familyPendingRequests(studentId);
+  if (!reqs.length) return '';
+  if (reqs.length === 1) return feeMessageTextForRequest(reqs[0].id);
+  const kids = familyMembers(studentId).filter(s => reqs.some(r => r.studentId === s.id));
+  const months = [...new Set(reqs.map(requestMonthLong).filter(Boolean))];
+  const total = reqs.reduce((a, r) => a + (r.amountPaid || 0), 0);
+  const names = kids.map(s => s.name);
+  const nameList = names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] : names[0];
+  const lines = [`Dear ${familyParentName(studentId)},`, '', `Fee payment is due for ${nameList}${months.length === 1 ? ', ' + months[0] : ''}:`];
+  kids.forEach(s => {
+    const mine = reqs.filter(r => r.studentId === s.id);
+    lines.push('');
+    if (kids.length > 1) lines.push(`${s.name}:`);
+    mine.forEach((r, i) => {
+      const subj = subject(r.subjectId);
+      const typeMode = [r.type, s.modePreference].filter(Boolean).join(', ');
+      const left = studentRemaining(s.id, r.subjectId, r.type);
+      lines.push(`${i + 1}. ${subj ? subj.name : 'Subject'} (${typeMode})${months.length > 1 ? ', ' + requestMonthLong(r) : ''}: ${r.classes} class${Number(r.classes) === 1 ? '' : 'es'}, ${inrText(r.amountPaid)}`);
+      lines.push(`   Classes available now: ${left}${left < 0 ? ' (overdue - please pay at the earliest)' : ''}`);
+    });
+    if (kids.length > 1 && mine.length > 1) lines.push(`Subtotal for ${s.name}: ${inrText(mine.reduce((a, r) => a + (r.amountPaid || 0), 0))}`);
+  });
+  lines.push('', `Total due: ${inrText(total)}`, '');
+  if (upiId) lines.push(`Pay via UPI: ${upiId}`);
+  lines.push('Or pay online: https://www.libeducation.com/fee-payment', '');
+  if (feeContactMobile) lines.push(`After payment, please share a screenshot to ${feeContactMobile}.`, '');
+  const logins = kids.map(s => ({ s, u: data.users.find(u => u.role === 'Student' && u.linkedId === s.id && !u.archived) })).filter(x => x.u);
+  if (logins.length) {
+    logins.forEach(x => lines.push(`${kids.length > 1 ? x.s.name + ' - ' : ''}Login ID and password: ${x.u.username} (same as login ID for first-time login)`));
+    lines.push('https://app.libeducation.com/#rates-fees', '');
+  }
+  lines.push('Discount offers: https://www.libeducation.com/discountoffers', '', '- LIB Education');
+  const out = []; let prevBlank = false;
+  for (const l of lines) { if (l === '') { if (!prevBlank) out.push(''); prevBlank = true; } else { out.push(l); prevBlank = false; } }
+  return out.join('\n').trim();
+}
+let billSeparatelyMsg = '';
+async function setBillSeparately(studentId, on) {
+  billSeparatelyMsg = '';
+  const { error } = await sb.from('students').update({ bill_separately: !!on }).eq('id', studentId);
+  if (error) billSeparatelyMsg = /bill_separately/.test(error.message || '') ? 'Run SQL 60 (fee-requests/60-bill-separately.sql) in Supabase first.' : 'Could not save: ' + error.message;
+  else { const st = data.students.find(s => s.id === studentId); if (st) st.billSeparately = !!on; }
+  render();
+}
+function billSeparatelyHtml(student) {
+  const fam = familyMembers(student.id).filter(s => s.id !== student.id);
+  return `<div class="hint" style="margin:4px 0">
+    <label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" ${student.billSeparately ? 'checked' : ''} onchange="setBillSeparately('${student.id}', this.checked)"> Bill separately (not grouped with family)</label>
+    ${student.billSeparately ? '' : fam.length ? ` · Family: ${esc(fam.map(s => s.name).join(', '))} (same parent login or parent mobile)` : ''}
+    ${billSeparatelyMsg ? `<span style="color:var(--brick)"> ${esc(billSeparatelyMsg)}</span>` : ''}
+  </div>`;
+}
+// "Mark all paid": every pending request of one family, with one date and reference.
+let markAllPaidStudentId = null;
+function startMarkAllPaid(studentId) { markAllPaidStudentId = studentId; markingPaidId = null; render(); }
+function cancelMarkAllPaid() { markAllPaidStudentId = null; render(); }
+function markAllPaidFormHtml(studentId) {
+  if (!markAllPaidStudentId || familyKeyOf(markAllPaidStudentId) !== familyKeyOf(studentId)) return '';
+  const reqs = familyPendingRequests(studentId);
+  const total = reqs.reduce((a, r) => a + (r.amountPaid || 0), 0);
+  return `
+        <div style="margin-top:10px;padding:12px;border:1px solid var(--forest);border-radius:8px;background:rgba(60,94,66,0.06)">
+          <div class="hint" style="margin-bottom:6px"><b>Mark all paid</b> — ${reqs.length} request${reqs.length === 1 ? '' : 's'}, ₹${total.toFixed(2)} in total:</div>
+          <ul class="hint" style="margin:0 0 8px 16px;padding:0">${reqs.map(r => `<li>${esc(studentNameWithCode(r.studentId))} · ${esc(subjectName(r.subjectId))} (${r.type}) · ${r.classes} class${Number(r.classes) === 1 ? '' : 'es'} · ₹${(r.amountPaid || 0).toFixed(2)}</li>`).join('')}</ul>
+          <div class="row-form" style="margin-bottom:0">
+            <label>Paid on <input type="date" id="markAllPaidDate" value="${todayStr}" style="width:140px"></label>
+            <label>Reference <input type="text" id="markAllPaidReference" placeholder="Keeps each request's own if empty" style="width:200px"></label>
+            <label>Remarks <input type="text" id="markAllPaidRemarks" style="width:140px"></label>
+            <button class="btn-small btn-primary" onclick="confirmMarkAllPaid()">Confirm all</button>
+            <button class="btn-small" onclick="cancelMarkAllPaid()">Cancel</button>
+          </div>
+        </div>`;
+}
+async function confirmMarkAllPaid() {
+  if (!markAllPaidStudentId) return;
+  const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  const date = val('markAllPaidDate') || todayStr, reference = val('markAllPaidReference'), remarks = val('markAllPaidRemarks');
+  const failed = [];
+  for (const r of familyPendingRequests(markAllPaidStudentId)) {
+    const { error } = await sb.from('subscriptions').update({ kind: 'Payment', date, payment_reference: reference || r.paymentReference || null, payment_remarks: remarks || r.paymentRemarks || null }).eq('id', r.id);
+    if (error) failed.push(error.message);
+  }
+  if (failed.length) alert('Could not mark ' + failed.length + ' request(s) paid: ' + failed[0]);
+  markAllPaidStudentId = null;
+  await loadStudentsAndSubscriptions();   // the database sets each payment's expiry date; fetch it
+  render();
+}
+// Fees + Reports: pending requests grouped by family, total per family (and per child when there are several).
+function pendingFeeRequestsByFamilyHtml() {
+  const reqs = data.subscriptions.filter(s => s.kind === 'Request');
+  if (!reqs.length) return '<div class="empty">No pending fee requests.</div>';
+  const fams = new Map();
+  reqs.forEach(r => { const k = familyKeyOf(r.studentId); if (!fams.has(k)) fams.set(k, r.studentId); });
+  const list = [...fams.values()].map(sid => ({ sid, reqs: familyPendingRequests(sid) }))
+    .sort((a, b) => studentNameWithCode(a.reqs[0].studentId).localeCompare(studentNameWithCode(b.reqs[0].studentId)));
+  const grand = reqs.reduce((a, r) => a + (r.amountPaid || 0), 0);
+  return `<div class="hint" style="margin-bottom:6px">${reqs.length} request${reqs.length === 1 ? '' : 's'} from ${list.length} famil${list.length === 1 ? 'y' : 'ies'} · ₹${grand.toFixed(2)} in total. Brothers and sisters (same parent login or parent mobile) are shown together with one message.</div>
+    <div class="table-scroll"><table>
+      <tr><th>Student</th><th>Subject</th><th>Type</th><th>Classes</th><th>Amount</th><th>Requested</th><th>Reference &amp; working</th><th></th></tr>
+      ${list.map(f => {
+        const total = f.reqs.reduce((a, r) => a + (r.amountPaid || 0), 0);
+        const kids = [...new Set(f.reqs.map(r => r.studentId))];
+        const phones = familyPhones(f.sid);
+        const head = `<tr style="background:var(--soft)"><td colspan="8">
+          <b>${esc(familyParentName(f.sid))}</b> · ${esc(phones.join(', ') || '—')}${copyBtnHtml(phones[0])} · ${f.reqs.length} request${f.reqs.length === 1 ? '' : 's'} · <b>Family total ₹${total.toFixed(2)}</b>
+          <span style="margin-left:6px"><button class="btn-small" onclick="generateFeeMessageForRequest('${f.reqs[0].id}')">Message</button>${familyWaChips(f.sid, familyFeeMessage(f.sid))}${f.reqs.length > 1 ? `<button class="btn-small btn-primary" onclick="startMarkAllPaid('${f.sid}')">Mark all paid</button>` : ''}</span>
+        </td></tr>`;
+        const rows = kids.map(kid => {
+          const mine = f.reqs.filter(r => r.studentId === kid);
+          return mine.map(r => `<tr><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid || 0).toFixed(2)}</td><td>${r.date || '—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${calcNoteHtml(r)}</td><td>${markingPaidId === r.id ? '<span class="hint">Confirm below</span>' : `<button class="btn-small" onclick="startMarkPaid('${r.id}')">Mark paid</button>`}</td></tr>`).join('')
+            + (kids.length > 1 ? `<tr><td colspan="4" class="hint" style="text-align:right">Subtotal for ${esc((data.students.find(s => s.id === kid) || {}).name || '')}</td><td><b>${mine.reduce((a, r) => a + (r.amountPaid || 0), 0).toFixed(2)}</b></td><td colspan="3"></td></tr>` : '');
+        }).join('');
+        const single = f.reqs.find(r => r.id === markingPaidId);
+        const forms = (single ? markPaidFormHtml(single) : '') + markAllPaidFormHtml(f.sid);
+        return head + rows + (forms ? `<tr><td colspan="8">${forms}</td></tr>` : '');
+      }).join('')}
+    </table></div>`;
 }
 function demandTargetMonth() { return monthStr; }
 function isDemandPeriod() { const d=Number(todayStr.slice(8,10)); return d>=1&&d<=7; }
@@ -8433,7 +8619,8 @@ function exportDemandRun() {
   const wb = XLSX.utils.book_new();
   let raised, notRaised = [];
   if (demandPreviewRows) {
-    raised = demandPreviewRows.map(r => ({ Student: studentLabel(r.student), Subject: r.subj.name, Type: r.ty, Method: r.method, Mode: r.mode, ClassesLeft: r.left, Classes: r.classes, Amount: r.amount, Raise: r.include ? 'Yes' : 'No (unticked)', Working: demandRowNote(r) }));
+    const studentTotal = r => demandPreviewRows.filter(x => x.student.id === r.student.id && x.include).reduce((a, x) => a + x.amount, 0);
+    raised = demandPreviewRows.map(r => ({ Student: studentLabel(r.student), StudentTotal: studentTotal(r), Subject: r.subj.name, Type: r.ty, Method: r.method, Mode: r.mode, ClassesLeft: r.left, Classes: r.classes, Amount: r.amount, Raise: r.include ? 'Yes' : 'No (unticked)', Working: demandRowNote(r) }));
     notRaised = demandSkippedRows.map(r => ({ Student: studentLabel(r.student), Subject: r.subj.name, Type: r.ty, Reason: r.reason }));
   } else {
     const label = demandRunLabel(month);
@@ -9607,7 +9794,20 @@ async function addFeeRequest() {
   if (noteLost) requestMsg = 'Fee request added, but the working was NOT saved: run SQL 59 (fee-requests/59-fee-request-working.sql) in Supabase.';
   render();
 }
-function startMarkPaid(id) { markingPaidId = id; render(); }
+function markPaidFormHtml(r) {
+  return `
+        <div style="margin-top:10px;padding:12px;border:1px solid var(--forest);border-radius:8px;background:rgba(60,94,66,0.06)">
+          <div class="hint" style="margin-bottom:8px"><b>Confirm payment received</b> — ${esc(studentNameWithCode(r.studentId))}, ${esc(subjectName(r.subjectId))}, ${r.type}, ${r.classes} class${r.classes===1?'':'es'}, ₹${(r.amountPaid||0).toFixed(2)}</div>
+          <div class="row-form" style="margin-bottom:0">
+            <label>Paid on <input type="date" id="markPaidDate_${r.id}" value="${todayStr}" style="width:140px"></label>
+            <label>Reference <input type="text" id="markPaidReference_${r.id}" value="${escAttr(r.paymentReference||'')}" style="width:130px"></label>
+            <label>Remarks <input type="text" id="markPaidRemarks_${r.id}" value="${escAttr(r.paymentRemarks||'')}" style="width:140px"></label>
+            <button class="btn-small btn-primary" onclick="confirmMarkPaid('${r.id}')">Confirm</button>
+            <button class="btn-small" onclick="cancelMarkPaid()">Cancel</button>
+          </div>
+        </div>`;
+}
+function startMarkPaid(id) { markingPaidId = id; markAllPaidStudentId = null; render(); }
 function cancelMarkPaid() { markingPaidId = null; render(); }
 async function confirmMarkPaid(id) {
   const dateInput = document.getElementById('markPaidDate_'+id);
@@ -10876,9 +11076,12 @@ function exportZeroBalance() {
 
 function exportPendingFeeRequests() {
   const wb = XLSX.utils.book_new();
-  const rows = data.subscriptions.filter(s=>s.kind==='Request').map(r => {
+  const reqs = data.subscriptions.filter(s=>s.kind==='Request');
+  const sum = list => list.reduce((a,r)=>a+(r.amountPaid||0),0);
+  const rows = reqs.slice().sort((a,b)=>familyParentName(a.studentId).localeCompare(familyParentName(b.studentId)) || familyKeyOf(a.studentId).localeCompare(familyKeyOf(b.studentId)) || studentNameWithCode(a.studentId).localeCompare(studentNameWithCode(b.studentId))).map(r => {
     const st = data.students.find(x=>x.id===r.studentId);
     return {
+      Family: familyParentName(r.studentId), FamilyTotal: sum(familyPendingRequests(r.studentId)), StudentTotal: sum(reqs.filter(x=>x.studentId===r.studentId)),
       Student: studentNameWithCode(r.studentId), ParentName: st?(st.parentName||''):'', MobileNumber: st?(st.mobileNumber||''):'',
       Subject: subjectName(r.subjectId), Type: r.type, Classes: r.classes, Amount: r.amountPaid||0, RequestedDate: r.date||'', Working: r.calcNote||''
     };
@@ -11585,8 +11788,32 @@ function renderStudents() {
       <div id="reqCalcNote">${requestCalcHtml()}</div>`}
       ${(() => {
         const pending = pendingFeeRequests(student.id);
-        if (!pending.length) return '<div class="empty">No pending fee requests.</div>';
-        return `<div class="table-scroll"><table>
+        const famPending = familyPendingRequests(student.id);
+        const sepHtml = billSeparatelyHtml(student);
+        const others = famPending.filter(r => r.studentId !== student.id);
+        const otherNames = [...new Set(others.map(r => (data.students.find(x => x.id === r.studentId) || {}).name).filter(Boolean))];
+        if (!famPending.length) return sepHtml + '<div class="empty">No pending fee requests.</div>';
+        const myTotal = pending.reduce((a, r) => a + (r.amountPaid || 0), 0), famTotal = famPending.reduce((a, r) => a + (r.amountPaid || 0), 0);
+        const showMsg = feeMessageForRequestId && famPending.some(r => r.id === feeMessageForRequestId);
+        const header = sepHtml + `<div class="row-form" style="margin:6px 0">
+          <span><b>Total ₹${myTotal.toFixed(2)}</b>${others.length ? ` · with ${esc(otherNames.join(', '))} (same family): <b>₹${famTotal.toFixed(2)}</b>` : ''}</span>
+          <button class="btn-small" onclick="generateFeeMessageForRequest('${famPending[0].id}')">Message${others.length ? ' (family)' : ''}</button>
+          ${familyWaChips(student.id, familyFeeMessage(student.id))}
+          ${famPending.length > 1 ? `<button class="btn-small btn-primary" onclick="startMarkAllPaid('${student.id}')">Mark all paid${others.length ? ' (family)' : ''}</button>` : ''}
+        </div>
+        ${showMsg ? `<div style="padding:8px 0">
+                <textarea id="feeMessageTextarea" rows="8" style="width:100%;max-width:520px;font-family:inherit;font-size:14px;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box">${esc(feeMessageDraft)}</textarea>
+                <div class="row-form" style="margin-top:6px">
+                  <button class="btn-small btn-primary" onclick="copyFeeMessage()">Copy</button>
+                  ${familyWaChips(student.id, feeMessageDraft)}
+                  <button class="btn-small" onclick="dismissFeeMessage()">Close</button>
+                  ${aiOn()&&!aiFeeMsg.loading?'<button class="btn-small" style="background:var(--gold);border-color:var(--gold);color:#000" onclick="aiImproveFeeMessage()">✨ Improve</button>':aiOn()&&aiFeeMsg.loading?'<button class="btn-small" style="background:var(--gold);border-color:var(--gold);color:#000" disabled>Improving...</button>':""}
+                  ${feeMessageCopyStatus ? `<span class="hint" style="color:${feeMessageCopyStatus==='Copied!'?'var(--forest)':'var(--brick)'}">${esc(feeMessageCopyStatus)}</span>` : ''}
+                </div>
+                <div class="hint">Parent mobile on file: <b>${esc(familyPhones(student.id).join(', ') || 'Not on file')}</b>${copyBtnHtml(familyPhones(student.id)[0])} — paste this message wherever you want to send it (WhatsApp, SMS, email).</div>
+              </div>` : ''}`;
+        if (!pending.length) return header + `<div class="empty">No pending fee requests for ${esc(student.name)}.</div>` + markAllPaidFormHtml(student.id);
+        return header + `<div class="table-scroll"><table>
           <tr><th>Subject</th><th>Type</th><th>Classes</th><th>Amount</th><th>Requested</th><th>Reference</th><th></th></tr>
           ${pending.map(r => {
             const isMarking = markingPaidId === r.id;
@@ -11601,25 +11828,10 @@ function renderStudents() {
                   <button class="btn-small btn-primary" onclick="startMarkPaid('${r.id}')">Mark as Paid</button>
                   ${r.paymentReference ? `<button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="rejectPayment('${r.id}')">Reject Payment</button>` : ''}
                   <button class="btn-small" onclick="startEditRequest('${r.id}')">Edit</button>
-                  <button class="btn-small" onclick="generateFeeMessageForRequest('${r.id}')">Message</button>
-                  ${waChips(student.id, feeMessageTextForRequest(r.id))}
                   <button class="icon-btn" onclick="cancelFeeRequest('${r.id}')" title="Cancel request">✕</button>
                 `}
               </td>
-            </tr>${feeMessageForRequestId === r.id ? `
-            <tr><td colspan="7">
-              <div style="padding:8px 0">
-                <textarea id="feeMessageTextarea" rows="4" style="width:100%;max-width:480px;font-family:inherit;font-size:14px;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box">${esc(feeMessageDraft)}</textarea>
-                <div class="row-form" style="margin-top:6px">
-                  <button class="btn-small btn-primary" onclick="copyFeeMessage()">Copy</button>
-                  ${waChips(student.id, feeMessageDraft)}
-                  <button class="btn-small" onclick="dismissFeeMessage()">Close</button>
-                  ${aiOn()&&!aiFeeMsg.loading?'<button class="btn-small" style="background:var(--gold);border-color:var(--gold);color:#000" onclick="aiImproveFeeMessage()">✨ Improve</button>':aiOn()&&aiFeeMsg.loading?'<button class="btn-small" style="background:var(--gold);border-color:var(--gold);color:#000" disabled>Improving...</button>':""}
-                  ${feeMessageCopyStatus ? `<span class="hint" style="color:${feeMessageCopyStatus==='Copied!'?'var(--forest)':'var(--brick)'}">${esc(feeMessageCopyStatus)}</span>` : ''}
-                </div>
-                <div class="hint">Parent mobile on file: <b>${esc((phoneNumbersFor(student.id,'parent').map(p=>p.number).join(', ')) || student.mobileNumber || 'Not on file')}</b>${copyBtnHtml((phoneNumbersFor(student.id,'parent')[0]||{}).number || student.mobileNumber)} — paste this message wherever you want to send it (WhatsApp, SMS, email).</div>
-              </div>
-            </td></tr>` : ''}`;
+            </tr>`;
           }).join('')}
         </table></div>
         ${pending.filter(r => r.id === editingRequestId).map(r => {
@@ -11642,17 +11854,8 @@ function renderStudents() {
           <div class="hint" id="editReqQuoteHint">${feeQuoteHintHtml(d, 'edit')}</div>
         </div>`;
         }).join('')}
-        ${pending.filter(r => r.id === markingPaidId).map(r => `
-        <div style="margin-top:10px;padding:12px;border:1px solid var(--forest);border-radius:8px;background:rgba(60,94,66,0.06)">
-          <div class="hint" style="margin-bottom:8px"><b>Confirm payment received</b> — ${esc(subjectName(r.subjectId))}, ${r.type}, ${r.classes} class${r.classes===1?'':'es'}, ₹${(r.amountPaid||0).toFixed(2)}</div>
-          <div class="row-form" style="margin-bottom:0">
-            <label>Paid on <input type="date" id="markPaidDate_${r.id}" value="${todayStr}" style="width:140px"></label>
-            <label>Reference <input type="text" id="markPaidReference_${r.id}" value="${escAttr(r.paymentReference||'')}" style="width:130px"></label>
-            <label>Remarks <input type="text" id="markPaidRemarks_${r.id}" value="${escAttr(r.paymentRemarks||'')}" style="width:140px"></label>
-            <button class="btn-small btn-primary" onclick="confirmMarkPaid('${r.id}')">Confirm</button>
-            <button class="btn-small" onclick="cancelMarkPaid()">Cancel</button>
-          </div>
-        </div>`).join('')}`;
+        ${pending.filter(r => r.id === markingPaidId).map(markPaidFormHtml).join('')}
+        ${markAllPaidFormHtml(student.id)}`;
       })()}
 
       </div>
@@ -12029,14 +12232,7 @@ function renderReports() {
 
   const pendingRequestRows = data.subscriptions.filter(s=>s.kind==='Request')
     .slice().sort((a,b)=>(a.date||'').localeCompare(b.date||''));
-  const pendingRequestsHtml = pendingRequestRows.length ? `
-    <div class="table-scroll"><table>
-      <tr><th>Student</th><th>Parent</th><th>Mobile</th><th>Subject</th><th>Type</th><th>Classes</th><th>Amount</th><th>Requested</th><th>Reference</th><th></th></tr>
-      ${pendingRequestRows.map(r=>{
-        const st = data.students.find(x=>x.id===r.studentId);
-        return `<tr><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(st?(st.parentName||'—'):'—')}</td><td>${esc(st?(st.mobileNumber||'—'):'—')}${copyBtnHtml(st&&st.mobileNumber)}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${r.paymentReference?esc(r.paymentReference):'<span class="hint">—</span>'}${calcNoteHtml(r)}</td><td><button class="btn-small" onclick="generateFeeMessageForRequest('${r.id}')">Message</button>${waChips(r.studentId, feeMessageTextForRequest(r.id))}</td></tr>`;
-      }).join('')}
-    </table></div>` : '<div class="empty">No pending fee requests.</div>';
+  const pendingRequestsHtml = pendingFeeRequestsByFamilyHtml();
 
   let studentPoolForBalances = data.students;
   if (studentBalanceStatusFilter === 'active') studentPoolForBalances = studentPoolForBalances.filter(s=>!s.archived);
@@ -12688,14 +12884,7 @@ function renderFees() {
     </table></div>` : '<div class="empty">No active students currently need renewal.</div>';
   const pendingRequestRows = data.subscriptions.filter(s=>s.kind==='Request')
     .slice().sort((a,b)=>(a.date||'').localeCompare(b.date||''));
-  const pendingRequestsHtml = pendingRequestRows.length ? `
-    <div class="table-scroll"><table>
-      <tr><th>Student</th><th>Parent</th><th>Mobile</th><th>Subject</th><th>Type</th><th>Classes</th><th>Amount</th><th>Requested</th><th>Reference</th><th></th></tr>
-      ${pendingRequestRows.map(r=>{
-        const st = data.students.find(x=>x.id===r.studentId);
-        return `<tr><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(st?(st.parentName||'—'):'—')}</td><td>${esc(st?(st.mobileNumber||'—'):'—')}${copyBtnHtml(st&&st.mobileNumber)}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${r.paymentReference?esc(r.paymentReference):'<span class="hint">—</span>'}${calcNoteHtml(r)}</td><td><button class="btn-small" onclick="generateFeeMessageForRequest('${r.id}')">Message</button>${waChips(r.studentId, feeMessageTextForRequest(r.id))}</td></tr>`;
-      }).join('')}
-    </table></div>` : '<div class="empty">No pending fee requests.</div>';
+  const pendingRequestsHtml = pendingFeeRequestsByFamilyHtml();
 
   // All subscription payments (moved from Reports)
   const allPaymentsFiltered = allPaymentsStudentFilter === '' ? [] : (allPaymentsShowAll
@@ -12796,7 +12985,7 @@ function renderFees() {
               if(!demandPreviewRows.length) return `<div class="empty">No fee requests needed this month.</div>${skippedHtml}`;
               return `<div class="table-scroll"><table>
                 <tr><th>Raise</th><th>Student</th><th>Subject</th><th>Type</th><th>Method</th><th>Classes left</th><th>Classes</th><th>Amount (₹)</th><th>Working</th></tr>
-                ${demandPreviewRows.map((r,i)=>`<tr${r.include?'':' style="opacity:0.5"'}><td><input type="checkbox" ${r.include?'checked':''} onchange="demandRowSet(${i},'include',this.checked)"></td><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(r.method)}</td><td${r.left<0?' style="color:var(--brick)"':''}>${r.left<0?`${-r.left} owed`:r.left}</td><td><input type="number" min="0.5" step="0.5" style="width:70px" value="${r.classes}" onchange="demandRowSet(${i},'classes',this.value)"></td><td><input type="number" min="1" step="1" style="width:90px" value="${r.amount}" onchange="demandRowSet(${i},'amount',this.value)"></td><td><span class="hint" style="font-size:11px;display:block;min-width:280px;white-space:normal">${esc(demandRowNote(r))}</span></td></tr>`).join('')}
+                ${demandPreviewRows.map((r,i)=>{ const next=demandPreviewRows[i+1], mine=demandPreviewRows.filter(x=>x.student.id===r.student.id&&x.include); return `<tr${r.include?'':' style="opacity:0.5"'}><td><input type="checkbox" ${r.include?'checked':''} onchange="demandRowSet(${i},'include',this.checked)"></td><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(r.method)}</td><td${r.left<0?' style="color:var(--brick)"':''}>${r.left<0?`${-r.left} owed`:r.left}</td><td><input type="number" min="0.5" step="0.5" style="width:70px" value="${r.classes}" onchange="demandRowSet(${i},'classes',this.value)"></td><td><input type="number" min="1" step="1" style="width:90px" value="${r.amount}" onchange="demandRowSet(${i},'amount',this.value)"></td><td><span class="hint" style="font-size:11px;display:block;min-width:280px;white-space:normal">${esc(demandRowNote(r))}</span></td></tr>`+(mine.length>1&&(!next||next.student.id!==r.student.id)?`<tr><td colspan="7" class="hint" style="text-align:right">Subtotal for ${esc(r.student.name)}</td><td><b>${mine.reduce((a,x)=>a+x.amount,0).toFixed(2)}</b></td><td></td></tr>`:''); }).join('')}
               </table></div>
               <div class="hint" style="margin-top:8px">${inc.length} request${inc.length===1?'':'s'} will be created${demandPreviewRows.length>inc.length?' · '+(demandPreviewRows.length-inc.length)+' unticked':''} · Total ₹${inc.reduce((a,r)=>a+r.amount,0).toFixed(2)}</div>
               ${skippedHtml}
@@ -15053,8 +15242,19 @@ function renderParentPortal() {
       </div>
     </div>` : `<div class="card"><div class="hint">Viewing: <b>${esc(child.name)}</b>${child.archived?' <span class="tag cat">Archived</span>':''}</div></div>`;
 
+  // More than one child with fees due: one line per child and the family total.
+  const kidsDue = myChildren.map(c => ({ c, amt: pendingFeeRequests(c.id).reduce((a, r) => a + (r.amountPaid || 0), 0) })).filter(x => x.amt > 0);
+  const familyDue = kidsDue.length > 1 ? `
+    <div class="card" style="border-color:var(--gold)">
+      <h2 style="margin-top:0">Fees due for your children</h2>
+      <div class="table-scroll"><table>
+        ${kidsDue.map(x => `<tr><td><a href="#" onclick="setParentSelectedChild('${x.c.id}');return false">${esc(x.c.name)}</a></td><td>₹${x.amt.toFixed(2)}</td></tr>`).join('')}
+        <tr><td><b>Total</b></td><td><b>₹${kidsDue.reduce((a, x) => a + x.amt, 0).toFixed(2)}</b></td></tr>
+      </table></div>
+      <div class="hint">Open each child to see the details and pay.</div>
+    </div>` : '';
   if (spOpen) return switcher + spPaperHtml();
-  return studentFeeOverdueBanner(child) + switcher + studentDashboardStatsHtml(child) + renderStudyPlanReadOnly(child) + renderStudentHomeworkSection(child) + renderStudentPracticeSection(child) + renderStudentResourcesSection(child) + myPhotoUploadHtml() + renderStudentReportCards(child, studentViewMonth, 'setStudentViewMonth', esc(child.name) + "'s")
+  return studentFeeOverdueBanner(child) + switcher + familyDue + studentDashboardStatsHtml(child) + renderStudyPlanReadOnly(child) + renderStudentHomeworkSection(child) + renderStudentPracticeSection(child) + renderStudentResourcesSection(child) + myPhotoUploadHtml() + renderStudentReportCards(child, studentViewMonth, 'setStudentViewMonth', esc(child.name) + "'s")
     + studentFeeCalculatorHtml(child);
 }
 
@@ -16568,7 +16768,7 @@ const HELP = {
   'discount': { t:'Discount structure', b:'<ul><li>Optional discounts when a student subscribes to multiple subjects.</li><li>Used in the Fee Calculator as a reference — does not automatically apply to recorded payments.</li></ul>' },
   'fee-calc': { t:'Fee calculator', b:"<ul><li>Calculates the expected fee based on a student's enrolled subjects and class type.</li><li>Click Push fee request to send the amount straight to the student's fee requests.</li></ul>" },
   'renewal': { t:'Students needing renewal', b:'<ul><li>Active students with 0 or fewer classes remaining in any subject.</li><li>Also shows students enrolled in a subject who have never bought classes (Never subscribed).</li><li>Click Request Fees to jump to the Fee Calculator for that student.</li></ul>' },
-  'pending-fees': { t:'Pending fee requests', b:"<ul><li>All fee requests across all students not yet marked Paid.</li><li>To confirm a payment, open the student's page and click Mark as Paid on the request.</li></ul>" },
+  'pending-fees': { t:'Pending fee requests', b:"<ul><li>All fee requests across all students not yet marked Paid, grouped by family.</li><li>Brothers and sisters are one family when they share a parent login or a parent mobile number (main Mobile or any Parent number). Tick <b>Bill separately</b> on a student's page to keep them out of the family.</li><li>Message makes one WhatsApp message for the whole family with every subject and the total.</li><li>Mark paid marks one request; Mark all paid marks every request of the family with one date and reference.</li></ul>" },
   'all-payments': { t:'All subscription payments', b:'<ul><li>Every payment recorded for the selected month, across all students.</li><li>Use the filters to narrow by teacher or subject.</li><li>Export downloads the filtered list as Excel.</li></ul>' },
   'refunds': { t:'Refunds issued', b:'<ul><li>All refunds recorded for the selected month.</li><li>Export downloads the list as Excel.</li></ul>' },
   'payroll': { t:'Teacher payroll', b:'<ul><li>Each teacher\'s earnings for the selected month — classes given multiplied by their per-class rate.</li><li>A ₹100 demo bonus is added for each demo that was Converted to a student that month.</li><li>Rates are set in the Fees tab under Fee setup.</li><li>Toggle the breakdown by category and class type with the Show/Hide button.</li><li>📄 Salary Slip opens a printable slip for one teacher. With All Teachers picked, 📄 Print all salary slips puts every teacher\'s slip in one window, one per page, so you can save them as a single PDF.</li></ul>' },
@@ -20291,7 +20491,7 @@ function render() {
         ${iosInstallHelpHtml()}
       </div>
     </div>
-    ${feeMessageForRequestId && currentTab !== 'students' ? `<div class="modal-backdrop" onclick="dismissFeeMessage()"></div><div class="modal-box"><h3>Fee message</h3><textarea id="feeMessageTextarea" rows="5" style="width:100%;font-family:inherit;font-size:14px;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box;resize:vertical">${esc(feeMessageDraft)}</textarea><div class="row-form" style="margin-top:8px"><button class="btn-small btn-primary" onclick="copyFeeMessage()">Copy</button>${waChips((data.subscriptions.find(x=>x.id===feeMessageForRequestId)||{}).studentId||'', feeMessageDraft)} <button class="btn-small" onclick="dismissFeeMessage()">Close</button> ${feeMessageCopyStatus ? `<span class="hint" style="color:${feeMessageCopyStatus==='Copied!'?'var(--forest)':'var(--brick)'}">${esc(feeMessageCopyStatus)}</span>` : ''}</div></div>` : ''}
+    ${feeMessageForRequestId && currentTab !== 'students' ? `<div class="modal-backdrop" onclick="dismissFeeMessage()"></div><div class="modal-box"><h3>Fee message</h3><textarea id="feeMessageTextarea" rows="5" style="width:100%;font-family:inherit;font-size:14px;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box;resize:vertical">${esc(feeMessageDraft)}</textarea><div class="row-form" style="margin-top:8px"><button class="btn-small btn-primary" onclick="copyFeeMessage()">Copy</button>${familyWaChips((data.subscriptions.find(x=>x.id===feeMessageForRequestId)||{}).studentId||'', feeMessageDraft)} <button class="btn-small" onclick="dismissFeeMessage()">Close</button> ${feeMessageCopyStatus ? `<span class="hint" style="color:${feeMessageCopyStatus==='Copied!'?'var(--forest)':'var(--brick)'}">${esc(feeMessageCopyStatus)}</span>` : ''}</div></div>` : ''}
     ${helpPanelHtml()}
     ${aiHelpPanelHtml()}
   `;
