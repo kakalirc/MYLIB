@@ -274,7 +274,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-23 18:35 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-23 18:55 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1140,6 +1140,10 @@ function fyOptionsList(count) {
 
 let logDraft = { date: todayStr, teacherId: '', studentId: '', subjectId: '', classType: 'Group', mode: 'Offline', count: 1, status: 'Present', remarks: '' };
 let logMsg = '';
+let logViewMode = 'day'; // 'day' | 'month' - scope of the classes list under the Class Log register
+let logViewMonth = ''; // YYYY-MM picked in month view ('' = month of the register date)
+function setLogViewMode(v) { logViewMode = v; if (v === 'month' && !logViewMonth) logViewMonth = (logDraft.date || todayStr).slice(0, 7); render(); }
+function setLogViewMonth(v) { logViewMonth = v; render(); }
 let sessionConfirmModal = null; // { type: 'duplicate'|'absent', onProceed: fn } or null while no modal is showing
 let editingSessionId = null;
 let editSessionDraft = { classType: 'Group', mode: 'Offline', status: 'Present', count: '', date: '', remarks: '' };
@@ -12321,14 +12325,20 @@ function renderLog() {
 
   const canAdd = d.studentId && d.subjectId && d.date && d.mode;
 
-  const dayEntries = data.sessions.filter(s=>s.teacherId===d.teacherId && s.date===d.date).sort((a,b)=>studentName(a.studentId).localeCompare(studentName(b.studentId)));
+  const logMonthView = logViewMode === 'month';
+  const logMonth = logViewMonth || (d.date || todayStr).slice(0, 7);
+  const dayEntries = data.sessions.filter(s=>s.teacherId===d.teacherId && (logMonthView ? (s.date||'').startsWith(logMonth) : s.date===d.date))
+    .sort((a,b)=>(logMonthView ? (a.date||'').localeCompare(b.date||'') : 0) || studentName(a.studentId).localeCompare(studentName(b.studentId)));
+  const sumCount = st => dayEntries.filter(s=>s.status===st).reduce((a,s)=>a+(Number(s.count)||0),0);
+  const dateCell = s => logMonthView ? `<td>${s.date}${savedAtHtml(s.createdAt, s.date)}</td>` : '';
   const entriesHtml = dayEntries.length ? `
     <div class="table-scroll"><table>
-      <tr><th>Student</th><th>Subject</th><th>Type</th><th>Mode</th><th>Classes</th><th>Status</th><th>Remarks</th><th></th></tr>
+      <tr>${logMonthView?'<th>Date</th>':''}<th>Student</th><th>Subject</th><th>Type</th><th>Mode</th><th>Classes</th><th>Status</th><th>Remarks</th><th></th></tr>
       ${dayEntries.map(s=>{
         if (editingSessionId === s.id) {
           const ed = editSessionDraft;
           return `<tr>
+            ${dateCell(s)}
             <td>${esc(studentName(s.studentId))}</td>
             <td>${esc(subjectName(s.subjectId))}</td>
             <td colspan="6">
@@ -12354,6 +12364,7 @@ function renderLog() {
         }
         return `
         <tr>
+          ${dateCell(s)}
           <td>${esc(studentName(s.studentId))}</td>
           <td>${esc(subjectName(s.subjectId))}</td>
           <td>${s.classType}</td>
@@ -12367,7 +12378,8 @@ function renderLog() {
           </td>
         </tr>`;
       }).join('')}
-    </table></div>` : '<div class="empty">No classes logged for this teacher on this date yet.</div>';
+      ${logMonthView ? `<tr class="total"><td colspan="9">Month total: <b>${sumCount('Present')}</b> present · <b>${sumCount('Absent')}</b> absent · ${dayEntries.length} entr${dayEntries.length===1?'y':'ies'}</td></tr>` : ''}
+    </table></div>` : `<div class="empty">${logMonthView ? 'No classes logged for this teacher in this month.' : 'No classes logged for this teacher on this date yet.'}</div>`;
 
   return `
     <div class="card">
@@ -12408,7 +12420,14 @@ function renderLog() {
       ${noBalanceWarning}
     </div>
     <div class="card">
-      <h2>${esc(teacher.name)} — classes on ${d.date}</h2>
+      <h2>${esc(teacher.name)} — ${logMonthView ? `classes in ${logMonth}` : `classes on ${d.date}`}</h2>
+      <div class="row-form">
+        <select onchange="setLogViewMode(this.value)">
+          <option value="day" ${!logMonthView?'selected':''}>Selected day</option>
+          <option value="month" ${logMonthView?'selected':''}>Whole month</option>
+        </select>
+        ${logMonthView ? `<input type="month" value="${logMonth}" max="${monthStr}" onchange="setLogViewMonth(this.value)">` : '<span class="hint">Uses the date picked above.</span>'}
+      </div>
       ${entriesHtml}
     </div>
     ${sessionConfirmModalHtml()}
