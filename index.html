@@ -271,7 +271,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-23 10:15 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-23 10:40 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1393,6 +1393,7 @@ async function loadTeacherResearchAccess() {
 }
 let researchDraft = { subjectId: '', gradeId: '', boardId: '', studentId: '', chapter: '', focus: '' };
 let researchNotesStudent = ''; // Saved briefs filter: '' = all, 'none' = no student, else a student id
+let researchShowHidden = false; // Saved briefs: list the hidden ones instead (each with Unhide)
 let researchBrief = { loading: false, text: '', error: '', savedId: '', ask: null };
 let researchBankQs = [];
 let researchNotes = null;      // this teacher's saved briefs, newest first; null = not loaded yet
@@ -1403,7 +1404,7 @@ async function loadResearchData() {
   let notes, chaps, tbs;
   try {
     [notes, chaps, tbs] = await Promise.all([
-      sb.from('teacher_research_notes').select('*').order('created_at', { ascending: false }).limit(100),
+      sb.from('teacher_research_notes').select('*').order('created_at', { ascending: false }).limit(300),
       researchChapterList ? Promise.resolve(null) : sb.from('qb_chapters').select('id,textbook_id,chapter_number,title,is_current_syllabus'),
       researchChapterList ? Promise.resolve(null) : sb.from('qb_textbooks').select('id,board_id,grade_id,subject_name,is_current'),
     ]);
@@ -1565,13 +1566,17 @@ async function saveResearchBrief() {
   researchNotesMsg = savedMsg;
   render();
 }
-async function deleteResearchNote(id) {
-  if (!confirm('Delete this saved brief?')) return;
-  const { error } = await sb.from('teacher_research_notes').delete().eq('id', id);
-  if (error) { researchNotesMsg = 'Could not delete: ' + error.message; render(); return; }
-  researchNotes = (researchNotes || []).filter(n => n.id !== id);
+// Briefs are never deleted from the app (SQL 58): a teacher hides one and can unhide it from "Show hidden".
+async function setResearchNoteHidden(id, hidden) {
+  const { error } = await sb.from('teacher_research_notes').update({ hidden }).eq('id', id);
+  if (error) {
+    researchNotesMsg = 'Could not ' + (hidden ? 'hide' : 'unhide') + ': ' + error.message + (/hidden/.test(error.message || '') ? ' Ask your admin to run SQL 58 in Supabase.' : '');
+    render(); return;
+  }
+  researchNotes = (researchNotes || []).map(n => n.id === id ? { ...n, hidden } : n);
   if (researchOpenNoteId === id) researchOpenNoteId = '';
-  if (researchBrief.savedId === id) { researchBrief = { loading: false, text: '', error: '', savedId: '', ask: null }; researchBankQs = []; }
+  if (hidden && researchBrief.savedId === id) { researchBrief = { loading: false, text: '', error: '', savedId: '', ask: null }; researchBankQs = []; }
+  researchNotesMsg = hidden ? 'Hidden. Tick Show hidden to see it again.' : 'Back in Saved briefs.';
   render();
 }
 function closeResearchBrief() { researchBrief = { loading: false, text: '', error: '', savedId: '', ask: null }; researchBankQs = []; render(); }
@@ -1579,7 +1584,7 @@ function closeResearchBrief() { researchBrief = { loading: false, text: '', erro
 function resetResearchState() {
   researchBrief = { loading: false, text: '', error: '', savedId: '', ask: null }; researchBankQs = [];
   researchDraft = { subjectId: '', gradeId: '', boardId: '', studentId: '', chapter: '', focus: '' };
-  researchNotesStudent = '';
+  researchNotesStudent = ''; researchShowHidden = false;
   researchNotes = null; researchNotesMsg = ''; researchOpenNoteId = '';
   insights = null; insightsRaw = null; insightsFilter = { subject: '', gradeId: '', days: '', search: '' }; insightsStudentId = ''; insightsMsg = '';
   qrRows = null; qrMsg = ''; qrOpenChapter = ''; qrDraft = { subjectId: '', gradeId: '', boardId: '', examType: '' };
@@ -8588,7 +8593,7 @@ const SUPPORT_KB = {
 - [qb] Question Bank (Teaching): Review Queue (check and approve questions for your subject and grade), Full Question Bank, Archived, Practice Papers and Past Papers. Pick board, subject and grade first. Old-syllabus questions stay hidden unless you tick "Old syllabus only".
 - [qb] Practice papers: Question Bank → Practice Papers → New paper. Pick a blueprint, tick the sections you want, and tick lessons for a lesson-only paper (none ticked = all lessons). Create and auto-fill, then Swap, Remove or Re-run auto-fill, Mark ready, and Assign to students with a due date.
 - [qb] Marking practice papers: open the paper, tap a student under Needs marking, give marks for each written question and overall feedback, then Mark as reviewed. MCQs are marked automatically, and you can change those marks too.
-- [research] Research (Teaching): Lesson prep (an AI brief for a chapter: key points, teaching order, common mistakes, examples, practice questions; every brief saves itself to Saved briefs, with Delete to remove it; optional "For student" picker shows that student's Study Plan topics as chapter suggestions and Saved briefs can be filtered by student) and Resource library (keep notes, worksheets and links; tick "Share with students" to show them to your students and their parents).
+- [research] Research (Teaching): Lesson prep (an AI brief for a chapter: key points, teaching order, common mistakes, examples, practice questions; every brief saves itself to Saved briefs; Hide takes one out of the list and Show hidden brings it back; optional "For student" picker shows that student's Study Plan topics as chapter suggestions and Saved briefs can be filtered by student) and Resource library (keep notes, worksheets and links; tick "Share with students" to show them to your students and their parents).
 - [research] [qb] Research also has Student insights (how each student did by chapter and question type on papers you marked, with "Make a paper on weak chapters") and Question research (how past papers ask each chapter).
 - Give Attendance (Attendance): record a class you gave. Current month records can be edited; earlier months are view only.
 - My Attendance Report (Attendance): your classes for the month, by student.
@@ -16422,7 +16427,7 @@ const HELP = {
   'hw-admin': { t:'Homework (all teachers)', b:'<ul><li>Every homework set by every teacher.</li><li>Filter by teacher, student or status to follow up.</li><li>Teachers set and review homework from their own Homework tab.</li></ul>' },
   'sp-admin': { t:'Study Plans (all teachers)', b:'<ul><li>Read-only view of every study plan and how far each student has got.</li><li>Only the teacher can edit a plan, from their own Study Plans tab.</li></ul>' },
   'textbook-library': { t:'Textbook library', b:'<ul><li>Every book teachers uploaded for Study Plans, once each, with how many student links it has.</li><li>Teachers see the books for the subjects they teach (all grades) and can link or unlink them; they cannot change or delete a book.</li><li><b>Edit</b> fixes a book\'s name, subject, grade or board. The subject decides which teachers see it.</li><li>Tap <b>▶ N student links</b> to see which students use the book (with subject and teacher).</li><li><b>Delete</b> removes the book and its student links. Topics already added to plans stay.</li></ul>' },
-  'research': { t:'Research', b:'<ul><li><b>Lesson prep</b>: pick subject, grade and chapter (or type a topic) to get an AI brief: key points, teaching order, common mistakes, examples and practice questions. Check it against the textbook. Each brief saves itself in Saved briefs; Delete removes one you don’t want.</li><li><b>For student</b> (optional): pick one of your students to see their Study Plan topics in the chapter list (done topics last) and fill in their grade and board. With no student picked, the list shows all your students’ topics with their names. Question Bank chapters come first. Saved briefs remember the student and can be filtered by student.</li><li><b>Student insights</b>: how each student did, by chapter and question type, on the practice papers you marked. Under 60% shows as weak; Make a paper on weak chapters starts a practice paper with those lessons ticked.</li><li><b>Question research</b>: per chapter, which past papers asked it, average marks and question types.</li><li><b>Resource library</b>: keep notes, worksheets, pictures and links by subject and chapter. Tick Share with students to show an item to your students and their parents.</li><li>Student insights and Question research need Question Bank access.</li></ul>' },
+  'research': { t:'Research', b:'<ul><li><b>Lesson prep</b>: pick subject, grade and chapter (or type a topic) to get an AI brief: key points, teaching order, common mistakes, examples and practice questions. Check it against the textbook. Each brief saves itself in Saved briefs. Hide takes one you don’t want out of the list; tick Show hidden to see and Unhide it. Briefs are never deleted.</li><li><b>For student</b> (optional): pick one of your students to see their Study Plan topics in the chapter list (done topics last) and fill in their grade and board. With no student picked, the list shows all your students’ topics with their names. Question Bank chapters come first. Saved briefs remember the student and can be filtered by student.</li><li><b>Student insights</b>: how each student did, by chapter and question type, on the practice papers you marked. Under 60% shows as weak; Make a paper on weak chapters starts a practice paper with those lessons ticked.</li><li><b>Question research</b>: per chapter, which past papers asked it, average marks and question types.</li><li><b>Resource library</b>: keep notes, worksheets, pictures and links by subject and chapter. Tick Share with students to show an item to your students and their parents.</li><li>Student insights and Question research need Question Bank access.</li></ul>' },
   'student-homework': { t:'Homework', b:'<ul><li>Homework your teachers have set, with the due date.</li><li>Upload a photo of your work, or Mark submitted if there is nothing to photograph.</li><li>Once the teacher reviews it you see the marks and feedback here.</li></ul>' },
   'student-practice': { t:'Practice Papers', b:'<ul><li>Papers your teacher assigned. Start (or Continue) opens the paper.</li><li>Go section by section. Tap the answer for MCQs, type short answers, and upload a photo for long answers.</li><li>Answers save automatically, so you can stop and come back before the due date.</li><li>Submit paper when finished. MCQs are marked at once; the full score shows after the teacher reviews it.</li></ul>' },
   'student-resources': { t:'From your teachers', b:'<ul><li>Notes, worksheets, pictures and links your teachers shared for your subjects.</li><li>Tap an item to open or download it.</li></ul>' },
@@ -16853,7 +16858,8 @@ function renderTeacherResearch(teacher) {
   const noteTitle = n => [n.chapter, n.subject_name, qbByName(grades, n.grade_id), n.student_id ? studentName(n.student_id) : ''].filter(Boolean).join(' · ');
   const noteStudentIds = [...new Set((researchNotes || []).map(n => n.student_id).filter(Boolean))];
   // The brief open in the card above is left out of the list until it is closed, so it never shows twice.
-  const shownNotes = (researchNotes || []).filter(n => n.id !== researchBrief.savedId).filter(n => !researchNotesStudent || (researchNotesStudent === 'none' ? !n.student_id : n.student_id === researchNotesStudent));
+  const hiddenCount = (researchNotes || []).filter(n => n.hidden).length;
+  const shownNotes = (researchNotes || []).filter(n => n.id !== researchBrief.savedId && !!n.hidden === researchShowHidden).filter(n => !researchNotesStudent || (researchNotesStudent === 'none' ? !n.student_id : n.student_id === researchNotesStudent));
   return `
   <div class="card">
     <h3 style="font-family:'Zilla Slab',serif;margin:0 0 6px">Lesson prep ${helpBtn('research')}</h3>
@@ -16908,7 +16914,7 @@ function renderTeacherResearch(teacher) {
       <h3 style="font-family:'Zilla Slab',serif;margin:0;flex:1">${esc([b.ask.chapter, b.ask.subjectName, qbByName(grades, b.ask.gradeId), b.ask.studentId ? studentName(b.ask.studentId) : ''].filter(Boolean).join(' · '))}</h3>
       ${b.savedId ? `<span style="font-size:12px;color:var(--forest)" title="Saved automatically. It stays in Saved briefs after you close it.">✓ Saved</span>` : `<button class="btn-small" onclick="saveResearchBrief()">Save</button>`}
       <button class="btn-small" onclick="copyResearchBrief('', this)">Copy</button>
-      ${b.savedId ? `<button class="btn-small btn-danger" onclick="deleteResearchNote('${b.savedId}')">Delete</button>` : ''}
+      ${b.savedId ? `<button class="btn-small" onclick="setResearchNoteHidden('${b.savedId}', true)" title="Takes it out of Saved briefs. Show hidden brings it back.">Hide</button>` : ''}
       <button class="btn-small" onclick="closeResearchBrief()">Close</button>
     </div>
     ${researchMdHtml(b.text)}
@@ -16927,10 +16933,11 @@ function renderTeacherResearch(teacher) {
         ${byName(noteStudentIds.map(id => ({ id, name: studentName(id) || 'Student (removed)' }))).map(st => `<option value="${st.id}" ${st.id === researchNotesStudent ? 'selected' : ''}>${esc(st.name)}</option>`).join('')}
         <option value="none" ${researchNotesStudent === 'none' ? 'selected' : ''}>No student</option>
       </select>` : ''}
+      ${hiddenCount || researchShowHidden ? `<label style="font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" ${researchShowHidden ? 'checked' : ''} onchange="researchShowHidden = this.checked; researchOpenNoteId = ''; render()"> Show hidden (${hiddenCount})</label>` : ''}
     </div>
     ${researchNotesMsg ? `<div class="hint" style="color:${researchNotesMsg.startsWith('Could not') ? 'var(--brick)' : 'var(--forest)'}">${esc(researchNotesMsg)}</div>` : ''}
     ${researchNotes === null ? '<div class="hint">Loading…</div>' : !researchNotes.length ? '<div class="empty">Nothing saved yet. Briefs you make are saved here automatically.</div>' :
-      !shownNotes.length ? '<div class="empty">No saved briefs for this student.</div>' :
+      !shownNotes.length ? `<div class="empty">${researchShowHidden ? 'No hidden briefs' + (researchNotesStudent ? ' for this student' : '') + '.' : researchNotesStudent ? 'No saved briefs for this student.' : 'All your saved briefs are hidden. Tick Show hidden to see them.'}</div>` :
       shownNotes.map(n => `
       <div style="border-top:1px solid var(--line);padding:8px 0">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;cursor:pointer" onclick="toggleResearchNote('${n.id}')">
@@ -16944,7 +16951,7 @@ function renderTeacherResearch(teacher) {
           ${researchMdHtml(n.brief)}
           <div style="display:flex;gap:8px;margin-top:6px">
             <button class="btn-small" onclick="copyResearchBrief('${n.id}', this)">Copy</button>
-            <button class="btn-small btn-danger" onclick="deleteResearchNote('${n.id}')">Delete</button>
+            ${n.hidden ? `<button class="btn-small" onclick="setResearchNoteHidden('${n.id}', false)">Unhide</button>` : `<button class="btn-small" onclick="setResearchNoteHidden('${n.id}', true)" title="Takes it out of Saved briefs. Show hidden brings it back.">Hide</button>`}
           </div>
         </div>` : ''}
       </div>`).join('')}
