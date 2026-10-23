@@ -274,7 +274,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-23 17:40 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-23 18:20 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -5530,13 +5530,20 @@ function filterTeachersByStudentPicker() {
   const opts = byName(data.students.filter(s=>studentMatchesSearch(s, term))).map(s=>`<option value="${s.id}" ${teachersByStudentFilter===s.id?'selected':''}>${esc(studentLabel(s))}${s.archived?' (archived)':''}</option>`).join('');
   select.innerHTML = `<option value="" ${teachersByStudentFilter===''?'selected':''}>Pick a student…</option><option value="ALL" ${teachersByStudentFilter==='ALL'?'selected':''}>All Students</option>` + opts;
 }
+// "9876543210 · Parent name (Child, Child)" for parent login pickers; names come from linked students.
+function parentLoginLabel(u) {
+  const kids = data.parentStudents.filter(m => m.parentUserId === u.id).map(m => data.students.find(s => s.id === m.studentId)).filter(Boolean);
+  const parents = [...new Set(kids.map(s => (s.parentName || '').trim()).filter(Boolean))];
+  const kidNames = kids.map(s => s.name).join(', ');
+  return u.username + (parents.length ? ' · ' + parents.join(' / ') : '') + (kidNames ? ' (' + kidNames + ')' : '');
+}
 function filterParentPicker(searchId, selectId) {
   const term = document.getElementById(searchId).value.trim().toLowerCase();
   const select = document.getElementById(selectId);
   if (!select) return;
-  const pool = data.users.filter(u=>u.role==='Parent' && (!term || u.username.toLowerCase().includes(term)));
+  const pool = data.users.filter(u=>u.role==='Parent' && (!term || parentLoginLabel(u).toLowerCase().includes(term)));
   const opts = pool.slice().sort((a,b)=>a.username.localeCompare(b.username))
-    .map(u=>`<option value="${u.id}" ${(selectedParentUserId===u.id)?'selected':''}>${esc(u.username)}${u.archived?' (archived)':''}</option>`).join('');
+    .map(u=>`<option value="${u.id}" ${(selectedParentUserId===u.id)?'selected':''}>${esc(parentLoginLabel(u))}${u.archived?' (archived)':''}</option>`).join('');
   select.innerHTML = `<option value="">Choose a parent…</option>` + opts;
 }
 function filterAnnouncementUserPicker() {
@@ -7882,9 +7889,11 @@ async function addStudent() {
   if (!isValidPersonName(name)) { addConfirmMsg.student = 'Name cannot contain numbers.'; render(); return; }
   const { data: row, error } = await sb.from('students').insert({ name, archived: false }).select().single();
   if (error) { addConfirmMsg.student = 'Could not add student: ' + error.message; render(); return; }
-  data.students.push({ id: row.id, name: row.name, archived: !!row.archived, code: row.student_code || '' });
+  data.students.push({ id: row.id, name: row.name, archived: !!row.archived, code: row.student_code || '', parentName: '', mobileNumber: '', email: '', address: '', photo: '', gradeId: '', boardId: '', academicYear: '', modePreference: '', classTypePreference: '', billSeparately: false });
   input.value = '';
-  addConfirmMsg.student = `Student "${name}" added${row.student_code ? ' (' + row.student_code + ')' : ''}.`;
+  // Open the new student's maintenance screen straight away so details can be filled in.
+  selectStudent(row.id);
+  addConfirmMsg.student = `Student "${name}" added${row.student_code ? ' (' + row.student_code + ')' : ''}. Fill in their details below.`;
   render();
 }
 function activeStudents() { return data.students.filter(s=>!s.archived); }
@@ -12979,7 +12988,7 @@ function renderParents() {
     </div>
   `;
 
-  const parentUsers = byName(data.users.filter(u=>u.role==='Parent').map(u=>({name:u.username, _raw:u})));
+  const parentUsers = byName(data.users.filter(u=>u.role==='Parent').map(u=>({name:parentLoginLabel(u), _raw:u})));
   const selectedParent = selectedParentUserId ? data.users.find(u=>u.id===selectedParentUserId) : null;
   const parentDropdownOptions = `<option value="">Choose a parent…</option>` + parentUsers.map(pu=>`<option value="${pu._raw.id}" ${selectedParentUserId===pu._raw.id?'selected':''}>${esc(pu.name)}</option>`).join('');
 
@@ -12988,7 +12997,7 @@ function renderParents() {
       <h2>Manage parent logins</h2>
       <div class="hint">${parentUsers.length===0 ? 'No parent logins yet — add one above.' : 'Choose a parent to view or manage their children.'}</div>
       <div class="row-form">
-        <input type="text" id="parentSearchBox1" placeholder="Search by username…" oninput="filterParentPicker('parentSearchBox1','parentPickerSelect1')" style="width:200px">
+        <input type="text" id="parentSearchBox1" placeholder="Search mobile, parent or child…" oninput="filterParentPicker('parentSearchBox1','parentPickerSelect1')" style="width:200px">
       </div>
       <div class="row-form">
         <select id="parentPickerSelect1" onchange="selectParentFromDropdown(this.value)">${parentDropdownOptions}</select>
