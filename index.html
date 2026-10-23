@@ -274,7 +274,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-23 17:40 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-23 18:05 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -8126,7 +8126,7 @@ function feeQuoteHintHtml(d, which) {
   return differs ? `${sum} — you've entered your own amount. <button type="button" class="btn-small" onclick="useQuoteAmount('${which}')">Use ₹${q.amount.toFixed(2)}</button>` : sum;
 }
 // The saved working of an auto-raised fee request (SQL 59); stays on the row after it is marked paid.
-function calcNoteHtml(r) { return r && r.calcNote ? `<div class="hint" style="font-size:11px;white-space:normal;min-width:220px;max-width:360px">🧮 ${esc(r.calcNote)}</div>` : ''; }
+function calcNoteHtml(r) { return r && r.calcNote ? `<div class="hint" style="font-size:11px;white-space:normal;min-width:220px;max-width:360px">🧮 ${esc(r.calcNote).replace(/\n/g, '<br>')}</div>` : ''; }
 function requestFormDraft(which) { return which === 'edit' ? editRequestDraft : which === 'pay' ? subDraft : requestDraft; }
 // Typing in Classes/Amount updates the draft and the hint in place (no full
 // render, so the cursor stays in the box).
@@ -8181,7 +8181,7 @@ function requestCalcNote() {
 }
 function requestCalcHtml() {
   const d = requestDraft, note = requestCalcNote();
-  return (note ? `<div class="hint" style="font-size:12px">🧮 ${esc(note)}</div>` : '') + (d.calcMsg ? `<div class="hint" style="color:var(--brick)">${esc(d.calcMsg)}</div>` : '');
+  return (note ? `<div class="hint" style="font-size:12px">🧮 ${esc(note).replace(/\n/g, '<br>')}</div>` : '') + (d.calcMsg ? `<div class="hint" style="color:var(--brick)">${esc(d.calcMsg)}</div>` : '');
 }
 function useQuoteAmount(which) {
   const d = requestFormDraft(which);
@@ -8433,6 +8433,7 @@ function feeMessageTextForRequest(requestId) {
     ``,
     classTypeMode ? `Class type: ${classTypeMode}` : '',
     `Classes due: ${classCount}`,
+    parentWhyOf(r) ? `How we worked it out: ${parentWhyOf(r)}` : null,
     `Amount due: Rs ${amount}`,
     ``,
     remainingLine,
@@ -8559,6 +8560,8 @@ function familyFeeMessage(studentId) {
       const left = studentRemaining(s.id, r.subjectId, r.type);
       lines.push(`${i + 1}. ${subj ? subj.name : 'Subject'} (${typeMode})${months.length > 1 ? ', ' + requestMonthLong(r) : ''}: ${r.classes} class${Number(r.classes) === 1 ? '' : 'es'}, ${inrText(r.amountPaid)}`);
       lines.push(`   Classes available now: ${left}${left < 0 ? ' (overdue - please pay at the earliest)' : ''}`);
+      const why = parentWhyOf(r);
+      if (why) lines.push(`   How we worked it out: ${why}`);
     });
     if (kids.length > 1 && mine.length > 1) lines.push(`Subtotal for ${s.name}: ${inrText(mine.reduce((a, r) => a + (r.amountPaid || 0), 0))}`);
   });
@@ -8681,7 +8684,15 @@ function demandPriceText(q) {
 function demandRowNote(r) {
   const price = r.amountEdited ? `${r.classes} classes, amount set by admin ${rupees(r.amount)} (Fee setup ${rupees(r.quoteAmount)})` : demandPriceText(feeQuote(r.subj.id, r.ty, r.mode, r.classes));
   const classesNote = r.classesEdited ? `${r.why} → classes changed by admin to ${r.classes}` : r.why;
-  return `${r.manual ? 'Calculated ' + todayStr + ' for ' + monthLabelOf(r.month) : demandRunLabel(r.month)} · ${classesNote}. Amount: ${price}`;
+  return `${r.manual ? 'Calculated ' + todayStr + ' for ' + monthLabelOf(r.month) : demandRunLabel(r.month)} · ${classesNote}. Amount: ${price}`
+    + (r.parentWhy && !r.classesEdited ? `\n${PARENT_WHY_PREFIX}${r.classes} classes): ${r.parentWhy}` : '');
+}
+// The parent-friendly reason saved as the working's last line; used in fee messages only while the request still
+// has the classes it was worked out for (an edited request drops it rather than contradict the change).
+const PARENT_WHY_PREFIX = 'For parent (';
+function parentWhyOf(r) {
+  const m = /\nFor parent \(([\d.]+) classes\): (.+)$/.exec((r && r.calcNote) || '');
+  return m && Number(m[1]) === Number(r.classes) ? m[2] : '';
 }
 // The calculation for one student + subject + type in a month (YYYY-MM). Returns { neverPaid }, { skip: reason } or
 // { row } — the same answer for the bulk run and the Calculate button on a student's fee request form.
@@ -8708,25 +8719,31 @@ function demandCalcFor(student, subj, ty, month) {
     let n = 0; for (let d = 1; d <= daysInMonth; d++) if (new Date(yr, mo-1, d).getDay() === wd) n++;
     predicted += n * Math.max(1, Math.round(byDay[wd].classes / byDay[wd].dates.size));   // two classes a day, every week, count as two
   });
-  let method, classes, why;
+  const monthName = new Date(yr, mo-1, 1).toLocaleString('en-IN', { month: 'long' });
+  const owedText = n => `${n} class${n === 1 ? '' : 'es'} already taken but not yet paid`;
+  let method, classes, why, parentWhy;
   if (FEE_PACKAGE_SIZES.includes(Number(lastPay.classes))) {
     const monthUse = Math.max(usedLastMonth, predicted);
     if (left > monthUse) return { skip: `Package ${lastPay.classes}: ${left} classes left, more than last month's use (${usedLastMonth})` };
     method = 'Package'; classes = Number(lastPay.classes);
     why = `Package ${classes} (last paid ${lastPay.date}), ${leftText}, ${usedLastMonth} used in ${prevLabel}${owed ? ` — ${owed} owed will be taken from this package` : ''}`;
+    parentWhy = `your ${classes}-class package${owed ? ` (${owedText(owed)} will come out of it)` : ''}`;
   } else if (regularDays.length) {
     method = 'Regular'; classes = halfRound(predicted - left);
     why = `Regular ${regularDays.map(d => DAY_NAMES[d]).join('+')}: ${predicted} classes this month ${left < 0 ? '+ ' + owed + ' owed' : '− ' + left + ' left'} = ${classes}`;
+    const days = regularDays.map(d => DAY_NAMES[d]), dayList = days.length > 1 ? days.slice(0, -1).join(', ') + ' & ' + days[days.length - 1] : days[0];
+    parentWhy = `${dayList} classes in ${monthName} = ${predicted}${owed ? `, plus ${owedText(owed)}` : left > 0 ? `, minus ${left} still available` : ''}${owed || left > 0 ? ` = ${classes}` : ''}`;
   } else {
     method = usedLastMonth ? 'Irregular' : 'No classes last month';
     classes = halfRound(Number(lastPay.classes) - left);
+    parentWhy = `same as your last payment (${lastPay.classes} classes)${owed ? ` + ${owedText(owed)}` : left > 0 ? `, minus ${left} still available` : ''}`;
     why = `${usedLastMonth ? `Irregular (${usedLastMonth} class${usedLastMonth===1?'':'es'} in ${prevLabel}, no fixed weekday)` : `No classes in ${prevLabel}`}: last payment ${lastPay.classes} ${left < 0 ? '+ ' + owed + ' owed' : '− ' + left + ' left'} = ${classes}`;
   }
   if (classes <= 0) return { skip: `${method}: enough classes left (${left})` };
   const mode = studentUsualMode(student.id, subj.id, ty);
   const q = feeQuote(subj.id, ty, mode, classes);
   if (!q || !q.rate) return { skip: `No rate in Fee setup for ${catLabel(subj.category)}, ${ty}, ${mode}` };
-  return { row: { student, subj, ty, month, method, why, left, owed, mode, classes, baseClasses: classes, amount: q.amount, quoteAmount: q.amount, include: true, classesEdited: false, amountEdited: false } };
+  return { row: { student, subj, ty, month, method, why, parentWhy, left, owed, mode, classes, baseClasses: classes, amount: q.amount, quoteAmount: q.amount, include: true, classesEdited: false, amountEdited: false } };
 }
 function previewDemand() {
   const month = demandTargetMonth(); demandMsg = ''; demandShowSkipped = false;
@@ -10357,6 +10374,9 @@ function generatePaymentReference() {
   const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
   return 'LIB' + Date.now().toString().slice(-6) + rand;
 }
+// A request raised by the monthly run carries AUTO-YYYY-MM as its reference; only a UPI checkout reference means
+// the student or parent has started paying.
+function paymentInitiated(r) { return !!r.paymentReference && !r.paymentReference.startsWith('AUTO-'); }
 async function startPayCheckout() {
   payCheckoutMsg = '';
   const selectedIds = [...payCheckoutSelected];
@@ -12001,7 +12021,7 @@ function renderStudents() {
                 ${rejectPaymentMsg[r.id] ? `<div class="hint" style="color:var(--brick)">${esc(rejectPaymentMsg[r.id])}</div>` : ''}
                 ${isMarking ? `<span class="hint">Confirming payment — fill in the details below.</span>` : isEditing ? `<span class="hint">Editing — see below.</span>` : `
                   <button class="btn-small btn-primary" onclick="startMarkPaid('${r.id}')">Mark as Paid</button>
-                  ${r.paymentReference ? `<button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="rejectPayment('${r.id}')">Reject Payment</button>` : ''}
+                  ${paymentInitiated(r) ? `<button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="rejectPayment('${r.id}')">Reject Payment</button>` : ''}
                   <button class="btn-small" onclick="startEditRequest('${r.id}')">Edit</button>
                   <button class="icon-btn" onclick="cancelFeeRequest('${r.id}')" title="Cancel request">✕</button>
                 `}
@@ -13169,7 +13189,7 @@ function renderFees() {
                   const fk=familyKeyOf(r.student.id), famRows=demandPreviewRows.filter(x=>familyKeyOf(x.student.id)===fk), famKids=[...new Set(famRows.map(x=>x.student.name))], multi=famKids.length>1;
                   const famHead=multi&&(!prev||familyKeyOf(prev.student.id)!==fk)?`<tr style="background:var(--soft)"><td colspan="9"><b>Family: ${esc(familyParentName(r.student.id))}</b> · ${esc(famKids.join(', '))}</td></tr>`:'';
                   const famFoot=multi&&(!next||familyKeyOf(next.student.id)!==fk)?`<tr><td colspan="7" style="text-align:right"><b>Family total</b></td><td><b>${famRows.filter(x=>x.include).reduce((a,x)=>a+x.amount,0).toFixed(2)}</b></td><td></td></tr>`:'';
-                  return famHead+`<tr${r.include?'':' style="opacity:0.5"'}><td><input type="checkbox" ${r.include?'checked':''} onchange="demandRowSet(${i},'include',this.checked)"></td><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(r.method)}</td><td${r.left<0?' style="color:var(--brick)"':''}>${r.left<0?`${-r.left} owed`:r.left}</td><td><input type="number" min="0.5" step="0.5" style="width:70px" value="${r.classes}" onchange="demandRowSet(${i},'classes',this.value)"></td><td><input type="number" min="1" step="1" style="width:90px" value="${r.amount}" onchange="demandRowSet(${i},'amount',this.value)"></td><td><span class="hint" style="font-size:11px;display:block;min-width:280px;white-space:normal">${esc(demandRowNote(r))}</span></td></tr>`+(mine.length>1&&(!next||next.student.id!==r.student.id)?`<tr><td colspan="7" class="hint" style="text-align:right">Subtotal for ${esc(r.student.name)}</td><td><b>${mine.reduce((a,x)=>a+x.amount,0).toFixed(2)}</b></td><td></td></tr>`:'')+famFoot; }).join('')}
+                  return famHead+`<tr${r.include?'':' style="opacity:0.5"'}><td><input type="checkbox" ${r.include?'checked':''} onchange="demandRowSet(${i},'include',this.checked)"></td><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(r.method)}</td><td${r.left<0?' style="color:var(--brick)"':''}>${r.left<0?`${-r.left} owed`:r.left}</td><td><input type="number" min="0.5" step="0.5" style="width:70px" value="${r.classes}" onchange="demandRowSet(${i},'classes',this.value)"></td><td><input type="number" min="1" step="1" style="width:90px" value="${r.amount}" onchange="demandRowSet(${i},'amount',this.value)"></td><td><span class="hint" style="font-size:11px;display:block;min-width:280px;white-space:normal">${esc(demandRowNote(r)).replace(/\n/g,'<br>')}</span></td></tr>`+(mine.length>1&&(!next||next.student.id!==r.student.id)?`<tr><td colspan="7" class="hint" style="text-align:right">Subtotal for ${esc(r.student.name)}</td><td><b>${mine.reduce((a,x)=>a+x.amount,0).toFixed(2)}</b></td><td></td></tr>`:'')+famFoot; }).join('')}
               </table></div>
               <div class="hint" style="margin-top:8px">${inc.length} request${inc.length===1?'':'s'} will be created${demandPreviewRows.length>inc.length?' · '+(demandPreviewRows.length-inc.length)+' unticked':''} · Total ₹${inc.reduce((a,r)=>a+r.amount,0).toFixed(2)}</div>
               ${skippedHtml}
@@ -14327,9 +14347,9 @@ function renderStudentReportCards(student, viewMonth, monthSetterFn, titlePrefix
       <div class="table-scroll"><table>
         <tr><th></th><th>Subject</th><th>Type</th><th>Classes</th><th>Amount</th><th>Requested</th><th>Status</th></tr>
         ${myPendingRequests.map(r=>`<tr>
-          <td><input type="checkbox" ${payCheckoutSelected.has(r.id)?'checked':''} ${r.paymentReference?'disabled title="Already initiated — contact admin to reset before paying again"':''} onchange="togglePayCheckoutSelect('${r.id}')"></td>
-          <td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td>
-          <td>${r.paymentReference ? `<span class="hint">Initiated (${esc(r.paymentReference)}) <a href="#" onclick="startUndoPaymentInitiation('${r.id}'); return false;" style="color:var(--brick)">Undo</a></span>` : (r.paymentRemarks ? `<span class="hint" style="color:var(--brick)">${esc(r.paymentRemarks)}</span>` : '<span class="hint">—</span>')}</td>
+          <td><input type="checkbox" ${payCheckoutSelected.has(r.id)?'checked':''} ${paymentInitiated(r)?'disabled title="Already initiated — contact admin to reset before paying again"':''} onchange="togglePayCheckoutSelect('${r.id}')"></td>
+          <td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}${parentWhyOf(r)?`<div class="hint" style="font-size:11px;min-width:160px;white-space:normal">${esc(parentWhyOf(r))}</div>`:''}</td><td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td>
+          <td>${paymentInitiated(r) ? `<span class="hint">Initiated (${esc(r.paymentReference)}) <a href="#" onclick="startUndoPaymentInitiation('${r.id}'); return false;" style="color:var(--brick)">Undo</a></span>` : (r.paymentRemarks ? `<span class="hint" style="color:var(--brick)">${esc(r.paymentRemarks)}</span>` : '<span class="hint">—</span>')}</td>
         </tr>`).join('')}
       </table></div>
       ${payCheckoutMsg ? `<div class="hint" style="color:var(--brick)">${esc(payCheckoutMsg)}</div>` : ''}
