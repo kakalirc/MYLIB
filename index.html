@@ -271,7 +271,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-22 22:50 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-23 10:15 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1513,13 +1513,26 @@ async function generateResearchBrief() {
   researchBrief = { loading: true, text: '', error: '', savedId: '', ask };
   researchBankQs = [];
   render();
-  const [r] = await Promise.all([
-    callResearchFunction({ subject: subj.name, grade: qbByName(grades, gradeId), board: qbByName(boards, researchDraft.boardId), chapter, focus: ask.focus }),
-    matched.length && teacherQbAccess ? loadResearchBankQuestions(matched) : Promise.resolve(),
-  ]);
-  researchBrief = r.error ? { loading: false, text: '', error: r.error, savedId: '', ask } : { loading: false, text: r.data.text || '', error: '', savedId: '', ask };
-  if (!r.error) trackUse('brief.make');
+  // Question Bank questions go to the AI as reference and come back listed at the end of the brief.
+  if (matched.length && teacherQbAccess) await loadResearchBankQuestions(matched);
+  const r = await callResearchFunction({
+    subject: subj.name, grade: qbByName(grades, gradeId), board: qbByName(boards, researchDraft.boardId), chapter, focus: ask.focus,
+    gradeId, studentId: ask.studentId, bank: researchBankQs.map(researchBankLine),
+  });
+  if (r.error) { researchBrief = { loading: false, text: '', error: r.error, savedId: '', ask }; render(); return; }
+  const note = r.data.note;
+  researchBrief = { loading: false, text: r.data.text || '', error: '', savedId: note ? note.id : '', ask };
+  // The function saved it (auto-save): the list gets the row, hidden there while this card shows it.
+  if (note) { researchNotes = [note, ...(researchNotes || [])]; researchBankQs = []; }
+  else if (r.data.saveError) researchBrief.error = 'Could not save automatically: ' + r.data.saveError + '. Press Save to try again.';
+  if (/\n## From your Question Bank\n/.test(researchBrief.text)) researchBankQs = [];
+  trackUse('brief.make');
   render();
+}
+// One Question Bank question as a line for the AI and the saved brief: "question (type · marks · year)".
+function researchBankLine(q) {
+  const meta = [QB_TYPE_LABELS[q.question_type] || q.question_type, q.marks != null ? q.marks + ' marks' : '', q.source_year].filter(Boolean).join(' · ');
+  return String(q.question_text || '').replace(/\s+/g, ' ').trim() + (meta ? ' (' + meta + ')' : '');
 }
 // A few approved, current-syllabus questions from the Question Bank for the chapter (newest papers first).
 async function loadResearchBankQuestions(chapterIds) {
@@ -1527,12 +1540,14 @@ async function loadResearchBankQuestions(chapterIds) {
     .in('chapter_id', chapterIds).eq('approved', true).order('source_year', { ascending: false, nullsFirst: false }).limit(60);
   researchBankQs = (rows || []).filter(q => !q.archived && q.syllabus_status !== 'old').slice(0, 10);
 }
+// Save button: only shows when auto-save did not happen (an admin, or the save failed).
 async function saveResearchBrief() {
   const b = researchBrief;
   if (!b.text || !b.ask || b.savedId) return;
+  const bankMd = researchBankQs.length ? '\n\n## From your Question Bank\n' + researchBankQs.map((q, i) => (i + 1) + '. ' + researchBankLine(q)).join('\n') : '';
   const fields = {
     teacher_id: currentLinkedId, subject_name: b.ask.subjectName, grade_id: b.ask.gradeId || null,
-    chapter: b.ask.chapter, focus: b.ask.focus || null, brief: b.text,
+    chapter: b.ask.chapter, focus: b.ask.focus || null, brief: b.text + bankMd,
   };
   let { data: row, error } = await sb.from('teacher_research_notes').insert(b.ask.studentId ? { ...fields, student_id: b.ask.studentId } : fields).select().single();
   let savedMsg = '✓ Saved.';
@@ -1556,6 +1571,7 @@ async function deleteResearchNote(id) {
   if (error) { researchNotesMsg = 'Could not delete: ' + error.message; render(); return; }
   researchNotes = (researchNotes || []).filter(n => n.id !== id);
   if (researchOpenNoteId === id) researchOpenNoteId = '';
+  if (researchBrief.savedId === id) { researchBrief = { loading: false, text: '', error: '', savedId: '', ask: null }; researchBankQs = []; }
   render();
 }
 function closeResearchBrief() { researchBrief = { loading: false, text: '', error: '', savedId: '', ask: null }; researchBankQs = []; render(); }
@@ -1571,11 +1587,38 @@ function resetResearchState() {
   resDraft = { subjectId: '', gradeId: '', chapter: '', title: '', link: '', note: '', shared: false };
 }
 function toggleResearchNote(id) { researchOpenNoteId = researchOpenNoteId === id ? '' : id; render(); }
-// Copies the brief just written ('') or a saved one (its id) as plain text.
-function copyResearchBrief(id) {
-  const text = id ? ((researchNotes || []).find(n => n.id === id) || {}).brief : researchBrief.text;
-  if (!text || !navigator.clipboard) return;
-  navigator.clipboard.writeText(text).then(() => { researchNotesMsg = 'Copied.'; render(); }, () => {});
+// Copies the brief just written ('') or a saved one (its id) as plain text, without the Markdown marks.
+// The button itself shows the result. Falls back to the old copy command where the clipboard API is missing or blocked (http pages).
+function copyResearchBrief(id, btnEl) {
+  let text = id ? ((researchNotes || []).find(n => n.id === id) || {}).brief : researchBrief.text;
+  if (!text) return;
+  if (!id && researchBankQs.length) text += '\n\n## From your Question Bank\n' + researchBankQs.map((q, i) => (i + 1) + '. ' + researchBankLine(q)).join('\n');
+  const plain = researchMdPlain(text);
+  const show = ok => {
+    if (!btnEl) return;
+    btnEl.textContent = ok ? '✓ Copied' : 'Could not copy';
+    btnEl.style.color = ok ? '' : 'var(--brick)';
+    setTimeout(() => { btnEl.textContent = 'Copy'; btnEl.style.color = ''; }, 1800);
+  };
+  const oldWay = () => {
+    const ta = document.createElement('textarea');
+    ta.value = plain; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.top = '-1000px';
+    document.body.appendChild(ta); ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    ta.remove();
+    show(ok);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) navigator.clipboard.writeText(plain).then(() => show(true), oldWay);
+  else oldWay();
+}
+// Markdown → plain text for pasting into WhatsApp or Word: no #, ** or > marks; bullets become •.
+function researchMdPlain(md) {
+  return String(md || '').split('\n').map(line => line
+    .replace(/^\s*#{1,4}\s+(.*)$/, (m, t) => t.toUpperCase())
+    .replace(/^\s*>\s?/, '')
+    .replace(/^(\s*)[-*]\s+/, '$1• ')
+    .replace(/\*\*(.+?)\*\*/g, '$1')).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 // Small Markdown → HTML for AI briefs: headings, bullet / numbered lists, **bold**. Text is escaped first.
 function researchMdHtml(md) {
@@ -1586,6 +1629,7 @@ function researchMdHtml(md) {
     const t = line.trim();
     let m;
     if (!t) { close(); return; }
+    if ((m = t.match(/^>\s?(.*)$/))) { close(); html += '<div style="margin:4px 0 8px;padding:6px 10px;border-left:3px solid var(--line);background:rgba(0,0,0,0.04);border-radius:4px;font-size:13px">' + inline(m[1]) + '</div>'; return; }
     if ((m = t.match(/^#{1,4}\s+(.*)$/))) { close(); html += '<h3 style="font-size:15px;margin:14px 0 6px">' + inline(m[1]) + '</h3>'; return; }
     if ((m = t.match(/^[-*•]\s+(.*)$/))) { if (list !== 'ul') { close(); html += '<ul style="margin:4px 0 8px 20px;padding:0">'; list = 'ul'; } html += '<li>' + inline(m[1]) + '</li>'; return; }
     if ((m = t.match(/^\d+[.)]\s+(.*)$/))) { if (list !== 'ol') { close(); html += '<ol style="margin:4px 0 8px 20px;padding:0">'; list = 'ol'; } html += '<li>' + inline(m[1]) + '</li>'; return; }
@@ -8544,7 +8588,7 @@ const SUPPORT_KB = {
 - [qb] Question Bank (Teaching): Review Queue (check and approve questions for your subject and grade), Full Question Bank, Archived, Practice Papers and Past Papers. Pick board, subject and grade first. Old-syllabus questions stay hidden unless you tick "Old syllabus only".
 - [qb] Practice papers: Question Bank → Practice Papers → New paper. Pick a blueprint, tick the sections you want, and tick lessons for a lesson-only paper (none ticked = all lessons). Create and auto-fill, then Swap, Remove or Re-run auto-fill, Mark ready, and Assign to students with a due date.
 - [qb] Marking practice papers: open the paper, tap a student under Needs marking, give marks for each written question and overall feedback, then Mark as reviewed. MCQs are marked automatically, and you can change those marks too.
-- [research] Research (Teaching): Lesson prep (an AI brief for a chapter: key points, teaching order, common mistakes, examples, practice questions; save it to Saved briefs; optional "For student" picker shows that student's Study Plan topics as chapter suggestions and Saved briefs can be filtered by student) and Resource library (keep notes, worksheets and links; tick "Share with students" to show them to your students and their parents).
+- [research] Research (Teaching): Lesson prep (an AI brief for a chapter: key points, teaching order, common mistakes, examples, practice questions; every brief saves itself to Saved briefs, with Delete to remove it; optional "For student" picker shows that student's Study Plan topics as chapter suggestions and Saved briefs can be filtered by student) and Resource library (keep notes, worksheets and links; tick "Share with students" to show them to your students and their parents).
 - [research] [qb] Research also has Student insights (how each student did by chapter and question type on papers you marked, with "Make a paper on weak chapters") and Question research (how past papers ask each chapter).
 - Give Attendance (Attendance): record a class you gave. Current month records can be edited; earlier months are view only.
 - My Attendance Report (Attendance): your classes for the month, by student.
@@ -13422,7 +13466,7 @@ function renderUsers() {
         ${!researchAccessOpen ? `<span class="tag" style="margin-left:auto;font-size:11px;font-weight:400">AI lesson prep</span>` : ''}
       </h2>
       ${researchAccessOpen ? `
-      <div class="hint">Tick the teachers who may use the Research tab. There they pick a subject, class and chapter and get an AI lesson brief (key points, common mistakes, examples, practice questions), which they can save. It uses the AI key from AI Settings, but the key stays on the server and the teacher never sees it. Each brief costs a few cents of AI credit. A teacher who is logged in sees the change after logging in again.</div>
+      <div class="hint">Tick the teachers who may use the Research tab. There they pick a subject, class and chapter and get an AI lesson brief (key points, common mistakes, examples, practice questions), which is saved for them automatically. It uses the AI key from AI Settings, but the key stays on the server and the teacher never sees it. Each brief costs a few cents of AI credit. A teacher who is logged in sees the change after logging in again.</div>
       ${researchAccessMsg ? `<div class="hint" style="color:${researchAccessMsg.startsWith('Could not')?'var(--brick)':'var(--forest)'}">${esc(researchAccessMsg)}</div>` : ''}
       ${researchAccessByTeacher === null ? (researchAccessMsg ? '' : '<div class="hint">Loading…</div>') : `
       <div class="table-scroll"><table>
@@ -16378,7 +16422,7 @@ const HELP = {
   'hw-admin': { t:'Homework (all teachers)', b:'<ul><li>Every homework set by every teacher.</li><li>Filter by teacher, student or status to follow up.</li><li>Teachers set and review homework from their own Homework tab.</li></ul>' },
   'sp-admin': { t:'Study Plans (all teachers)', b:'<ul><li>Read-only view of every study plan and how far each student has got.</li><li>Only the teacher can edit a plan, from their own Study Plans tab.</li></ul>' },
   'textbook-library': { t:'Textbook library', b:'<ul><li>Every book teachers uploaded for Study Plans, once each, with how many student links it has.</li><li>Teachers see the books for the subjects they teach (all grades) and can link or unlink them; they cannot change or delete a book.</li><li><b>Edit</b> fixes a book\'s name, subject, grade or board. The subject decides which teachers see it.</li><li>Tap <b>▶ N student links</b> to see which students use the book (with subject and teacher).</li><li><b>Delete</b> removes the book and its student links. Topics already added to plans stay.</li></ul>' },
-  'research': { t:'Research', b:'<ul><li><b>Lesson prep</b>: pick subject, grade and chapter (or type a topic) to get an AI brief: key points, teaching order, common mistakes, examples and practice questions. Check it against the textbook. Save keeps it in Saved briefs.</li><li><b>For student</b> (optional): pick one of your students to see their Study Plan topics in the chapter list (done topics last) and fill in their grade and board. With no student picked, the list shows all your students’ topics with their names. Question Bank chapters come first. Saved briefs remember the student and can be filtered by student.</li><li><b>Student insights</b>: how each student did, by chapter and question type, on the practice papers you marked. Under 60% shows as weak; Make a paper on weak chapters starts a practice paper with those lessons ticked.</li><li><b>Question research</b>: per chapter, which past papers asked it, average marks and question types.</li><li><b>Resource library</b>: keep notes, worksheets, pictures and links by subject and chapter. Tick Share with students to show an item to your students and their parents.</li><li>Student insights and Question research need Question Bank access.</li></ul>' },
+  'research': { t:'Research', b:'<ul><li><b>Lesson prep</b>: pick subject, grade and chapter (or type a topic) to get an AI brief: key points, teaching order, common mistakes, examples and practice questions. Check it against the textbook. Each brief saves itself in Saved briefs; Delete removes one you don’t want.</li><li><b>For student</b> (optional): pick one of your students to see their Study Plan topics in the chapter list (done topics last) and fill in their grade and board. With no student picked, the list shows all your students’ topics with their names. Question Bank chapters come first. Saved briefs remember the student and can be filtered by student.</li><li><b>Student insights</b>: how each student did, by chapter and question type, on the practice papers you marked. Under 60% shows as weak; Make a paper on weak chapters starts a practice paper with those lessons ticked.</li><li><b>Question research</b>: per chapter, which past papers asked it, average marks and question types.</li><li><b>Resource library</b>: keep notes, worksheets, pictures and links by subject and chapter. Tick Share with students to show an item to your students and their parents.</li><li>Student insights and Question research need Question Bank access.</li></ul>' },
   'student-homework': { t:'Homework', b:'<ul><li>Homework your teachers have set, with the due date.</li><li>Upload a photo of your work, or Mark submitted if there is nothing to photograph.</li><li>Once the teacher reviews it you see the marks and feedback here.</li></ul>' },
   'student-practice': { t:'Practice Papers', b:'<ul><li>Papers your teacher assigned. Start (or Continue) opens the paper.</li><li>Go section by section. Tap the answer for MCQs, type short answers, and upload a photo for long answers.</li><li>Answers save automatically, so you can stop and come back before the due date.</li><li>Submit paper when finished. MCQs are marked at once; the full score shows after the teacher reviews it.</li></ul>' },
   'student-resources': { t:'From your teachers', b:'<ul><li>Notes, worksheets, pictures and links your teachers shared for your subjects.</li><li>Tap an item to open or download it.</li></ul>' },
@@ -16808,7 +16852,8 @@ function renderTeacherResearch(teacher) {
   const b = researchBrief;
   const noteTitle = n => [n.chapter, n.subject_name, qbByName(grades, n.grade_id), n.student_id ? studentName(n.student_id) : ''].filter(Boolean).join(' · ');
   const noteStudentIds = [...new Set((researchNotes || []).map(n => n.student_id).filter(Boolean))];
-  const shownNotes = (researchNotes || []).filter(n => !researchNotesStudent || (researchNotesStudent === 'none' ? !n.student_id : n.student_id === researchNotesStudent));
+  // The brief open in the card above is left out of the list until it is closed, so it never shows twice.
+  const shownNotes = (researchNotes || []).filter(n => n.id !== researchBrief.savedId).filter(n => !researchNotesStudent || (researchNotesStudent === 'none' ? !n.student_id : n.student_id === researchNotesStudent));
   return `
   <div class="card">
     <h3 style="font-family:'Zilla Slab',serif;margin:0 0 6px">Lesson prep ${helpBtn('research')}</h3>
@@ -16861,8 +16906,9 @@ function renderTeacherResearch(teacher) {
   <div class="card">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
       <h3 style="font-family:'Zilla Slab',serif;margin:0;flex:1">${esc([b.ask.chapter, b.ask.subjectName, qbByName(grades, b.ask.gradeId), b.ask.studentId ? studentName(b.ask.studentId) : ''].filter(Boolean).join(' · '))}</h3>
-      <button class="btn-small" onclick="saveResearchBrief()">Save</button>
-      <button class="btn-small" onclick="copyResearchBrief('')">Copy</button>
+      ${b.savedId ? `<span style="font-size:12px;color:var(--forest)" title="Saved automatically. It stays in Saved briefs after you close it.">✓ Saved</span>` : `<button class="btn-small" onclick="saveResearchBrief()">Save</button>`}
+      <button class="btn-small" onclick="copyResearchBrief('', this)">Copy</button>
+      ${b.savedId ? `<button class="btn-small btn-danger" onclick="deleteResearchNote('${b.savedId}')">Delete</button>` : ''}
       <button class="btn-small" onclick="closeResearchBrief()">Close</button>
     </div>
     ${researchMdHtml(b.text)}
@@ -16883,7 +16929,7 @@ function renderTeacherResearch(teacher) {
       </select>` : ''}
     </div>
     ${researchNotesMsg ? `<div class="hint" style="color:${researchNotesMsg.startsWith('Could not') ? 'var(--brick)' : 'var(--forest)'}">${esc(researchNotesMsg)}</div>` : ''}
-    ${researchNotes === null ? '<div class="hint">Loading…</div>' : !researchNotes.length ? '<div class="empty">Nothing saved yet. Make a brief and press Save to keep it here.</div>' :
+    ${researchNotes === null ? '<div class="hint">Loading…</div>' : !researchNotes.length ? '<div class="empty">Nothing saved yet. Briefs you make are saved here automatically.</div>' :
       !shownNotes.length ? '<div class="empty">No saved briefs for this student.</div>' :
       shownNotes.map(n => `
       <div style="border-top:1px solid var(--line);padding:8px 0">
@@ -16897,7 +16943,7 @@ function renderTeacherResearch(teacher) {
           ${n.focus ? `<div class="hint">You asked: ${esc(n.focus)}</div>` : ''}
           ${researchMdHtml(n.brief)}
           <div style="display:flex;gap:8px;margin-top:6px">
-            <button class="btn-small" onclick="copyResearchBrief('${n.id}')">Copy</button>
+            <button class="btn-small" onclick="copyResearchBrief('${n.id}', this)">Copy</button>
             <button class="btn-small btn-danger" onclick="deleteResearchNote('${n.id}')">Delete</button>
           </div>
         </div>` : ''}

@@ -1,10 +1,10 @@
 // teacher-research: writes a lesson-prep brief for the Research tab.
 // The Anthropic key is read here with service_role (ai_settings row 1), so the teacher's browser never sees it.
-// Every call is logged in ai_usage_log (SQL 46). Only Admins and Teachers switched on in Admin → Setup → Research access (teachers.ai_research, SQL 46) may call it.
+// Every call is logged in ai_usage_log (SQL 46). A teacher's brief is saved to teacher_research_notes here (auto-save), straight from the AI's reply. Only Admins and Teachers switched on in Admin → Setup → Research access (teachers.ai_research, SQL 46) may call it.
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const MODEL = "claude-sonnet-5-5";
-const MAX_TOKENS = 3000;
+const MAX_TOKENS = 8000;        // Sonnet 5.5 thinks by default and that counts here, so thinking is switched off below
 const DAILY_LIMIT = 30;          // briefs per teacher per 24 hours (admins have no limit)
 
 const CORS = {
@@ -24,9 +24,11 @@ Write a short, practical brief the tutor can read in five minutes before class. 
 ## Practice questions (5 to 8, mixing easy and harder, in the style of the student's board exam, with short answers at the end)
 ## Quick check (3 questions to ask at the end of class)
 Keep it to the chapter and class given. Use simple English. For Sanskrit, Hindi or other Indian languages, write those words in Devanagari.
+If past exam questions from the tutor's Question Bank are given, use them to see what the chapter covers and how it is examined; do not copy them into the brief.
 If you are not sure what the chapter contains in the current textbook, say so in one line at the top instead of guessing, and keep the brief general.`;
 
 const clip = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
+const uuidOrNull = (v: unknown) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v ?? "")) ? String(v) : null;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -62,6 +64,8 @@ Deno.serve(async (req) => {
   const subject = clip(body.subject, 80), grade = clip(body.grade, 40), board = clip(body.board, 40);
   const chapter = clip(body.chapter, 200), focus = clip(body.focus, 600);
   if (!subject || !chapter) return reply(400, { error: "Pick a subject and a chapter." });
+  // Up to 10 approved Question Bank questions on the chapter, already labelled by the app ("question (type · marks · year)").
+  const bank = (Array.isArray(body.bank) ? body.bank : []).slice(0, 10).map((q) => clip(q, 600)).filter(Boolean);
 
   const ask = [
     `Subject: ${subject}`,
@@ -69,13 +73,14 @@ Deno.serve(async (req) => {
     board && `Board: ${board}`,
     `Chapter or topic: ${chapter}`,
     focus && `The tutor also says: ${focus}`,
+    bank.length && `Past exam questions on this chapter from the tutor's Question Bank:\n${bank.map((q) => "- " + q).join("\n")}`,
   ].filter(Boolean).join("\n");
 
   try {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": ai.api_key, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: MODEL, max_tokens: MAX_TOKENS, system: SYSTEM, messages: [{ role: "user", content: ask }] }),
+      body: JSON.stringify({ model: MODEL, max_tokens: MAX_TOKENS, thinking: { type: "between_tools" }, system: SYSTEM, messages: [{ role: "user", content: ask }] }),
     });
     const d = await r.json();
     // Usage log for Admin → Setup → AI usage. A failed log never blocks the brief.
@@ -84,8 +89,24 @@ Deno.serve(async (req) => {
       input_tokens: d.usage?.input_tokens || 0, output_tokens: d.usage?.output_tokens || 0, ok: r.ok && !d.error,
     }).then(() => {}, () => {});
     if (!r.ok || d.error) return reply(502, { error: d.error?.message || "The AI service did not answer." });
-    const text = (d.content || []).filter((c: { type: string }) => c.type === "text").map((c: { text: string }) => c.text).join("\n").trim();
-    return reply(200, { text });
+    let text = (d.content || []).filter((c: { type: string }) => c.type === "text").map((c: { text: string }) => c.text).join("\n").trim();
+    const cut = d.stop_reason === "max_tokens";
+    if (cut) text += "\n\n> This brief was cut short because it got too long. Try a narrower topic.";
+    if (bank.length) text += "\n\n## From your Question Bank\n" + bank.map((q, i) => `${i + 1}. ${q}`).join("\n");
+
+    // Auto-save for teachers (admins have no teacher row, so their briefs are not saved). A failed save still returns the brief.
+    let note = null, saveError = "";
+    if (prof.linked_teacher_id && text) {
+      const fields = {
+        teacher_id: prof.linked_teacher_id, subject_name: subject, grade_id: uuidOrNull(body.gradeId),
+        chapter, focus: focus || null, brief: text,
+      };
+      const studentId = uuidOrNull(body.studentId);
+      let ins = await admin.from("teacher_research_notes").insert(studentId ? { ...fields, student_id: studentId } : fields).select().single();
+      if (ins.error && studentId) ins = await admin.from("teacher_research_notes").insert(fields).select().single();
+      if (ins.error) saveError = ins.error.message; else note = ins.data;
+    }
+    return reply(200, { text, cut, note, saveError });
   } catch (e) {
     return reply(502, { error: "Could not reach the AI service: " + (e as Error).message });
   }
