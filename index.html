@@ -274,7 +274,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-23 14:45 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-23 14:55 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -8308,6 +8308,13 @@ function feeMessageTextForRequest(requestId) {
 // Students are one family when they share a parent login, or any parent phone number or main mobile (compared on
 // the last 10 digits). Requests stay one per subject; only the screens and the message are combined.
 let familyCache = null, familyCacheSig = '';
+const FAMILY_MAX_CHILDREN = 4;
+// Shown wherever families are used, so a skipped shared number can be found and corrected.
+function familySkippedHtml() {
+  const sk = familyIndex().skipped;
+  if (!sk.length) return '';
+  return `<div class="hint" style="color:var(--brick)">⚠ Not used to group families (shared by more than ${FAMILY_MAX_CHILDREN} students): ${sk.map(x => `${esc(x.label)} (${x.count} students)`).join(', ')}. If this is a real parent's number, it is saved on students who are not their children.</div>`;
+}
 function phoneKey(n) { const d = String(n || '').replace(/\D/g, ''); return d.length >= 10 ? d.slice(-10) : ''; }
 function familyIndex() {
   const sig = data.students.map(s => s.id + ':' + (s.mobileNumber || '') + (s.billSeparately ? ':sep' : '')).join(',') + '|' + data.studentPhoneNumbers.map(p => p.studentId + ':' + p.type + ':' + p.number).join(',') + '|' + (data.parentStudents || []).map(m => m.parentUserId + ':' + m.studentId).join(',');
@@ -8315,22 +8322,29 @@ function familyIndex() {
   const up = new Map();
   const find = id => { while (up.get(id) !== id) { up.set(id, up.get(up.get(id))); id = up.get(id); } return id; };
   data.students.forEach(s => up.set(s.id, s.id));
-  const firstByKey = new Map();
   const separate = new Set(data.students.filter(s => s.billSeparately).map(s => s.id));   // "Bill separately" (SQL 60)
-  const link = (key, studentId) => {
-    if (!key || !up.has(studentId) || separate.has(studentId)) return;
-    if (!firstByKey.has(key)) { firstByKey.set(key, studentId); return; }
-    const a = find(firstByKey.get(key)), b = find(studentId);
-    if (a !== b) up.set(b, a);
-  };
-  (data.parentStudents || []).forEach(m => link('login:' + m.parentUserId, m.studentId));
-  data.students.forEach(s => link('ph:' + phoneKey(s.mobileNumber), s.id));
-  data.studentPhoneNumbers.filter(p => p.type === 'parent').forEach(p => { const k = phoneKey(p.number); if (k) link('ph:' + k, p.studentId); });
+  // Collect every key first: a number or login shared by more than FAMILY_MAX_CHILDREN students is an office /
+  // admin number, not a family, and would chain everyone into one group — it is skipped and listed instead.
+  const byKey = new Map();
+  const add = (key, studentId) => { if (!key || !up.has(studentId) || separate.has(studentId)) return; (byKey.get(key) || byKey.set(key, new Set()).get(key)).add(studentId); };
+  (data.parentStudents || []).forEach(m => add('login:' + m.parentUserId, m.studentId));
+  data.students.forEach(s => { const k = phoneKey(s.mobileNumber); if (k) add('ph:' + k, s.id); });
+  data.studentPhoneNumbers.filter(p => p.type === 'parent').forEach(p => { const k = phoneKey(p.number); if (k) add('ph:' + k, p.studentId); });
+  const skipped = [];
+  byKey.forEach((ids, key) => {
+    if (ids.size > FAMILY_MAX_CHILDREN) {
+      const label = key.startsWith('login:') ? 'parent login ' + ((data.users.find(u => u.id === key.slice(6)) || {}).username || '?') : key.slice(3);
+      skipped.push({ label, count: ids.size });
+      return;
+    }
+    const list = [...ids], a = find(list[0]);
+    list.slice(1).forEach(id => { const b = find(id); if (b !== a) up.set(b, a); });
+  });
   const members = new Map();
   data.students.forEach(s => { const r = find(s.id); (members.get(r) || members.set(r, []).get(r)).push(s); });
   members.forEach(list => list.sort((a, b) => a.name.localeCompare(b.name)));
   const keyOf = new Map(data.students.map(s => [s.id, find(s.id)]));
-  familyCache = { keyOf, members }; familyCacheSig = sig;
+  familyCache = { keyOf, members, skipped }; familyCacheSig = sig;
   return familyCache;
 }
 function familyKeyOf(studentId) { return familyIndex().keyOf.get(studentId) || studentId; }
@@ -8464,7 +8478,7 @@ function pendingFeeRequestsByFamilyHtml() {
   const list = [...fams.values()].map(sid => ({ sid, reqs: familyPendingRequests(sid) }))
     .sort((a, b) => studentNameWithCode(a.reqs[0].studentId).localeCompare(studentNameWithCode(b.reqs[0].studentId)));
   const grand = reqs.reduce((a, r) => a + (r.amountPaid || 0), 0);
-  return `<div class="hint" style="margin-bottom:6px">${reqs.length} request${reqs.length === 1 ? '' : 's'} from ${list.length} famil${list.length === 1 ? 'y' : 'ies'} · ₹${grand.toFixed(2)} in total. Brothers and sisters (same parent login or parent mobile) are shown together with one message.</div>
+  return familySkippedHtml() + `<div class="hint" style="margin-bottom:6px">${reqs.length} request${reqs.length === 1 ? '' : 's'} from ${list.length} famil${list.length === 1 ? 'y' : 'ies'} · ₹${grand.toFixed(2)} in total. Brothers and sisters (same parent login or parent mobile) are shown together with one message.</div>
     <div class="table-scroll"><table>
       <tr><th>Student</th><th>Subject</th><th>Type</th><th>Classes</th><th>Amount</th><th>Requested</th><th>Reference &amp; working</th><th></th></tr>
       ${list.map(f => {
@@ -12987,7 +13001,7 @@ function renderFees() {
                   ${demandSkippedRows.map(r=>`<tr><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td><span class="hint">${esc(r.reason)}</span></td></tr>`).join('')}
                 </table></div>`:''}`:'';
               if(!demandPreviewRows.length) return `<div class="empty">No fee requests needed this month.</div>${skippedHtml}`;
-              return `<div class="table-scroll"><table>
+              return familySkippedHtml() + `<div class="table-scroll"><table>
                 <tr><th>Raise</th><th>Student</th><th>Subject</th><th>Type</th><th>Method</th><th>Classes left</th><th>Classes</th><th>Amount (₹)</th><th>Working</th></tr>
                 ${demandPreviewRows.map((r,i)=>{ const next=demandPreviewRows[i+1], prev=demandPreviewRows[i-1], mine=demandPreviewRows.filter(x=>x.student.id===r.student.id&&x.include);
                   const fk=familyKeyOf(r.student.id), famRows=demandPreviewRows.filter(x=>familyKeyOf(x.student.id)===fk), famKids=[...new Set(famRows.map(x=>x.student.name))], multi=famKids.length>1;
