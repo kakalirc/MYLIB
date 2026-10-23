@@ -274,7 +274,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-23 14:30 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-23 14:35 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -8593,7 +8593,7 @@ function demandRowSet(i, field, val) {
 }
 async function confirmDemand() {
   const todo = (demandPreviewRows || []).filter(r => r.include);
-  if (!todo.length) return;
+  if (!todo.length || !isDemandPeriod()) return;   // Preview works any day; creating only on the 1st-7th
   demandConfirming = true; demandMsg = ''; render();
   const month = demandTargetMonth(); let created = 0, noNoteColumn = false; const failed = [];
   for (const r of todo) {
@@ -12954,7 +12954,7 @@ function renderFees() {
         return `<h2>Raise fee requests — ${dMonth}</h2>
           <div class="hint" style="margin-bottom:6px">Raises one fee request per student, subject and class type (Group / Individual) for this month. How many classes depends on the student's last payment and last month's classes. Amount is from Fee setup with the Discount structure applied. Every request keeps its working, so you can answer any question about it later.</div>
           <div class="hint"><b>Rules:</b><ul style="margin:4px 0 0 16px;padding:0">
-            <li>Active on the <b>1st to 7th</b> of each month only. Can only be run <b>once per month</b>; use Reset to remove and re-run.</li>
+            <li><b>Preview</b> works any day and saves nothing. <b>Confirm</b> works on the <b>1st to 7th</b> only. Can only be run <b>once per month</b>; use Reset to remove and re-run.</li>
             <li><b>Classes left</b> = paid classes (after refunds, transfers and expired classes) − classes used. <b>Absent counts like Present</b> — it uses a class.</li>
             <li><b>Owed classes</b>: when classes left is below 0, the student owes them and they are added to the request (e.g. needs 8, owes 3 → asks 11).</li>
             <li><b>Package</b> — last payment was exactly <b>30, 50, 60 or 100</b> classes: asks for the same package again once classes left are at or below about one month's use. Owed classes come out of the package (not added).</li>
@@ -12965,13 +12965,14 @@ function renderFees() {
             <li><b>Not raised</b> (listed with the reason): archived students, a fee request already pending, enough classes left, no rate in Fee setup. Never a ₹0 request. Students who never paid are left out — they're in Students needing renewal.</li>
             <li>In the preview you can change classes or amount, or untick a row, before Confirm. Any change is written into the saved working. <b>Download Excel</b> keeps a copy of the whole run.</li>
           </ul></div>
-          ${dActive?(dRan?`
+          ${dRan?`
             <div class="hint" style="color:var(--forest);margin-top:8px">✓ Fee requests already raised for ${dMonth}.</div>
             <div class="row-form" style="margin-top:8px"><button class="btn-gold" onclick="exportDemandRun()">Download Excel of this run</button><button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="resetDemand()">Reset — remove &amp; unlock</button></div>
             ${demandMsg?`<div class="hint" style="color:var(--forest);margin-top:6px">${esc(demandMsg)}</div>`:''}
           `:`
             <div class="row-form" style="margin-top:8px">
               <button class="btn-small btn-primary" onclick="previewDemand()">Preview</button>
+              ${dActive?'':`<span class="hint">Preview works any day (nothing is saved). Confirm opens on the 1st–7th &nbsp;·&nbsp; Today is the ${ord(dDay)}</span>`}
               ${demandMsg?`<span class="hint" style="color:var(--forest)">${esc(demandMsg)}</span>`:''}
             </div>
             ${demandPreviewRows!==null?(()=>{
@@ -12991,16 +12992,11 @@ function renderFees() {
               ${skippedHtml}
               ${aiDemandReviewHtml()}
               <div class="row-form" style="margin-top:8px">
-                <button class="btn-primary" ${demandConfirming||!inc.length?'disabled':''} onclick="confirmDemand()">${demandConfirming?'Creating…':'Confirm &amp; Create'}</button>
+                <button class="btn-primary" ${demandConfirming||!inc.length||!dActive?'disabled':''} onclick="confirmDemand()" ${dActive?'':'title="Confirm opens on the 1st–7th of the month"'}>${demandConfirming?'Creating…':'Confirm &amp; Create'}</button>${dActive?'':'<span class="hint">Preview only — Confirm opens on the 1st–7th.</span>'}
                 <button class="btn-gold" onclick="exportDemandRun()">Download Excel</button>
                 <button class="btn-small" onclick="demandPreviewRows=null;render()">Cancel</button>
               </div>`;
             })():''}
-          `):`
-            <div class="row-form" style="margin-top:8px">
-              <button class="btn-small btn-primary" disabled>Preview</button>
-              <span class="hint">Available 1st–7th of each month &nbsp;·&nbsp; Today is the ${ord(dDay)}</span>
-            </div>
           `}`;
       })()}
     </div>
