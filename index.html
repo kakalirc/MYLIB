@@ -274,7 +274,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-23 18:20 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-23 18:35 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -3460,6 +3460,19 @@ async function createAndLinkDemo(id, nameFromDemo) {
   demoLinkingId = ''; demoLinkStudentId = ''; demoLinkMsg = '';
   wixLastCreatedStudentId = row.id;
   demoLogMsg = `✓ Student "${name}"${row.student_code ? ' (' + row.student_code + ')' : ''} created and linked. Marked Converted — bonus will appear in payroll.`; render();
+}
+// Search box only refills the dropdown; a full render() per keystroke lost focus and dropped letters.
+function demoLinkOptionsHtml() {
+  const q = demoLinkSearch.trim().toLowerCase();
+  const list = byName(data.students.filter(s => !s.archived && (!q || (s.name || '').toLowerCase().includes(q) || (s.code || '').toLowerCase().includes(q))));
+  return '<option value="">' + (q ? (list.length ? 'Pick from ' + list.length + ' match' + (list.length === 1 ? '' : 'es') + '…' : 'No student matches') : 'Pick existing student…') + '</option>'
+    + list.map(s => '<option value="' + s.id + '" ' + (demoLinkStudentId === s.id ? 'selected' : '') + '>' + esc(s.name) + (s.code ? ' (' + esc(s.code) + ')' : '') + '</option>').join('');
+}
+function demoLinkSearchInput(el) {
+  demoLinkSearch = el.value;
+  demoLinkStudentId = '';
+  const sel = document.getElementById('demoLinkSelect');
+  if (sel) sel.innerHTML = demoLinkOptionsHtml();
 }
 async function linkDemoToStudent(id) {
   if (!demoLinkStudentId) { demoLinkMsg = 'Please pick a student.'; render(); return; }
@@ -13560,10 +13573,10 @@ function renderWixBookings() {
             const statusBadge = d.status==='Converted' ? '<span style="color:var(--forest);font-weight:600">Converted</span>' : d.status==='Cancelled' ? '<span style="color:var(--brick)">Cancelled</span>' : '<span style="color:var(--gold-dark,#b8860b)">Pending</span>';
             const linkSection = demoLinkingId===d.id
               ? '<div style="display:flex;flex-direction:column;gap:4px">'
-                + '<input type="text" placeholder="Search existing student…" value="'+esc(demoLinkSearch)+'" oninput="demoLinkSearch=this.value;demoLinkStudentId=\'\';render()" style="font-size:12px;padding:2px 6px;border:1px solid var(--line);border-radius:4px;width:180px">'
+                + '<input type="text" placeholder="Search existing student…" value="'+esc(demoLinkSearch)+'" oninput="demoLinkSearchInput(this)" style="font-size:12px;padding:2px 6px;border:1px solid var(--line);border-radius:4px;width:180px">'
                 + '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">'
-                + '<select onchange="demoLinkStudentId=this.value" style="font-size:12px;padding:2px 4px;border:1px solid var(--line);border-radius:4px"><option value="">Pick existing student…</option>'
-                + byName(data.students.filter(s=>!s.archived && (!demoLinkSearch || s.name.toLowerCase().includes(demoLinkSearch.toLowerCase())))).map(s=>'<option value="'+s.id+'" '+(demoLinkStudentId===s.id?'selected':'')+'>'+esc(s.name)+'</option>').join('')
+                + '<select id="demoLinkSelect" onchange="demoLinkStudentId=this.value" style="font-size:12px;padding:2px 4px;border:1px solid var(--line);border-radius:4px">'
+                + demoLinkOptionsHtml()
                 + '</select>'
                 + ' <button class="btn-small btn-primary" style="font-size:11px" onclick="linkDemoToStudent(\'' + d.id + '\')">Link &amp; Convert</button>'
                 + '</div>'
