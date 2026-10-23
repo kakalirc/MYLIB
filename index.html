@@ -274,7 +274,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-23 15:20 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-23 17:40 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -8438,7 +8438,8 @@ function feeMessageTextForRequest(requestId) {
     remainingLine,
     ``,
     upiId ? `Pay via UPI: ${upiId}` : '',
-    `Or pay online: https://www.libeducation.com/fee-payment`,
+    `Or pay online: ${RAZORPAY_FEE_PAGE}`,
+    `(enter Tuition Fee ${inrText(r.amountPaid)} and Student Name: ${s.name})`,
     ``,
     feeContactMobile ? `After payment, please share a screenshot to ${feeContactMobile}.` : '',
     ``,
@@ -8534,6 +8535,8 @@ function requestMonthLong(r) {
   const [yr, mo] = ym.split('-').map(Number);
   return new Date(yr, mo - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
 }
+// Razorpay payment page (asks for amount, email, phone, student name); payments are matched and marked paid by hand.
+const RAZORPAY_FEE_PAGE = 'https://pages.razorpay.com/pl_P9Dy5JA4jygV77/view';
 function inrText(n) { return 'Rs ' + (Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 // One message for every pending request in the family; a single request keeps the usual one-subject message.
 function familyFeeMessage(studentId) {
@@ -8561,7 +8564,7 @@ function familyFeeMessage(studentId) {
   });
   lines.push('', `Total due: ${inrText(total)}`, '');
   if (upiId) lines.push(`Pay via UPI: ${upiId}`);
-  lines.push('Or pay online: https://www.libeducation.com/fee-payment', '');
+  lines.push(`Or pay online: ${RAZORPAY_FEE_PAGE}`, `(enter Tuition Fee ${inrText(total)} and Student Name: ${names.join(', ')})`, '');
   if (feeContactMobile) lines.push(`After payment, please share a screenshot to ${feeContactMobile}.`, '');
   const logins = kids.map(s => ({ s, u: data.users.find(u => u.role === 'Student' && u.linkedId === s.id && !u.archived) })).filter(x => x.u);
   if (logins.length) {
@@ -14332,7 +14335,7 @@ function renderStudentReportCards(student, viewMonth, monthSetterFn, titlePrefix
       ${payCheckoutMsg ? `<div class="hint" style="color:var(--brick)">${esc(payCheckoutMsg)}</div>` : ''}
       <div class="row-form" style="margin-top:10px">
         <button class="btn-primary" ${payCheckoutIds.length?'':'disabled'} onclick="startPayCheckout()">Pay ₹${payCheckoutTotal.toFixed(2)}</button>
-        <a href="https://www.libeducation.com/fee-payment" target="_blank" rel="noopener"><button class="btn-small">Other payment options</button></a>
+        <a href="${RAZORPAY_FEE_PAGE}" target="_blank" rel="noopener"><button class="btn-small">Pay online (Razorpay)</button></a>
       </div>
       <div class="hint">LIB Education confirms each payment manually. For any support issue contact LIB Support Team.</div>
     </div>
