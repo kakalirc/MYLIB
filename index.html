@@ -274,7 +274,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-23 14:35 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-23 14:45 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -8572,7 +8572,9 @@ function previewDemand() {
       });
     });
   });
-  rows.sort((a,b) => studentLabel(a.student).localeCompare(studentLabel(b.student)) || a.subj.name.localeCompare(b.subj.name) || a.ty.localeCompare(b.ty));
+  // Brothers and sisters (same parent login / parent mobile) sit together, as on Pending fee requests.
+  rows.sort((a,b) => familyParentName(a.student.id).localeCompare(familyParentName(b.student.id)) || familyKeyOf(a.student.id).localeCompare(familyKeyOf(b.student.id))
+    || studentLabel(a.student).localeCompare(studentLabel(b.student)) || a.subj.name.localeCompare(b.subj.name) || a.ty.localeCompare(b.ty));
   demandPreviewRows = rows; demandSkippedRows = skipped; demandNeverPaid = neverPaid; render();
 }
 // Preview edits: classes re-price from Fee setup (unless the amount was typed); the note records any change.
@@ -8620,7 +8622,8 @@ function exportDemandRun() {
   let raised, notRaised = [];
   if (demandPreviewRows) {
     const studentTotal = r => demandPreviewRows.filter(x => x.student.id === r.student.id && x.include).reduce((a, x) => a + x.amount, 0);
-    raised = demandPreviewRows.map(r => ({ Student: studentLabel(r.student), StudentTotal: studentTotal(r), Subject: r.subj.name, Type: r.ty, Method: r.method, Mode: r.mode, ClassesLeft: r.left, Classes: r.classes, Amount: r.amount, Raise: r.include ? 'Yes' : 'No (unticked)', Working: demandRowNote(r) }));
+    const familyTotal = r => demandPreviewRows.filter(x => familyKeyOf(x.student.id) === familyKeyOf(r.student.id) && x.include).reduce((a, x) => a + x.amount, 0);
+    raised = demandPreviewRows.map(r => ({ Family: familyParentName(r.student.id), FamilyTotal: familyTotal(r), Student: studentLabel(r.student), StudentTotal: studentTotal(r), Subject: r.subj.name, Type: r.ty, Method: r.method, Mode: r.mode, ClassesLeft: r.left, Classes: r.classes, Amount: r.amount, Raise: r.include ? 'Yes' : 'No (unticked)', Working: demandRowNote(r) }));
     notRaised = demandSkippedRows.map(r => ({ Student: studentLabel(r.student), Subject: r.subj.name, Type: r.ty, Reason: r.reason }));
   } else {
     const label = demandRunLabel(month);
@@ -12986,7 +12989,11 @@ function renderFees() {
               if(!demandPreviewRows.length) return `<div class="empty">No fee requests needed this month.</div>${skippedHtml}`;
               return `<div class="table-scroll"><table>
                 <tr><th>Raise</th><th>Student</th><th>Subject</th><th>Type</th><th>Method</th><th>Classes left</th><th>Classes</th><th>Amount (₹)</th><th>Working</th></tr>
-                ${demandPreviewRows.map((r,i)=>{ const next=demandPreviewRows[i+1], mine=demandPreviewRows.filter(x=>x.student.id===r.student.id&&x.include); return `<tr${r.include?'':' style="opacity:0.5"'}><td><input type="checkbox" ${r.include?'checked':''} onchange="demandRowSet(${i},'include',this.checked)"></td><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(r.method)}</td><td${r.left<0?' style="color:var(--brick)"':''}>${r.left<0?`${-r.left} owed`:r.left}</td><td><input type="number" min="0.5" step="0.5" style="width:70px" value="${r.classes}" onchange="demandRowSet(${i},'classes',this.value)"></td><td><input type="number" min="1" step="1" style="width:90px" value="${r.amount}" onchange="demandRowSet(${i},'amount',this.value)"></td><td><span class="hint" style="font-size:11px;display:block;min-width:280px;white-space:normal">${esc(demandRowNote(r))}</span></td></tr>`+(mine.length>1&&(!next||next.student.id!==r.student.id)?`<tr><td colspan="7" class="hint" style="text-align:right">Subtotal for ${esc(r.student.name)}</td><td><b>${mine.reduce((a,x)=>a+x.amount,0).toFixed(2)}</b></td><td></td></tr>`:''); }).join('')}
+                ${demandPreviewRows.map((r,i)=>{ const next=demandPreviewRows[i+1], prev=demandPreviewRows[i-1], mine=demandPreviewRows.filter(x=>x.student.id===r.student.id&&x.include);
+                  const fk=familyKeyOf(r.student.id), famRows=demandPreviewRows.filter(x=>familyKeyOf(x.student.id)===fk), famKids=[...new Set(famRows.map(x=>x.student.name))], multi=famKids.length>1;
+                  const famHead=multi&&(!prev||familyKeyOf(prev.student.id)!==fk)?`<tr style="background:var(--soft)"><td colspan="9"><b>Family: ${esc(familyParentName(r.student.id))}</b> · ${esc(famKids.join(', '))}</td></tr>`:'';
+                  const famFoot=multi&&(!next||familyKeyOf(next.student.id)!==fk)?`<tr><td colspan="7" style="text-align:right"><b>Family total</b></td><td><b>${famRows.filter(x=>x.include).reduce((a,x)=>a+x.amount,0).toFixed(2)}</b></td><td></td></tr>`:'';
+                  return famHead+`<tr${r.include?'':' style="opacity:0.5"'}><td><input type="checkbox" ${r.include?'checked':''} onchange="demandRowSet(${i},'include',this.checked)"></td><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(r.method)}</td><td${r.left<0?' style="color:var(--brick)"':''}>${r.left<0?`${-r.left} owed`:r.left}</td><td><input type="number" min="0.5" step="0.5" style="width:70px" value="${r.classes}" onchange="demandRowSet(${i},'classes',this.value)"></td><td><input type="number" min="1" step="1" style="width:90px" value="${r.amount}" onchange="demandRowSet(${i},'amount',this.value)"></td><td><span class="hint" style="font-size:11px;display:block;min-width:280px;white-space:normal">${esc(demandRowNote(r))}</span></td></tr>`+(mine.length>1&&(!next||next.student.id!==r.student.id)?`<tr><td colspan="7" class="hint" style="text-align:right">Subtotal for ${esc(r.student.name)}</td><td><b>${mine.reduce((a,x)=>a+x.amount,0).toFixed(2)}</b></td><td></td></tr>`:'')+famFoot; }).join('')}
               </table></div>
               <div class="hint" style="margin-top:8px">${inc.length} request${inc.length===1?'':'s'} will be created${demandPreviewRows.length>inc.length?' · '+(demandPreviewRows.length-inc.length)+' unticked':''} · Total ₹${inc.reduce((a,r)=>a+r.amount,0).toFixed(2)}</div>
               ${skippedHtml}
