@@ -274,7 +274,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-23 11:10 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-23 13:30 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -936,6 +936,9 @@ let sCalcClasses = '';
 let demandPreviewRows = null;
 let demandMsg = '';
 let demandConfirming = false;
+let demandSkippedRows = [];   // preview rows not raised, each with its reason
+let demandNeverPaid = 0;
+let demandShowSkipped = false;
 // Estimated AI cost (SQL 50): $ per million tokens per model, and the ₹ per $ rate. Admin only.
 const AI_DEFAULT_PRICES = { 'claude-haiku-4-5': { in: 1, out: 5 }, 'claude-sonnet-5-5': { in: 2, out: 10 } }; // Anthropic list prices, Oct 2026
 let aiModelPrices = {};   // saved prices; model → { in, out }
@@ -1206,7 +1209,9 @@ let refundReportMonth = monthStr;
 let allPaymentsMonth = monthStr;
 let allPaymentsShowAll = false;
 let allPaymentsStudentFilter = '';
-let subDraft = { subjectId: '', type: 'Group', classes: '', amountPaid: '', date: todayStr };
+let subDraft = newSubDraft();
+// Record subscription payment form. mode only prices the amount from Fee setup (payments don't store it).
+function newSubDraft() { return { subjectId: '', type: 'Group', mode: '', classes: '', amountPaid: '', amountEdited: false, date: todayStr, reference: '', remarks: '' }; }
 let subPayPendingWarning = null; // set when pending fee requests exist for the subject being paid
 let rptRenewalOpen = false;    // reports: "Students needing renewal" collapsed by default
 let rptPendingOpen = false;    // reports: "Pending fee requests" collapsed by default
@@ -3822,7 +3827,7 @@ async function loadStudentsAndSubscriptions() {
     data.subscriptions = subRows.map(r => ({
       id: r.id, studentId: r.student_id, subjectId: r.subject_id, type: r.type,
       classes: Number(r.classes), amountPaid: Number(r.amount_paid) || 0, date: r.date, kind: r.kind,
-      paymentReference: r.payment_reference || '', paymentRemarks: r.payment_remarks || '',
+      paymentReference: r.payment_reference || '', paymentRemarks: r.payment_remarks || '', calcNote: r.calc_note || '',
       transferGroupId: r.transfer_group_id || '',
       expiresOn: r.expires_on || '', expiredBatchId: r.expired_batch_id || '',
       createdAt: r.created_at || ''   // teachers' list (teacher_my_subscriptions) has no saved time
@@ -7898,12 +7903,18 @@ async function removeStudentPhoneNumberAdmin(id) {
   data.studentPhoneNumbers = data.studentPhoneNumbers.filter(p=>p.id!==id);
   render();
 }
-function selectStudent(id) { selectedStudentId = id; subDraft = { subjectId: '', type: 'Group', classes: '', amountPaid: '', date: todayStr }; subPayPendingWarning = null; refundDraft = { subjectId: '', type: 'Group', date: todayStr }; refundMsg = ''; requestDraft = { subjectId: '', type: 'Group', mode: '', classes: '', amountPaid: '', amountEdited: false, date: todayStr }; requestMsg = ''; enrollDraft = { teacherId: '', subjectId: '' }; enrollShowAllSubjects = false; addConfirmMsg.student = ''; contactMsg = ''; render(); loadStudentPhotoOnDemand(id); }
+function selectStudent(id) { selectedStudentId = id; subDraft = newSubDraft(); subPayPendingWarning = null; refundDraft = { subjectId: '', type: 'Group', date: todayStr }; refundMsg = ''; requestDraft = { subjectId: '', type: 'Group', mode: '', classes: '', amountPaid: '', amountEdited: false, date: todayStr }; requestMsg = ''; enrollDraft = { teacherId: '', subjectId: '' }; enrollShowAllSubjects = false; addConfirmMsg.student = ''; contactMsg = ''; render(); loadStudentPhotoOnDemand(id); }
 function backToStudentList() { selectedStudentId = ''; addConfirmMsg.student = ''; contactMsg = ''; render(); }
-function subDraftSet(field, val) { subDraft[field] = val; render(); }
+function subDraftSet(field, val) {
+  subDraft[field] = val;
+  if (field === 'subjectId' || field === 'type') subDraft.mode = studentUsualMode(selectedStudentId, subDraft.subjectId, subDraft.type);
+  refillRequestAmount(subDraft);
+  render();
+}
 function refundDraftSet(field, val) { refundDraft[field] = val; refundMsg = ''; render(); }
 function requestDraftSet(field, val) {
   requestDraft[field] = val; requestMsg = '';
+  if (field === 'subjectId' || field === 'type') { requestDraft.calc = null; requestDraft.calcMsg = ''; }
   if (field === 'subjectId' || field === 'type') requestDraft.mode = studentUsualMode(selectedStudentId, requestDraft.subjectId, requestDraft.type);
   refillRequestAmount(requestDraft);
   render();
@@ -7956,12 +7967,14 @@ function feeQuoteHintHtml(d, which) {
   const differs = d.amountPaid !== '' && Math.abs(Number(d.amountPaid) - q.amount) > 0.009;
   return differs ? `${sum} — you've entered your own amount. <button type="button" class="btn-small" onclick="useQuoteAmount('${which}')">Use ₹${q.amount.toFixed(2)}</button>` : sum;
 }
-function requestFormDraft(which) { return which === 'edit' ? editRequestDraft : requestDraft; }
+// The saved working of an auto-raised fee request (SQL 59); stays on the row after it is marked paid.
+function calcNoteHtml(r) { return r && r.calcNote ? `<div class="hint" style="font-size:11px">🧮 ${esc(r.calcNote)}</div>` : ''; }
+function requestFormDraft(which) { return which === 'edit' ? editRequestDraft : which === 'pay' ? subDraft : requestDraft; }
 // Typing in Classes/Amount updates the draft and the hint in place (no full
 // render, so the cursor stays in the box).
 function requestQuoteInput(which, field, val) {
   const d = requestFormDraft(which);
-  const amountBox = document.getElementById(which === 'edit' ? 'editReqAmount_' + editingRequestId : 'reqAmount');
+  const amountBox = document.getElementById(which === 'edit' ? 'editReqAmount_' + editingRequestId : which === 'pay' ? 'payAmount' : 'reqAmount');
   if (field === 'classes') {
     d.classes = val;
     if (which === 'edit') d.amountEdited = false;
@@ -7971,8 +7984,46 @@ function requestQuoteInput(which, field, val) {
     d.amountPaid = val;
     d.amountEdited = val !== '';
   }
-  const hint = document.getElementById(which === 'edit' ? 'editReqQuoteHint' : 'reqQuoteHint');
+  const hint = document.getElementById(which === 'edit' ? 'editReqQuoteHint' : which === 'pay' ? 'payQuoteHint' : 'reqQuoteHint');
   if (hint) hint.innerHTML = feeQuoteHintHtml(d, which);
+  const calcBox = which === 'new' && document.getElementById('reqCalcNote');
+  if (calcBox) calcBox.innerHTML = requestCalcHtml();
+}
+// "Calculate" on a student's fee request form: the Raise fee requests rules for this subject + type, this month.
+function calcFeeRequest() {
+  const d = requestDraft, student = data.students.find(s => s.id === selectedStudentId), subj = subject(d.subjectId);
+  d.calc = null; d.calcMsg = ''; requestMsg = '';
+  if (!student || !subj) { render(); return; }
+  const res = demandCalcFor(student, subj, d.type, monthStr);
+  const pending = data.subscriptions.filter(s => s.kind === 'Request' && s.studentId === student.id && s.subjectId === subj.id && s.type === d.type).length;
+  const pendingNote = pending ? ` Note: ${pending} fee request${pending === 1 ? ' is' : 's are'} already pending for this subject and type.` : '';
+  if (res.neverPaid || res.skip) { d.classes = ''; d.amountPaid = ''; d.amountEdited = false; }
+  if (res.neverPaid) d.calcMsg = `Never paid for ${subj.name} (${d.type}), so there is nothing to calculate from — type the classes yourself.`;
+  else if (res.skip) d.calcMsg = `No request needed: ${res.skip}.` + pendingNote;
+  else {
+    const r = Object.assign(res.row, { manual: true });
+    d.calc = r; d.calcMsg = pendingNote.trim();
+    d.mode = r.mode; d.classes = r.classes; d.amountPaid = r.amount; d.amountEdited = false;
+  }
+  render();
+}
+// The working as it will be saved: the calculation, plus any change made to classes, mode or amount since.
+function requestCalcNote() {
+  const d = requestDraft;
+  if (!d.calc) return '';
+  const r = Object.assign({}, d.calc);
+  r.mode = d.mode || r.mode;
+  r.classes = Number(d.classes) || 0;
+  r.classesEdited = r.classes !== r.baseClasses;
+  const q = feeQuote(r.subj.id, r.ty, r.mode, r.classes);
+  r.quoteAmount = q && q.rate ? q.amount : 0;
+  r.amount = Number(d.amountPaid) || 0;
+  r.amountEdited = Math.abs(r.amount - r.quoteAmount) > 0.009;
+  return demandRowNote(r);
+}
+function requestCalcHtml() {
+  const d = requestDraft, note = requestCalcNote();
+  return (note ? `<div class="hint" style="font-size:12px">🧮 ${esc(note)}</div>` : '') + (d.calcMsg ? `<div class="hint" style="color:var(--brick)">${esc(d.calcMsg)}</div>` : '');
 }
 function useQuoteAmount(which) {
   const d = requestFormDraft(which);
@@ -8016,7 +8067,7 @@ async function addSubscriptionPayment() {
   }).select().single();
   if (error) { alert('Could not record this payment: ' + error.message); render(); return; }
   data.subscriptions.push({ id: row.id, studentId: row.student_id, subjectId: row.subject_id, type: row.type, classes: Number(row.classes), amountPaid: Number(row.amount_paid), date: row.date, kind: row.kind, paymentReference: row.payment_reference||'', paymentRemarks: row.payment_remarks||'', expiresOn: row.expires_on || '', expiredBatchId: '' });
-  subDraft = { subjectId: '', type: 'Group', classes: '', amountPaid: '', date: todayStr };
+  subDraft = newSubDraft();
   render();
 }
 // The money being recorded IS the payment for the pending request(s): mark them paid with the date, reference and
@@ -8031,7 +8082,7 @@ async function markPendingThenPay() {
   }
   subPayPendingWarning = null;
   if (failed.length) alert('Could not mark ' + failed.length + ' request(s) paid: ' + failed[0]);
-  subDraft = { subjectId: '', type: 'Group', classes: '', amountPaid: '', date: todayStr };
+  subDraft = newSubDraft();
   await loadStudentsAndSubscriptions();   // the database sets each payment's expiry date; fetch it
   render();
 }
@@ -8252,65 +8303,147 @@ function feeMessageTextForRequest(requestId) {
 function demandTargetMonth() { return monthStr; }
 function isDemandPeriod() { const d=Number(todayStr.slice(8,10)); return d>=1&&d<=7; }
 function isDemandAlreadyRun(month) { return data.subscriptions.some(s=>s.kind==='Request'&&s.paymentReference==='AUTO-'+month); }
+// ---------- bulk fee requests (1st-7th of the month) ----------
+// One row per active student × enrolled subject × Group/Individual that has paid before. How many classes to ask
+// for depends on the last payment: a package size repeats the package, fixed weekdays last month predict this
+// month, anything else repeats the last payment. Absent counts like Present (it uses a class). Owed classes
+// (balance below 0) are added, except for a package, which they come out of. Each request keeps its working
+// in calc_note (SQL 59) so a query about the amount can be answered later.
+const FEE_PACKAGE_SIZES = [30, 50, 60, 100];
+const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+function monthLabelOf(ym) { const [y,m] = ym.split('-').map(Number); return new Date(y, m-1, 1).toLocaleString('en-IN', { month: 'short', year: 'numeric' }); }
+function rupees(n) { const v = Math.round(Number(n)*100)/100; return '₹' + v.toLocaleString('en-IN', { maximumFractionDigits: 2 }); }
+function halfRound(n) { return Math.round(n * 2) / 2; }
+function demandRunLabel(month) { return 'Fee request run ' + monthLabelOf(month); }
+// "9 × ₹300 − 5% = ₹2,565" — the money part of the working.
+function demandPriceText(q) {
+  if (!q || !q.rate) return '';
+  return `${q.classes} × ${rupees(q.rate)} (${q.mode})${q.tier ? ` − ${q.tier.percent}%` : ''} = ${rupees(q.amount)}`;
+}
+function demandRowNote(r) {
+  const price = r.amountEdited ? `${r.classes} classes, amount set by admin ${rupees(r.amount)} (Fee setup ${rupees(r.quoteAmount)})` : demandPriceText(feeQuote(r.subj.id, r.ty, r.mode, r.classes));
+  const classesNote = r.classesEdited ? `${r.why} → classes changed by admin to ${r.classes}` : r.why;
+  return `${r.manual ? 'Calculated ' + todayStr + ' for ' + monthLabelOf(r.month) : demandRunLabel(r.month)} · ${classesNote}. Amount: ${price}`;
+}
+// The calculation for one student + subject + type in a month (YYYY-MM). Returns { neverPaid }, { skip: reason } or
+// { row } — the same answer for the bulk run and the Calculate button on a student's fee request form.
+function demandCalcFor(student, subj, ty, month) {
+  const [yr, mo] = month.split('-').map(Number);
+  const prevMonthStr = mo === 1 ? (yr-1) + '-12' : yr + '-' + String(mo-1).padStart(2,'0');
+  const prevLabel = monthLabelOf(prevMonthStr);
+  const daysInMonth = new Date(yr, mo, 0).getDate();
+  const pays = data.subscriptions.filter(s => s.studentId === student.id && s.subjectId === subj.id && s.type === ty && s.kind === 'Payment' && s.classes > 0)
+    .sort((a,b) => (a.date||'').localeCompare(b.date||'') || (a.createdAt||'').localeCompare(b.createdAt||''));
+  if (!pays.length) return { neverPaid: true };
+  const lastPay = pays[pays.length - 1];
+  const left = studentRemaining(student.id, subj.id, ty);   // payments − refunds − transfers − expired − used
+  const owed = left < 0 ? -left : 0;
+  const leftText = left < 0 ? `${owed} owed` : `${left} left`;
+  // Last month: every class marked, Present or Absent, by weekday.
+  const lastMonth = data.sessions.filter(s => s.studentId === student.id && s.subjectId === subj.id && s.classType === ty && (s.date||'').startsWith(prevMonthStr));
+  const usedLastMonth = lastMonth.reduce((a,s) => a + (Number(s.count)||0), 0);
+  const byDay = {};
+  lastMonth.forEach(s => { const wd = new Date(s.date + 'T00:00:00').getDay(); const d = byDay[wd] || (byDay[wd] = { dates: new Set(), classes: 0 }); d.dates.add(s.date); d.classes += Number(s.count)||0; });
+  const regularDays = Object.keys(byDay).map(Number).filter(wd => byDay[wd].dates.size >= 2).sort();
+  let predicted = 0;
+  regularDays.forEach(wd => {
+    let n = 0; for (let d = 1; d <= daysInMonth; d++) if (new Date(yr, mo-1, d).getDay() === wd) n++;
+    predicted += n * Math.max(1, Math.round(byDay[wd].classes / byDay[wd].dates.size));   // two classes a day, every week, count as two
+  });
+  let method, classes, why;
+  if (FEE_PACKAGE_SIZES.includes(Number(lastPay.classes))) {
+    const monthUse = Math.max(usedLastMonth, predicted);
+    if (left > monthUse) return { skip: `Package ${lastPay.classes}: ${left} classes left, more than last month's use (${usedLastMonth})` };
+    method = 'Package'; classes = Number(lastPay.classes);
+    why = `Package ${classes} (last paid ${lastPay.date}), ${leftText}, ${usedLastMonth} used in ${prevLabel}${owed ? ` — ${owed} owed will be taken from this package` : ''}`;
+  } else if (regularDays.length) {
+    method = 'Regular'; classes = halfRound(predicted - left);
+    why = `Regular ${regularDays.map(d => DAY_NAMES[d]).join('+')}: ${predicted} classes this month ${left < 0 ? '+ ' + owed + ' owed' : '− ' + left + ' left'} = ${classes}`;
+  } else {
+    method = usedLastMonth ? 'Irregular' : 'No classes last month';
+    classes = halfRound(Number(lastPay.classes) - left);
+    why = `${usedLastMonth ? `Irregular (${usedLastMonth} class${usedLastMonth===1?'':'es'} in ${prevLabel}, no fixed weekday)` : `No classes in ${prevLabel}`}: last payment ${lastPay.classes} ${left < 0 ? '+ ' + owed + ' owed' : '− ' + left + ' left'} = ${classes}`;
+  }
+  if (classes <= 0) return { skip: `${method}: enough classes left (${left})` };
+  const mode = studentUsualMode(student.id, subj.id, ty);
+  const q = feeQuote(subj.id, ty, mode, classes);
+  if (!q || !q.rate) return { skip: `No rate in Fee setup for ${catLabel(subj.category)}, ${ty}, ${mode}` };
+  return { row: { student, subj, ty, month, method, why, left, owed, mode, classes, baseClasses: classes, amount: q.amount, quoteAmount: q.amount, include: true, classesEdited: false, amountEdited: false } };
+}
 function previewDemand() {
-  const month=demandTargetMonth(); demandMsg='';
-  const rows=[];
-  const [yr,mo]=month.split('-').map(Number);
-  const prevMo=mo===1?12:mo-1, prevYr=mo===1?yr-1:yr;
-  const prevMonthStr=prevYr+'-'+String(prevMo).padStart(2,'0');
-  const daysInMonth=new Date(yr,mo,0).getDate();
-  data.students.filter(s=>!s.archived).forEach(student=>{
-    subjectsForStudent(student.id).forEach(subj=>{
-      TYPES.forEach(ty=>{
-        const prevDates=new Set(data.sessions.filter(s=>s.studentId===student.id&&s.subjectId===subj.id&&s.classType===ty&&s.date.startsWith(prevMonthStr)&&s.status==='Present').map(s=>s.date));
-        if(!prevDates.size) return;
-        const weekdays=new Set([...prevDates].map(d=>new Date(d+'T00:00:00').getDay()));
-        let predicted=0;
-        for(let d=1;d<=daysInMonth;d++){if(weekdays.has(new Date(yr,mo-1,d).getDay())) predicted++;}
-        if(!predicted) return;
-        const remaining=Math.max(0,studentRemaining(student.id,subj.id,ty));
-        const shortfall=predicted-remaining;
-        if(shortfall<=0) return;
-        const existingPending=data.subscriptions.filter(s=>s.kind==='Request'&&s.studentId===student.id&&s.subjectId===subj.id&&s.type===ty&&s.paymentReference!=='AUTO-'+month);
-        const autoExists=data.subscriptions.some(s=>s.kind==='Request'&&s.studentId===student.id&&s.subjectId===subj.id&&s.type===ty&&s.paymentReference==='AUTO-'+month);
-        if(autoExists) return;
-        // Use most common mode from previous month sessions
-        const modeCounts={}; [...prevDates].forEach(d=>{ const s=data.sessions.find(x=>x.studentId===student.id&&x.subjectId===subj.id&&x.classType===ty&&x.date===d); if(s) modeCounts[s.mode]=(modeCounts[s.mode]||0)+1; });
-        const bestMode=Object.entries(modeCounts).sort((a,b)=>b[1]-a[1])[0]?.[0]||'Online';
-        // Fee setup rate × shortfall, then best matching discount tier
-        const baseRate=Number(feeRates[rateKey(subj.category,ty,bestMode)])||0;
-        const baseAmount=baseRate*shortfall;
-        const eligibleTiers=discountTiers.filter(t=>shortfall>=Number(t.minClasses));
-        const bestTier=eligibleTiers.length?eligibleTiers.reduce((b,t)=>Number(t.minClasses)>Number(b.minClasses)?t:b):null;
-        const amount=Math.round(bestTier?baseAmount*(1-Number(bestTier.percent)/100):baseAmount);
-        const dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-        rows.push({student,subj,ty,predicted,remaining,shortfall,amount,existingPending:existingPending.length,skip:existingPending.length>0,weekdays:[...weekdays].sort().map(d=>dayNames[d]).join('+')});
+  const month = demandTargetMonth(); demandMsg = ''; demandShowSkipped = false;
+  const rows = [], skipped = [];
+  let neverPaid = 0;
+  data.students.filter(s => !s.archived).forEach(student => {
+    subjectsForStudent(student.id).forEach(subj => {
+      TYPES.forEach(ty => {
+        const skip = reason => skipped.push({ student, subj, ty, month, reason });
+        const res = demandCalcFor(student, subj, ty, month);
+        if (res.neverPaid) { neverPaid++; return; }   // never paid: Students needing renewal lists them
+        if (data.subscriptions.some(s => s.kind === 'Request' && s.studentId === student.id && s.subjectId === subj.id && s.type === ty)) return skip('A fee request is already pending');
+        if (res.skip) return skip(res.skip);
+        rows.push(res.row);
       });
     });
   });
-  demandPreviewRows=rows; render();
+  rows.sort((a,b) => studentLabel(a.student).localeCompare(studentLabel(b.student)) || a.subj.name.localeCompare(b.subj.name) || a.ty.localeCompare(b.ty));
+  demandPreviewRows = rows; demandSkippedRows = skipped; demandNeverPaid = neverPaid; render();
+}
+// Preview edits: classes re-price from Fee setup (unless the amount was typed); the note records any change.
+function demandRowSet(i, field, val) {
+  const r = demandPreviewRows && demandPreviewRows[i]; if (!r) return;
+  if (field === 'include') r.include = !!val;
+  else if (field === 'classes') {
+    const n = halfRound(Number(val) || 0); if (n <= 0) { render(); return; }
+    r.classes = n; r.classesEdited = n !== r.baseClasses;
+    const q = feeQuote(r.subj.id, r.ty, r.mode, n);
+    r.quoteAmount = q && q.rate ? q.amount : 0;
+    if (!r.amountEdited) r.amount = r.quoteAmount;
+  } else if (field === 'amount') {
+    const a = Math.round((Number(val) || 0) * 100) / 100; if (a <= 0) { render(); return; }
+    r.amount = a; r.amountEdited = Math.abs(a - r.quoteAmount) > 0.009;
+  }
+  render();
 }
 async function confirmDemand() {
-  if(!demandPreviewRows||!demandPreviewRows.length) return;
-  demandConfirming=true; demandMsg=''; render();
-  const month=demandTargetMonth(); let created=0;
-  for(const row of demandPreviewRows) {
-    if(row.skip) continue;
-    const {data:result,error}=await sb.from('subscriptions').insert({
-      student_id:row.student.id,subject_id:row.subj.id,type:row.ty,
-      classes:row.shortfall,amount_paid:row.amount,date:month+'-01',
-      kind:'Request',payment_reference:'AUTO-'+month
-    }).select().single();
-    if(!error&&result) {
-      data.subscriptions.push({id:result.id,studentId:result.student_id,subjectId:result.subject_id,
-        type:result.type,classes:Number(result.classes),amountPaid:Number(result.amount_paid),
-        date:result.date,kind:result.kind,paymentReference:result.payment_reference||'',
-        paymentRemarks:'',transferGroupId:'',expiresOn:'',expiredBatchId:''});
-      created++;
-    }
+  const todo = (demandPreviewRows || []).filter(r => r.include);
+  if (!todo.length) return;
+  demandConfirming = true; demandMsg = ''; render();
+  const month = demandTargetMonth(); let created = 0, noNoteColumn = false; const failed = [];
+  for (const r of todo) {
+    const note = demandRowNote(r);
+    const row = { student_id: r.student.id, subject_id: r.subj.id, type: r.ty, classes: r.classes, amount_paid: r.amount, date: month + '-01', kind: 'Request', payment_reference: 'AUTO-' + month };
+    let res = noNoteColumn ? null : await sb.from('subscriptions').insert(Object.assign({ calc_note: note }, row)).select().single();
+    if (!res || (res.error && /calc_note/.test(res.error.message || ''))) { noNoteColumn = true; res = await sb.from('subscriptions').insert(row).select().single(); }
+    const { data: result, error } = res;
+    if (error || !result) { failed.push(studentLabel(r.student) + ': ' + (error ? error.message : 'not saved')); continue; }
+    data.subscriptions.push({ id: result.id, studentId: result.student_id, subjectId: result.subject_id, type: result.type, classes: Number(result.classes), amountPaid: Number(result.amount_paid),
+      date: result.date, kind: result.kind, paymentReference: result.payment_reference || '', paymentRemarks: '', calcNote: result.calc_note || '', transferGroupId: '', expiresOn: '', expiredBatchId: '', createdAt: result.created_at || '' });
+    created++;
   }
-  demandConfirming=false; demandPreviewRows=null;
-  demandMsg='Created '+created+' fee request'+(created===1?'':'s')+' for '+month+'.'; render();
+  demandConfirming = false; demandPreviewRows = null; demandSkippedRows = [];
+  demandMsg = 'Created ' + created + ' fee request' + (created === 1 ? '' : 's') + ' for ' + month + '.'
+    + (failed.length ? ' ' + failed.length + ' failed: ' + failed[0] : '')
+    + (noNoteColumn ? ' The working was NOT saved: run SQL 59 (fee-requests/59-fee-request-working.sql) in Supabase.' : '');
+  render();
+}
+// Excel of a run. Before Confirm: the preview (raised and not raised). After: this month's auto requests with their saved working.
+function exportDemandRun() {
+  const month = demandTargetMonth();
+  const wb = XLSX.utils.book_new();
+  let raised, notRaised = [];
+  if (demandPreviewRows) {
+    raised = demandPreviewRows.map(r => ({ Student: studentLabel(r.student), Subject: r.subj.name, Type: r.ty, Method: r.method, Mode: r.mode, ClassesLeft: r.left, Classes: r.classes, Amount: r.amount, Raise: r.include ? 'Yes' : 'No (unticked)', Working: demandRowNote(r) }));
+    notRaised = demandSkippedRows.map(r => ({ Student: studentLabel(r.student), Subject: r.subj.name, Type: r.ty, Reason: r.reason }));
+  } else {
+    const label = demandRunLabel(month);
+    raised = data.subscriptions.filter(s => s.paymentReference === 'AUTO-' + month || (s.calcNote || '').startsWith(label)).map(s => ({
+      Student: studentNameWithCode(s.studentId), Subject: subjectName(s.subjectId), Type: s.type, Classes: s.classes, Amount: s.amountPaid || 0,
+      Status: s.kind === 'Request' ? 'Pending' : s.kind, Working: s.calcNote || '(not saved: SQL 59 not run)' }));
+  }
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(raised.length ? raised : [{ Student: 'None' }]), 'Fee requests');
+  if (notRaised.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(notRaised), 'Not raised');
+  XLSX.writeFile(wb, 'fee-requests-' + month + '.xlsx');
 }
 async function resetDemand() {
   const month=demandTargetMonth();
@@ -8989,9 +9122,9 @@ async function aiStudentAtRisk() {
 }
 async function aiReviewDemand() {
   aiDemandReview={loading:true,result:'',error:''};render();
-  var rows=demandPreviewRows.filter(function(r){return !r.skip;});
+  var rows=(demandPreviewRows||[]).filter(function(r){return r.include;});
   if(!rows.length){aiDemandReview={loading:false,result:'No requests to review.',error:''};render();return;}
-  var summary=rows.map(function(r){return r.student.name+' ('+r.subj.name+' '+r.ty+'): '+r.predicted+' predicted, '+r.remaining+' remaining, '+r.shortfall+' to request — Rs'+r.amount;}).join('\n');
+  var summary=rows.map(function(r){return r.student.name+' ('+r.subj.name+' '+r.ty+'): '+demandRowNote(r);}).join('\n');
   var r=await callClaude(
     'You are an assistant for LIB Education. Review these auto-generated fee requests and give a brief 2-3 sentence summary of what will be raised and flag anything unusual. Return only the summary.',
     'Fee requests about to be raised:\n'+summary,300
@@ -9462,12 +9595,16 @@ async function addFeeRequest() {
     render();
     return;
   }
-  const { data: row, error } = await sb.from('subscriptions').insert({
-    student_id: selectedStudentId, subject_id: d.subjectId, type: d.type, classes, amount_paid: amountPaid, date, kind: 'Request'
-  }).select().single();
+  const insertRow = { student_id: selectedStudentId, subject_id: d.subjectId, type: d.type, classes, amount_paid: amountPaid, date, kind: 'Request' };
+  const calcNote = requestCalcNote();
+  let res = await sb.from('subscriptions').insert(calcNote ? Object.assign({ calc_note: calcNote }, insertRow) : insertRow).select().single();
+  let noteLost = false;
+  if (calcNote && res.error && /calc_note/.test(res.error.message || '')) { noteLost = true; res = await sb.from('subscriptions').insert(insertRow).select().single(); }   // SQL 59 not run yet
+  const { data: row, error } = res;
   if (error) { requestMsg = 'Could not add fee request: ' + error.message; render(); return; }
-  data.subscriptions.push({ id: row.id, studentId: row.student_id, subjectId: row.subject_id, type: row.type, classes: Number(row.classes), amountPaid: Number(row.amount_paid), date: row.date, kind: row.kind, paymentReference: '', paymentRemarks: '' });
+  data.subscriptions.push({ id: row.id, studentId: row.student_id, subjectId: row.subject_id, type: row.type, classes: Number(row.classes), amountPaid: Number(row.amount_paid), date: row.date, kind: row.kind, paymentReference: '', paymentRemarks: '', calcNote: row.calc_note || '', createdAt: row.created_at || '' });
   requestDraft = { subjectId: '', type: 'Group', mode: '', classes: '', amountPaid: '', amountEdited: false, date: todayStr };
+  if (noteLost) requestMsg = 'Fee request added, but the working was NOT saved: run SQL 59 (fee-requests/59-fee-request-working.sql) in Supabase.';
   render();
 }
 function startMarkPaid(id) { markingPaidId = id; render(); }
@@ -10698,7 +10835,7 @@ function exportSubscriptionHistory() {
   ).filter(r => allPaymentsStudentFilter === 'ALL' || r.studentId === allPaymentsStudentFilter);
   const rows = source.map(r => ({
     Student: r.studentName, Subject: r.subjectName, Type: r.type, Classes: r.classes, Amount_Paid: r.amountPaid||0,
-    Payment_Date: r.date, Status: r.status, Used: r.usedHere, Expired: r.expiredClasses||0, Remaining: r.remainingHere, Reference: r.paymentReference||'', Remarks: r.paymentRemarks||''
+    Payment_Date: r.date, Status: r.status, Used: r.usedHere, Expired: r.expiredClasses||0, Remaining: r.remainingHere, Reference: r.paymentReference||'', Remarks: r.paymentRemarks||'', Working: r.calcNote||''
   }));
   const monthLabel = allPaymentsShowAll ? 'All Time' : allPaymentsMonth;
   const studentObj = (allPaymentsStudentFilter && allPaymentsStudentFilter !== 'ALL') ? data.students.find(s=>s.id===allPaymentsStudentFilter) : null;
@@ -10743,7 +10880,7 @@ function exportPendingFeeRequests() {
     const st = data.students.find(x=>x.id===r.studentId);
     return {
       Student: studentNameWithCode(r.studentId), ParentName: st?(st.parentName||''):'', MobileNumber: st?(st.mobileNumber||''):'',
-      Subject: subjectName(r.subjectId), Type: r.type, Classes: r.classes, Amount: r.amountPaid||0, RequestedDate: r.date||''
+      Subject: subjectName(r.subjectId), Type: r.type, Classes: r.classes, Amount: r.amountPaid||0, RequestedDate: r.date||'', Working: r.calcNote||''
     };
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length?rows:[{Student:'None'}]), 'Pending Fee Requests');
@@ -11234,7 +11371,7 @@ function renderStudents() {
           <td>${esc(r.subjectName)}</td><td>${r.type}</td><td>${r.classes}</td>
           <td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td>
           <td>${subscriptionStatusCellHtml(r)}</td><td>${isRefund?'—':r.usedHere}</td><td>${isRefund||!r.expiredClasses?'—':`<span style="color:var(--brick)">${r.expiredClasses}</span>`}</td><td>${isRefund?'—':r.remainingHere}</td>
-          <td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${r.paymentRemarks ? `<div class="hint">${esc(r.paymentRemarks)}</div>` : ''}</td>
+          <td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${r.paymentRemarks ? `<div class="hint">${esc(r.paymentRemarks)}</div>` : ''}${calcNoteHtml(r)}</td>
           <td>
             ${editingRequestId === r.id ? '<span class="hint">Editing — see below.</span>' : `<button class="btn-small" onclick="startEditRequest('${r.id}')">Edit</button>
             <button class="icon-btn" onclick="deleteSubscription('${r.id}')">✕</button>`}
@@ -11441,9 +11578,11 @@ function renderStudents() {
         <label>Amount <input type="number" id="reqAmount" value="${escAttr(String(requestDraft.amountPaid))}" min="0" step="any" style="width:100px" oninput="requestQuoteInput('new','amount',this.value)"></label>
         <label>Requested date <input type="date" id="reqDate" value="${requestDraft.date||todayStr}" onchange="requestDraft.date=this.value"></label>
         <button type="button" class="btn-small" onclick="requestDraft.date='${todayStr}';document.getElementById('reqDate').value='${todayStr}'">Today</button>
+        <button class="btn-gold" ${requestDraft.subjectId?'':'disabled'} onclick="calcFeeRequest()" title="Fill classes and amount using the Raise fee requests rules">Calculate</button>
         <button class="btn-primary" ${requestDraft.subjectId?'':'disabled'} onclick="addFeeRequest()">Add fee request</button>
       </div>
-      <div class="hint" id="reqQuoteHint">${feeQuoteHintHtml(requestDraft, 'new')}</div>`}
+      <div class="hint" id="reqQuoteHint">${feeQuoteHintHtml(requestDraft, 'new')}</div>
+      <div id="reqCalcNote">${requestCalcHtml()}</div>`}
       ${(() => {
         const pending = pendingFeeRequests(student.id);
         if (!pending.length) return '<div class="empty">No pending fee requests.</div>';
@@ -11455,7 +11594,7 @@ function renderStudents() {
             return `<tr>
               <td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td>
               <td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td>
-              <td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}</td>
+              <td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${calcNoteHtml(r)}</td>
               <td>
                 ${rejectPaymentMsg[r.id] ? `<div class="hint" style="color:var(--brick)">${esc(rejectPaymentMsg[r.id])}</div>` : ''}
                 ${isMarking ? `<span class="hint">Confirming payment — fill in the details below.</span>` : isEditing ? `<span class="hint">Editing — see below.</span>` : `
@@ -11524,14 +11663,16 @@ function renderStudents() {
       <div class="row-form">
         <select onchange="subDraftSet('subjectId', this.value)">${paySubjectOptions}</select>
         <select onchange="subDraftSet('type', this.value)">${TYPES.map(ty=>`<option value="${ty}" ${subDraft.type===ty?'selected':''}>${ty}</option>`).join('')}</select>
-        <label>Classes <input type="number" id="payClasses" min="0.5" step="0.5" style="width:80px"></label>
-        <label>Amount paid <input type="number" id="payAmount" min="0" step="1" style="width:100px"></label>
-        <label>Payment date <input type="date" id="payDate" value="${todayStr}"></label>
-        <button type="button" class="btn-small" onclick="document.getElementById('payDate').value='${todayStr}'">Today</button>
-        <label>Reference <input type="text" id="payReference" placeholder="Optional" style="width:130px"></label>
-        <label>Remarks <input type="text" id="payRemarks" placeholder="Optional" style="width:140px"></label>
+        <select onchange="subDraftSet('mode', this.value)" title="Online/Offline: picks the Fee setup rate">${RATE_MODES.map(m=>`<option value="${m}" ${subDraft.mode===m?'selected':''}>${m}</option>`).join('')}</select>
+        <label>Classes <input type="number" id="payClasses" min="0.5" step="0.5" style="width:80px" value="${escAttr(String(subDraft.classes))}" oninput="requestQuoteInput('pay','classes',this.value)"></label>
+        <label>Amount paid <input type="number" id="payAmount" min="0" step="1" style="width:100px" value="${escAttr(String(subDraft.amountPaid))}" oninput="requestQuoteInput('pay','amount',this.value)"></label>
+        <label>Payment date <input type="date" id="payDate" value="${escAttr(subDraft.date||todayStr)}" onchange="subDraft.date=this.value"></label>
+        <button type="button" class="btn-small" onclick="document.getElementById('payDate').value='${todayStr}';subDraft.date='${todayStr}'">Today</button>
+        <label>Reference <input type="text" id="payReference" placeholder="Optional" style="width:130px" value="${escAttr(subDraft.reference||'')}" oninput="subDraft.reference=this.value"></label>
+        <label>Remarks <input type="text" id="payRemarks" placeholder="Optional" style="width:140px" value="${escAttr(subDraft.remarks||'')}" oninput="subDraft.remarks=this.value"></label>
         <button class="btn-primary" ${canRecordPayment?'':'disabled'} onclick="addSubscriptionPayment()">Record payment</button>
       </div>
+      <div class="hint" id="payQuoteHint">${feeQuoteHintHtml(subDraft, 'pay')}</div>
       ${subPayPendingWarning && subPayPendingWarning.pending && subPayPendingWarning.pending.length ? (() => {
         const pw = subPayPendingWarning;
         const subjName = esc((subject(pw.pending[0].subjectId)||{}).name || 'this subject');
@@ -11893,7 +12034,7 @@ function renderReports() {
       <tr><th>Student</th><th>Parent</th><th>Mobile</th><th>Subject</th><th>Type</th><th>Classes</th><th>Amount</th><th>Requested</th><th>Reference</th><th></th></tr>
       ${pendingRequestRows.map(r=>{
         const st = data.students.find(x=>x.id===r.studentId);
-        return `<tr><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(st?(st.parentName||'—'):'—')}</td><td>${esc(st?(st.mobileNumber||'—'):'—')}${copyBtnHtml(st&&st.mobileNumber)}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${r.paymentReference?esc(r.paymentReference):'<span class="hint">—</span>'}</td><td><button class="btn-small" onclick="generateFeeMessageForRequest('${r.id}')">Message</button>${waChips(r.studentId, feeMessageTextForRequest(r.id))}</td></tr>`;
+        return `<tr><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(st?(st.parentName||'—'):'—')}</td><td>${esc(st?(st.mobileNumber||'—'):'—')}${copyBtnHtml(st&&st.mobileNumber)}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${r.paymentReference?esc(r.paymentReference):'<span class="hint">—</span>'}${calcNoteHtml(r)}</td><td><button class="btn-small" onclick="generateFeeMessageForRequest('${r.id}')">Message</button>${waChips(r.studentId, feeMessageTextForRequest(r.id))}</td></tr>`;
       }).join('')}
     </table></div>` : '<div class="empty">No pending fee requests.</div>';
 
@@ -12552,7 +12693,7 @@ function renderFees() {
       <tr><th>Student</th><th>Parent</th><th>Mobile</th><th>Subject</th><th>Type</th><th>Classes</th><th>Amount</th><th>Requested</th><th>Reference</th><th></th></tr>
       ${pendingRequestRows.map(r=>{
         const st = data.students.find(x=>x.id===r.studentId);
-        return `<tr><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(st?(st.parentName||'—'):'—')}</td><td>${esc(st?(st.mobileNumber||'—'):'—')}${copyBtnHtml(st&&st.mobileNumber)}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${r.paymentReference?esc(r.paymentReference):'<span class="hint">—</span>'}</td><td><button class="btn-small" onclick="generateFeeMessageForRequest('${r.id}')">Message</button>${waChips(r.studentId, feeMessageTextForRequest(r.id))}</td></tr>`;
+        return `<tr><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(st?(st.parentName||'—'):'—')}</td><td>${esc(st?(st.mobileNumber||'—'):'—')}${copyBtnHtml(st&&st.mobileNumber)}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${r.paymentReference?esc(r.paymentReference):'<span class="hint">—</span>'}${calcNoteHtml(r)}</td><td><button class="btn-small" onclick="generateFeeMessageForRequest('${r.id}')">Message</button>${waChips(r.studentId, feeMessageTextForRequest(r.id))}</td></tr>`;
       }).join('')}
     </table></div>` : '<div class="empty">No pending fee requests.</div>';
 
@@ -12566,7 +12707,7 @@ function renderFees() {
       <tr><th>Student</th><th>Subject</th><th>Type</th><th>Classes</th><th>Amount</th><th>Date</th><th>Status</th><th>Used</th><th>Expired</th><th>Remaining</th><th>Reference &amp; Remarks</th></tr>
       ${allPaymentsFiltered.map(r=>`
         <tr${r.status==='Refund'?' style="color:var(--brick)"':''}><td>${esc(r.studentName)}</td><td>${esc(r.subjectName)}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td>
-          <td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${subscriptionStatusCellHtml(r)}</td><td>${r.status==='Refund'?'—':r.usedHere}</td><td>${r.status==='Refund'||!r.expiredClasses?'—':`<span style="color:var(--brick)">${r.expiredClasses}</span>`}</td><td>${r.status==='Refund'?'—':r.remainingHere}</td><td>${r.paymentReference?esc(r.paymentReference):'<span class="hint">—</span>'}${r.paymentRemarks?`<div class="hint">${esc(r.paymentRemarks)}</div>`:''}</td></tr>`).join('')}
+          <td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${subscriptionStatusCellHtml(r)}</td><td>${r.status==='Refund'?'—':r.usedHere}</td><td>${r.status==='Refund'||!r.expiredClasses?'—':`<span style="color:var(--brick)">${r.expiredClasses}</span>`}</td><td>${r.status==='Refund'?'—':r.remainingHere}</td><td>${r.paymentReference?esc(r.paymentReference):'<span class="hint">—</span>'}${r.paymentRemarks?`<div class="hint">${esc(r.paymentRemarks)}</div>`:''}${calcNoteHtml(r)}</td></tr>`).join('')}
     </table></div>` : (allPaymentsStudentFilter==='' ? '<div class="empty">Pick a student above to see their subscription payments.</div>' : `<div class="empty">No matching subscription payments.</div>`);
   const allPaymentsStudentOptions = `
     <option value="" ${allPaymentsStudentFilter===''?'selected':''}>Pick a student…</option>
@@ -12622,28 +12763,50 @@ function renderFees() {
         const dActive=isDemandPeriod(),dRan=isDemandAlreadyRun(dMonth);
         const ord=n=>n+(n===1?'st':n===2?'nd':n===3?'rd':'th');
         return `<h2>Raise fee requests — ${dMonth}</h2>
-          <div class="hint" style="margin-bottom:6px">Uses last month's attendance weekday pattern to predict this month's class count. Subtracts carry-forward balance for the shortfall. Amount is from Fee setup rates with Discount structure applied. Group and Individual are always separate.</div>          <div class="hint"><b>Rules:</b><ul style="margin:4px 0 0 16px;padding:0"><li>Active on the <b>1st to 7th</b> of each month only.</li><li>Uses the <b>weekday pattern</b> from last month's attendance to predict this month's classes — e.g. if a student attended every Mon and Thu last month, counts Mon+Thu in this month.</li><li>Group and Individual are calculated <b>separately</b> — one never covers the other.</li><li>Only students with a shortfall get a request — students with enough carry-forward are skipped.</li><li>Amount is calculated from the <b>Fee setup</b> rates (based on subject category, type and most common mode used last month) with the <b>Discount structure</b> applied if the class count qualifies.</li><li>Students who already have a <b>pending manual fee request</b> for the same subject and type are skipped — no duplicate is created.</li><li>Can only be run <b>once per month</b>. Use Reset to remove and re-run if schedules change.</li></ul></div>
+          <div class="hint" style="margin-bottom:6px">Raises one fee request per student, subject and class type (Group / Individual) for this month. How many classes depends on the student's last payment and last month's classes. Amount is from Fee setup with the Discount structure applied. Every request keeps its working, so you can answer any question about it later.</div>
+          <div class="hint"><b>Rules:</b><ul style="margin:4px 0 0 16px;padding:0">
+            <li>Active on the <b>1st to 7th</b> of each month only. Can only be run <b>once per month</b>; use Reset to remove and re-run.</li>
+            <li><b>Classes left</b> = paid classes (after refunds, transfers and expired classes) − classes used. <b>Absent counts like Present</b> — it uses a class.</li>
+            <li><b>Owed classes</b>: when classes left is below 0, the student owes them and they are added to the request (e.g. needs 8, owes 3 → asks 11).</li>
+            <li><b>Package</b> — last payment was exactly <b>30, 50, 60 or 100</b> classes: asks for the same package again once classes left are at or below about one month's use. Owed classes come out of the package (not added).</li>
+            <li><b>Regular</b> — came on the same weekday(s) at least twice last month (Present or Absent): counts those weekdays this month − classes left (+ owed). If they usually take two classes that day, it counts as two.</li>
+            <li><b>Irregular or no classes last month</b>: asks for the classes of the last payment − classes left (+ owed).</li>
+            <li><b>Amount</b> = Fee setup rate (subject category, type, the student's usual Online/Offline) × classes, with the Discount structure if the count qualifies.</li>
+            <li>Group and Individual are calculated <b>separately</b> — one never covers the other.</li>
+            <li><b>Not raised</b> (listed with the reason): archived students, a fee request already pending, enough classes left, no rate in Fee setup. Never a ₹0 request. Students who never paid are left out — they're in Students needing renewal.</li>
+            <li>In the preview you can change classes or amount, or untick a row, before Confirm. Any change is written into the saved working. <b>Download Excel</b> keeps a copy of the whole run.</li>
+          </ul></div>
           ${dActive?(dRan?`
             <div class="hint" style="color:var(--forest);margin-top:8px">✓ Fee requests already raised for ${dMonth}.</div>
-            <div class="row-form" style="margin-top:8px"><button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="resetDemand()">Reset — remove &amp; unlock</button></div>
+            <div class="row-form" style="margin-top:8px"><button class="btn-gold" onclick="exportDemandRun()">Download Excel of this run</button><button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="resetDemand()">Reset — remove &amp; unlock</button></div>
             ${demandMsg?`<div class="hint" style="color:var(--forest);margin-top:6px">${esc(demandMsg)}</div>`:''}
           `:`
             <div class="row-form" style="margin-top:8px">
               <button class="btn-small btn-primary" onclick="previewDemand()">Preview</button>
               ${demandMsg?`<span class="hint" style="color:var(--forest)">${esc(demandMsg)}</span>`:''}
             </div>
-            ${demandPreviewRows!==null?(demandPreviewRows.length===0?
-              `<div class="empty">No fee requests needed — all students have enough carry forward to cover their scheduled classes.</div>`
-            :`<div class="table-scroll"><table>
-                <tr><th>Student</th><th>Subject</th><th>Type</th><th>Pattern</th><th>Predicted</th><th>Remaining</th><th>To Request</th><th>Amount</th><th>Existing pending</th></tr>
-                ${demandPreviewRows.map(r=>`<tr><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td><span class="hint">${r.weekdays}</span></td><td>${r.predicted}</td><td>${r.remaining}</td><td><b>${r.shortfall}</b></td><td>₹${r.amount.toFixed(2)}</td><td>${r.existingPending>0?`<span class="hint" style="color:var(--brick)">${r.existingPending} pending</span>`:'—'}</td></tr>`).join('')}
+            ${demandPreviewRows!==null?(()=>{
+              const inc=demandPreviewRows.filter(r=>r.include);
+              const skippedHtml=demandSkippedRows.length||demandNeverPaid?`
+                <div class="hint" style="margin-top:10px;cursor:pointer;user-select:none" onclick="demandShowSkipped=!demandShowSkipped;render()">${demandShowSkipped?'▼':'▶'} Not raised: ${demandSkippedRows.length}${demandNeverPaid?` · plus ${demandNeverPaid} subject/type${demandNeverPaid===1?'':'s'} never paid (see Students needing renewal)`:''}</div>
+                ${demandShowSkipped&&demandSkippedRows.length?`<div class="table-scroll"><table>
+                  <tr><th>Student</th><th>Subject</th><th>Type</th><th>Reason</th></tr>
+                  ${demandSkippedRows.map(r=>`<tr><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td><span class="hint">${esc(r.reason)}</span></td></tr>`).join('')}
+                </table></div>`:''}`:'';
+              if(!demandPreviewRows.length) return `<div class="empty">No fee requests needed this month.</div>${skippedHtml}`;
+              return `<div class="table-scroll"><table>
+                <tr><th>Raise</th><th>Student</th><th>Subject</th><th>Type</th><th>Method</th><th>Classes left</th><th>Classes</th><th>Amount (₹)</th><th>Working</th></tr>
+                ${demandPreviewRows.map((r,i)=>`<tr${r.include?'':' style="opacity:0.5"'}><td><input type="checkbox" ${r.include?'checked':''} onchange="demandRowSet(${i},'include',this.checked)"></td><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(r.method)}</td><td${r.left<0?' style="color:var(--brick)"':''}>${r.left<0?`${-r.left} owed`:r.left}</td><td><input type="number" min="0.5" step="0.5" style="width:70px" value="${r.classes}" onchange="demandRowSet(${i},'classes',this.value)"></td><td><input type="number" min="1" step="1" style="width:90px" value="${r.amount}" onchange="demandRowSet(${i},'amount',this.value)"></td><td><span class="hint" style="font-size:11px;display:block;min-width:280px;white-space:normal">${esc(demandRowNote(r))}</span></td></tr>`).join('')}
               </table></div>
-              <div class="hint" style="margin-top:8px">${demandPreviewRows.filter(r=>!r.skip).length} request${demandPreviewRows.filter(r=>!r.skip).length===1?'':'s'} will be created${demandPreviewRows.some(r=>r.skip)?' · '+demandPreviewRows.filter(r=>r.skip).length+' skipped (already pending)':''} · Total ₹${demandPreviewRows.filter(r=>!r.skip).reduce((a,r)=>a+r.amount,0).toFixed(2)}</div>
+              <div class="hint" style="margin-top:8px">${inc.length} request${inc.length===1?'':'s'} will be created${demandPreviewRows.length>inc.length?' · '+(demandPreviewRows.length-inc.length)+' unticked':''} · Total ₹${inc.reduce((a,r)=>a+r.amount,0).toFixed(2)}</div>
+              ${skippedHtml}
               ${aiDemandReviewHtml()}
               <div class="row-form" style="margin-top:8px">
-                <button class="btn-primary" ${demandConfirming?'disabled':''} onclick="confirmDemand()">${demandConfirming?'Creating…':'Confirm &amp; Create'}</button>
+                <button class="btn-primary" ${demandConfirming||!inc.length?'disabled':''} onclick="confirmDemand()">${demandConfirming?'Creating…':'Confirm &amp; Create'}</button>
+                <button class="btn-gold" onclick="exportDemandRun()">Download Excel</button>
                 <button class="btn-small" onclick="demandPreviewRows=null;render()">Cancel</button>
-              </div>`):''}
+              </div>`;
+            })():''}
           `):`
             <div class="row-form" style="margin-top:8px">
               <button class="btn-small btn-primary" disabled>Preview</button>
@@ -16395,8 +16558,8 @@ function renderPortalShell(bodyHtml) {
 const HELP = {
   'sub-enrollment': { t:'Subject enrollment', b:'<ul><li>Lists subjects this student is currently studying.</li><li>Add a subject to allow payments, scheduling and attendance for it.</li><li>Remove to stop new scheduling — existing records are kept.</li><li>The Online Class Link column shows the teacher\'s join link (Zoom/Meet) — click Join ↗ to open it directly.</li></ul>' },
   'sub-balances': { t:'Subscription balances', b:'<ul><li>Shows subscribed, used and remaining classes per subject and class type.</li><li>Classes are drawn from the oldest payment first.</li><li>A balance of 0 or below means the student needs to renew.</li><li>Pending fee requests are not counted until marked Paid.</li></ul>' },
-  'fee-requests': { t:'Fee requests', b:"<ul><li>A placeholder for an expected payment — doesn't add to the class count until marked Paid.</li><li>Use it when a parent confirms they will pay soon.</li><li>Amount fills in by itself from Fee setup (rate for the subject's category, Group/Individual and Online/Offline × classes, with the discount tier applied). Online/Offline starts on the mode the student uses most. You can type your own amount for a special price.</li><li>Once marked Paid it becomes a real payment and classes are added.</li><li>Message generates a WhatsApp-ready reminder with UPI details.</li></ul>" },
-  'record-payment': { t:'Record subscription payment', b:'<ul><li>Records a new class purchase for this student.</li><li>Pick subject, class type, number of classes and amount paid.</li><li>The payment date sets the expiry date (120 to 365 days depending on batch size).</li><li>Reference and Remarks are optional, for your records.</li></ul>' },
+  'fee-requests': { t:'Fee requests', b:"<ul><li>A placeholder for an expected payment — doesn't add to the class count until marked Paid.</li><li>Use it when a parent confirms they will pay soon.</li><li>Amount fills in by itself from Fee setup (rate for the subject's category, Group/Individual and Online/Offline × classes, with the discount tier applied). Online/Offline starts on the mode the student uses most. You can type your own amount for a special price.</li><li><b>Calculate</b> fills classes and amount with the same rules as Fees › Raise fee requests (package, regular weekdays, irregular, owed classes) for this month, and the working is saved on the request.</li><li>Once marked Paid it becomes a real payment and classes are added.</li><li>Message generates a WhatsApp-ready reminder with UPI details.</li></ul>" },
+  'record-payment': { t:'Record subscription payment', b:'<ul><li>Records a new class purchase for this student.</li><li>Pick subject, class type, Online/Offline and number of classes. The amount fills in from Fee setup (rate × classes, less any discount) — you can type a different amount.</li><li>The payment date sets the expiry date (120 to 365 days depending on batch size).</li><li>Reference and Remarks are optional, for your records.</li></ul>' },
   'issue-refund': { t:'Issue a refund', b:'<ul><li>Reduces a student\'s unused class count for a specific subject and type.</li><li>Only unused classes can be refunded — cannot refund classes already given.</li><li>The original payment record is unchanged; a Refund entry is created.</li></ul>' },
   'transfer-credits': { t:'Transfer class credits', b:"<ul><li>Moves already-purchased classes from one subject to another — no money involved.</li><li>Both subjects must be the same class type (Group or Individual).</li><li>If subjects have different teachers you'll be asked to confirm, since it changes who gets paid.</li></ul>" },
   'sub-history': { t:'Subscription history', b:'<ul><li><b>Active</b> — being drawn down now (oldest first).</li><li><b>Upcoming</b> — next in line after the active payment runs out.</li><li><b>Expired</b> — unused classes removed after the expiry date.</li><li>Click Edit to correct a date, amount, reference or expiry date.</li></ul>' },
