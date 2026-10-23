@@ -89,8 +89,11 @@
   .btn-copy.copied { border-color: var(--forest); color: var(--forest); }
   /* Shared destructive-action button (replaces repeated inline overrides) */
   .btn-danger, .btn-primary.btn-danger { background: var(--brick); color: #fff; }   /* the 2-class form must out-rank .btn-primary's green, which is defined later */
+  .nav-hint-mobile { display: none; }
   @media (max-width: 700px) {
     .desktop-tabs { display: none; }
+    .nav-hint-desktop { display: none; }
+    .nav-hint-mobile { display: inline; }
     .sidebar-nav { display: none; }
     .admin-layout { display: block; }
     .mobile-tab-bar { display: block; margin-bottom: 20px; position: relative; }
@@ -271,7 +274,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-23 10:40 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-23 11:10 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -11732,7 +11735,7 @@ function renderDashboard() {
     ${aiAdminChatCardHtml()}
     <div class="card">
       <h2>Welcome back</h2>
-      <div class="hint">Use the menu on the left to get to Class Log, Fees, Students, and everything else. The numbers above are a quick look at what's waiting for you today — click any of them to jump straight there.</div>
+      <div class="hint"><span class="nav-hint-desktop">Use the menu on the left</span><span class="nav-hint-mobile">Use the ☰ menu at the top</span> to get to Class Log, Fees, Students, and everything else. The boxes above show what's waiting for you today. Click any of them to go straight there.</div>
       ${aiMonthlySummaryHtml()}</div>
     </div>`;
 }
@@ -15925,7 +15928,7 @@ function renderTeacherDashboard(teacher) {
     ${expiryListHtml}
     <div class="card">
       <h2>Welcome back, ${esc(teacher.name)}</h2>
-      <div class="hint">Use the tabs above to get to your schedule, availability, attendance, and profile. The numbers above are a quick look at what's waiting for you today.</div>
+      <div class="hint"><span class="nav-hint-desktop">Use the menu on the left</span><span class="nav-hint-mobile">Use the ☰ menu at the top</span> to get to your schedule, availability, attendance, students, and everything else. The boxes above show what's waiting for you today. Click any of them to go straight there.</div>
       <div style="margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <label style="font-size:13px;color:var(--hint)"><b>Earnings for</b>
           <input type="month" value="${teacherEarningsMonth}" max="${monthStr}" onchange="teacherEarningsMonth=this.value;render()" style="margin-left:6px;font-size:13px;border:1px solid var(--line);border-radius:6px;padding:2px 6px">
