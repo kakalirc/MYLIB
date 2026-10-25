@@ -8619,13 +8619,34 @@ function familyPhones(studentId) {
   if (!out.length) m.forEach(s => add(s.mobileNumber));
   return out;
 }
+// Fee-message WhatsApp launcher: try the installed Windows desktop app first,
+// then fall back to WhatsApp Web if the browser stays in the foreground.
+function openFeeWhatsApp(phone, button) {
+  const message = button && button.dataset ? (button.dataset.waText || '') : '';
+  const num = String(phone || '').replace(/\D/g, '');
+  const encoded = encodeURIComponent(message);
+  const webUrl = num ? `https://wa.me/${num}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
+  const desktopUrl = num ? `whatsapp://send?phone=${num}&text=${encoded}` : `whatsapp://send?text=${encoded}`;
+  let leftPage = false;
+  const markLeft = () => { leftPage = true; };
+  window.addEventListener('blur', markLeft, { once: true });
+  window.open(desktopUrl, '_blank');
+  setTimeout(() => {
+    window.removeEventListener('blur', markLeft);
+    if (!leftPage && document.visibilityState === 'visible') window.open(webUrl, '_blank', 'noopener');
+  }, 1400);
+}
 function familyWaChips(studentId, messageText) {
   if (!messageText) return '';
-  const encoded = encodeURIComponent(messageText);
-  const chipStyle = 'text-decoration:none;display:inline-flex;align-items:center';
+  const chipStyle = 'display:inline-flex;align-items:center';
   const phones = familyPhones(studentId);
-  if (!phones.length) return `<a href="https://wa.me/?text=${encoded}" target="_blank" class="btn-small" style="${chipStyle}">📤 WhatsApp</a>`;
-  return phones.map(ph => { const clean = ph.replace(/\D/g, ''); const num = clean.length === 10 ? '91' + clean : clean; return `<a href="https://wa.me/${num}?text=${encoded}" target="_blank" class="btn-small" style="${chipStyle}">📤 ${esc(ph)}</a>`; }).join('');
+  const makeButton = (phone, label) => `<button type="button" class="btn-small" style="${chipStyle}" data-wa-text="${escAttr(messageText)}" onclick="openFeeWhatsApp('${phone}',this)">📤 ${label}</button>`;
+  if (!phones.length) return makeButton('', 'WhatsApp');
+  return phones.map(ph => {
+    const clean = ph.replace(/\D/g, '');
+    const num = clean.length === 10 ? '91' + clean : clean;
+    return makeButton(num, esc(ph));
+  }).join('');
 }
 function requestMonthLong(r) {
   const ym = r.paymentReference && r.paymentReference.startsWith('AUTO-') ? r.paymentReference.slice(5) : (r.date || '').slice(0, 7);
