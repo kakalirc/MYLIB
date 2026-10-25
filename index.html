@@ -8179,7 +8179,7 @@ function editRequestDraftSet(field, val) {
   editRequestDraft[field] = val;
   // Pending requests only: changing what is asked for re-prices it from Fee setup.
   if (editRequestDraft.kind === 'Request') {
-    if (field === 'subjectId' || field === 'type') editRequestDraft.mode = studentUsualMode(selectedStudentId, editRequestDraft.subjectId, editRequestDraft.type);
+    if (field === 'subjectId' || field === 'type') { const editRow = data.subscriptions.find(x => x.id === editingRequestId); editRequestDraft.mode = studentUsualMode(editRow ? editRow.studentId : selectedStudentId, editRequestDraft.subjectId, editRequestDraft.type); }
     editRequestDraft.amountEdited = false;
     refillRequestAmount(editRequestDraft);
   }
@@ -8768,7 +8768,12 @@ function pendingFeeRequestsByFamilyHtml() {
         </td></tr>`;
         const rows = kids.map(kid => {
           const mine = f.reqs.filter(r => r.studentId === kid);
-          return mine.map(r => `<tr><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid || 0).toFixed(2)}</td><td>${r.date || '—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${calcNoteHtml(r)}</td><td>${markingPaidId === r.id ? '<span class="hint">Confirm below</span>' : `<button class="btn-small" onclick="startMarkPaid('${r.id}')">Mark paid</button>`}</td></tr>`).join('')
+          return mine.map(r => {
+            const isEditing = editingRequestId === r.id;
+            const subjectOptions = subjectsForStudent(r.studentId).map(s => `<option value="${s.id}" ${editRequestDraft.subjectId===s.id?'selected':''}>${esc(studentLabel(s))}</option>`).join('');
+            const editPanel = isEditing ? `<tr><td colspan="8"><div style="margin:8px 0;padding:12px;border:1px solid var(--forest);border-radius:8px;background:rgba(60,94,66,0.06)"><div class="hint" style="margin-bottom:8px"><b>Edit pending fee request</b> — ${esc(studentNameWithCode(r.studentId))}</div>${editRequestMsg ? `<div class="hint" style="color:var(--brick)">${esc(editRequestMsg)}</div>` : ''}<div class="row-form" style="margin-bottom:0"><select onchange="editRequestDraftSet('subjectId', this.value)">${subjectOptions}</select><select onchange="editRequestDraftSet('type', this.value)">${TYPES.map(ty=>`<option value="${ty}" ${editRequestDraft.type===ty?'selected':''}>${ty}</option>`).join('')}</select><label>Classes <input type="number" id="editReqClasses_${r.id}" value="${editRequestDraft.classes}" min="0.5" step="0.5" style="width:80px" oninput="requestQuoteInput('edit','classes',this.value)"></label><label>Amount ₹ <input type="number" id="editReqAmount_${r.id}" value="${editRequestDraft.amountPaid}" min="0" step="any" style="width:100px" oninput="requestQuoteInput('edit','amount',this.value)"></label><label>Requested date <input type="date" id="editReqDate_${r.id}" value="${editRequestDraft.date}" onchange="editRequestDraft.date=this.value"></label><button class="btn-small btn-primary" onclick="saveRequestEdit('${r.id}')">Save</button><button class="btn-small" onclick="cancelEditRequest()">Cancel</button></div><div class="hint" id="editReqQuoteHint">${feeQuoteHintHtml(editRequestDraft, 'edit')}</div></div></td></tr>` : '';
+            return `<tr><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid || 0).toFixed(2)}</td><td>${r.date || '—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${calcNoteHtml(r)}</td><td>${markingPaidId === r.id ? '<span class="hint">Confirm below</span>' : `<button class="btn-small" onclick="startMarkPaid('${r.id}')">Mark paid</button><button class="btn-small" onclick="startEditRequest('${r.id}')">Edit</button><button class="icon-btn" title="Remove pending request" aria-label="Remove pending request" onclick="if(confirm('Remove this pending fee request? This cannot be undone.')) cancelFeeRequest('${r.id}')">✕</button>`}</td></tr>${editPanel}`;
+          }).join('')
             + (kids.length > 1 ? `<tr><td colspan="4" class="hint" style="text-align:right">Subtotal for ${esc((data.students.find(s => s.id === kid) || {}).name || '')}</td><td><b>${mine.reduce((a, r) => a + (r.amountPaid || 0), 0).toFixed(2)}</b></td><td colspan="3"></td></tr>` : '');
         }).join('');
         const single = f.reqs.find(r => r.id === markingPaidId);
