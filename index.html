@@ -132,6 +132,16 @@
   .icon-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 15px; padding: 2px 6px; }
   .icon-btn:hover { color: var(--brick); }
   .table-scroll { overflow-x: auto; }
+  .app-usage-detail-scroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .app-usage-detail-table { width: 100%; min-width: 650px; table-layout: fixed; border-collapse: collapse; font-size: 12.5px; }
+  .app-usage-detail-table th, .app-usage-detail-table td { padding: 8px 10px; }
+  .app-usage-detail-table:not(.app-usage-four-col) th:nth-child(1), .app-usage-detail-table:not(.app-usage-four-col) td:nth-child(1) { width: 50%; white-space: normal; overflow-wrap: anywhere; }
+  .app-usage-detail-table:not(.app-usage-four-col) th:nth-child(2), .app-usage-detail-table:not(.app-usage-four-col) td:nth-child(2) { width: 12%; text-align: right; }
+  .app-usage-detail-table:not(.app-usage-four-col) th:nth-child(3), .app-usage-detail-table:not(.app-usage-four-col) td:nth-child(3) { width: 38%; white-space: nowrap; }
+  .app-usage-four-col th:nth-child(1), .app-usage-four-col td:nth-child(1) { width: 36%; white-space: normal; overflow-wrap: anywhere; }
+  .app-usage-four-col th:nth-child(2), .app-usage-four-col td:nth-child(2) { width: 16%; }
+  .app-usage-four-col th:nth-child(3), .app-usage-four-col td:nth-child(3) { width: 10%; text-align: right; }
+  .app-usage-four-col th:nth-child(4), .app-usage-four-col td:nth-child(4) { width: 38%; white-space: nowrap; }
   table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   table th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.3px; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
   table td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
@@ -453,6 +463,19 @@ let loginError = '';
 // "Today" in the user's own time zone (India). toISOString() would give the UTC date, which is still YESTERDAY from
 // midnight to 5:30 am IST - and the database's expiry run works on the Indian date, so the two must agree.
 const todayStr = (() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })();
+
+// Display database timestamps consistently in India Standard Time.
+function formatTimestampIST(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: true
+  }).format(date) + ' IST';
+}
 let feeRates = {}; // global, category+type only — independent of teacher/subject
 let feeSettingsRowId = null;
 let auditLoggingEnabled = true;
@@ -659,10 +682,11 @@ function appUsageHtml() {
     });
     const keys = Object.keys(by).sort(byOrder);
     const cols = shown.length + 2;
-    const who = k => `<table style="font-size:12.5px;margin:0">
-      <tr><th>Who</th><th>Role</th><th>Times</th><th>Last used</th></tr>
-      ${Object.values(by[k].users).sort((a, b) => b.n - a.n || a.label.localeCompare(b.label)).map(u => `<tr><td>${esc(u.label)}</td><td>${esc(u.role)}</td><td>${u.n}</td><td>${esc(u.last.slice(0, 10))}</td></tr>`).join('')}
-    </table>`;
+    const who = k => `<div class="app-usage-detail-scroll"><table class="app-usage-detail-table app-usage-four-col" style="margin:0;min-width:760px">
+      <colgroup><col style="width:36%"><col style="width:16%"><col style="width:10%"><col style="width:38%"></colgroup>
+      <thead><tr><th>Who</th><th>Role</th><th>Times</th><th>Last used (IST)</th></tr></thead>
+      <tbody>${Object.values(by[k].users).sort((a, b) => b.n - a.n || a.label.localeCompare(b.label)).map(u => `<tr><td>${esc(u.label)}</td><td>${esc(u.role)}</td><td>${u.n}</td><td>${esc(formatTimestampIST(u.last))}</td></tr>`).join('')}</tbody>
+    </table></div>`;
     return `<div class="table-scroll"><table>
       <tr><th>Feature</th>${shown.map(r => `<th>${r}s</th>`).join('')}<th>People</th></tr>
       ${keys.map(k => `<tr style="cursor:pointer" onclick="toggleAppUsageRow('f:${escAttr(k)}')"><td>${arrow('f:' + k)}${esc(appUsageFeatureLabel(k))}</td>${shown.map(r => `<td>${by[k].n[r] || ''}</td>`).join('')}<td>${Object.keys(by[k].users).length}</td></tr>${appUsageExpanded['f:' + k] ? sub(cols, who(k)) : ''}`).join('')}
@@ -683,13 +707,14 @@ function appUsageHtml() {
     const list = Object.values(by).sort((a, b) => b.actions - a.actions || b.total - a.total);
     const top = u => Object.entries(u.f).filter(([k]) => !k.startsWith('tab:')).sort((a, b) => b[1] - a[1]).slice(0, 3)
       .map(([k, n]) => `${esc(appUsageFeatureLabel(k))} ×${n}`).join(', ') || '<span style="color:var(--muted)">only opened screens</span>';
-    const all = u => `<table style="font-size:12.5px;margin:0">
-      <tr><th>Feature</th><th>Times</th><th>Last used</th></tr>
-      ${Object.keys(u.f).sort(byOrder).map(k => `<tr><td>${esc(appUsageFeatureLabel(k))}</td><td>${u.f[k]}</td><td>${esc(u.fLast[k].slice(0, 10))}</td></tr>`).join('')}
-    </table>`;
+    const all = u => `<div class="app-usage-detail-scroll"><table class="app-usage-detail-table" style="margin:0;min-width:650px">
+      <colgroup><col style="width:50%"><col style="width:12%"><col style="width:38%"></colgroup>
+      <thead><tr><th>Feature</th><th>Times</th><th>Last used (IST)</th></tr></thead>
+      <tbody>${Object.keys(u.f).sort(byOrder).map(k => `<tr><td>${esc(appUsageFeatureLabel(k))}</td><td>${u.f[k]}</td><td>${esc(formatTimestampIST(u.fLast[k]))}</td></tr>`).join('')}</tbody>
+    </table></div>`;
     return `<div class="table-scroll"><table>
       <tr><th>User</th><th>Role</th><th>Actions</th><th>Screens opened</th><th>Top actions</th><th>Last used</th></tr>
-      ${list.map(u => `<tr style="cursor:pointer" onclick="toggleAppUsageRow('u:${escAttr(u.id)}')"><td>${arrow('u:' + u.id)}${esc(u.label)}</td><td>${esc(u.role)}</td><td>${u.actions}</td><td>${u.total - u.actions}</td><td style="font-size:12.5px">${top(u)}</td><td>${esc(u.last.slice(0, 10))}</td></tr>${appUsageExpanded['u:' + u.id] ? sub(6, all(u)) : ''}`).join('')}
+      ${list.map(u => `<tr style="cursor:pointer" onclick="toggleAppUsageRow('u:${escAttr(u.id)}')"><td>${arrow('u:' + u.id)}${esc(u.label)}</td><td>${esc(u.role)}</td><td>${u.actions}</td><td>${u.total - u.actions}</td><td style="font-size:12.5px">${top(u)}</td><td>${esc(formatTimestampIST(u.last))}</td></tr>${appUsageExpanded['u:' + u.id] ? sub(6, all(u)) : ''}`).join('')}
     </table></div>
     <div class="hint">Tap a person to see everything they used this month.</div>`;
   }
@@ -2366,8 +2391,8 @@ async function loadAuditLog() {
   auditLoading = true;
   render();
   let q = sb.from('audit_log').select('*').order('created_at', { ascending: false }).limit(500);
-  if (auditFilterFrom) q = q.gte('created_at', auditFilterFrom + 'T00:00:00');
-  if (auditFilterTo) q = q.lte('created_at', auditFilterTo + 'T23:59:59');
+  if (auditFilterFrom) q = q.gte('created_at', auditFilterFrom + 'T00:00:00+05:30');
+  if (auditFilterTo) q = q.lte('created_at', auditFilterTo + 'T23:59:59+05:30');
   if (auditFilterTable) q = q.eq('table_name', auditFilterTable);
   if (auditFilterAction) q = q.eq('action', auditFilterAction);
   if (auditFilterUser) q = q.ilike('changed_by_username', '%' + auditFilterUser + '%');
@@ -2381,8 +2406,8 @@ async function loadLoginLog() {
   loginLogLoading = true;
   render();
   let q = sb.from('login_log').select('*').order('created_at', { ascending: false }).limit(500);
-  if (loginLogFilterFrom) q = q.gte('created_at', loginLogFilterFrom + 'T00:00:00');
-  if (loginLogFilterTo) q = q.lte('created_at', loginLogFilterTo + 'T23:59:59');
+  if (loginLogFilterFrom) q = q.gte('created_at', loginLogFilterFrom + 'T00:00:00+05:30');
+  if (loginLogFilterTo) q = q.lte('created_at', loginLogFilterTo + 'T23:59:59+05:30');
   if (loginLogFilterEvent) q = q.eq('event', loginLogFilterEvent);
   if (loginLogFilterUser) q = q.ilike('username', '%' + loginLogFilterUser + '%');
   const { data: rows, error } = await q;
@@ -13794,7 +13819,7 @@ function renderAiAdmin() {
         const missing = [...new Set(aiUsageRows.filter(r => (r.input_tokens || r.output_tokens) && !aiPrice(r.model)).map(r => r.model || '(no model)'))];
         return `<div class="table-scroll"><table>
           <tr><th>User</th><th>Role</th><th>Calls</th><th>Tokens in</th><th>Tokens out</th><th>Est. cost</th><th>Last used</th></tr>
-          ${list.map(u => `<tr><td>${esc(u.label)}</td><td>${esc(u.role)}</td><td>${u.calls}${u.failed ? ` <span style="font-size:12px;color:var(--brick)">(${u.failed} failed)</span>` : ''}</td><td>${fmt(u.inTok)}</td><td>${fmt(u.outTok)}</td><td>${u.unpriced && !u.cost ? '—' : aiCostFmt(u.cost)}${u.unpriced ? '*' : ''}</td><td>${esc(u.last.slice(0, 10))}</td></tr>`).join('')}
+          ${list.map(u => `<tr><td>${esc(u.label)}</td><td>${esc(u.role)}</td><td>${u.calls}${u.failed ? ` <span style="font-size:12px;color:var(--brick)">(${u.failed} failed)</span>` : ''}</td><td>${fmt(u.inTok)}</td><td>${fmt(u.outTok)}</td><td>${u.unpriced && !u.cost ? '—' : aiCostFmt(u.cost)}${u.unpriced ? '*' : ''}</td><td>${esc(formatTimestampIST(u.last))}</td></tr>`).join('')}
           <tr><td><b>Total</b></td><td></td><td><b>${aiUsageRows.length}</b></td><td><b>${fmt(list.reduce((a, u) => a + u.inTok, 0))}</b></td><td><b>${fmt(list.reduce((a, u) => a + u.outTok, 0))}</b></td><td><b>${aiCostFmt(totalCost)}</b></td><td></td></tr>
         </table></div>
         <div style="margin-top:12px"><b>By feature</b></div>
@@ -13832,7 +13857,7 @@ function renderAuditLog() {
       <tr><th>When</th><th>Username</th><th>Role</th><th>Event</th></tr>
       ${loginLogRows.map(r=>{
         const label = r.event === 'login' ? '<span class="tag">Login</span>' : r.event === 'logout' ? '<span class="tag cat">Logout</span>' : '<span class="tag absent">Failed attempt</span>';
-        return `<tr><td>${esc((r.created_at||'').replace('T',' ').slice(0,19))}</td><td>${esc(r.username||'(unknown)')}</td><td>${esc(r.role||'—')}</td><td>${label}</td></tr>`;
+        return `<tr><td>${esc(formatTimestampIST(r.created_at))}</td><td>${esc(r.username||'(unknown)')}</td><td>${esc(r.role||'—')}</td><td>${label}</td></tr>`;
       }).join('')}
     </table></div>` : (loginLogLoading ? '<div class="loading">Loading…</div>' : '<div class="empty">No login activity recorded for this filter.</div>');
 
@@ -13840,7 +13865,7 @@ function renderAuditLog() {
     <div class="table-scroll"><table>
       <tr><th>When</th><th>Who</th><th>Action</th><th>Area</th><th>Details</th></tr>
       ${auditRows.map(r=>`<tr>
-        <td>${esc((r.created_at||'').replace('T',' ').slice(0,19))}</td>
+        <td>${esc(formatTimestampIST(r.created_at))}</td>
         <td>${esc(r.changed_by_username||'—')}</td>
         <td>${r.action==='INSERT'?'Added':r.action==='DELETE'?'Deleted':'Edited'}</td>
         <td>${esc(AUDIT_TABLE_LABELS[r.table_name]||r.table_name)}</td>
@@ -20744,7 +20769,7 @@ function render() {
     <div class="sidebar-nav">
       <div class="sidebar-item ${currentTab==='dashboard'?'active':''}" onclick="setTab('dashboard')" style="font-weight:700;margin-bottom:10px">Dashboard</div>
       ${tabGroups.map(g => {
-        const isCollapsed = !!sidebarCollapsedGroups[g.label] && g.label !== activeGroupLabel;
+        const isCollapsed = !!sidebarCollapsedGroups[g.label];
         return `
         <div class="sidebar-group">
           <div class="sidebar-group-header" onclick="toggleSidebarGroup('${g.label}')">
