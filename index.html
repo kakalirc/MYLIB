@@ -15628,6 +15628,10 @@ let scheduleMsg = '';
 let markDoneDraft = null; // { scheduleId, status, count, mode, remarks } or null
 let editingScheduleId = '';
 let editScheduleDraft = { date: '', time: '' };
+// Teacher Dashboard: inline time-only editor for today's Pending/Missed schedule rows.
+let teacherDashboardTimeEditId = '';
+let teacherDashboardTimeDraft = {};
+let teacherDashboardTimeState = {};
 
 function scheduleSet(field, val) {
   scheduleDraft[field] = val;
@@ -15683,6 +15687,48 @@ async function saveEditSchedule(id) {
   if (s) { s.date = editScheduleDraft.date; s.time = editScheduleDraft.time; }
   editingScheduleId = '';
   scheduleMsg = '';
+  render();
+}
+async function saveTeacherDashboardClassTime(id, newTime) {
+  const entry = scheduledClasses.find(function(sc){ return sc.id === id; });
+  if (currentRole !== 'Teacher' || !entry || entry.teacherId !== currentLinkedId) return;
+  if (entry.status === 'Done') {
+    teacherDashboardTimeState[id] = { kind: 'error', message: 'Completed classes cannot be edited.' };
+    teacherDashboardTimeEditId = '';
+    render();
+    return;
+  }
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(newTime || '')) {
+    teacherDashboardTimeState[id] = { kind: 'error', message: 'Choose a valid time.' };
+    render();
+    return;
+  }
+  teacherDashboardTimeDraft[id] = newTime;
+  teacherDashboardTimeState[id] = { kind: 'saving', message: 'Saving…' };
+  render();
+  // Reuse the existing server-side schedule-edit RPC and keep the class date unchanged.
+  const { data: result, error } = await sb.rpc('reschedule_scheduled_class', {
+    p_schedule_id: id, p_date: entry.date, p_time: newTime
+  });
+  if (error || !result || !result.ok) {
+    const reason = error ? error.message : (result && result.error ? result.error : 'unknown error');
+    teacherDashboardTimeState[id] = { kind: 'error', message: 'Could not save: ' + reason };
+    teacherDashboardTimeEditId = id;
+    render();
+    return;
+  }
+  await loadScheduledClasses();
+  teacherDashboardTimeEditId = '';
+  delete teacherDashboardTimeDraft[id];
+  teacherDashboardTimeState[id] = { kind: 'saved', message: 'Saved' };
+  render();
+}
+function startTeacherDashboardTimeEdit(id) {
+  const entry = scheduledClasses.find(function(sc){ return sc.id === id; });
+  if (currentRole !== 'Teacher' || !entry || entry.teacherId !== currentLinkedId || entry.status === 'Done') return;
+  teacherDashboardTimeEditId = id;
+  teacherDashboardTimeDraft[id] = entry.time || '';
+  teacherDashboardTimeState[id] = { kind: 'editing', message: '' };
   render();
 }
 function isScheduleOverdue(entry) { return entry.status === 'Pending' && entry.date < todayStr; }
@@ -16617,7 +16663,24 @@ function renderTeacherDashboard(teacher) {
       var stName=esc(studentNameWithCode(sc.studentId));
       var subName=sc.subjectId?esc(subjectName(sc.subjectId)):'—';
       var statusColor=sc.status==='Done'?'var(--forest)':sc.status==='Missed'?'var(--brick)':'var(--gold-dark,#b8860b)';
-      h+='<tr><td><b>'+(sc.time||'—')+'</b></td><td>'+stName+'</td><td>'+subName+'</td><td>'+(sc.classType||'—')+'</td><td style="color:'+statusColor+'">'+esc(sc.status)+'</td></tr>';
+      var timeCell='';
+      var timeState=teacherDashboardTimeState[sc.id] || {};
+      if (teacherDashboardTimeEditId===sc.id && sc.status!=='Done') {
+        var draftTime=teacherDashboardTimeDraft[sc.id] || sc.time || '';
+        timeCell='<input type="time" aria-label="Change class time" value="'+escAttr(draftTime)+'" onchange="saveTeacherDashboardClassTime(\''+sc.id+'\',this.value)" style="width:112px;max-width:100%;padding:5px;border:1px solid var(--line);border-radius:6px">';
+      } else {
+        timeCell='<b>'+(sc.time||'—')+'</b> ';
+        if (sc.status==='Done') {
+          timeCell+='<button class="btn-small" disabled title="Completed classes cannot be edited" style="opacity:.45;cursor:not-allowed">Edit</button>';
+        } else {
+          timeCell+='<button class="btn-small" onclick="startTeacherDashboardTimeEdit(\''+sc.id+'\')">Edit</button>';
+        }
+      }
+      if (timeState.message) {
+        var stateColor=timeState.kind==='error'?'var(--brick)':timeState.kind==='saved'?'var(--forest)':'var(--muted)';
+        timeCell+='<div class="hint" style="color:'+stateColor+';font-size:11px;margin-top:3px">'+esc(timeState.message)+'</div>';
+      }
+      h+='<tr><td>'+timeCell+'</td><td>'+stName+'</td><td>'+subName+'</td><td>'+(sc.classType||'—')+'</td><td style="color:'+statusColor+'">'+esc(sc.status)+'</td></tr>';
     });
     h+='</table></div></div>';
     return h;
