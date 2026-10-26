@@ -5966,6 +5966,16 @@ function teachersForStudent(studentId) {
 function subjectsForStudentAndTeacher(studentId, teacherId) {
   return subjectsForStudent(studentId).filter(s=>s.teacherId===teacherId);
 }
+// Screen-local deduplication: some student-subject enrollment rows may repeat the same subject.
+// Keep the shared helper unchanged because other screens rely on its existing behaviour.
+function uniqueSubjectsForStudentAndTeacher(studentId, teacherId) {
+  const seen = new Set();
+  return subjectsForStudentAndTeacher(studentId, teacherId).filter(s => {
+    if (!s || seen.has(s.id)) return false;
+    seen.add(s.id);
+    return true;
+  }).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+}
 
 // For a teacher and month: a chronological attendance log — one row per class actually held,
 // sorted by date. This reads like a traditional register, not a summary.
@@ -15922,6 +15932,15 @@ function groupScheduleBySlot(list) {
 const WEEKDAY_LABELS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 let weeklyPatternDraft = { studentId: '', subjectId: '', classType: '', startDate: todayStr, days: [{ weekday: '', time: '' }] };
 let weeklyPatternMsg = '';
+// Retain the last generated student/subject context so the resulting classes remain visible
+// below the weekly form even after the input form is reset.
+let weeklyGeneratedView = null;
+function teacherScheduleFilterStudentSet(studentId, teacherId) {
+  teacherScheduleFilterStudent = studentId;
+  const validSubjects = studentId ? uniqueSubjectsForStudentAndTeacher(studentId, teacherId) : byName(subjectsForTeacher(teacherId));
+  if (teacherScheduleFilterSubject && !validSubjects.some(s=>s.id===teacherScheduleFilterSubject)) teacherScheduleFilterSubject = '';
+  render();
+}
 async function clearPendingSchedule(studentId, subjectId, classType) {
   const toClear = scheduledClasses.filter(c=>c.studentId===studentId && c.subjectId===subjectId && c.classType===classType && c.status==='Pending');
   if (!toClear.length) { weeklyPatternMsg = 'No pending classes to clear.'; render(); return; }
@@ -15977,6 +15996,9 @@ async function submitWeeklyPattern(teacherId) {
     render(); return;
   }
   await loadScheduledClasses();
+  // Save the target scope before clearing the form. The generated list below is restricted
+  // to this teacher + student + subject + class type, never the teacher's full schedule.
+  weeklyGeneratedView = { teacherId, studentId, subjectId, classType, startDate };
   const parts = [`Generated ${result.generated} classes.`];
   if (result.warnings && result.warnings.length) parts.push(`${result.warnings.length} joined an existing group slot.`);
   if (result.conflicts && result.conflicts.length) parts.push(`${result.conflicts.length} skipped due to a conflicting Individual student — schedule those manually as extras.`);
@@ -16005,7 +16027,7 @@ function renderTeacherSchedule(teacher, isAdminCaller) {
         </select>
         <select onchange="weeklyPatternSet('subjectId', this.value)" ${!weeklyPatternDraft.studentId?'disabled':''}>
           <option value="">Subject…</option>
-          ${(weeklyPatternDraft.studentId ? subjectsForStudentAndTeacher(weeklyPatternDraft.studentId, teacher.id) : []).map(s=>`<option value="${s.id}" ${weeklyPatternDraft.subjectId===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}
+          ${(weeklyPatternDraft.studentId ? uniqueSubjectsForStudentAndTeacher(weeklyPatternDraft.studentId, teacher.id) : []).map(s=>`<option value="${s.id}" ${weeklyPatternDraft.subjectId===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}
         </select>
         <select onchange="weeklyPatternSet('classType', this.value)" ${!weeklyPatternDraft.subjectId?'disabled':''}>
           <option value="">Type…</option>
@@ -16030,6 +16052,21 @@ function renderTeacherSchedule(teacher, isAdminCaller) {
       </div>
       <div class="hint">Individual-subscription students can't share a slot with anyone else — group freely otherwise, by simply letting two or more students land on the same date and time.</div>
     </div>
+
+    ${weeklyGeneratedView && weeklyGeneratedView.teacherId===teacher.id ? (()=>{
+      const v = weeklyGeneratedView;
+      const student = data.students.find(s=>s.id===v.studentId);
+      const subj = data.subjects.find(s=>s.id===v.subjectId);
+      const rows = scheduledClasses.filter(c=>c.teacherId===v.teacherId && c.studentId===v.studentId && c.subjectId===v.subjectId && c.classType===v.classType && c.date>=v.startDate).slice().sort((a,b)=>a.date===b.date?a.time.localeCompare(b.time):a.date.localeCompare(b.date));
+      return `<div class="card">
+        <h2>Generated classes</h2>
+        <div class="hint">${esc(student?student.name:'Selected student')} · ${esc(subj?subj.name:'Selected subject')} · ${esc(v.classType)}</div>
+        ${rows.length===0 ? '<div class="empty">No scheduled class records were found for this student and subject. Check Class Schedule for the selected period.</div>' : `
+          <div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Day</th><th>Time</th><th>Status</th></tr></thead><tbody>
+          ${rows.map(c=>`<tr><td>${esc(c.date)}</td><td>${esc(WEEKDAY_LABELS[new Date(c.date+'T00:00:00').getDay()])}</td><td>${esc(c.time)}</td><td>${c.status==='Done'?'<span class="tag" style="background:var(--forest);color:#fff">Done</span>':c.status==='Pending'?'<span class="tag">Pending</span>':`<span class="tag">${esc(c.status||'Scheduled')}</span>`}</td></tr>`).join('')}
+          </tbody></table></div>`}
+      </div>`;
+    })() : ''}
 
     <div class="card">
       <h2>Schedule an extra class <button class="help-btn" onclick="openHelp('extra-class',event)">?</button></h2>
@@ -16063,13 +16100,13 @@ function renderTeacherSchedule(teacher, isAdminCaller) {
         ${teacherScheduleViewMode==='month' ? `<input type="month" value="${teacherScheduleMonth}" onchange="teacherScheduleMonth=this.value; render();">` : ''}
       </div>
       <div class="row-form">
-        <select onchange="teacherScheduleFilterStudent=this.value; render();">
+        <select onchange="teacherScheduleFilterStudentSet(this.value, '${teacher.id}');">
           <option value="">All students</option>
           ${myStudents.map(s=>`<option value="${s.id}" ${teacherScheduleFilterStudent===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}
         </select>
         <select onchange="teacherScheduleFilterSubject=this.value; render();">
           <option value="">All subjects</option>
-          ${byName(subjectsForTeacher(teacher.id)).map(s=>`<option value="${s.id}" ${teacherScheduleFilterSubject===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}
+          ${(teacherScheduleFilterStudent ? uniqueSubjectsForStudentAndTeacher(teacherScheduleFilterStudent, teacher.id) : byName(subjectsForTeacher(teacher.id)).filter((s,i,a)=>a.findIndex(x=>x.id===s.id)===i)).map(s=>`<option value="${s.id}" ${teacherScheduleFilterSubject===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}
         </select>
       </div>
       ${groups.length===0 ? '<div class="empty">Nothing scheduled for this period.</div>' : ''}
