@@ -321,6 +321,34 @@ function activeCategories() { return categories.filter(c=>!c.archived); }
 let data = { teachers: [], subjects: [], students: [], studentSubjects: [], subscriptions: [], sessions: [], users: [], parentStudents: [], studentPhoneNumbers: [], adminPhoneNumbers: [], demoLogs: [], teacherPayrollRecords: [], wixBookings: [], supportTickets: [] };
 let loaded = false;
 let currentTab = 'dashboard';
+
+// Class Frequency feature state. This feature only stores weekly counts; it never edits scheduled_classes.
+let setupSubTab = 'teachers';
+let frequencyRows = [];
+let frequencyLoading = false;
+let frequencyLoadError = '';
+let frequencyMsg = '';
+let frequencyStudentId = '';
+let frequencySubjectId = '';
+let frequencySearch = '';
+let frequencyFilterSubjectId = '';
+let frequencyFilterTeacherId = '';
+let frequencyFilterStatus = 'all';
+let frequencyFilterDay = '';
+let frequencyMinWeekly = '';
+let frequencyMaxWeekly = '';
+let frequencyEditStudentId = '';
+let frequencyEditSubjectId = '';
+let frequencyDraft = { monday_count: 0, tuesday_count: 0, wednesday_count: 0, thursday_count: 0, friday_count: 0, saturday_count: 0, sunday_count: 0 };
+let frequencyEditorOpen = false;
+let frequencyNewPickerOpen = false;
+let frequencyFiltersApplied = false;
+let frequencyNewStudentSearch = '';
+const FREQUENCY_DAYS = [
+  ['monday_count','Monday'], ['tuesday_count','Tuesday'], ['wednesday_count','Wednesday'],
+  ['thursday_count','Thursday'], ['friday_count','Friday'], ['saturday_count','Saturday'], ['sunday_count','Sunday']
+];
+
 let mobileTabMenuOpen = false;
 let helpOpenSection = '';
 let archiveStudentConfirmId = null;
@@ -1688,6 +1716,7 @@ function researchMdHtml(md) {
 function toggleTeacherMobileTabMenu() { teacherMobileTabMenuOpen = !teacherMobileTabMenuOpen; render(); }
 function setTeacherPortalTab(t) {
   teacherPortalTab = t;
+  if (t === 'frequency') { frequencyMsg = ''; loadClassFrequencyRows().then(() => render()); }
   trackUse('tab:' + t, true);
   teacherMobileTabMenuOpen = false;
   if (t === 'students') teacherStudentSearch = '';
@@ -10868,7 +10897,7 @@ async function actuallySaveSessionEdit(id, count, date) {
 // so Teachers & Subjects (key 'setup') shows as #teachers-subjects. Old #users links still work.
 const TAB_HASH = { users: 'setup', setup: 'teachers-subjects' };
 function tabFromHash(h) { const k = Object.keys(TAB_HASH).find(k => TAB_HASH[k] === h); return k || h; }
-function setTab(t) { currentTab = t; trackUse('tab:' + t, true); location.hash = TAB_HASH[t] || t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; tbAdminEditId=''; tbAdminMsg=''; Promise.all([loadStudyPlans(), loadTextbookLibrary()]).then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
+function setTab(t) { currentTab = t; if (t === 'setup' && setupSubTab === 'frequency') loadClassFrequencyRows().then(() => render()); trackUse('tab:' + t, true); location.hash = TAB_HASH[t] || t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; tbAdminEditId=''; tbAdminMsg=''; Promise.all([loadStudyPlans(), loadTextbookLibrary()]).then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
   if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); } }
 function setPayrollMonth(v) { payrollMonth = v; render(); }
 function setNetProfitMonth(v) { netProfitMonth = v; render(); }
@@ -11632,7 +11661,330 @@ function exportTeacherRegister() {
 
 
 // ---------- render: setup ----------
+
+function setSetupSubTab(tab) {
+  setupSubTab = tab === 'frequency' ? 'frequency' : 'teachers';
+  frequencyMsg = '';
+  if (setupSubTab === 'frequency') loadClassFrequencyRows().then(() => render());
+  else render();
+}
+function frequencyCountTotal(row) {
+  return FREQUENCY_DAYS.reduce((sum, [key]) => sum + Math.max(0, Number(row && row[key]) || 0), 0);
+}
+function frequencyRowFor(studentId, subjectId) {
+  return frequencyRows.find(r => r.student_id === studentId && r.subject_id === subjectId) || null;
+}
+function uniqueSubjectsForStudentFrequency(studentId) {
+  const seen = new Set();
+  return subjectsForStudent(studentId).filter(s => {
+    if (!s || seen.has(s.id)) return false;
+    seen.add(s.id); return true;
+  }).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+}
+function frequencyEligiblePairs(teacherId) {
+  const activeStudents = data.students.filter(s => !s.archived);
+  const pairs = [];
+  activeStudents.forEach(student => {
+    const enrolled = uniqueSubjectsForStudentAndTeacher(student.id, teacherId);
+    enrolled.forEach(subject => {
+      if (subject && subject.teacherId === teacherId) pairs.push({ student, subject, teacher: data.teachers.find(t => t.id === subject.teacherId) });
+    });
+  });
+  return pairs;
+}
+async function loadClassFrequencyRows() {
+  frequencyLoading = true;
+  frequencyLoadError = '';
+  try {
+    // Expected table contract: student_subject_frequency, one row per student/subject pair,
+    // with monday_count ... sunday_count integer columns and a unique (student_id, subject_id) constraint.
+    const { data: rows, error } = await sb.from('student_subject_frequency')
+      .select('id,student_id,subject_id,monday_count,tuesday_count,wednesday_count,thursday_count,friday_count,saturday_count,sunday_count,created_at,updated_at');
+    if (error) throw error;
+    frequencyRows = (rows || []).map(r => ({
+      ...r,
+      ...Object.fromEntries(FREQUENCY_DAYS.map(([key]) => [key, Math.max(0, Number(r[key]) || 0)]))
+    }));
+  } catch (e) {
+    frequencyLoadError = (e && e.message) ? e.message : 'Could not load Class Frequency data.';
+  } finally {
+    frequencyLoading = false;
+  }
+}
+function setFrequencyFilter(key, value) {
+  if (key === 'search') frequencySearch = value;
+  if (key === 'subject') frequencyFilterSubjectId = value;
+  if (key === 'teacher') frequencyFilterTeacherId = value;
+  if (key === 'status') frequencyFilterStatus = value;
+  if (key === 'day') frequencyFilterDay = value;
+  if (key === 'min') frequencyMinWeekly = value;
+  if (key === 'max') frequencyMaxWeekly = value;
+  render();
+}
+function startFrequencyEditor(studentId, subjectId) {
+  frequencyEditStudentId = studentId;
+  frequencyEditSubjectId = subjectId;
+  const saved = frequencyRowFor(studentId, subjectId);
+  frequencyDraft = Object.fromEntries(FREQUENCY_DAYS.map(([key]) => [key, saved ? Math.max(0, Number(saved[key]) || 0) : 0]));
+  frequencyEditorOpen = true;
+  frequencyNewPickerOpen = false;
+  frequencyMsg = '';
+  render();
+}
+function closeFrequencyEditor() {
+  frequencyEditorOpen = false;
+  frequencyEditStudentId = '';
+  frequencyEditSubjectId = '';
+  frequencyMsg = '';
+  render();
+}
+function setFrequencyDraft(key, value) {
+  const n = value === '' ? 0 : Number(value);
+  if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+    frequencyMsg = 'Enter a whole number greater than or equal to zero for each weekday.';
+    render();
+    return;
+  }
+  frequencyDraft = { ...frequencyDraft, [key]: n };
+  frequencyMsg = '';
+  render();
+}
+async function saveClassFrequency() {
+  if (!frequencyEditStudentId || !frequencyEditSubjectId) return;
+  const teacher = data.subjects.find(s => s.id === frequencyEditSubjectId);
+  const student = data.students.find(s => s.id === frequencyEditStudentId);
+  if (!student || !teacher || !subjectsForStudent(student.id).some(s => s.id === frequencyEditSubjectId)) {
+    frequencyMsg = 'This student is not currently enrolled in the selected subject.';
+    render(); return;
+  }
+  if (currentRole === 'Teacher' && (teacher.teacherId !== currentLinkedId || !subjectsForStudentAndTeacher(student.id, currentLinkedId).some(s => s.id === frequencyEditSubjectId))) {
+    frequencyMsg = 'You can only configure frequency for your assigned students and subjects.';
+    render(); return;
+  }
+  for (const [key] of FREQUENCY_DAYS) {
+    if (!Number.isInteger(Number(frequencyDraft[key])) || Number(frequencyDraft[key]) < 0) {
+      frequencyMsg = 'Every weekday count must be a whole number greater than or equal to zero.';
+      render(); return;
+    }
+  }
+  frequencyMsg = 'Saving…';
+  render();
+  const payload = {
+    student_id: frequencyEditStudentId,
+    subject_id: frequencyEditSubjectId,
+    ...Object.fromEntries(FREQUENCY_DAYS.map(([key]) => [key, Number(frequencyDraft[key]) || 0])),
+    updated_at: new Date().toISOString()
+  };
+  try {
+    const { error } = await sb.from('student_subject_frequency').upsert(payload, { onConflict: 'student_id,subject_id' });
+    if (error) throw error;
+    await loadClassFrequencyRows();
+    frequencyEditorOpen = false;
+    frequencyMsg = 'Frequency saved. Existing scheduled classes were not changed.';
+  } catch (e) {
+    frequencyMsg = 'Could not save frequency: ' + ((e && e.message) ? e.message : 'Unknown database error');
+  }
+  render();
+}
+async function clearClassFrequency() {
+  if (!frequencyEditStudentId || !frequencyEditSubjectId) return;
+  // Clear means reset all weekday counts to zero while retaining the student/subject record.
+  frequencyDraft = Object.fromEntries(FREQUENCY_DAYS.map(([key]) => [key, 0]));
+  await saveClassFrequency();
+}
+function renderFrequencyEditor(teacherId) {
+  if (!frequencyEditorOpen) return '';
+  const student = data.students.find(s => s.id === frequencyEditStudentId);
+  const subject = data.subjects.find(s => s.id === frequencyEditSubjectId);
+  if (!student || !subject) return '';
+  if (teacherId && subject.teacherId !== teacherId) return '';
+  const total = FREQUENCY_DAYS.reduce((sum, [key]) => sum + (Number(frequencyDraft[key]) || 0), 0);
+  return `
+    <div class="card">
+      <h2>${frequencyRowFor(student.id, subject.id) ? 'Edit' : 'Set'} Class Frequency</h2>
+      <div class="hint">Student: <b>${esc(studentLabel(student))}</b> · Subject: <b>${esc(subject.name)}</b> · Teacher: <b>${esc(teacherName(subject.teacherId))}</b></div>
+      <div class="hint" style="margin:8px 0 12px">Each class is 60 minutes. These settings save the weekly frequency only; they do not create or modify scheduled classes.</div>
+      <div class="table-scroll"><table>
+        <tr><th>Weekday</th><th>Include</th><th>Classes on this day</th></tr>
+        ${FREQUENCY_DAYS.map(([key,label]) => {
+          const count = Number(frequencyDraft[key]) || 0;
+          return `<tr>
+            <td>${label}</td>
+            <td><input type="checkbox" ${count>0?'checked':''} aria-label="${label} enabled" onchange="setFrequencyDraft('${key}',this.checked?Math.max(1,Number(document.getElementById('freq_${key}')?.value)||0):0)"></td>
+            <td><input id="freq_${key}" type="number" min="0" step="1" value="${count}" style="width:100px" onchange="setFrequencyDraft('${key}',this.value)" oninput="frequencyDraft['${key}']=this.value===''?0:Number(this.value)"></td>
+          </tr>`;
+        }).join('')}
+      </table></div>
+      <div class="hint" style="margin-top:10px">Weekly total: <b>${total} classes</b> · <b>${total*60} minutes</b></div>
+      ${frequencyMsg ? `<div class="hint" style="color:${frequencyMsg.startsWith('Could not')?'var(--brick)':'var(--forest)'}">${esc(frequencyMsg)}</div>` : ''}
+      <div class="row-form">
+        <button class="btn-primary" onclick="saveClassFrequency()">Save Frequency</button>
+        <button class="btn-small" onclick="clearClassFrequency()">Clear Frequency</button>
+        <button class="btn-small" onclick="closeFrequencyEditor()">Cancel</button>
+      </div>
+    </div>`;
+}
+function renderClassFrequencyAdmin() {
+  const subjects = byName(data.subjects.filter(s => !s.archived));
+  const teachers = byName(data.teachers.filter(t => !t.archived));
+  const pairs = [];
+  data.students.filter(s => !s.archived).forEach(student => {
+    uniqueSubjectsForStudentFrequency(student.id).forEach(subject => {
+      if (subject && subject.teacherId && data.teachers.some(t => t.id === subject.teacherId)) {
+        pairs.push({ student, subject, teacher: data.teachers.find(t => t.id === subject.teacherId), saved: frequencyRowFor(student.id, subject.id) });
+      }
+    });
+  });
+  const filtered = pairs.filter(p => {
+    const q = frequencySearch.trim().toLowerCase();
+    if (q && ![p.student.name, p.student.code, p.student.mobileNumber, p.subject.name, p.teacher.name].some(v => String(v||'').toLowerCase().includes(q))) return false;
+    if (frequencyFilterSubjectId && p.subject.id !== frequencyFilterSubjectId) return false;
+    if (frequencyFilterTeacherId && p.subject.teacherId !== frequencyFilterTeacherId) return false;
+    if (frequencyFilterStatus === 'configured' && !p.saved) return false;
+    if (frequencyFilterStatus === 'missing' && p.saved) return false;
+    const total = p.saved ? frequencyCountTotal(p.saved) : 0;
+    if (frequencyFilterMinWeeklyValue() !== null && total < frequencyFilterMinWeeklyValue()) return false;
+    if (frequencyFilterMaxWeeklyValue() !== null && total > frequencyFilterMaxWeeklyValue()) return false;
+    if (frequencyFilterDay && (!p.saved || (Number(p.saved[frequencyFilterDay])||0) < 1)) return false;
+    return true;
+  });
+  const totalConfigured = pairs.filter(p=>p.saved).length;
+  const studentOptions = byName(data.students.filter(s=>!s.archived)).map(s=>`<option value="${s.id}">${esc(studentLabel(s))}</option>`).join('');
+  const subjectOptions = subjects.map(s=>`<option value="${s.id}" ${frequencyFilterSubjectId===s.id?'selected':''}>${esc(s.name)}</option>`).join('');
+  const teacherOptions = teachers.map(t=>`<option value="${t.id}" ${frequencyFilterTeacherId===t.id?'selected':''}>${esc(teacherLabel(t))}</option>`).join('');
+  const setupTabsHtml = `<div class="card" style="padding:10px 12px"><div class="row-form" style="margin:0;gap:8px"><button class="btn-small" onclick="setSetupSubTab('teachers')">Teachers &amp; Subjects</button><button class="btn-primary" onclick="setSetupSubTab('frequency')">Class Frequency</button></div></div>`;
+  const newPairHtml = frequencyNewPickerOpen ? `
+    <div class="card" id="frequencyNewPicker"><h2>New Frequency</h2>
+      <div class="row-form">
+        <label>Search Student <input type="search" placeholder="Type student name or ID…" value="${escAttr(frequencyNewStudentSearch)}" oninput="frequencyNewStudentSearch=this.value;const el=document.getElementById('frequencyNewStudent');if(el){const q=this.value.toLowerCase();Array.from(el.options).forEach(o=>{o.hidden=!!o.value&&!o.text.toLowerCase().includes(q)})}"></label>
+        <label>Student <select id="frequencyNewStudent" onchange="frequencyStudentId=this.value;frequencySubjectId='';render()"><option value="">Choose a student…</option>${byName(data.students.filter(s=>!s.archived)).map(s=>`<option value="${s.id}" ${frequencyStudentId===s.id?'selected':''}>${esc(studentLabel(s))}</option>`).join('')}</select></label>
+        <label>Subject <select id="frequencyNewSubject" onchange="frequencySubjectId=this.value"><option value="">Choose an enrolled subject…</option>${(frequencyStudentId?uniqueSubjectsForStudentFrequency(frequencyStudentId):[]).filter(s=>s.teacherId&&data.teachers.some(t=>t.id===s.teacherId)).map(s=>`<option value="${s.id}" ${frequencySubjectId===s.id?'selected':''}>${esc(s.name)} — ${esc(teacherName(s.teacherId))}</option>`).join('')}</select></label>
+        <button class="btn-primary" onclick="if(!frequencyStudentId||!frequencySubjectId){frequencyMsg='Select a student and an enrolled subject.';render();}else{frequencyNewPickerOpen=false;frequencyFiltersApplied=true;frequencySearch='';frequencyFilterSubjectId=frequencySubjectId;frequencyFilterTeacherId='';frequencyFilterStatus='all';frequencyFilterDay='';frequencyMinWeekly='';frequencyMaxWeekly='';startFrequencyEditor(frequencyStudentId,frequencySubjectId);}">Continue</button>
+        <button class="btn-small" onclick="frequencyNewPickerOpen=false;frequencyMsg='';render()">Cancel</button>
+      </div>
+    </div>` : '';
+  const frequencyDashboardHtml = `
+    <div class="row-form" style="margin:0 0 12px;align-items:stretch">
+      <div class="stat" style="flex:1;min-width:180px"><div class="stat-label">Eligible student–subject pairs</div><div class="stat-value">${pairs.length}</div></div>
+      <div class="stat" style="flex:1;min-width:180px"><div class="stat-label">Configured</div><div class="stat-value">${totalConfigured}</div></div>
+      <div class="stat" style="flex:1;min-width:180px"><div class="stat-label">Not configured</div><div class="stat-value">${pairs.length-totalConfigured}</div></div>
+    </div>`;
+  return setupTabsHtml + frequencyDashboardHtml + `
+    <div class="card">
+      <h2>Class Frequency</h2>
+      <div class="hint">Configure weekly class counts for each enrolled student and subject. Every class is 60 minutes. This feature does not change scheduled classes.</div>
+      <div class="row-form" style="margin-top:10px">
+        <button class="btn-primary" onclick="startNewFrequencyAdmin()">+ New Frequency</button>
+        <button class="btn-small" onclick="loadClassFrequencyRows().then(()=>render())">↻ Refresh</button>
+      </div>
+      ${newPairHtml}
+      ${frequencyEditorOpen && !frequencyFiltersApplied ? renderFrequencyEditor('') : ''}
+      <h3>Filters</h3>
+      <div class="row-form">
+        <input type="search" placeholder="Search student, ID, phone, subject or teacher" value="${escAttr(frequencySearch)}" oninput="frequencySearch=this.value">
+        <select onchange="setFrequencyFilter('subject',this.value)"><option value="">All subjects</option>${subjectOptions}</select>
+        <select onchange="setFrequencyFilter('teacher',this.value)"><option value="">All teachers</option>${teacherOptions}</select>
+        <select onchange="setFrequencyFilter('status',this.value)">
+          <option value="all" ${frequencyFilterStatus==='all'?'selected':''}>All statuses</option>
+          <option value="configured" ${frequencyFilterStatus==='configured'?'selected':''}>Configured</option>
+          <option value="missing" ${frequencyFilterStatus==='missing'?'selected':''}>Not configured</option>
+        </select>
+        <select onchange="setFrequencyFilter('day',this.value)">
+          <option value="">Any weekday</option>
+          ${FREQUENCY_DAYS.map(([key,label])=>`<option value="${key}" ${frequencyFilterDay===key?'selected':''}>${label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="row-form">
+        <label>Min classes/week <input type="number" min="0" step="1" value="${escAttr(frequencyMinWeekly)}" style="width:110px" oninput="frequencyMinWeekly=this.value"></label>
+        <label>Max classes/week <input type="number" min="0" step="1" value="${escAttr(frequencyMaxWeekly)}" style="width:110px" placeholder="No limit" oninput="frequencyMaxWeekly=this.value"></label>
+        <button class="btn-primary" onclick="frequencyFiltersApplied=true;render()">Apply Filters</button>
+        <button class="btn-small" onclick="resetFrequencyFilters()">Reset filters</button>
+      </div>
+      ${frequencyLoading ? '<div class="empty">Loading frequency records…</div>' : ''}
+      ${frequencyLoadError ? `<div class="hint" style="color:var(--brick)">Could not load Class Frequency: ${esc(frequencyLoadError)}. Check the table name, columns and RLS policies.</div>` : ''}
+      ${frequencyMsg ? `<div class="hint" style="color:${frequencyMsg.startsWith('Could not')?'var(--brick)':'var(--forest)'}">${esc(frequencyMsg)}</div>` : ''}
+      <div class="table-scroll"><table>
+        <tr><th>Student</th><th>Subject</th><th>Teacher</th><th>Weekly pattern</th><th>Total/week</th><th>Status</th><th>Action</th></tr>
+        ${frequencyFiltersApplied ? filtered.map(p=>{
+          const total = p.saved ? frequencyCountTotal(p.saved) : 0;
+          const pattern = p.saved ? FREQUENCY_DAYS.filter(([key])=>Number(p.saved[key])>0).map(([key,label])=>`${label.slice(0,3)} ${p.saved[key]}`).join(', ') : '';
+          const isOpen = frequencyEditorOpen && frequencyEditStudentId===p.student.id && frequencyEditSubjectId===p.subject.id;
+          return `<tr>
+            <td>${esc(studentLabel(p.student))}</td><td>${esc(p.subject.name)}</td><td>${esc(p.teacher.name)}</td>
+            <td>${p.saved ? esc(pattern||'0 classes') : '<span class="hint">—</span>'}</td><td>${p.saved?total:'—'}</td>
+            <td><span class="tag ${p.saved?'':'absent'}">${p.saved?'Configured':'Not configured'}</span></td>
+            <td><button class="btn-small ${p.saved?'':'btn-primary'}" onclick="startFrequencyEditor('${p.student.id}','${p.subject.id}')">${p.saved?'Edit':'Set up'}</button></td>
+          </tr>
+          ${isOpen ? `<tr><td colspan="7">${renderFrequencyEditor('')}</td></tr>` : ''}`;
+        }).join('') : ''}
+        ${frequencyFiltersApplied && !filtered.length ? `<tr><td colspan="7"><div class="empty">No student–subject pairs match these filters.</div></td></tr>` : ''}
+        ${!frequencyFiltersApplied ? `<tr><td colspan="7"><div class="empty">Set your filters above and click Apply Filters to view student–subject records.</div></td></tr>` : ''}
+      </table></div>
+    </div>`;
+}
+function frequencyFilterMinWeeklyValue() { return frequencyMinWeekly.trim()==='' ? null : Math.max(0, Number(frequencyMinWeekly)||0); }
+function frequencyFilterMaxWeeklyValue() { return frequencyMaxWeekly.trim()==='' ? null : Math.max(0, Number(frequencyMaxWeekly)||0); }
+function resetFrequencyFilters() {
+  frequencySearch=''; frequencyFilterSubjectId=''; frequencyFilterTeacherId=''; frequencyFilterStatus='all'; frequencyFilterDay=''; frequencyMinWeekly=''; frequencyMaxWeekly=''; frequencyFiltersApplied=false;
+  render();
+}
+function startNewFrequencyAdmin() {
+  frequencyEditStudentId=''; frequencyEditSubjectId=''; frequencyEditorOpen=false; frequencyMsg='';
+  frequencyStudentId=''; frequencySubjectId=''; frequencyNewStudentSearch=''; frequencyNewPickerOpen=true;
+  render();
+}
+function renderClassFrequencyTeacher(teacher) {
+  frequencyFilterTeacherId = '';
+  const pairs = frequencyEligiblePairs(teacher.id).map(p=>({...p,saved:frequencyRowFor(p.student.id,p.subject.id)}));
+  const q = frequencySearch.trim().toLowerCase();
+  const filtered = pairs.filter(p=>{
+    if(q && ![p.student.name,p.student.code,p.student.mobileNumber,p.subject.name].some(v=>String(v||'').toLowerCase().includes(q))) return false;
+    if(frequencyFilterSubjectId && p.subject.id!==frequencyFilterSubjectId) return false;
+    if(frequencyFilterStatus==='configured'&&!p.saved) return false;
+    if(frequencyFilterStatus==='missing'&&p.saved) return false;
+    if(frequencyFilterDay&&(!p.saved||(Number(p.saved[frequencyFilterDay])||0)<1)) return false;
+    const total=p.saved?frequencyCountTotal(p.saved):0;
+    if(frequencyFilterMinWeeklyValue()!==null&&total<frequencyFilterMinWeeklyValue())return false;
+    if(frequencyFilterMaxWeeklyValue()!==null&&total>frequencyFilterMaxWeeklyValue())return false;
+    return true;
+  });
+  return `
+    <div class="card">
+      <h2>Class Frequency</h2>
+      <div class="hint">Only students and subjects assigned to you are shown. Each class is 60 minutes. Weekly frequency settings do not change scheduled classes.</div>
+      <div class="row-form">
+        <input type="search" placeholder="Search my students or subjects" value="${escAttr(frequencySearch)}" oninput="frequencySearch=this.value">
+        <select onchange="setFrequencyFilter('subject',this.value)"><option value="">All my subjects</option>${byName([...new Map(pairs.map(p=>[p.subject.id,p.subject])).values()]).map(s=>`<option value="${s.id}" ${frequencyFilterSubjectId===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+        <select onchange="setFrequencyFilter('status',this.value)"><option value="all" ${frequencyFilterStatus==='all'?'selected':''}>All statuses</option><option value="configured" ${frequencyFilterStatus==='configured'?'selected':''}>Configured</option><option value="missing" ${frequencyFilterStatus==='missing'?'selected':''}>Not configured</option></select>
+        <select onchange="setFrequencyFilter('day',this.value)"><option value="">Any weekday</option>${FREQUENCY_DAYS.map(([key,label])=>`<option value="${key}" ${frequencyFilterDay===key?'selected':''}>${label}</option>`).join('')}</select>
+      </div>
+      <div class="row-form">
+        <label>Min classes/week <input type="number" min="0" step="1" value="${escAttr(frequencyMinWeekly)}" style="width:110px" oninput="frequencyMinWeekly=this.value;render()"></label>
+        <label>Max classes/week <input type="number" min="0" step="1" value="${escAttr(frequencyMaxWeekly)}" style="width:110px" placeholder="No limit" oninput="frequencyMaxWeekly=this.value;render()"></label>
+        <button class="btn-primary" onclick="frequencyFiltersApplied=true;render()">Apply Filters</button>
+        <button class="btn-small" onclick="resetFrequencyFilters()">Reset filters</button>
+        <button class="btn-small" onclick="loadClassFrequencyRows().then(()=>render())">↻ Refresh</button>
+      </div>
+      ${frequencyLoading ? '<div class="empty">Loading frequency records…</div>' : ''}
+      ${frequencyLoadError ? `<div class="hint" style="color:var(--brick)">Could not load Class Frequency: ${esc(frequencyLoadError)}. Check the table name, columns and RLS policies.</div>` : ''}
+      ${frequencyMsg ? `<div class="hint" style="color:${frequencyMsg.startsWith('Could not')?'var(--brick)':'var(--forest)'}">${esc(frequencyMsg)}</div>` : ''}
+      <div class="table-scroll"><table>
+        <tr><th>Student</th><th>Subject</th><th>Weekly pattern</th><th>Total/week</th><th>Status</th><th>Action</th></tr>
+        ${frequencyFiltersApplied ? filtered.map(p=>{
+          const total=p.saved?frequencyCountTotal(p.saved):0;
+          const isOpen=frequencyEditorOpen && frequencyEditStudentId===p.student.id && frequencyEditSubjectId===p.subject.id;
+          const pattern=p.saved?FREQUENCY_DAYS.filter(([key])=>Number(p.saved[key])>0).map(([key,label])=>`${label.slice(0,3)} ${p.saved[key]}`).join(', '):'';
+          return `<tr><td>${esc(studentLabel(p.student))}</td><td>${esc(p.subject.name)}</td><td>${p.saved?esc(pattern||'0 classes'):'—'}</td><td>${p.saved?total:'—'}</td><td><span class="tag ${p.saved?'':'absent'}">${p.saved?'Configured':'Not configured'}</span></td><td><button class="btn-small ${p.saved?'':'btn-primary'}" onclick="startFrequencyEditor('${p.student.id}','${p.subject.id}')">${p.saved?'Edit':'Set up'}</button></td></tr>${isOpen?`<tr><td colspan="6">${renderFrequencyEditor(teacher.id)}</td></tr>`:''}`;
+        }).join('') : ''}
+        ${frequencyFiltersApplied && !filtered.length?'<tr><td colspan="6"><div class="empty">No assigned student–subject pairs match these filters.</div></td></tr>':''}
+        ${!frequencyFiltersApplied?'<tr><td colspan="6"><div class="empty">Set filters above and click Apply Filters to view your assigned student–subject records.</div></td></tr>':''}
+      </table></div>
+    </div>
+    `;
+}
 function renderSetup() {
+
+  if (setupSubTab === 'frequency') return renderClassFrequencyAdmin();
   // ================= TEACHERS =================
   const activeTeacherOpts = byName(data.teachers.filter(t=>!t.archived)).map(t=>`<option value="${t.id}" ${selectedTeacherId===t.id?'selected':''}>${esc(teacherLabel(t))}</option>`).join('');
   const archivedTeacherOpts = byName(data.teachers.filter(t=>t.archived)).map(t=>`<option value="${t.id}" ${selectedTeacherId===t.id?'selected':''}>${esc(teacherLabel(t))}</option>`).join('');
@@ -11795,7 +12147,14 @@ function renderSetup() {
     `;
   }
 
-  return teacherBlock1 + teacherManageBlock;
+  const setupTabsHtml = `
+    <div class="card" style="padding:10px 12px">
+      <div class="row-form" style="margin:0;gap:8px">
+        <button class="${setupSubTab==='teachers'?'btn-primary':'btn-small'}" onclick="setSetupSubTab('teachers')">Teachers &amp; Subjects</button>
+        <button class="${setupSubTab==='frequency'?'btn-primary':'btn-small'}" onclick="setSetupSubTab('frequency')">Class Frequency</button>
+      </div>
+    </div>`;
+  return setupTabsHtml + teacherBlock1 + teacherManageBlock;
 }
 
 
@@ -16977,6 +17336,7 @@ function renderTeacherPortal() {
   const teacherTabGroups = [
     { label: 'Teaching', tabs: [
       ['schedule', 'Class Schedule'],
+      ['frequency', 'Class Frequency'],
       ['students', 'My Students'],
       ['studyplans', 'Study Plans'],
       ['homework', 'Homework'],
@@ -16998,6 +17358,7 @@ function renderTeacherPortal() {
   const teacherMobileTabsList = [
     ['dashboard', 'Dashboard'],
     ['schedule', 'Class Schedule'],
+    ['frequency', 'Class Frequency'],
     ['students', 'My Students'],
     ['studyplans', 'Study Plans'],
     ['homework', 'Homework'],
@@ -17050,6 +17411,9 @@ function teacherPortalBodyHtml(teacher) {
   }
   if (teacherPortalTab === 'schedule') {
     return renderTeacherSchedule(teacher, false);
+  }
+  if (teacherPortalTab === 'frequency') {
+    return renderClassFrequencyTeacher(teacher);
   }
   if (teacherPortalTab === 'students') {
     return renderTeacherStudents(teacher);
