@@ -284,7 +284,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-27 16:15 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-27 17:30 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1241,6 +1241,13 @@ let wixLastCreatedStudentId = '';
 let wixPaidReady = false;          // SQL 61 run (bookings carry the paid column)
 let wixPaidFilter = 'All';         // All | Paid | Not paid
 let rzpWaiting = [];               // razorpay_payments still unmatched / ambiguous
+// Fees page, suggest mode: recent Razorpay payments not yet used for a fee (payment_reference) nor set aside (SQL 62).
+let rzpFeePayments = [];
+let rzpFeeReady = false;           // SQL 62 run (fee_dismissed column)
+let rzpFeePick = {};               // payment id -> family key picked by hand
+let rzpFeeUnticked = {};           // payment id -> Set of request ids un-ticked under the picked family
+let rzpFeeMsg = '';
+let rzpFeeShowDismissed = false;   // list set-aside payments so a mistake can be brought back
 let rzpLinkPick = {};              // payment id -> booking id picked in "Needs a look"  // id of student just created via Convert to Student or createAndLinkDemo
 let demoLinkingId = ''; // demo log id currently being linked to a student
 let demoLinkStudentId = '';
@@ -1791,6 +1798,7 @@ async function load() {
     (currentRole === 'Admin' || currentRole === 'Teacher') ? loadTeacherPrivateNotes() : Promise.resolve(),
     (currentRole === 'Admin' || currentRole === 'Teacher') ? loadTeacherPayrollRecords() : Promise.resolve(),
     currentRole === 'Admin' ? loadWixBookings() : Promise.resolve(),
+    currentRole === 'Admin' ? loadRazorpayFeePayments() : Promise.resolve(),
     currentRole === 'Admin' ? loadProspectQuotes() : Promise.resolve(),
     loadSupportTickets(),
     loadStudyPlans(),
@@ -2830,6 +2838,155 @@ async function loadRazorpayWaiting() {
   rzpWaiting = error || !rows ? [] : rows;   // table missing = SQL 61 not run yet
   if (!error) wixPaidReady = true;
 }
+async function loadRazorpayFeePayments() {
+  if (currentRole !== 'Admin') { rzpFeePayments = []; return; }
+  const since = new Date(Date.now() - 60 * 86400000).toISOString();
+  const cols = 'id,amount,email,contact,method,description,notes,captured_at,match_status';
+  let res = await sb.from('razorpay_payments').select(cols + ',fee_dismissed').gte('captured_at', since).order('captured_at', { ascending: false }).limit(100);
+  rzpFeeReady = !res.error;
+  if (res.error) res = await sb.from('razorpay_payments').select(cols).gte('captured_at', since).order('captured_at', { ascending: false }).limit(100);   // SQL 62 not run yet
+  rzpFeePayments = res.error || !res.data ? [] : res.data;   // table missing = SQL 61 not run yet
+}
+// Payments still waiting for a fee decision: not linked to a demo booking, not set aside, not already a fee reference.
+function rzpFeeWaiting() {
+  const used = new Set(data.subscriptions.map(s => s.paymentReference).filter(Boolean));
+  return rzpFeePayments.filter(p => !['matched', 'manual'].includes(p.match_status) && !p.fee_dismissed && !used.has(p.id));
+}
+// Names typed on the payment page (any note whose key mentions "name"), lower-case, single spaces.
+function rzpNamesTyped(p) {
+  const out = [];
+  if (p.notes && typeof p.notes === 'object') Object.entries(p.notes).forEach(([k, v]) => { if (/name/i.test(k) && v) String(v).split(/,|&| and /i).forEach(n => { const t = n.trim().toLowerCase().replace(/\s+/g, ' '); if (t) out.push(t); }); });
+  return out;
+}
+// Suggest which pending requests a payment is for. Families come from the paying phone (student main mobile or
+// any saved number), else from the student name typed. A family fits when the amount equals its pending total, or
+// one of its requests, up to +5% (Razorpay's charge is added on top). Nothing is marked paid here.
+function rzpFeeSuggest(p) {
+  const amt = Number(p.amount || 0);
+  const fits = total => total > 0 && amt >= total - 0.5 && amt <= total * 1.05 + 1;
+  const famKeys = new Set();
+  const ph = phoneKey(p.contact);
+  if (ph) {
+    data.students.forEach(s => { if (phoneKey(s.mobileNumber) === ph) famKeys.add(familyKeyOf(s.id)); });
+    data.studentPhoneNumbers.forEach(n => { if (phoneKey(n.number) === ph) famKeys.add(familyKeyOf(n.studentId)); });
+  }
+  const byPhone = famKeys.size > 0;
+  if (!byPhone) {
+    const names = rzpNamesTyped(p);
+    data.students.filter(s => !s.archived).forEach(s => {
+      const n = (s.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      if (n && names.some(t => t === n || (t.length >= 3 && n.split(' ')[0] === t.split(' ')[0] && (n.startsWith(t) || t.startsWith(n))))) famKeys.add(familyKeyOf(s.id));
+    });
+  }
+  const options = [];
+  famKeys.forEach(k => {
+    const reqs = familyPendingRequests(k);
+    if (!reqs.length) return;
+    const total = reqs.reduce((a, r) => a + (r.amountPaid || 0), 0);
+    if (fits(total)) { options.push({ famKey: k, reqs, total }); return; }
+    reqs.filter(r => fits(r.amountPaid || 0)).forEach(r => options.push({ famKey: k, reqs: [r], total: r.amountPaid || 0 }));
+  });
+  return { options, byPhone, famKeys: [...famKeys] };
+}
+function rzpFeeFamilyLabel(famKey) {
+  return `${familyParentName(famKey)} (${familyMembers(famKey).map(s => s.name).join(', ')})`;
+}
+async function confirmRazorpayFee(paymentId, famKey, requestIds) {
+  const p = rzpFeePayments.find(x => x.id === paymentId);
+  if (!p) return;
+  const reqs = data.subscriptions.filter(r => r.kind === 'Request' && requestIds.includes(r.id));
+  if (!reqs.length) { rzpFeeMsg = 'Those requests are no longer pending.'; render(); return; }
+  const total = reqs.reduce((a, r) => a + (r.amountPaid || 0), 0);
+  const amt = Number(p.amount || 0);
+  const warn = amt < total - 0.5 || amt > total * 1.05 + 1 ? `\n\n⚠ The payment is ₹${amt.toFixed(2)} but these requests total ₹${total.toFixed(2)}.` : '';
+  if (!confirm(`Mark ${reqs.length} request${reqs.length === 1 ? '' : 's'} of ${rzpFeeFamilyLabel(famKey)} paid with Razorpay ${p.id}?${warn}`)) return;
+  const date = new Date(p.captured_at || Date.now()).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });   // YYYY-MM-DD, India date
+  const failed = [];
+  for (const r of reqs) {
+    const { error } = await sb.from('subscriptions').update({ kind: 'Payment', date, payment_reference: p.id, payment_remarks: 'Razorpay' }).eq('id', r.id).eq('kind', 'Request');
+    if (error) failed.push(error.message);
+  }
+  delete rzpFeePick[paymentId];
+  await loadStudentsAndSubscriptions();   // the database sets each payment's expiry date; fetch it
+  rzpFeeMsg = failed.length ? `Could not mark ${failed.length} request(s) paid: ${failed[0]}` : `Marked paid ✓ (${reqs.length} request${reqs.length === 1 ? '' : 's'}, ${p.id})`;
+  render();
+}
+function confirmRazorpayFeePick(paymentId) {
+  const k = rzpFeePick[paymentId];
+  if (!k) { rzpFeeMsg = 'Pick the family this payment is for.'; render(); return; }
+  const off = rzpFeeUnticked[paymentId] || new Set();
+  const ids = familyPendingRequests(k).map(r => r.id).filter(id => !off.has(id));
+  if (!ids.length) { rzpFeeMsg = 'Tick at least one request.'; render(); return; }
+  confirmRazorpayFee(paymentId, k, ids);
+}
+function pickRazorpayFeeFamily(paymentId, famKey) { rzpFeePick[paymentId] = famKey; rzpFeeUnticked[paymentId] = new Set(); render(); }
+function tickRazorpayFeeRequest(paymentId, reqId, on) {
+  const off = rzpFeeUnticked[paymentId] || (rzpFeeUnticked[paymentId] = new Set());
+  if (on) off.delete(reqId); else off.add(reqId);
+  render();
+}
+async function dismissRazorpayFee(paymentId, dismiss = true) {
+  const { error } = await sb.rpc('razorpay_fee_dismiss', { p_payment: paymentId, p_dismiss: dismiss });
+  if (error) { rzpFeeMsg = /razorpay_fee_dismiss|function/i.test(error.message || '') ? 'Run SQL 62 (razorpay/62-razorpay-fee-dismiss.sql) in Supabase first.' : 'Could not save: ' + error.message; render(); return; }
+  const p = rzpFeePayments.find(x => x.id === paymentId);
+  if (p) p.fee_dismissed = dismiss;
+  rzpFeeMsg = dismiss ? 'Set aside ✓ (Show set-aside payments to bring it back)' : 'Brought back ✓';
+  render();
+}
+function rzpFeeDismissedHtml() {
+  const used = new Set(data.subscriptions.map(s => s.paymentReference).filter(Boolean));
+  const list = rzpFeePayments.filter(p => p.fee_dismissed && !used.has(p.id));
+  if (!list.length) return '';
+  return `<div class="hint" style="margin:6px 0"><a href="#" onclick="rzpFeeShowDismissed=!rzpFeeShowDismissed;render();return false">${rzpFeeShowDismissed ? 'Hide' : 'Show'} set-aside payments (${list.length})</a></div>
+    ${rzpFeeShowDismissed ? list.map(p => `<div style="font-size:12px;padding:4px 0;border-top:1px dashed var(--border)">₹${Number(p.amount || 0).toFixed(2)} · ${p.captured_at ? new Date(p.captured_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''} · ${esc(p.contact || '')} ${rzpNotesText(p) ? '· ' + esc(rzpNotesText(p)) : ''} <span class="hint">${esc(p.id)}</span> <button class="btn-small" style="font-size:11px" onclick="dismissRazorpayFee('${p.id}', false)">Bring back</button></div>`).join('') : ''}`;
+}
+function razorpayFeeBoxHtml() {
+  const list = rzpFeeWaiting();
+  const dismissedHtml = rzpFeeDismissedHtml();
+  if (!list.length && !rzpFeeMsg && !dismissedHtml) return '';
+  const msgHtml = rzpFeeMsg ? `<div style="font-size:13px;font-weight:500;margin-bottom:8px;color:${rzpFeeMsg.includes('✓') ? 'var(--green)' : 'var(--brick)'}">${esc(rzpFeeMsg)}</div>` : '';
+  if (!list.length) return `<div style="margin:10px 0">${msgHtml}${dismissedHtml}</div>`;
+  const pendingFamilies = [...new Set(data.subscriptions.filter(r => r.kind === 'Request').map(r => familyKeyOf(r.studentId)))]
+    .map(k => ({ k, label: rzpFeeFamilyLabel(k), total: familyPendingRequests(k).reduce((a, r) => a + (r.amountPaid || 0), 0) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  const reqLine = r => `${esc(studentNameWithCode(r.studentId))} · ${esc(subjectName(r.subjectId))} (${r.type}) · ${r.classes} class${Number(r.classes) === 1 ? '' : 'es'} · ₹${(r.amountPaid || 0).toFixed(2)}`;
+  return `
+    <div style="border:1px solid var(--accent,#4e7cf6);border-radius:8px;padding:12px;margin:12px 0;background:rgba(78,124,246,0.05)">
+      <div style="font-weight:700;margin-bottom:4px">Razorpay payments to confirm (${list.length})</div>
+      <div class="hint" style="margin-bottom:8px">Suggested from the paying phone number or the student name typed, and the amount. Nothing is marked paid until you click Confirm.</div>
+      ${msgHtml}
+      ${list.map(p => {
+        const sg = rzpFeeSuggest(p);
+        const when = p.captured_at ? new Date(p.captured_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+        const head = `<div><b>₹${Number(p.amount || 0).toFixed(2)}</b> · ${when} · ${esc(p.contact || '')}${p.email ? ' · ' + esc(p.email) : ''}</div>
+          ${rzpNotesText(p) ? `<div class="hint" style="font-size:11px;margin:4px 0 0">${esc(rzpNotesText(p))}</div>` : ''}
+          <div class="hint" style="font-size:11px;margin:2px 0 0">${esc(p.id)}${p.method ? ' · ' + esc(p.method) : ''}</div>`;
+        const suggestion = sg.options.map(o => `
+          <div style="margin-top:6px;padding:8px;border:1px solid var(--green,#3c5e42);border-radius:6px;background:rgba(60,94,66,0.06)">
+            <div style="font-size:12px"><b>Looks like ${esc(rzpFeeFamilyLabel(o.famKey))}</b> · ${o.reqs.length} request${o.reqs.length === 1 ? '' : 's'}, ₹${o.total.toFixed(2)} <span class="hint">(${sg.byPhone ? 'same phone' : 'same name'})</span></div>
+            <ul class="hint" style="margin:4px 0 6px 16px;padding:0">${o.reqs.map(r => `<li>${reqLine(r)}</li>`).join('')}</ul>
+            <button class="btn-small btn-primary" onclick="confirmRazorpayFee('${p.id}', '${o.famKey}', ${escAttr(JSON.stringify(o.reqs.map(r => r.id)))})">✓ Confirm</button>
+          </div>`).join('');
+        const why = sg.options.length > 1 ? '<div class="hint" style="color:var(--brick);margin-top:6px">More than one fits; confirm the right one.</div>'
+          : sg.options.length ? '' : `<div class="hint" style="color:var(--brick);margin-top:6px">${sg.famKeys.length ? 'Family found, but the amount does not match its pending requests.' : 'No family with this phone number or student name.'} Pick the family below if you know it.</div>`;
+        return `
+          <div style="border-top:1px dashed var(--border);padding:10px 0;font-size:13px">
+            ${head}${suggestion}${why}
+            <div class="row-form" style="gap:6px;margin:6px 0 0;flex-wrap:wrap">
+              <select onchange="pickRazorpayFeeFamily('${p.id}', this.value)" style="max-width:320px">
+                <option value="">${sg.options.length ? 'Or pick another family…' : 'Family…'}</option>
+                ${pendingFamilies.map(f => `<option value="${f.k}" ${rzpFeePick[p.id] === f.k ? 'selected' : ''}>${esc(f.label)} · ₹${f.total.toFixed(2)}</option>`).join('')}
+              </select>
+              <button class="btn-small" onclick="confirmRazorpayFeePick('${p.id}')">Mark ticked paid</button>
+              <button class="btn-small" onclick="dismissRazorpayFee('${p.id}')" title="e.g. a demo booking payment, or already entered by hand">Not a fee</button>
+            </div>
+            ${rzpFeePick[p.id] ? (() => { const off = rzpFeeUnticked[p.id] || new Set(); const reqs = familyPendingRequests(rzpFeePick[p.id]); const tot = reqs.filter(r => !off.has(r.id)).reduce((a, r) => a + (r.amountPaid || 0), 0);
+              return `<div style="margin-top:6px;font-size:12px">${reqs.map(r => `<label style="display:block"><input type="checkbox" ${off.has(r.id) ? '' : 'checked'} onchange="tickRazorpayFeeRequest('${p.id}', '${r.id}', this.checked)"> ${reqLine(r)}</label>`).join('')}<div class="hint">Ticked: ₹${tot.toFixed(2)} · payment ₹${Number(p.amount || 0).toFixed(2)}</div></div>`; })() : ''}
+          </div>`;
+      }).join('')}
+      ${dismissedHtml}
+    </div>`;
+}
 async function markWixBookingPaid(id, paid) {
   const wb = data.wixBookings.find(x => x.id === id);
   if (!wb) return;
@@ -2865,13 +3022,15 @@ function rzpNotesText(p) {
   return bits.join(' · ');
 }
 function razorpayWaitingHtml() {
-  if (!rzpWaiting.length) return '';
+  const usedForFees = new Set(data.subscriptions.map(s => s.paymentReference).filter(Boolean));
+  const waiting = rzpWaiting.filter(p => !usedForFees.has(p.id));
+  if (!waiting.length) return '';
   const unpaid = data.wixBookings.filter(b => !b.paid).slice().sort((a, b) => (b.submittedAt || b.createdAt || '').localeCompare(a.submittedAt || a.createdAt || ''));
   return `
     <div style="border:1px solid var(--brick);border-radius:8px;padding:12px;margin-bottom:14px;background:rgba(166,67,46,0.05)">
-      <div style="font-weight:700;color:var(--brick);margin-bottom:4px">Needs a look: ${rzpWaiting.length} Razorpay payment${rzpWaiting.length === 1 ? '' : 's'} not matched to a booking</div>
-      <div class="hint" style="margin-bottom:8px">Pick the booking it is for and click Link, or click Not a demo for other payments (e.g. tuition fees).</div>
-      ${rzpWaiting.map(p => `
+      <div style="font-weight:700;color:var(--brick);margin-bottom:4px">Needs a look: ${waiting.length} Razorpay payment${waiting.length === 1 ? '' : 's'} not matched to a booking</div>
+      <div class="hint" style="margin-bottom:8px">Pick the booking it is for and click Link, or click Not a demo for other payments. Tuition fee payments are confirmed on the Fees page.</div>
+      ${waiting.map(p => `
         <div style="border-top:1px dashed var(--border);padding:8px 0;font-size:13px">
           <div><b>₹${Number(p.amount || 0).toFixed(2)}</b> · ${p.captured_at ? new Date(p.captured_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''} · ${esc(p.contact || '')} ${p.email ? '· ' + esc(p.email) : ''} ${p.match_status === 'ambiguous' ? '<span class="tag" style="font-size:10px">more than one booking fits</span>' : ''}</div>
           ${rzpNotesText(p) ? `<div class="hint" style="font-size:11px;margin:4px 0 0">${esc(rzpNotesText(p))}</div>` : ''}
@@ -11125,7 +11284,7 @@ async function actuallySaveSessionEdit(id, count, date) {
 // so Teachers & Subjects (key 'setup') shows as #teachers-subjects. Old #users links still work.
 const TAB_HASH = { users: 'setup', setup: 'teachers-subjects' };
 function tabFromHash(h) { const k = Object.keys(TAB_HASH).find(k => TAB_HASH[k] === h); return k || h; }
-function setTab(t) { currentTab = t; if (t === 'setup' && setupSubTab === 'frequency') loadClassFrequencyRows().then(() => render()); trackUse('tab:' + t, true); location.hash = TAB_HASH[t] || t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; tbAdminEditId=''; tbAdminMsg=''; Promise.all([loadStudyPlans(), loadTextbookLibrary()]).then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
+function setTab(t) { currentTab = t; if (t === 'setup' && setupSubTab === 'frequency') loadClassFrequencyRows().then(() => render()); trackUse('tab:' + t, true); location.hash = TAB_HASH[t] || t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'fees') { rzpFeeMsg = ''; loadRazorpayFeePayments().then(() => render()); } if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; tbAdminEditId=''; tbAdminMsg=''; Promise.all([loadStudyPlans(), loadTextbookLibrary()]).then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
   if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); } }
 function setPayrollMonth(v) { payrollMonth = v; render(); }
 function setNetProfitMonth(v) { netProfitMonth = v; render(); }
@@ -13964,6 +14123,7 @@ function renderFees() {
       ${aiBatchRenewalHtml(zeroBalanceRows)}
       ` : `<div class="hint" style="color:var(--muted);font-size:12px">${zeroBalanceRows.length ? `${zeroBalanceRows.length} student${zeroBalanceRows.length===1?'':'s'} needing renewal — click to expand` : 'No students needing renewal — click to expand'}</div>`}
 
+      ${razorpayFeeBoxHtml()}
       <h2 id="pendingFeeRequestsSection" style="cursor:pointer;user-select:none;margin-top:${rptRenewalOpen?'18':'10'}px" onclick="rptPendingOpen=!rptPendingOpen;render()">
         <span style="font-size:13px;margin-right:6px;display:inline-block;transition:transform 0.15s;transform:rotate(${rptPendingOpen?'90':'0'}deg)">▶</span>Pending fee requests <button class="help-btn" onclick="openHelp('pending-fees',event)">?</button>
       </h2>
@@ -17987,7 +18147,7 @@ const HELP = {
   'fee-calc': { t:'Fee calculator', b:"<ul><li>Calculates the expected fee based on a student's enrolled subjects and class type.</li><li>Click Push fee request to send the amount straight to the student's fee requests.</li></ul>" },
   'renewal': { t:'Students needing renewal', b:'<ul><li>Active students with 0 or fewer classes remaining in any subject.</li><li>Also shows students enrolled in a subject who have never bought classes (Never subscribed).</li><li>Click Request Fees to jump to the Fee Calculator for that student.</li></ul>' },
   'bulk-parents': { t:'Create all parent logins', b:"<ul><li>Preview lists every active student's family that needs a parent login. Nothing is saved until you press Create.</li><li>Brothers and sisters with the same parent mobile or main mobile share one login with all of them linked.</li><li>Login ID and password are the parent's 10-digit mobile. When the parent logs in with it, the app asks them to change the password.</li><li>A family that already has a parent login is not given a second one; only children missing from it are linked.</li><li>Skipped: students with no phone number, or a number saved on more than 4 students.</li><li>After Create, each family's row has 📤 WhatsApp buttons with the message ready (app link, login ID, password). Later, open a parent from Manage parent logins to send it again.</li></ul>" },
-  'pending-fees': { t:'Pending fee requests', b:"<ul><li>All fee requests across all students not yet marked Paid, grouped by family.</li><li>Brothers and sisters are one family when they share a parent login or a parent mobile number (main Mobile or any Parent number). Tick <b>Bill separately</b> on a student's page to keep them out of the family.</li><li>Message makes one WhatsApp message for the whole family with every subject and the total.</li><li>Mark paid marks one request; Mark all paid marks every request of the family with one date and reference.</li></ul>" },
+  'pending-fees': { t:'Pending fee requests', b:"<ul><li>All fee requests across all students not yet marked Paid, grouped by family.</li><li>Brothers and sisters are one family when they share a parent login or a parent mobile number (main Mobile or any Parent number). Tick <b>Bill separately</b> on a student's page to keep them out of the family.</li><li>Message makes one WhatsApp message for the whole family with every subject and the total.</li><li>Mark paid marks one request; Mark all paid marks every request of the family with one date and reference.</li><li><b>Razorpay payments to confirm</b> (above the list): payments from the Razorpay page, each with a suggested family from the paying phone or the student name typed, and the amount. Confirm marks those requests paid with the Razorpay payment ID as reference. Wrong family? Pick another one and tick the requests it covers. Not a fee sets it aside; Show set-aside payments brings it back.</li></ul>" },
   'all-payments': { t:'All subscription payments', b:'<ul><li>Every payment recorded for the selected month, across all students.</li><li>Use the filters to narrow by teacher or subject.</li><li>Export downloads the filtered list as Excel.</li></ul>' },
   'refunds': { t:'Refunds issued', b:'<ul><li>All refunds recorded for the selected month.</li><li>Export downloads the list as Excel.</li></ul>' },
   'payroll': { t:'Teacher payroll', b:'<ul><li>Each teacher\'s earnings for the selected month — classes given multiplied by their per-class rate.</li><li>A ₹100 demo bonus is added for each demo that was Converted to a student that month.</li><li>Rates are set in the Fees tab under Fee setup.</li><li>Toggle the breakdown by category and class type with the Show/Hide button.</li><li>📄 Salary Slip opens a printable slip for one teacher. With All Teachers picked, 📄 Print all salary slips puts every teacher\'s slip in one window, one per page, so you can save them as a single PDF.</li></ul>' },
