@@ -284,7 +284,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-23 19:45 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-27 16:15 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -12951,10 +12951,10 @@ function renderDashboard() {
     { num: needingRenewal, label: `Student${needingRenewal===1?'':'s'} needing renewal`, action: "setTab('reports'); setTimeout(()=>{ const el=document.getElementById('studentsNeedingRenewalSection'); if(el) el.scrollIntoView({behavior:'smooth'}); },120)" },
     { num: unreadChats, label: `Unread chat${unreadChats===1?'':'s'}`, tab: 'chat' },
   ];
-  const _teacherExpiryStudentIds = new Set(studentsForTeacher(teacher.id).map(function(st){return st.id;}));
-  const expiring = expiringSoon().filter(function(r){return _teacherExpiryStudentIds.has(r.studentId);});
+  const expiring = expiringSoon();
   // The card counts CLASSES (the unused classes that will be lost), not payments; the list below shows the payments.
   const expiringClasses = Math.round(expiring.reduce((a, r) => a + r.unused, 0) * 100) / 100;
+  if (expirySettings.enabled) cards.push({ num: expiringClasses, label: `Class${expiringClasses===1?'':'es'} expiring in ${EXPIRY_WARN_DAYS} days`, action: "var e=document.getElementById('expiryList'); if(e) e.scrollIntoView({behavior:'smooth'})" });
   const expiryListHtml = expiring.length ? `
     <div class="card" id="expiryList">
       <h2>Expiring in the next ${EXPIRY_WARN_DAYS} days</h2>
