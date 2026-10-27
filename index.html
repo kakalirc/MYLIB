@@ -156,6 +156,7 @@
   .app-splash-spinner { width:36px; height:36px; border:3px solid var(--line); border-top-color:var(--forest); border-radius:50%; animation:spin 0.8s linear infinite; }
   @keyframes spin { to { transform:rotate(360deg); } }
   .hint { font-size: 12px; color: var(--muted); margin-top: -4px; margin-bottom: 12px; }
+  .date-day { font-size: 12px; color: var(--muted); margin-left: 4px; min-width: 2.2em; display: inline-block; white-space: nowrap; }
   .topup-input { width: 55px; }
   .subrow { display: flex; gap: 4px; align-items: center; }
   .pool-label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 2px; }
@@ -284,7 +285,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-27 19:15 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-27 19:30 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1450,6 +1451,37 @@ let teacherAttendanceViewMonth = monthStr;
 let teacherAttendanceViewMode = 'day'; // 'day' | 'month' - which scope the attendance list below the form uses
 function isCurrentMonth(dateStr) { return !!dateStr && dateStr.slice(0,7) === todayStr.slice(0,7); }
 function formatDate(d) { if (!d) return ''; try { return new Date(d+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}); } catch(e) { return d; } }
+// Date with short weekday, e.g. "Tue, 27 Oct 2026". Takes 'YYYY-MM-DD' (or a timestamp starting with it); anything else is returned unchanged.
+const DAY_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'], MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dayDate(d) {
+  if (!d) return '';
+  const s = String(d).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return String(d);
+  const dt = new Date(s + 'T00:00:00');
+  if (isNaN(dt)) return String(d);
+  return `${DAY_SHORT[dt.getDay()]}, ${dt.getDate()} ${MONTH_SHORT[dt.getMonth()]} ${dt.getFullYear()}`;
+}
+// Small grey weekday after every date box ("Tue"), kept up to date as the date changes. The browser's own date box can't show it.
+function syncDateDayHint(inp) {
+  let hint = inp.nextElementSibling;
+  if (!hint || !hint.classList.contains('date-day')) {
+    hint = document.createElement('span');
+    hint.className = 'date-day';
+    inp.insertAdjacentElement('afterend', hint);
+  }
+  const v = inp.value;
+  const txt = /^\d{4}-\d{2}-\d{2}$/.test(v) ? DAY_SHORT[new Date(v + 'T00:00:00').getDay()] : '';
+  if (hint.textContent !== txt) hint.textContent = txt;
+}
+function syncAllDateDayHints() { document.querySelectorAll('input[type="date"]').forEach(syncDateDayHint); }
+document.addEventListener('input', e => { if (e.target && e.target.matches && e.target.matches('input[type="date"]')) syncDateDayHint(e.target); }, true);
+document.addEventListener('change', e => { if (e.target && e.target.matches && e.target.matches('input[type="date"]')) syncDateDayHint(e.target); }, true);
+let dateDayHintQueued = false;
+new MutationObserver(() => {
+  if (dateDayHintQueued) return;
+  dateDayHintQueued = true;
+  requestAnimationFrame(() => { dateDayHintQueued = false; syncAllDateDayHints(); });
+}).observe(document.documentElement, { childList: true, subtree: true });
 let teacherMobileTabMenuOpen = false;
 // Question Bank tab: only for teachers an admin has switched on (Setup → Question Bank access), and then
 // only if the database lets them read some questions (their subject at a class they teach) or they already
@@ -4745,7 +4777,7 @@ function hwWhatsAppDraft(hw) {
   let msg = `📚 *Homework Assigned — ${sjName}*\n\n👤 Student: ${sName}\n📝 ${hw.title}`;
   if (hw.description) msg += `\n${hw.description}`;
   if (hw.studyPlanTopic) msg += `\n🔗 Topic: ${hw.studyPlanTopic}`;
-  if (hw.dueDate) msg += `\n📅 Due: ${formatDate(hw.dueDate)}`;
+  if (hw.dueDate) msg += `\n📅 Due: ${dayDate(hw.dueDate)}`;
   msg += `\n\n— My LIB Education`;
   return encodeURIComponent(msg.replace(/\\n/g, '\n'));
 }
@@ -6235,13 +6267,13 @@ function subscriptionStatusCellHtml(r) {
   let html = subscriptionStatusTag(r.status);
   if (r.status === 'Refund') return html;
   if (!r.expiresOn) return expirySettings.enabled ? html + `<div class="hint" style="margin-top:3px">No expiry</div>` : html;
-  if (r.expiredClasses > 0) return html + `<div class="hint" style="color:var(--brick);margin-top:3px">${fmtN(r.expiredClasses)} unused expired after ${esc(r.expiresOn)}</div>`;
+  if (r.expiredClasses > 0) return html + `<div class="hint" style="color:var(--brick);margin-top:3px">${fmtN(r.expiredClasses)} unused expired after ${esc(dayDate(r.expiresOn))}</div>`;
   const left = daysUntil(r.expiresOn);
-  if (left < 0) return html + `<div class="hint" style="margin-top:3px">Expired ${esc(r.expiresOn)}</div>`;   // nothing was left to lose
+  if (left < 0) return html + `<div class="hint" style="margin-top:3px">Expired ${esc(dayDate(r.expiresOn))}</div>`;   // nothing was left to lose
   if (r.remainingHere > 0 && left <= EXPIRY_WARN_DAYS) {
-    return html + `<div class="hint" style="color:var(--brick);margin-top:3px">Expires ${esc(r.expiresOn)} (${left === 0 ? 'today' : 'in ' + left + ' day' + (left === 1 ? '' : 's')})</div>`;
+    return html + `<div class="hint" style="color:var(--brick);margin-top:3px">Expires ${esc(dayDate(r.expiresOn))} (${left === 0 ? 'today' : 'in ' + left + ' day' + (left === 1 ? '' : 's')})</div>`;
   }
-  return html + `<div class="hint" style="margin-top:3px">Expires ${esc(r.expiresOn)}</div>`;
+  return html + `<div class="hint" style="margin-top:3px">Expires ${esc(dayDate(r.expiresOn))}</div>`;
 }
 function expiryRuleLines() {
   const out = []; let prev = 0;
@@ -13322,7 +13354,7 @@ function renderDashboard() {
         <tr><th>Student</th><th>Parent</th><th>Mobile</th><th>Subject</th><th>Type</th><th>Unused classes</th><th>Expires on</th><th>Days left</th></tr>
         ${expiring.map(r => {
           const st = data.students.find(x=>x.id===r.studentId);
-          return `<tr><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(st?(st.parentName||'—'):'—')}</td><td>${esc(st?(st.mobileNumber||'—'):'—')}${copyBtnHtml(st&&st.mobileNumber)}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${fmtN(r.unused)}</td><td>${esc(r.expiresOn)}</td><td style="color:var(--brick)">${r.daysLeft}</td></tr>`;
+          return `<tr><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(st?(st.parentName||'—'):'—')}</td><td>${esc(st?(st.mobileNumber||'—'):'—')}${copyBtnHtml(st&&st.mobileNumber)}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${fmtN(r.unused)}</td><td>${esc(dayDate(r.expiresOn))}</td><td style="color:var(--brick)">${r.daysLeft}</td></tr>`;
         }).join('')}
       </table></div>
     </div>` : '';
@@ -13409,7 +13441,7 @@ function renderLog() {
   const dayEntries = data.sessions.filter(s=>s.teacherId===d.teacherId && (logMonthView ? (s.date||'').startsWith(logMonth) : s.date===d.date))
     .sort((a,b)=>(logMonthView ? (a.date||'').localeCompare(b.date||'') : 0) || studentName(a.studentId).localeCompare(studentName(b.studentId)));
   const sumCount = st => dayEntries.filter(s=>s.status===st).reduce((a,s)=>a+(Number(s.count)||0),0);
-  const dateCell = s => logMonthView ? `<td>${s.date}${savedAtHtml(s.createdAt, s.date)}</td>` : '';
+  const dateCell = s => logMonthView ? `<td>${dayDate(s.date)}${savedAtHtml(s.createdAt, s.date)}</td>` : '';
   const entriesHtml = dayEntries.length ? `
     <div class="table-scroll"><table>
       <tr>${logMonthView?'<th>Date</th>':''}<th>Student</th><th>Subject</th><th>Type</th><th>Mode</th><th>Classes</th><th>Status</th><th>Remarks</th><th></th></tr>
@@ -13499,7 +13531,7 @@ function renderLog() {
       ${noBalanceWarning}
     </div>
     <div class="card">
-      <h2>${esc(teacher.name)} — ${logMonthView ? `classes in ${logMonth}` : `classes on ${d.date}`}</h2>
+      <h2>${esc(teacher.name)} — ${logMonthView ? `classes in ${logMonth}` : `classes on ${dayDate(d.date)}`}</h2>
       <div class="row-form">
         <select onchange="setLogViewMode(this.value)">
           <option value="day" ${!logMonthView?'selected':''}>Selected day</option>
@@ -13877,7 +13909,7 @@ function renderReports(only) {
         <tr><th>Date</th><th>Student</th><th>Subject</th><th>Type</th><th>Mode</th><th>Status</th><th>Classes</th></tr>
         ${entries.map(e=>`
           <tr>
-            <td>${e.date}${savedAtHtml(e.createdAt, e.date)}</td><td>${esc(e.studentName)}</td><td>${esc(e.subjectName)}</td>
+            <td>${dayDate(e.date)}${savedAtHtml(e.createdAt, e.date)}</td><td>${esc(e.studentName)}</td><td>${esc(e.subjectName)}</td>
             <td>${e.classType}</td><td>${e.mode}</td>
             <td>${e.status==='Present' ? '<span class="tag">Present</span>' : '<span class="tag absent">Absent</span>'}</td>
             <td>${e.count}</td>
@@ -13898,7 +13930,7 @@ function renderReports(only) {
           <tr><th>Date</th><th>Subject</th><th>Teacher</th><th>Type</th><th>Mode</th><th>Status</th><th>Classes</th></tr>
           ${rMonthSessions.map(s=>`
             <tr>
-              <td>${s.date}${savedAtHtml(s.createdAt, s.date)}</td><td>${esc(subjectName(s.subjectId))}</td><td>${esc(teacherNameWithCode(s.teacherId))}</td>
+              <td>${dayDate(s.date)}${savedAtHtml(s.createdAt, s.date)}</td><td>${esc(subjectName(s.subjectId))}</td><td>${esc(teacherNameWithCode(s.teacherId))}</td>
               <td>${s.classType}</td><td>${s.mode}</td>
               <td>${s.status==='Present' ? '<span class="tag">Present</span>' : '<span class="tag absent">Absent</span>'}</td>
               <td>${s.count}</td>
@@ -14642,7 +14674,7 @@ function renderWixBookings() {
       })();
       scheduleBlock = `
         <div style="font-size:12px;background:var(--hover,rgba(0,0,0,.04));border-radius:6px;padding:8px;margin-top:10px">
-          <div>📅 <b>${scheduledTeacher ? esc(scheduledTeacher.name) : '?'}</b> · ${b.scheduledDate}${b.scheduledTime ? ' at ' + b.scheduledTime : ''}</div>
+          <div>📅 <b>${scheduledTeacher ? esc(scheduledTeacher.name) : '?'}</b> · ${dayDate(b.scheduledDate)}${b.scheduledTime ? ' at ' + b.scheduledTime : ''}</div>
           ${b.demoLogId ? `<div class="hint" style="font-size:11px;margin-top:2px">✓ Demo log linked — mark Converted / Cancelled there once the demo happens</div>` : ''}
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
@@ -14827,7 +14859,7 @@ function renderWixBookings() {
                 </div>
               </td></tr>`;
             }
-            return `<tr><td>${d.date||'—'}</td><td>${d.demoTime||'—'}</td><td>${esc(tName)}</td><td>${esc(d.subjectId?subjectName(d.subjectId):'—')}</td><td>${esc(d.board||'—')}</td><td>${esc(d.studentName||'—')}</td><td>${esc(d.parentMobile||'—')}${copyBtnHtml(d.parentMobile)}</td><td>${esc(d.notes||'—')}</td><td>${linkSection}</td><td>${statusBadge}</td><td>${d.status==='Converted'?'₹'+d.bonusAmount:'—'}</td><td>${actions}</td></tr>`;
+            return `<tr><td>${d.date?dayDate(d.date):'—'}</td><td>${d.demoTime||'—'}</td><td>${esc(tName)}</td><td>${esc(d.subjectId?subjectName(d.subjectId):'—')}</td><td>${esc(d.board||'—')}</td><td>${esc(d.studentName||'—')}</td><td>${esc(d.parentMobile||'—')}${copyBtnHtml(d.parentMobile)}</td><td>${esc(d.notes||'—')}</td><td>${linkSection}</td><td>${statusBadge}</td><td>${d.status==='Converted'?'₹'+d.bonusAmount:'—'}</td><td>${actions}</td></tr>`;
           }).join('')
           + '</table></div>';
       })()}
@@ -15472,7 +15504,7 @@ function studentDashboardStatsHtml(student) {
   const expiryBanner = expiryRows.length ? `
     <div class="card" style="border-color:var(--brick)">
       <h2 style="color:var(--brick)">⚠ Classes expiring soon</h2>
-      ${expiryRows.map(r => `<div class="hint" style="font-size:14px;margin-bottom:4px">${fmtN(r.unused)} unused class${r.unused===1?'':'es'} in <b>${esc(subjectName(r.subjectId))}</b> (${r.type}) must be used by <b>${esc(r.expiresOn)}</b> (${r.daysLeft===0?'today':'in '+r.daysLeft+' day'+(r.daysLeft===1?'':'s')}). After that they expire.</div>`).join('')}
+      ${expiryRows.map(r => `<div class="hint" style="font-size:14px;margin-bottom:4px">${fmtN(r.unused)} unused class${r.unused===1?'':'es'} in <b>${esc(subjectName(r.subjectId))}</b> (${r.type}) must be used by <b>${esc(dayDate(r.expiresOn))}</b> (${r.daysLeft===0?'today':'in '+r.daysLeft+' day'+(r.daysLeft===1?'':'s')}). After that they expire.</div>`).join('')}
     </div>` : '';
   return `
     ${expiryBanner}
@@ -15514,7 +15546,7 @@ function renderStudentReportCards(student, viewMonth, monthSetterFn, titlePrefix
       <tr><th>Date</th><th>Subject</th><th>Teacher</th><th>Type</th><th>Mode</th><th>Status</th><th>Classes</th><th>Remarks</th></tr>
       ${monthSessions.map(s=>`
         <tr>
-          <td>${s.date}${savedAtHtml(s.createdAt, s.date)}</td><td>${esc(subjectName(s.subjectId))}</td><td>${esc(teacherName(s.teacherId))}</td>
+          <td>${dayDate(s.date)}${savedAtHtml(s.createdAt, s.date)}</td><td>${esc(subjectName(s.subjectId))}</td><td>${esc(teacherName(s.teacherId))}</td>
           <td>${s.classType}</td><td>${s.mode}</td>
           <td>${s.status==='Present' ? '<span class="tag">Present</span>' : '<span class="tag absent">Absent</span>'}</td>
           <td>${s.count}</td>
@@ -15635,7 +15667,7 @@ function studentScheduleCardHtml(studentId, titlePrefix) {
   return `
     <div class="card">
       <h2>${titlePrefix} Class Schedule</h2>
-      ${leaveNotices.length ? leaveNotices.map(l=>`<div class="hint" style="color:var(--brick)">${esc(teacherName(l.teacherId))} is on leave ${esc(l.startDate)} to ${esc(l.endDate)}${l.reason?' ('+esc(l.reason)+')':''}.</div>`).join('') : ''}
+      ${leaveNotices.length ? leaveNotices.map(l=>`<div class="hint" style="color:var(--brick)">${esc(teacherName(l.teacherId))} is on leave ${esc(dayDate(l.startDate))} to ${esc(dayDate(l.endDate))}${l.reason?' ('+esc(l.reason)+')':''}.</div>`).join('') : ''}
       <div class="row-form"><input type="month" value="${studentScheduleViewMonth}" onchange="studentScheduleViewMonth=this.value; render();"></div>
       ${list.length===0 ? '<div class="empty">No classes scheduled for this month.</div>' : `
       <div class="table-scroll"><table>
@@ -15643,7 +15675,7 @@ function studentScheduleCardHtml(studentId, titlePrefix) {
         ${list.map(entry=>{
           const overdue = isScheduleOverdue(entry);
           const statusLabel = entry.status === 'Done' ? '<span class="tag" style="background:var(--forest);color:#fff">Done</span>' : overdue ? '<span class="tag" style="background:var(--brick);color:#fff">Overdue</span>' : '<span class="tag">Upcoming</span>';
-          return `<tr><td>${esc(entry.date)}</td><td>${esc(entry.time)}</td><td>${esc(subjectName(entry.subjectId))}</td><td>${esc(teacherName(entry.teacherId))}</td><td>${statusLabel}</td></tr>`;
+          return `<tr><td>${esc(dayDate(entry.date))}</td><td>${esc(entry.time)}</td><td>${esc(subjectName(entry.subjectId))}</td><td>${esc(teacherName(entry.teacherId))}</td><td>${statusLabel}</td></tr>`;
         }).join('')}
       </table></div>`}
     </div>`;
@@ -16209,7 +16241,7 @@ function teacherStudentCardHtml(s, teacher) {
         .sort((a,b) => a.expiresOn.localeCompare(b.expiresOn))[0];
       subjRows.push(`<tr><td>${esc(subj.name)}</td><td>${ty}</td><td>${bought}</td><td>${used}</td>
         <td style="font-weight:600;color:${bought-used<=0?'var(--brick)':'inherit'}">${bought-used}</td>
-        <td>${nextExpiry ? `${nextExpiry.remainingHere} on ${esc(formatDate(nextExpiry.expiresOn))}` : '<span class="hint">—</span>'}</td></tr>`);
+        <td>${nextExpiry ? `${nextExpiry.remainingHere} on ${esc(dayDate(nextExpiry.expiresOn))}` : '<span class="hint">—</span>'}</td></tr>`);
     });
     if (!TYPES.some(ty => studentSubscribed(s.id, subj.id, ty) || studentUsed(s.id, subj.id, ty))) {
       subjRows.push(`<tr><td>${esc(subj.name)}</td><td colspan="5" class="hint">No classes subscribed yet</td></tr>`);
@@ -16871,7 +16903,7 @@ function markDoneSuccessPopupHtml() {
     <div style="position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:999; display:flex; align-items:center; justify-content:center; padding:20px;">
       <div class="card" style="max-width:340px; margin:0; border-color:var(--forest)">
         <h2 style="margin-top:0; color:var(--forest)">Marked done ✓</h2>
-        <div class="hint">Attendance recorded for ${esc(markDoneSuccessPopup.date)}.</div>
+        <div class="hint">Attendance recorded for ${esc(dayDate(markDoneSuccessPopup.date))}.</div>
         <div class="row-form" style="margin-top:14px"><button class="btn-primary" onclick="markDoneSuccessPopup=null; render();">OK</button></div>
       </div>
     </div>`;
@@ -17013,7 +17045,7 @@ function teacherLeaveManageHtml(teacherId) {
       ${myLeave.length===0 ? '<div class="empty">No leave recorded.</div>' : `
       <div class="table-scroll"><table>
         <tr><th>From</th><th>To</th><th>Reason</th><th></th></tr>
-        ${myLeave.map(l=>`<tr><td>${esc(l.startDate)}${savedAtHtml(l.createdAt, l.startDate)}</td><td>${esc(l.endDate)}</td><td>${l.reason?esc(l.reason):'<span class="hint">—</span>'}</td><td><button class="icon-btn" onclick="removeTeacherLeave('${l.id}')">✕</button></td></tr>`).join('')}
+        ${myLeave.map(l=>`<tr><td>${esc(dayDate(l.startDate))}${savedAtHtml(l.createdAt, l.startDate)}</td><td>${esc(dayDate(l.endDate))}</td><td>${l.reason?esc(l.reason):'<span class="hint">—</span>'}</td><td><button class="icon-btn" onclick="removeTeacherLeave('${l.id}')">✕</button></td></tr>`).join('')}
       </table></div>`}
     </div>`;
 }
@@ -17236,7 +17268,7 @@ function renderTeacherSchedule(teacher, isAdminCaller) {
       ${groups.length===0 ? '<div class="empty">Nothing scheduled for this period.</div>' : ''}
       ${groups.map(g => `
         <div style="border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-top:10px;">
-          <div style="font-weight:600; font-size:13.5px; margin-bottom:6px;">${esc(g.date)} at ${esc(g.time)} ${g.entries.length>1?`<span class="tag">${g.entries.length} students</span>`:''}</div>
+          <div style="font-weight:600; font-size:13.5px; margin-bottom:6px;">${esc(dayDate(g.date))} at ${esc(g.time)} ${g.entries.length>1?`<span class="tag">${g.entries.length} students</span>`:''}</div>
           ${g.entries.map(entry => {
             const student = data.students.find(s=>s.id===entry.studentId);
             const subj = data.subjects.find(s=>s.id===entry.subjectId);
@@ -17399,7 +17431,7 @@ function markDoneModalHtml(isAdminCaller) {
       <div class="card" style="max-width:380px; margin:0;">
         <h2 style="margin-top:0">Mark class done</h2>
         <div class="hint">${student?esc(student.name):''} — ${entry?esc(entry.date):''} at ${entry?esc(entry.time):''}</div>
-        ${fromClosedMonth && isAdminCaller ? `<div class="hint" style="color:var(--brick)">This class is from a previous month. The attendance record will be dated ${esc(entry.date)} unless you set a different date below — this may affect that month's already-paid payroll.</div>` : ''}
+        ${fromClosedMonth && isAdminCaller ? `<div class="hint" style="color:var(--brick)">This class is from a previous month. The attendance record will be dated ${esc(dayDate(entry.date))} unless you set a different date below — this may affect that month's already-paid payroll.</div>` : ''}
         <div class="row-form" style="margin-top:8px">
           <select onchange="markDoneDraft.status=this.value">
             <option value="Present" ${markDoneDraft.status==='Present'?'selected':''}>Present</option>
@@ -17452,7 +17484,7 @@ function renderTeacherAttendance(teacher) {
         if (editingSessionId === s.id) {
           const ed = editSessionDraft;
           return `<tr>
-            <td>${s.date}${savedAtHtml(s.createdAt, s.date)}</td><td>${esc(studentName(s.studentId))}</td><td>${esc(subjectName(s.subjectId))}</td>
+            <td>${dayDate(s.date)}${savedAtHtml(s.createdAt, s.date)}</td><td>${esc(studentName(s.studentId))}</td><td>${esc(subjectName(s.subjectId))}</td>
             <td colspan="6">
               ${editSessionMsg ? `<div class="hint" style="color:var(--brick)">${esc(editSessionMsg)}</div>` : ''}
               <div class="row-form" style="margin-bottom:0">
@@ -17475,7 +17507,7 @@ function renderTeacherAttendance(teacher) {
           </tr>`;
         }
         return `<tr>
-          <td>${s.date}${savedAtHtml(s.createdAt, s.date)}</td><td>${esc(studentName(s.studentId))}</td><td>${esc(subjectName(s.subjectId))}</td>
+          <td>${dayDate(s.date)}${savedAtHtml(s.createdAt, s.date)}</td><td>${esc(studentName(s.studentId))}</td><td>${esc(subjectName(s.subjectId))}</td>
           <td>${s.classType}</td><td>${s.mode}</td>
           <td>${s.status==='Present' ? '<span class="tag">Present</span>' : '<span class="tag absent">Absent</span>'}</td>
           <td>${s.count}</td>
@@ -17518,7 +17550,7 @@ function renderTeacherAttendance(teacher) {
       ${noBalanceWarning}`}
     </div>
     <div class="card">
-      <h2>${teacherAttendanceViewMode === 'day' ? `Attendance for ${d.date}` : `${teacherAttendanceViewMonth}${viewingCurrentMonth?' (current month — editable)':' (view only)'}`} <button class="help-btn" onclick="openHelp('attendance-record',event)">?</button></h2>
+      <h2>${teacherAttendanceViewMode === 'day' ? `Attendance for ${dayDate(d.date)}` : `${teacherAttendanceViewMonth}${viewingCurrentMonth?' (current month — editable)':' (view only)'}`} <button class="help-btn" onclick="openHelp('attendance-record',event)">?</button></h2>
       <div class="row-form">
         <select onchange="setTeacherAttendanceViewMode(this.value)">
           <option value="day" ${teacherAttendanceViewMode==='day'?'selected':''}>Selected day</option>
@@ -17801,12 +17833,12 @@ function renderTeacherDashboard(teacher) {
       <div class="hint">Unused classes in these payments expire after the expiry date shown (that day itself still counts). Remind the students so the classes can be used in time.</div>
       <div class="table-scroll"><table>
         <tr><th>Student</th><th>Subject</th><th>Type</th><th>Unused classes</th><th>Expires on</th><th>Days left</th></tr>
-        ${expiring.map(r => `<tr><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${fmtN(r.unused)}</td><td>${esc(r.expiresOn)}</td><td style="color:var(--brick)">${r.daysLeft}</td></tr>`).join('')}
+        ${expiring.map(r => `<tr><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${fmtN(r.unused)}</td><td>${esc(dayDate(r.expiresOn))}</td><td style="color:var(--brick)">${r.daysLeft}</td></tr>`).join('')}
       </table></div>
     </div>` : '';
   // Pending Action Items: timing review and today's classes are separate, independently hideable sections.
   const needsReviewClasses = scheduledClasses.filter(function(sc){return sc.teacherId===teacher.id && isProvisionalScheduleTime(sc) && sc.status!=='Done' && sc.date>=todayStr;}).sort(function(a,b){return a.date===b.date?(a.time||'').localeCompare(b.time||''):a.date.localeCompare(b.date);});
-  const timingReviewHtml = needsReviewClasses.length ? '<div class="card" style="border-left:4px solid var(--gold);background:var(--soft)"><h2 style="margin-top:0">⚠ Please Review and Correct Class Timings</h2><div class="hint">Some class timings are provisional after the pending-class rebuild. Please review and correct these times before conducting the classes. Batch classes may show 00:00; Individual classes may show 01:00 or 02:00. Use Edit in Today’s Classes for today’s lessons, or open Class Schedule to correct upcoming lessons. This notice remains while classes still have the agreed placeholder times. Corrected times no longer appear on this list.</div><div class="hint"><b>Timings awaiting review:</b> '+needsReviewClasses.length+' · Next: '+esc(needsReviewClasses[0].date)+' '+esc(needsReviewClasses[0].time||'—')+' · '+esc(studentNameWithCode(needsReviewClasses[0].studentId))+'</div></div>' : '';
+  const timingReviewHtml = needsReviewClasses.length ? '<div class="card" style="border-left:4px solid var(--gold);background:var(--soft)"><h2 style="margin-top:0">⚠ Please Review and Correct Class Timings</h2><div class="hint">Some class timings are provisional after the pending-class rebuild. Please review and correct these times before conducting the classes. Batch classes may show 00:00; Individual classes may show 01:00 or 02:00. Use Edit in Today’s Classes for today’s lessons, or open Class Schedule to correct upcoming lessons. This notice remains while classes still have the agreed placeholder times. Corrected times no longer appear on this list.</div><div class="hint"><b>Timings awaiting review:</b> '+needsReviewClasses.length+' · Next: '+esc(dayDate(needsReviewClasses[0].date))+' '+esc(needsReviewClasses[0].time||'—')+' · '+esc(studentNameWithCode(needsReviewClasses[0].studentId))+'</div></div>' : '';
   const todaySchedHtml = (function(){
     if (!myScheduledToday.length) return '';
     var h='<div class="card" style="border-left:4px solid var(--primary)">';
@@ -18255,7 +18287,7 @@ function teacherPortalBodyHtml(teacher) {
       <tr><th>Date</th><th>Student</th><th>Subject</th><th>Type</th><th>Mode</th><th>Status</th><th>Classes</th><th>Remarks</th></tr>
       ${allMonthSessions.map(s=>`
         <tr>
-          <td>${s.date}${savedAtHtml(s.createdAt, s.date)}</td><td>${esc(studentName(s.studentId))}</td><td>${esc(subjectName(s.subjectId))}</td>
+          <td>${dayDate(s.date)}${savedAtHtml(s.createdAt, s.date)}</td><td>${esc(studentName(s.studentId))}</td><td>${esc(subjectName(s.subjectId))}</td>
           <td>${s.classType}</td><td>${s.mode}</td>
           <td>${s.status==='Present' ? '<span class="tag">Present</span>' : '<span class="tag absent">Absent</span>'}</td>
           <td>${s.count}</td>
@@ -19084,8 +19116,8 @@ function renderTeacherHomework(teacher) {
           <div style="font-weight:600;font-size:15px">${esc(h.title)}</div>
           <div style="font-size:12.5px;color:var(--muted);margin-top:2px">
             ${student?esc(student.name):'?'} · ${subj?esc(subj.name):'?'}
-            ${h.assignedDate ? ' · Assigned '+formatDate(h.assignedDate) : ''}
-            ${h.dueDate ? ' · <b>Due '+formatDate(h.dueDate)+'</b>' : ''}
+            ${h.assignedDate ? ' · Assigned '+dayDate(h.assignedDate) : ''}
+            ${h.dueDate ? ' · <b>Due '+dayDate(h.dueDate)+'</b>' : ''}
           </div>
           ${h.description ? `<div style="font-size:13px;color:var(--ink);margin-top:4px">${esc(h.description)}</div>` : ''}
           ${h.studyPlanTopic ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">🔗 ${esc(h.studyPlanTopic)}</div>` : ''}
@@ -19171,7 +19203,7 @@ function renderStudentHomeworkSection(student) {
     <div style="border:1px solid var(--line);border-left:4px solid ${statusColor};border-radius:8px;padding:12px 14px;margin-bottom:8px">
       <div style="font-weight:600">${esc(h.title)}</div>
       <div style="font-size:12.5px;color:var(--muted);margin-top:2px">
-        ${subj?esc(subj.name):''}${h.dueDate?' · Due <b>'+formatDate(h.dueDate)+'</b>':''}
+        ${subj?esc(subj.name):''}${h.dueDate?' · Due <b>'+dayDate(h.dueDate)+'</b>':''}
       </div>
       ${h.description?`<div style="font-size:13px;margin-top:4px;color:var(--ink)">${esc(h.description)}</div>`:''}
       ${h.studyPlanTopic?`<div style="font-size:12px;color:var(--muted);margin-top:2px">🔗 ${esc(h.studyPlanTopic)}</div>`:''}
@@ -21786,8 +21818,8 @@ function renderAdminHomework() {
       <td>${student?esc(student.name):'-'}</td>
       <td>${subj?esc(subj.name):'-'}</td>
       <td>${esc(h.title)}</td>
-      <td>${h.assignedDate?formatDate(h.assignedDate):'-'}</td>
-      <td>${h.dueDate?formatDate(h.dueDate):'-'}</td>
+      <td>${h.assignedDate?dayDate(h.assignedDate):'-'}</td>
+      <td>${h.dueDate?dayDate(h.dueDate):'-'}</td>
       <td><span style="font-weight:600;color:${statusColor}">${hwStatusLabel(h)}</span></td>
       <td>${h.marks!==''&&h.marks!=null?(h.totalMarks!==''&&h.totalMarks!=null?`${h.marks}/${h.totalMarks}`:h.marks):'-'}</td>
       <td>${h.photoUrl?`<a href="${escAttr(hwFileUrl(h.photoUrl))}" target="_blank" style="font-size:12px">📷 View</a>`:'-'}</td>
