@@ -284,7 +284,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-27 18:40 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-27 19:15 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -986,6 +986,7 @@ let sCalcSubjectId = '';
 let sCalcType = 'Group';
 let sCalcMode = 'Offline';
 let sCalcClasses = '';
+let sCalcStudentId = '';   // whose calculator is showing (special rates are per student)
 let demandPreviewRows = null;
 let demandSelectedMonth = ''; // Admin-selected target month for monthly fee requests
 let demandMsg = '';
@@ -2205,6 +2206,115 @@ function handleOtherAdminPhotoUpload(event, profileId) {
   };
   reader.readAsDataURL(file);
 }
+// Agreed special per-class rates for one student + subject + type (SQL 63). A valid row beats Fee setup
+// everywhere a student's fee is worked out; discount tiers still apply on top.
+let studentFeeRates = [];
+let studentFeeRatesMissing = false;   // SQL 63 not run yet
+async function loadStudentFeeRates() {
+  const { data: rows, error } = await sb.from('student_fee_rates').select('*').order('from_date', { ascending: false });
+  studentFeeRatesMissing = !!(error && /student_fee_rates/.test(error.message || ''));
+  studentFeeRates = (!error && rows ? rows : []).map(r => ({ id: r.id, studentId: r.student_id, subjectId: r.subject_id, type: r.class_type, rate: Number(r.rate) || 0, offlineRate: r.offline_rate == null ? null : Number(r.offline_rate), fromDate: r.from_date || '', toDate: r.to_date || '', note: r.note || '' }));
+}
+// The special-rate row valid on the day (today by default), latest start date first.
+function specialRateRow(studentId, subjectId, type, onDate) {
+  if (!studentId || !subjectId) return null;
+  const d = onDate || todayStr;
+  return studentFeeRates.filter(r => r.studentId === studentId && r.subjectId === subjectId && r.type === type && r.fromDate <= d && (!r.toDate || r.toDate >= d))
+    .sort((a,b) => b.fromDate.localeCompare(a.fromDate))[0] || null;
+}
+function specialRateValue(row, mode) { return mode === 'Offline' && row.offlineRate != null ? row.offlineRate : row.rate; }
+// The per-class rate that applies: the student's special rate if one is valid, else Fee setup.
+function feeRateFor(studentId, subj, type, mode) {
+  if (!subj) return { rate: 0, special: null };
+  const sp = specialRateRow(studentId, subj.id, type);
+  if (sp) return { rate: Number(specialRateValue(sp, mode)) || 0, special: sp };
+  return { rate: Number(feeRates[rateKey(subj.category, type, mode)]) || 0, special: null };
+}
+function specialRateTag(special) { return special ? ` <span style="font-size:11px;font-weight:700;color:#fff;background:var(--gold);border-radius:4px;padding:1px 5px" title="Agreed special rate for this student${special.toDate ? ' until ' + special.toDate : ''}">Special rate</span>` : ''; }
+// ---- Student page: Special fee rates (admin) ----
+let specialRateDraft = { subjectId: '', type: 'Group', rate: '', offlineRate: '', fromDate: '', toDate: '', note: '' };
+let specialRateEditId = '';
+let specialRateMsg = '';
+function specialRateDraftReset() { specialRateDraft = { studentId: specialRateDraft.studentId, subjectId: '', type: 'Group', rate: '', offlineRate: '', fromDate: '', toDate: '', note: '' }; specialRateEditId = ''; }
+function startEditSpecialRate(id) {
+  const r = studentFeeRates.find(x => x.id === id); if (!r) return;
+  specialRateEditId = id; specialRateMsg = '';
+  specialRateDraft = { subjectId: r.subjectId, type: r.type, rate: String(r.rate), offlineRate: r.offlineRate == null ? '' : String(r.offlineRate), fromDate: r.fromDate, toDate: r.toDate, note: r.note };
+  render();
+}
+function cancelSpecialRate() { specialRateDraftReset(); specialRateMsg = ''; render(); }
+async function saveSpecialRate(studentId) {
+  const d = specialRateDraft; specialRateMsg = '';
+  const rate = Number(d.rate), off = d.offlineRate === '' ? null : Number(d.offlineRate);
+  const from = d.fromDate || todayStr;
+  if (!d.subjectId) specialRateMsg = 'Pick a subject.';
+  else if (d.rate === '' || !(rate >= 0)) specialRateMsg = 'Type the agreed rate per class.';
+  else if (off != null && !(off >= 0)) specialRateMsg = 'The Offline rate must be a number (or leave it empty).';
+  else if (d.toDate && d.toDate < from) specialRateMsg = 'The end date is before the start date.';
+  if (specialRateMsg) { render(); return; }
+  const payload = { student_id: studentId, subject_id: d.subjectId, class_type: d.type, rate, offline_rate: off, from_date: from, to_date: d.toDate || null, note: (d.note || '').trim() || null, updated_at: new Date().toISOString() };
+  const { error } = specialRateEditId
+    ? await sb.from('student_fee_rates').update(payload).eq('id', specialRateEditId)
+    : await sb.from('student_fee_rates').insert(payload);
+  if (error) { specialRateMsg = /student_fee_rates/.test(error.message || '') ? 'Run SQL 63 (fee-requests/63-student-special-rates.sql) in Supabase first.' : 'Could not save: ' + error.message; render(); return; }
+  await loadStudentFeeRates();
+  specialRateMsg = 'Special rate saved.'; specialRateDraftReset();
+  if (typeof trackUse === 'function') trackUse('special_fee_rate');
+  render();
+}
+async function deleteSpecialRate(id) {
+  if (!confirm('Remove this special rate? Fee setup rates will apply again from now on. Requests and payments already saved are not changed.')) return;
+  const { error } = await sb.from('student_fee_rates').delete().eq('id', id);
+  if (error) { specialRateMsg = 'Could not remove: ' + error.message; render(); return; }
+  await loadStudentFeeRates(); specialRateMsg = 'Special rate removed.'; if (specialRateEditId === id) specialRateDraftReset(); render();
+}
+function specialRateRowStatus(r) {
+  if (r.fromDate > todayStr) return `<span class="hint">Starts ${r.fromDate}</span>`;
+  if (r.toDate && r.toDate < todayStr) return `<span class="hint">Ended ${r.toDate}</span>`;
+  return `<span style="color:var(--forest);font-weight:600">In use</span>`;
+}
+function studentSpecialRatesHtml(student, enrolledSubjects) {
+  const subjs = byName(enrolledSubjects || []);
+  const mine = studentFeeRates.filter(r => r.studentId === student.id).sort((a,b) => subjectName(a.subjectId).localeCompare(subjectName(b.subjectId)) || a.type.localeCompare(b.type) || b.fromDate.localeCompare(a.fromDate));
+  // Applicable fee rates: what every fee sum uses today, and where it comes from.
+  const cell = (subj, ty, md) => {
+    const info = feeRateFor(student.id, subj, ty, md);
+    return `<td>${info.rate ? '₹' + info.rate.toFixed(2) : '<span style="color:var(--brick)">no rate</span>'}<div class="hint" style="font-size:11px">${info.special ? `Special${info.special.toDate ? ' until ' + info.special.toDate : ''}` : 'Fee setup'}</div></td>`;
+  };
+  const applicable = subjs.length ? `<div class="table-scroll"><table>
+      <tr><th>Subject</th><th>Type</th>${RATE_MODES.map(md => `<th>${md}</th>`).join('')}</tr>
+      ${subjs.flatMap(subj => TYPES.map(ty => `<tr><td>${esc(subj.name)} <span class="hint">(${esc(catLabel(subj.category))})</span>${specialRateRow(student.id, subj.id, ty) ? specialRateTag(specialRateRow(student.id, subj.id, ty)) : ''}</td><td>${ty}</td>${RATE_MODES.map(md => cell(subj, ty, md)).join('')}</tr>`)).join('')}
+    </table></div>` : '<div class="empty">Not enrolled in any subject yet.</div>';
+  if (specialRateDraft.studentId !== student.id) { specialRateDraftReset(); specialRateDraft.studentId = student.id; specialRateMsg = ''; }
+  const d = specialRateDraft;
+  const subjPool = byName([...subjs, ...data.subjects.filter(x => x.id === d.subjectId && !subjs.some(y => y.id === x.id))]);
+  const form = subjPool.length ? `<div class="row-form">
+      <select onchange="specialRateDraft.subjectId=this.value">${`<option value="">Subject…</option>` + subjPool.map(x => `<option value="${x.id}" ${d.subjectId===x.id?'selected':''}>${esc(x.name)} (${esc(catLabel(x.category))})</option>`).join('')}</select>
+      <select onchange="specialRateDraft.type=this.value">${TYPES.map(ty => `<option value="${ty}" ${d.type===ty?'selected':''}>${ty}</option>`).join('')}</select>
+      <label>Rate per class ₹ <input type="number" min="0" step="any" style="width:90px" value="${escAttr(String(d.rate))}" oninput="specialRateDraft.rate=this.value"></label>
+      <label>Offline rate ₹ <input type="number" min="0" step="any" style="width:90px" placeholder="same" value="${escAttr(String(d.offlineRate))}" oninput="specialRateDraft.offlineRate=this.value" title="Only if Offline classes have a different agreed rate"></label>
+      <label>From <input type="date" value="${d.fromDate || todayStr}" onchange="specialRateDraft.fromDate=this.value"></label>
+      <label>Until <input type="date" value="${d.toDate}" onchange="specialRateDraft.toDate=this.value" title="Leave empty if there is no end date"></label>
+      <input type="text" placeholder="Note (optional)" style="width:180px" value="${escAttr(d.note)}" oninput="specialRateDraft.note=this.value">
+      <button class="btn-primary" onclick="saveSpecialRate('${student.id}')">${specialRateEditId ? 'Save changes' : 'Add special rate'}</button>
+      ${specialRateEditId ? `<button class="btn-small" onclick="cancelSpecialRate()">Cancel</button>` : ''}
+    </div>` : '';
+  const list = mine.length ? `<div class="table-scroll"><table>
+      <tr><th>Subject</th><th>Type</th><th>Online</th><th>Offline</th><th>From</th><th>Until</th><th>Status</th><th>Note</th><th></th></tr>
+      ${mine.map(r => `<tr${specialRateEditId===r.id?' style="background:rgba(60,94,66,0.08)"':''}><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>₹${r.rate.toFixed(2)}</td><td>₹${specialRateValue(r,'Offline').toFixed(2)}${r.offlineRate == null ? ' <span class="hint">(same)</span>' : ''}</td><td>${r.fromDate}</td><td>${r.toDate || '—'}</td><td>${specialRateRowStatus(r)}</td><td>${esc(r.note)}</td>
+        <td><button class="btn-small" onclick="startEditSpecialRate('${r.id}')">Edit</button> <button class="btn-small" onclick="deleteSpecialRate('${r.id}')">Remove</button></td></tr>`).join('')}
+    </table></div>` : '';
+  return `<div class="student-section" style="background:#fff7e0">
+      <h3>Special fee rates</h3>
+      <div class="hint">An agreed per-class rate for this student. While it is in use it replaces the Fee setup rate everywhere this student's fee is worked out (Record payment, fee requests, Calculate, Raise fee requests, Fee calculator, the student's and parent's Applicable Rates). Bulk discount tiers still apply on top. Requests and payments already saved are not changed.</div>
+      ${studentFeeRatesMissing ? `<div class="hint" style="color:var(--brick)">Run SQL 63 (fee-requests/63-student-special-rates.sql) in Supabase to turn this on.</div>` : ''}
+      ${specialRateMsg ? `<div class="hint" style="color:${/saved|removed/.test(specialRateMsg)?'var(--forest)':'var(--brick)'}">${esc(specialRateMsg)}</div>` : ''}
+      ${list}
+      ${form}
+      <h4 style="margin:12px 0 4px">Applicable fee rates (today)</h4>
+      ${applicable}
+    </div>`;
+}
 async function loadFeeRates() {
   // Teachers never get the student fee price list, discounts or UPI details (SQL 45 also blocks the table for them):
   // only the academic year and audit switches, through teacher_app_settings().
@@ -2239,6 +2349,7 @@ async function loadFeeRates() {
     auditLoggingEnabled = true;
     loginAuditEnabled = true;
   }
+  await loadStudentFeeRates();
 }
 let upiId = '';
 let feeContactMobile = '';
@@ -6658,7 +6769,7 @@ async function logout() {
   // Nor should anything else this login loaded: the next person to log in on this tab may have a different role,
   // and their load() only refills what their role can read.
   data = { teachers: [], subjects: [], students: [], studentSubjects: [], subscriptions: [], sessions: [], users: [], parentStudents: [], studentPhoneNumbers: [], adminPhoneNumbers: [], demoLogs: [], teacherPayrollRecords: [], wixBookings: [], supportTickets: [] };
-  feeRates = {}; discountTiers = []; prospectQuotes = []; notifications = []; myAnnouncements = []; allAnnouncementsAdmin = [];
+  feeRates = {}; studentFeeRates = []; discountTiers = []; prospectQuotes = []; notifications = []; myAnnouncements = []; allAnnouncementsAdmin = [];
   auditRows = []; loginLogRows = []; scheduledClasses = []; teacherAvailability = []; teacherLeave = [];
   aiUsageRows = null; aiUsageNames = {}; appUsageRows = null; appUsageRecent = null; appUsageProfiles = [];
   qbAccessByTeacher = null; researchAccessByTeacher = null;
@@ -8435,18 +8546,18 @@ function editRequestDraftSet(field, val) {
   render();
 }
 // ---------- fee request amount auto-fill ----------
-// Same sum as the Fee calculator: Fee setup rate (subject category × type × mode)
-// × classes, less the one discount tier the class count reaches.
-function feeQuote(subjectId, type, mode, classes) {
+// Same sum as the Fee calculator: the student's special rate (SQL 63) or else the Fee setup rate
+// (subject category × type × mode) × classes, less the one discount tier the class count reaches.
+function feeQuote(subjectId, type, mode, classes, studentId) {
   const subj = subject(subjectId);
   const n = Number(classes) || 0;
   if (!subj || !type || !mode || n <= 0) return null;
-  const rate = Number(feeRates[rateKey(subj.category, type, mode)]) || 0;
+  const { rate, special } = feeRateFor(studentId, subj, type, mode);
   const base = rate * n;
   const eligible = discountTiers.filter(t => n >= Number(t.minClasses));
   const tier = eligible.length ? eligible.reduce((best,t) => Number(t.minClasses) > Number(best.minClasses) ? t : best) : null;
   const amount = tier ? base * (1 - Number(tier.percent)/100) : base;
-  return { subj, type, mode, rate, classes: n, tier, amount: Math.round(amount * 100) / 100 };
+  return { subj, type, mode, rate, special, classes: n, tier, amount: Math.round(amount * 100) / 100 };
 }
 // Online/Offline the student used most in their last 20 classes of this subject
 // and type (any type if none yet); Offline when they have no classes at all.
@@ -8459,16 +8570,21 @@ function studentUsualMode(studentId, subjectId, type) {
   const best = Object.entries(counts).sort((a,b) => b[1]-a[1])[0];
   return best && RATE_MODES.includes(best[0]) ? best[0] : 'Offline';
 }
+// The student a fee form draft belongs to: the request being edited, else the open student.
+function draftStudentId(d) {
+  if (d === editRequestDraft) { const row = data.subscriptions.find(x => x.id === editingRequestId); if (row) return row.studentId; }
+  return selectedStudentId;
+}
 function refillRequestAmount(d) {
   if (d.amountEdited) return;
-  const q = feeQuote(d.subjectId, d.type, d.mode, d.classes);
+  const q = feeQuote(d.subjectId, d.type, d.mode, d.classes, draftStudentId(d));
   d.amountPaid = q && q.rate ? q.amount : '';
 }
 function feeQuoteHintHtml(d, which) {
-  const q = feeQuote(d.subjectId, d.type, d.mode, d.classes);
+  const q = feeQuote(d.subjectId, d.type, d.mode, d.classes, draftStudentId(d));
   if (!q) return '';
-  if (!q.rate) return `<span style="color:var(--brick)">⚠ No rate in Fee setup for ${esc(catLabel(q.subj.category))}, ${q.type}, ${q.mode} — type the amount yourself.</span>`;
-  const sum = `Fee setup: ₹${q.rate.toFixed(2)} × ${q.classes} class${q.classes===1?'':'es'}${q.tier ? `, ${q.tier.percent}% discount (${q.tier.minClasses}+ classes)` : ''} = <b>₹${q.amount.toFixed(2)}</b>`;
+  if (!q.rate) return `<span style="color:var(--brick)">⚠ No rate in ${q.special ? 'this student\'s special rate' : 'Fee setup'} for ${esc(catLabel(q.subj.category))}, ${q.type}, ${q.mode} — type the amount yourself.</span>`;
+  const sum = `${q.special ? specialRateTag(q.special).trim() : 'Fee setup:'} ₹${q.rate.toFixed(2)} × ${q.classes} class${q.classes===1?'':'es'}${q.tier ? `, ${q.tier.percent}% discount (${q.tier.minClasses}+ classes)` : ''} = <b>₹${q.amount.toFixed(2)}</b>`;
   const differs = d.amountPaid !== '' && Math.abs(Number(d.amountPaid) - q.amount) > 0.009;
   return differs ? `${sum} — you've entered your own amount. <button type="button" class="btn-small" onclick="useQuoteAmount('${which}')">Use ₹${q.amount.toFixed(2)}</button>` : sum;
 }
@@ -8521,7 +8637,7 @@ function requestCalcNote() {
   r.mode = d.mode || r.mode;
   r.classes = Number(d.classes) || 0;
   r.classesEdited = r.classes !== r.baseClasses;
-  const q = feeQuote(r.subj.id, r.ty, r.mode, r.classes);
+  const q = feeQuote(r.subj.id, r.ty, r.mode, r.classes, r.student.id);
   r.quoteAmount = q && q.rate ? q.amount : 0;
   r.amount = Number(d.amountPaid) || 0;
   r.amountEdited = Math.abs(r.amount - r.quoteAmount) > 0.009;
@@ -8677,7 +8793,7 @@ function calculatedBaseAmount() {
   const subj = subject(calcSubjectId);
   if (!subj) return 0;
   const classes = Number(calcClasses) || 0;
-  const rate = Number(feeRates[rateKey(subj.category,calcType,calcMode)]) || 0;
+  const rate = feeRateFor(calcStudentId, subj, calcType, calcMode).rate;
   return rate * classes;
 }
 // The single best-matching tier: the highest minClasses threshold the entered
@@ -9136,10 +9252,10 @@ function halfRound(n) { return Math.round(n * 2) / 2; }
 function demandRunLabel(month) { return 'Fee request run ' + monthLabelOf(month); }
 function demandPriceText(q) {
   if (!q || !q.rate) return '';
-  return `${q.classes} × ${rupees(q.rate)} (${q.mode})${q.tier ? ` − ${q.tier.percent}%` : ''} = ${rupees(q.amount)}`;
+  return `${q.classes} × ${rupees(q.rate)} (${q.mode}${q.special ? ', special rate' : ''})${q.tier ? ` − ${q.tier.percent}%` : ''} = ${rupees(q.amount)}`;
 }
 function demandRowNote(r) {
-  const price = r.amountEdited ? `${r.classes} classes, amount set by admin ${rupees(r.amount)} (Fee setup ${rupees(r.quoteAmount)})` : demandPriceText(feeQuote(r.subj.id, r.ty, r.mode, r.classes));
+  const price = r.amountEdited ? `${r.classes} classes, amount set by admin ${rupees(r.amount)} (${specialRateRow(r.student.id, r.subj.id, r.ty) ? 'special rate' : 'Fee setup'} ${rupees(r.quoteAmount)})` : demandPriceText(feeQuote(r.subj.id, r.ty, r.mode, r.classes, r.student.id));
   const classesNote = r.classesEdited ? `${r.why} → classes changed by admin to ${r.classes}` : r.why;
   return `${r.manual ? 'Calculated ' + todayStr + ' for ' + monthLabelOf(r.month) : demandRunLabel(r.month)} · ${classesNote}. Amount: ${price}${r.leaveAdjustment ? `. Teacher-leave adjustment: −${r.leaveAdjustment} class${r.leaveAdjustment===1?'':'es'} (${r.leaveNote})` : ''}${r.reviewFlag ? `. REVIEW: ${r.reviewFlag}` : ''}`;
 }
@@ -9220,8 +9336,8 @@ function demandCalcFor(student, subj, ty, month) {
     why = `${frequency.method}: ${frequency.expected} expected classes − ${leave.count} teacher-leave adjustment − balance ${left<0?`(${owed} owed)`:`${left} left`} = ${classes} classes`;
   }
   if (!Number.isFinite(classes) || classes <= 0) return { skip: `No positive class request calculated (balance ${left}, expected ${expected}).` };
-  const q = feeQuote(subj.id, ty, mode, classes);
-  if (!q || !q.rate || !q.amount || q.amount <= 0) return { skip: `Missing or zero Fee Setup rate for ${catLabel(subj.category)}, ${ty}, ${mode}; no zero-value request created.`, review: true };
+  const q = feeQuote(subj.id, ty, mode, classes, student.id);
+  if (!q || !q.rate || !q.amount || q.amount <= 0) return { skip: `Missing or zero ${specialRateRow(student.id, subj.id, ty) ? 'special' : 'Fee Setup'} rate for ${catLabel(subj.category)}, ${ty}, ${mode}; no zero-value request created.`, review: true };
   return { row: { student, subj, ty, month, method, why, left, owed, mode, classes, baseClasses: classes, amount: q.amount, quoteAmount: q.amount, include: true, classesEdited: false, amountEdited: false, expected, expectedDisplay, expectedDisplayNote: displayFrequency.review || '', frequencyMethod: frequency.method, leaveAdjustment: leave.count, leaveNote: leave.note, reviewFlag: '' } };
 }
 function demandDataSignature() {
@@ -9236,7 +9352,8 @@ function demandDataSignature() {
     sessions: stable(data.sessions.map(x=>[x.id,x.date,x.studentId,x.teacherId,x.subjectId,x.classType,x.count,x.status,x.mode])),
     frequency: stable(frequencyRows.map(x=>[x.student_id,x.subject_id,...FREQUENCY_DAYS.map(([k])=>x[k])])),
     schedules: stable(scheduledClasses.map(x=>[x.id,x.date,x.time,x.studentId,x.teacherId,x.subjectId,x.classType,x.status,x.linkedSessionId])),
-    leave: stable(teacherLeave.map(x=>[x.id,x.teacherId,x.startDate,x.endDate,x.reason])), feeRates, discountTiers
+    leave: stable(teacherLeave.map(x=>[x.id,x.teacherId,x.startDate,x.endDate,x.reason])), feeRates, discountTiers,
+    specialRates: stable(studentFeeRates.map(x=>[x.id,x.studentId,x.subjectId,x.type,x.rate,x.offlineRate,x.fromDate,x.toDate]))
   });
 }
 async function previewDemand() {
@@ -9266,7 +9383,7 @@ function demandRowSet(i, field, val) {
   else if (field === 'classes') {
     const n = halfRound(Number(val) || 0); if (n <= 0) { render(); return; }
     r.classes = n; r.classesEdited = n !== r.baseClasses;
-    const q = feeQuote(r.subj.id, r.ty, r.mode, n);
+    const q = feeQuote(r.subj.id, r.ty, r.mode, n, r.student.id);
     r.quoteAmount = q && q.rate ? q.amount : 0;
     if (!r.amountEdited) r.amount = r.quoteAmount;
   } else if (field === 'amount') {
@@ -9315,7 +9432,7 @@ async function confirmDemand() {
       const fresh = demandCalcFor(student, subj, r.ty, month);
       if (!fresh.row) { await sb.from('fee_request_runs').update({status:'reset',reset_at:new Date().toISOString(),reset_by:currentUserId||null,reset_reason:'Calculation changed before creating requests',updated_at:new Date().toISOString()}).eq('target_month',month+'-01'); demandRunState = { ...demandRunState, status:'reset' }; demandConfirming=false; demandMsg=`Cannot confirm ${studentLabel(student)} · ${subj.name} (${r.ty}): ${fresh.skip || 'calculation changed'}. Refresh the preview.`; render(); return; }
       // Manual edits are retained only if the underlying rule calculation is still valid.
-      checked.push({ ...r, student, subj, mode: fresh.row.mode, quoteAmount: feeQuote(subj.id,r.ty,fresh.row.mode,r.classes)?.amount || 0, why: fresh.row.why, left: fresh.row.left, owed: fresh.row.owed, expected: fresh.row.expected, leaveAdjustment: fresh.row.leaveAdjustment, leaveNote: fresh.row.leaveNote });
+      checked.push({ ...r, student, subj, mode: fresh.row.mode, quoteAmount: feeQuote(subj.id,r.ty,fresh.row.mode,r.classes,student.id)?.amount || 0, why: fresh.row.why, left: fresh.row.left, owed: fresh.row.owed, expected: fresh.row.expected, leaveAdjustment: fresh.row.leaveAdjustment, leaveNote: fresh.row.leaveNote });
     }
     for (const r of checked) {
       if (!Number.isFinite(Number(r.classes)) || Number(r.classes) <= 0 || Math.abs(Number(r.classes) * 2 - Math.round(Number(r.classes) * 2)) > 0.0001 || !Number.isFinite(Number(r.amount)) || Number(r.amount) <= 0) {
@@ -10135,7 +10252,7 @@ async function aiNextMonthForecast(studentId) {
     var predicted=0;for(var dd=1;dd<=daysInNext;dd++){if(weekdays.has(new Date(yr,mo-1,dd).getDay()))predicted++;}
     var remaining=Math.max(0,studentRemaining(studentId,subj.id,ty));
     var shortfall=Math.max(0,predicted-remaining);
-    var baseRate=Number(feeRates[rateKey(subj.category,ty,'Online')])||0;
+    var baseRate=feeRateFor(studentId,subj,ty,'Online').rate;
     var amount=Math.round(baseRate*shortfall);
     if(predicted>0)forecasts.push(subj.name+' '+ty+': '+predicted+' classes expected, '+remaining+' already paid, '+(shortfall>0?shortfall+' more needed (Rs'+amount+')':'fully covered'));
   });});
@@ -12929,6 +13046,7 @@ function renderStudents() {
       <div class="table-scroll"><table><tr><th>Subject</th><th>Type</th><th>Subscribed</th><th>Used</th><th>Expired</th><th>Remaining</th></tr>${balRows}</table></div>
 
       </div>
+      ${studentSpecialRatesHtml(student, enrolledSubjects)}
       <div class="student-section" style="background:#e8f8ee">
       <h3>Fee requests <button class="help-btn" onclick="openHelp('fee-requests',event)">?</button></h3>
       <div class="hint">A fee request is a placeholder for an expected payment — it does not add to the student's class count until you mark it Paid. Once paid, it becomes a normal subscription payment below.</div>
@@ -14201,7 +14319,8 @@ function renderFees() {
   const calcSubjectPool = calcStudentId ? byName(subjectsForStudent(calcStudentId)) : [];
   const calcSubjectOptions = `<option value="">Subject…</option>` + calcSubjectPool.map(s=>`<option value="${s.id}" ${calcSubjectId===s.id?'selected':''}>${esc(s.name)} (${catLabel(s.category)})</option>`).join('');
   const calcSubj = calcSubjectId ? subject(calcSubjectId) : null;
-  const calcRate = calcSubj ? (Number(feeRates[rateKey(calcSubj.category,calcType,calcMode)]) || 0) : 0;
+  const calcRateInfo = calcSubj ? feeRateFor(calcStudentId, calcSubj, calcType, calcMode) : { rate: 0, special: null };
+  const calcRate = calcRateInfo.rate;
   const baseAmount = calculatedBaseAmount();
   const appliedTier = applicableDiscountTier();
   const finalAmount = calculatedDiscountedAmount();
@@ -14352,7 +14471,7 @@ function renderFees() {
 
     <div class="card">
       <h2 id="feeCalculatorSection">Fee calculator <button class="help-btn" onclick="openHelp('fee-calc',event)">?</button></h2>
-      <div class="hint">Pick a student and one of their enrolled subjects — the category comes from the subject automatically. The amount is calculated from the rate table and discount structure above, and can be pushed straight to a Fee Request.</div>
+      <div class="hint">Pick a student and one of their enrolled subjects — the category comes from the subject automatically. The amount is calculated from the rate table (or the student's agreed special rate, when there is one) and discount structure above, and can be pushed straight to a Fee Request.</div>
       ${calcMsg ? `<div class="hint" style="color:${calcMsg.includes('pushed')?'var(--forest)':'var(--brick)'}">${esc(calcMsg)}</div>` : ''}
       <div class="row-form">
         <input type="text" id="calcStudentSearchBox" placeholder="Search by name, ID, parent, or mobile…" oninput="filterCalcStudentPicker()" style="width:220px">
@@ -14364,7 +14483,7 @@ function renderFees() {
         <select onchange="calcSet('mode', this.value)">${RATE_MODES.map(md=>`<option value="${md}" ${calcMode===md?'selected':''}>${md}</option>`).join('')}</select>
         <label>Classes <input type="number" id="calcClasses" value="${calcClasses}" min="0.5" step="0.5" style="width:80px" onchange="calcClasses=this.value; render();"></label>
       </div>
-      ${calcSubj ? `<div class="hint">Rate for ${esc(calcSubj.name)} (${catLabel(calcSubj.category)}, ${calcType}, ${calcMode}): <b>₹${calcRate.toFixed(2)}</b> per class</div>` : ''}
+      ${calcSubj ? `<div class="hint">Rate for ${esc(calcSubj.name)} (${catLabel(calcSubj.category)}, ${calcType}, ${calcMode}): <b>₹${calcRate.toFixed(2)}</b> per class${calcRateInfo.special ? specialRateTag(calcRateInfo.special) + ' agreed for this student' : ''}</div>` : ''}
       ${calcSubj && studentRemaining(calcStudentId, calcSubjectId, calcType) < 0 ? `<div class="hint" style="color:var(--brick)">⚠ Negative balance: this student is already ${Math.abs(studentRemaining(calcStudentId, calcSubjectId, calcType))} classes over for ${esc(calcSubj.name)} (${calcType}).</div>` : ''}
       <div class="row-form">
         <label>Date <input type="date" id="calcDate" value="${calcDate}" onchange="calcDate=this.value; render();"></label>
@@ -15924,7 +16043,7 @@ function sCalcBaseAmount() {
   const subj = subject(sCalcSubjectId);
   if (!subj) return 0;
   const classes = Number(sCalcClasses) || 0;
-  const rate = Number(feeRates[rateKey(subj.category, sCalcType, sCalcMode)]) || 0;
+  const rate = feeRateFor(sCalcStudentId, subj, sCalcType, sCalcMode).rate;
   return rate * classes;
 }
 function sCalcAppliedTier() {
@@ -15954,6 +16073,7 @@ function studentFeeCalculatorHtml(student) {
   const effectiveTypes = TYPES.includes(student.classTypePreference) ? [student.classTypePreference] : TYPES;
   const effectiveModes = ['Offline','Online'].includes(student.modePreference) ? [student.modePreference] : RATE_MODES;
 
+  sCalcStudentId = student.id;
   // Snap subject to this student's list if current ID is missing/stale
   if (!sCalcSubjectId || !mySubjs.some(s => s.id === sCalcSubjectId)) {
     sCalcSubjectId = mySubjs.length ? mySubjs[0].id : '';
@@ -15972,9 +16092,18 @@ function studentFeeCalculatorHtml(student) {
     const headers = effectiveTypes.flatMap(ty => effectiveModes.map(md => `${ty} / ${md}`));
     return { catName: cat.name + (cat.archived ? ' (archived)' : ''), cells, headers };
   });
+  // Agreed special rates (SQL 63) replace the category rate for that subject: one extra row per subject.
+  mySubjs.forEach(subj => {
+    if (!effectiveTypes.some(ty => specialRateRow(student.id, subj.id, ty))) return;
+    const cells = effectiveTypes.flatMap(ty => effectiveModes.map(md => {
+      const info = feeRateFor(student.id, subj, ty, md);
+      return `<td style="text-align:right;padding:4px 10px">${info.special ? `<b>₹${info.rate.toFixed(0)}</b>` : `₹${info.rate.toFixed(0)}`}</td>`;
+    })).join('');
+    rateRowsHtml.push({ catName: subj.name + ' — your special rate', cells, headers: [] });
+  });
 
   // Build one header row + data rows
-  const allHeaders = rateRowsHtml[0] ? rateRowsHtml[0].headers : [];
+  const allHeaders = effectiveTypes.flatMap(ty => effectiveModes.map(md => `${ty} / ${md}`));
   const rateTableHtml = `
     <div class="table-scroll"><table>
       <tr><th style="text-align:left">Category</th>${allHeaders.map(h=>`<th style="text-align:right">${esc(h)}</th>`).join('')}</tr>
@@ -15992,7 +16121,8 @@ function studentFeeCalculatorHtml(student) {
   // --- Calculator ---
   // (subject already snapped above)
   const calcSubj = sCalcSubjectId ? subject(sCalcSubjectId) : null;
-  const calcRate = calcSubj ? (Number(feeRates[rateKey(calcSubj.category, sCalcType, sCalcMode)]) || 0) : 0;
+  const calcRateInfo = calcSubj ? feeRateFor(student.id, calcSubj, sCalcType, sCalcMode) : { rate: 0, special: null };
+  const calcRate = calcRateInfo.rate;
   const base = sCalcBaseAmount();
   const tier = sCalcAppliedTier();
   const final = sCalcFinal();
@@ -16007,7 +16137,7 @@ function studentFeeCalculatorHtml(student) {
     <div class="card"><div class="empty">You are not enrolled in any subjects yet — contact the admin to get enrolled.</div></div>` : `
     <div class="card">
       <h2>📋 Applicable Rates</h2>
-      <div class="hint" style="margin-bottom:10px">Per-class rates for your enrolled subject categories. These are the school-wide rates — your final fee may include a bulk discount (see below).</div>
+      <div class="hint" style="margin-bottom:10px">Per-class rates for your enrolled subject categories. These are the school-wide rates${studentFeeRates.some(r => r.studentId === student.id) ? ', except where a special rate has been agreed for you (shown in bold on its own row)' : ''} — your final fee may include a bulk discount (see below).</div>
       ${rateTableHtml}
     </div>
     <div class="card">
@@ -16027,7 +16157,7 @@ function studentFeeCalculatorHtml(student) {
         <label>Number of classes <input type="number" min="1" step="0.5" style="width:90px" value="${sCalcClasses}"
           onchange="sCalcClasses=this.value;render()"></label>
       </div>
-      ${calcSubj ? `<div class="hint">Rate: <b>₹${calcRate.toFixed(2)}</b> per class for ${esc(calcSubj.name)} (${catLabel(calcSubj.category)}, ${sCalcType}, ${sCalcMode})</div>` : ''}
+      ${calcSubj ? `<div class="hint">Rate: <b>₹${calcRate.toFixed(2)}</b> per class for ${esc(calcSubj.name)} (${catLabel(calcSubj.category)}, ${sCalcType}, ${sCalcMode})${calcRateInfo.special ? specialRateTag(calcRateInfo.special) : ''}</div>` : ''}
       ${remaining !== null && remaining < 0 ? `<div class="hint" style="color:var(--brick)">⚠ You currently have a negative balance of ${Math.abs(remaining)} classes for this subject (${sCalcType}).</div>` : ''}
       <div style="margin-top:12px;padding:12px 14px;background:rgba(60,94,66,0.07);border-radius:8px;border:1px solid rgba(60,94,66,0.18)">
         <div class="hint" style="font-size:14px">Before discount: <b>₹${base.toFixed(2)}</b></div>
@@ -18249,7 +18379,7 @@ const HELP = {
   'fee-msg-settings': { t:'Fee Message Settings', b:'<ul><li>Sets the UPI ID and contact number shown in every fee reminder message.</li><li>Parents send payment screenshots to the contact number.</li></ul>' },
   'fee-setup': { t:'Fee setup', b:'<ul><li>Per-class rates for each teacher, category, class type and mode.</li><li>Used to calculate teacher payroll in Reports.</li><li>A missing rate means those classes show as Rs 0 in payroll.</li></ul>' },
   'discount': { t:'Discount structure', b:'<ul><li>Optional discounts when a student subscribes to multiple subjects.</li><li>Used in the Fee Calculator as a reference — does not automatically apply to recorded payments.</li></ul>' },
-  'fee-calc': { t:'Fee calculator', b:"<ul><li>Calculates the expected fee based on a student's enrolled subjects and class type.</li><li>Click Push fee request to send the amount straight to the student's fee requests.</li></ul>" },
+  'fee-calc': { t:'Fee calculator', b:"<ul><li>If the student has an agreed special rate (Student page → Special fee rates), that rate is used instead of Fee setup. Discount tiers still apply.</li><li>Calculates the expected fee based on a student's enrolled subjects and class type.</li><li>Click Push fee request to send the amount straight to the student's fee requests.</li></ul>" },
   'renewal': { t:'Students needing renewal', b:'<ul><li>Active students with 0 or fewer classes remaining in any subject.</li><li>Also shows students enrolled in a subject who have never bought classes (Never subscribed).</li><li>Click Request Fees to jump to the Fee Calculator for that student.</li></ul>' },
   'bulk-parents': { t:'Create all parent logins', b:"<ul><li>Preview lists every active student's family that needs a parent login. Nothing is saved until you press Create.</li><li>Brothers and sisters with the same parent mobile or main mobile share one login with all of them linked.</li><li>Login ID and password are the parent's 10-digit mobile. When the parent logs in with it, the app asks them to change the password.</li><li>A family that already has a parent login is not given a second one; only children missing from it are linked.</li><li>Skipped: students with no phone number, or a number saved on more than 4 students.</li><li>After Create, each family's row has 📤 WhatsApp buttons with the message ready (app link, login ID, password). Later, open a parent from Manage parent logins to send it again.</li></ul>" },
   'razorpay-report': { t:'Razorpay payments', b:"<ul><li>Every payment Razorpay sent to the app in the month (India time), from 23 Oct 2026 when the webhook started.</li><li><b>Fee</b>: confirmed on the Fees page; shows the students, subjects and amounts recorded. <b>Demo</b>: linked to a website demo booking. <b>Set aside</b>: Not a fee / Not a demo. <b>Waiting</b>: still in Razorpay payments to confirm.</li><li>Fees difference = received minus recorded: Razorpay's charge added on top, or excess paid.</li><li>Refunds made in Razorpay are not shown; record them in the app as usual.</li></ul>" },
