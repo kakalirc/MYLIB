@@ -285,7 +285,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-27 22:15 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-27 22:20 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -9207,8 +9207,11 @@ function familyFeeMessage(studentId, short) {
   const many = reqs.length > 1;
   const forMonth = months.length ? ` for ${joinAnd(months)}` : '';
   const subjLabel = r => { const subj = subject(r.subjectId); return subj ? subj.name : 'Subject'; };
-  const opening = short ? 'This is a gentle reminder' : 'We would like to remind you';
-  const lines = [`Dear ${familyParentName(studentId)},`, '', `${opening} that the tuition fee${many ? 's' : ''}${forMonth} for the classes of ${joinAnd(names)} ${many ? 'are' : 'is'}${short ? ' still' : ''} due.`, '', 'Fee Details'];
+  // First message: plain fee details; the Short reminder (second message) is the one that says "reminder".
+  const opening = short
+    ? `This is a gentle reminder that the tuition fee${many ? 's' : ''}${forMonth} for the classes of ${joinAnd(names)} ${many ? 'are' : 'is'} still due.`
+    : `Please find below the tuition fee details${forMonth} for the classes of ${joinAnd(names)}.`;
+  const lines = [`Dear ${familyParentName(studentId)},`, '', opening, '', 'Fee Details'];
   kids.forEach(s => {
     const mine = reqs.filter(r => r.studentId === s.id);
     lines.push('');
