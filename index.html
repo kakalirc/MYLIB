@@ -285,7 +285,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-27 21:55 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-27 22:00 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -9049,7 +9049,7 @@ function setFeeMessageShort(on) {
 }
 function feeMessageShortToggleHtml() {
   const r = data.subscriptions.find(x => x.id === feeMessageForRequestId);
-  return `<div class="row-form" style="margin:4px 0;align-items:center"><label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" ${feeMessageShort ? 'checked' : ''} onchange="setFeeMessageShort(this.checked)"> Short reminder (same message without App Login and Discount offers)</label> ${r ? familyReminderHtml(r.studentId) : ''}</div>`
+  return `<div class="row-form" style="margin:4px 0;align-items:center"><label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" ${feeMessageShort ? 'checked' : ''} onchange="setFeeMessageShort(this.checked)"> Short reminder (opening line says “gentle reminder … still due”)</label> ${r ? familyReminderHtml(r.studentId) : ''}</div>`
     + (feeReminderMsg ? `<div class="hint" style="color:var(--brick)">${esc(feeReminderMsg)}</div>` : '');
 }
 function generateFeeMessageForRequest(requestId) {
@@ -9204,7 +9204,7 @@ function remainingText(left) {
   return `${left} class${left === 1 ? '' : 'es'} still available (before this payment)`;
 }
 // One message for every pending request in the family (one request or many: same layout).
-// short = a second reminder: the same message without App Login and Discount offers.
+// short = a second reminder: the same message, only the opening says "gentle reminder … still due".
 function familyFeeMessage(studentId, short) {
   const reqs = familyPendingRequests(studentId);
   if (!reqs.length) return '';
@@ -9240,20 +9240,18 @@ function familyFeeMessage(studentId, short) {
   if (upiId) lines.push(`UPI: ${upiId}`);
   lines.push(`Online Payment: ${RAZORPAY_FEE_PAGE}`, 'While making the online payment, please enter the following details:', `Tuition Fee: ${inrText(total)}`, `Student Name: ${names.join(', ')}`, '');
   if (feeContactMobile) lines.push(`After completing the payment, kindly share the payment confirmation screenshot at ${feeContactMobile} for our records.`, '');
-  if (!short) {
-    // The parent login shows every child's fees, so it is given when the family has one; else each child's login.
-    const parentIds = new Set((data.parentStudents || []).filter(m => kids.some(s => s.id === m.studentId)).map(m => m.parentUserId));
-    const parentLogin = data.users.find(u => u.role === 'Parent' && parentIds.has(u.id) && !u.archived);
-    const logins = parentLogin ? [] : kids.map(s => ({ s, u: data.users.find(u => u.role === 'Student' && u.linkedId === s.id && !u.archived) })).filter(x => x.u);
-    if (parentLogin || logins.length) {
-      lines.push('App Login');
-      if (parentLogin) lines.push(`Parent login (shows ${kids.length > 1 ? 'all your children’s' : 'your child’s'} classes and fees): ${parentLogin.username}`);
-      logins.forEach(x => lines.push(`${kids.length > 1 ? x.s.name + ' - ' : ''}Login ID: ${x.u.username}`));
-      lines.push('Password: same as the login ID, unless you have already changed it.');
-      lines.push('Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/', '');
-    }
-    lines.push('Discount offers: https://www.libeducation.com/discountoffers', '', 'Thank you for choosing LIB Education. We appreciate your continued trust and support.', '');
-  } else lines.push('Thank you for choosing LIB Education.', '');
+  // The parent login shows every child's fees, so it is given when the family has one; else each child's login.
+  const parentIds = new Set((data.parentStudents || []).filter(m => kids.some(s => s.id === m.studentId)).map(m => m.parentUserId));
+  const parentLogin = data.users.find(u => u.role === 'Parent' && parentIds.has(u.id) && !u.archived);
+  const logins = parentLogin ? [] : kids.map(s => ({ s, u: data.users.find(u => u.role === 'Student' && u.linkedId === s.id && !u.archived) })).filter(x => x.u);
+  if (parentLogin || logins.length) {
+    lines.push('App Login');
+    if (parentLogin) lines.push(`Parent login (shows ${kids.length > 1 ? 'all your children’s' : 'your child’s'} classes and fees): ${parentLogin.username}`);
+    logins.forEach(x => lines.push(`${kids.length > 1 ? x.s.name + ' - ' : ''}Login ID: ${x.u.username}`));
+    lines.push('Password: same as the login ID, unless you have already changed it.');
+    lines.push('Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/', '');
+  }
+  lines.push('Discount offers: https://www.libeducation.com/discountoffers', '', 'Thank you for choosing LIB Education. We appreciate your continued trust and support.', '');
   lines.push('Regards,', 'LIB Education');
   const out = []; let prevBlank = false;
   for (const l of lines) { if (l === '') { if (!prevBlank) out.push(''); prevBlank = true; } else { out.push(l); prevBlank = false; } }
