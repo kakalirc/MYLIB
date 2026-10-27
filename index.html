@@ -284,7 +284,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-27 18:00 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-27 18:40 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -627,7 +627,7 @@ const APP_USAGE_SCREENS = {
   schedule: 'Class Schedule', students: 'Students', studyplans: 'Study Plans', homework: 'Homework', questionbank: 'Question Bank',
   research: 'Research', attendance: 'Give Attendance', report: 'Attendance Report', availability: 'Availability', profile: 'My Profile',
   setup: 'Setup / Teachers & Subjects', dashboard: 'Dashboard', log: 'Class Log', chat: 'Communication', wixbookings: 'Demo Bookings',
-  fees: 'Fees', rebuildclasses: 'Rebuild Pending Classes', expenses: 'Expenses', reports: 'Reports & Export', parents: 'Parents', admins: 'Manage Admins', users: 'Setup',
+  fees: 'Fees', rebuildclasses: 'Rebuild Pending Classes', expenses: 'Expenses', reports: 'Reports & Export', payroll: 'Payroll', parents: 'Parents', admins: 'Manage Admins', users: 'Settings', superadmin: 'Superadmin tools',
   audit: 'Audit Log', support: 'Support', ai: 'AI',
 };
 function appUsageFeatureLabel(f) {
@@ -9648,21 +9648,24 @@ const SUPPORT_KB = {
 - Dashboard: at-a-glance stats, AI summaries and students at risk.
 - Class Log (Daily work): record daily attendance. Pick the date, find the student, mark Present/Absent/Holiday.
 - Communication (Daily work): chat with teachers, students and parents, and post announcements.
-- Students & Subscriptions (Daily work): add or edit students, enrol them in subjects, record payments, refunds and credit transfers, see subscription history and receipts.
 - Demo Bookings (Daily work): demo bookings from the website arrive here (New → Scheduled → Converted/Cancelled). A converted demo gives the teacher a demo bonus.
-- Fees (Money): per-class rates (Fee setup), discount structure, fee calculator and the UPI / contact details used in fee messages.
+- Support (Daily work): view and resolve issues raised by teachers, students or parents.
+- Rebuild Pending Classes (Daily work): rebuild the pending class schedule from each student's class frequency.
+- Fees (Money): per-class rates (Fee setup), discount structure, fee calculator, students needing renewal, Razorpay payments to confirm, pending fee requests, all subscription payments and the UPI / contact details used in fee messages.
+- Payroll (Money): each teacher's earnings for the month, demo bonuses, adjustments, mark paid and salary slips.
 - Expenses (Money): monthly overhead costs such as rent and electricity.
-- Reports & Export (Money): students needing renewal, pending fee requests, all payments, refunds, teacher payroll and Excel export.
+- Reports & Export (Money): student report, student balances, refunds, Razorpay payments history, net profit and Excel export.
+- Students & Subscriptions (People): add or edit students, enrol them in subjects, record payments, refunds and credit transfers, see subscription history and receipts.
 - Teachers & Subjects (People): add teachers and subjects, and set which teacher teaches each subject.
 - Parents (People): parent contact details and which children they are linked to.
-- Manage Admins (People): add or remove admin accounts.
-- Study Plans (People): read-only view of every teacher's study plans and progress, plus the Textbook library (every uploaded book; rename, retag or delete).
-- Homework (People): every homework set by teachers, with filters by teacher, student and status.
-- Question Bank (People): Review Queue (approve new or edited questions), Full Question Bank, Archived, Practice Papers and Past Papers. Pick board, subject and grade to see questions. Old-syllabus questions stay hidden unless you tick "Old syllabus only".
-- Setup (System): grades, categories, boards and subject names; Question Bank access and Research access (which teachers get those tabs); add users and manage their logins; change your password; backups.
+- Study Plans (Teaching): read-only view of every teacher's study plans and progress, plus the Textbook library (every uploaded book; rename, retag or delete).
+- Homework (Teaching): every homework set by teachers, with filters by teacher, student and status.
+- Question Bank (Teaching): Review Queue (approve new or edited questions), Full Question Bank, Archived, Practice Papers and Past Papers. Pick board, subject and grade to see questions. Old-syllabus questions stay hidden unless you tick "Old syllabus only".
+- Settings (System, once called Setup): grades, categories, boards and subject names; Question Bank access and Research access (which teachers get those tabs); add users and manage their logins; change your password.
+- Manage Admins (System): add or remove admin accounts.
 - AI (System): AI Settings (master switch, API key, cost estimate prices), AI access (per role and per person) and AI usage (calls and estimated cost per user and feature).
 - Audit Log (System): every change made in the app, login activity, and App usage (which features each person uses). Each part opens with a tap.
-- Support (System): view and resolve issues raised by teachers, students or parents.`,
+- Superadmin tools (Superadmin, superuser admins only): Academic Year, Export all data, Import backup, truncate old Audit & Login entries, clear all data and Audit Logging Controls. Each opens with the unlock password.`,
   Teacher: `My LIB app guide for Teacher:
 - Dashboard: today's classes, students needing renewal, low balances, students not seen in a while, your demo classes and student notes.
 - Class Schedule (Teaching): your classes by day or month. Set up a weekly schedule, add an extra class, mark a class done or remove a pending one.
@@ -11286,7 +11289,7 @@ async function actuallySaveSessionEdit(id, count, date) {
   render();
 }
 
-// Address-bar names that differ from the tab key: Setup (key 'users') shows as #setup,
+// Address-bar names that differ from the tab key: Settings (key 'users', once called Setup) shows as #setup,
 // so Teachers & Subjects (key 'setup') shows as #teachers-subjects. Old #users links still work.
 const TAB_HASH = { users: 'setup', setup: 'teachers-subjects' };
 function tabFromHash(h) { const k = Object.keys(TAB_HASH).find(k => TAB_HASH[k] === h); return k || h; }
@@ -13185,8 +13188,8 @@ function renderDashboard() {
   const unreadChats = chatTotalUnread();
   const cards = [
     { num: todaysClasses, label: `Class${todaysClasses===1?'':'es'} logged today`, tab: 'log' },
-    { num: pendingFeeRequests, label: `Pending fee request${pendingFeeRequests===1?'':'s'}`, action: "setTab('reports'); setTimeout(()=>{ const el=document.getElementById('pendingFeeRequestsSection'); if(el) el.scrollIntoView({behavior:'smooth'}); },120)" },
-    { num: needingRenewal, label: `Student${needingRenewal===1?'':'s'} needing renewal`, action: "setTab('reports'); setTimeout(()=>{ const el=document.getElementById('studentsNeedingRenewalSection'); if(el) el.scrollIntoView({behavior:'smooth'}); },120)" },
+    { num: pendingFeeRequests, label: `Pending fee request${pendingFeeRequests===1?'':'s'}`, action: "rptPendingOpen=true; setTab('fees'); setTimeout(()=>{ const el=document.getElementById('pendingFeeRequestsSection'); if(el) el.scrollIntoView({behavior:'smooth'}); },120)" },
+    { num: needingRenewal, label: `Student${needingRenewal===1?'':'s'} needing renewal`, action: "rptRenewalOpen=true; setTab('fees'); setTimeout(()=>{ const el=document.getElementById('studentsNeedingRenewalSection'); if(el) el.scrollIntoView({behavior:'smooth'}); },120)" },
     { num: unreadChats, label: `Unread chat${unreadChats===1?'':'s'}`, tab: 'chat' },
   ];
   const expiring = expiringSoon();
@@ -13393,7 +13396,7 @@ function renderLog() {
 }
 
 // ---------- render: reports ----------
-function renderReports() {
+function renderReports(only) {
   const balTotals = { grand: 0, totalUsed: 0, totalLeft: 0 };
   TYPES.forEach(ty => { balTotals[ty] = { sub:0, used:0, left:0 }; });
 
@@ -13825,6 +13828,20 @@ function renderReports() {
       <tr class="total"><td colspan="3">Total</td><td>${refundTotalClasses}</td><td>${refundTotalAmount.toFixed(2)}</td><td></td></tr>
     </table></div>` : '<div class="empty">No refunds issued this month.</div>';
 
+  const payrollCardHtml = `
+    <div class="card">
+      <h2>Teacher payroll <button class="help-btn" onclick="openHelp('payroll',event)">?</button></h2>
+      <div class="row-form">
+        <input type="month" value="${payrollMonth}" onchange="setPayrollMonth(this.value)">
+        <input type="text" id="payrollTeacherSearchBox" placeholder="Search by name, ID, or mobile…" oninput="filterPayrollTeacherPicker()" style="width:200px">
+        <select id="payrollTeacherPickerSelect" onchange="setPayrollTeacherFilter(this.value)">${payrollTeacherOptions}</select>
+      </div>
+      ${payrollMsg ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${esc(payrollMsg)}</div>` : ''}
+      ${payrollHtml}
+      ${payrollTeacherPool.length ? `<div class="row-form" style="margin-top:12px"><button class="btn-gold" onclick="exportTeacherPayroll()">Export Teacher Payroll report</button>${payrollTeacherPool.length > 1 ? `<button class="btn-small" onclick="printAllSalarySlips()">📄 Print all salary slips</button>` : ''}</div>` : ''}
+    </div>
+  `;
+  if (only === 'payroll') return payrollCardHtml;
   return `
     <div class="card">
       <h2>Student report</h2>
@@ -13904,17 +13921,6 @@ function renderReports() {
       <div class="row-form"><input type="month" value="${refundReportMonth}" onchange="setRefundReportMonth(this.value)"></div>
       ${refundsHtml}
       ${refundRows.length ? `<div class="row-form" style="margin-top:12px"><button class="btn-gold" onclick="exportRefunds()">Export Refunds report</button></div>` : ''}
-    </div>
-    <div class="card">
-      <h2>Teacher payroll <button class="help-btn" onclick="openHelp('payroll',event)">?</button></h2>
-      <div class="row-form">
-        <input type="month" value="${payrollMonth}" onchange="setPayrollMonth(this.value)">
-        <input type="text" id="payrollTeacherSearchBox" placeholder="Search by name, ID, or mobile…" oninput="filterPayrollTeacherPicker()" style="width:200px">
-        <select id="payrollTeacherPickerSelect" onchange="setPayrollTeacherFilter(this.value)">${payrollTeacherOptions}</select>
-      </div>
-      ${payrollMsg ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${esc(payrollMsg)}</div>` : ''}
-      ${payrollHtml}
-      ${payrollTeacherPool.length ? `<div class="row-form" style="margin-top:12px"><button class="btn-gold" onclick="exportTeacherPayroll()">Export Teacher Payroll report</button>${payrollTeacherPool.length > 1 ? `<button class="btn-small" onclick="printAllSalarySlips()">📄 Print all salary slips</button>` : ''}</div>` : ''}
     </div>
     <div class="card">
       <h2>Net profit — fee collection minus teacher payroll and other expenses</h2>
@@ -14298,18 +14304,6 @@ function renderFees() {
       ${allPaymentsHtml}
       ${allPaymentsFiltered.length ? `<div class="row-form" style="margin-top:12px"><button class="btn-gold" onclick="exportSubscriptionHistory()">Export Subscription History</button></div>` : ''}
     </div>
-    ${isCurrentUserSuperuserAdmin() ? `
-    <div class="card" style="border-color:var(--brick)">
-      <h2 style="color:var(--brick)">Academic Year (Superuser only)</h2>
-      <div class="hint">Current: <b>${esc(globalAcademicYear || 'Not set')}</b>. Changing this advances Grade (and Category, where applicable) for every student except those graded Adult — a once-a-year, whole-school action.</div>
-      ${bulkAcademicYearMsg ? `<div class="hint" style="color:${bulkAcademicYearMsg.startsWith('Grade update complete')?'var(--forest)':'var(--brick)'}">${esc(bulkAcademicYearMsg)}</div>` : ''}
-      <div class="row-form">
-        <input type="text" id="bulkAcademicYearInput" placeholder="e.g. 2026-27" style="width:140px">
-        <button class="btn-small" style="background:var(--brick);color:#fff" onclick="startBulkAcademicYearChange()">Advance everyone</button>
-      </div>
-    </div>
-    ${bulkAcademicYearConfirmModalHtml()}
-    ` : ''}
     ${expiryRulesCardHtml()}
     <div class="card">
       <h2>Fee Message Settings <button class="help-btn" onclick="openHelp('fee-msg-settings',event)">?</button></h2>
@@ -15168,7 +15162,30 @@ function renderUsers() {
     </div>
     ${bioSettingsCardHtml()}
 
-    ${isCurrentUserSuperuserAdmin() ? `
+    ${photoSizeErrorPopupHtml()}
+  `;
+}
+
+// ---------- Superadmin page (superuser admins only; every section needs the unlock password) ----------
+function renderSuperadmin() {
+  if (!isCurrentUserSuperuserAdmin()) return '<div class="card"><div class="empty">This page is for superuser admins only.</div></div>';
+  return `
+    <div class="card">
+      <h2>Superadmin</h2>
+      <div class="hint">Whole-school and data actions, for superuser admins only. Each section opens with the unlock password.</div>
+    </div>
+    <div class="card" style="border-color:var(--brick)">
+      <h2 style="color:var(--brick)">Academic Year</h2>
+      ${!dangerZoneUnlocked ? dangerZoneLockHtml('academic') : `
+      <div class="hint">Current: <b>${esc(globalAcademicYear || 'Not set')}</b>. Changing this advances Grade (and Category, where applicable) for every student except those graded Adult — a once-a-year, whole-school action.</div>
+      ${bulkAcademicYearMsg ? `<div class="hint" style="color:${bulkAcademicYearMsg.startsWith('Grade update complete')?'var(--forest)':'var(--brick)'}">${esc(bulkAcademicYearMsg)}</div>` : ''}
+      <div class="row-form">
+        <input type="text" id="bulkAcademicYearInput" placeholder="e.g. 2026-27" style="width:140px">
+        <button class="btn-small" style="background:var(--brick);color:#fff" onclick="startBulkAcademicYearChange()">Advance everyone</button>
+      </div>
+      `}
+    </div>
+    ${bulkAcademicYearConfirmModalHtml()}
     <div class="card" style="border-color:var(--brick)">
       <h2 style="color:var(--brick)">Export all data (for Access)</h2>
       ${!dangerZoneUnlocked ? dangerZoneLockHtml('export') : `
@@ -15235,8 +15252,6 @@ function renderUsers() {
       </div>
       `}
     </div>
-    ` : ''}
-    ${photoSizeErrorPopupHtml()}
   `;
 }
 
@@ -21859,29 +21874,34 @@ function render() {
     { label: 'Daily work', tabs: [
       ['log', 'Class Log'],
       ['chat', 'Communication' + (chatTotalUnread() ? ` (${chatTotalUnread()})` : '')],
-      ['students', 'Students & Subscriptions'],
       ['wixbookings', 'Demo Bookings' + (data.wixBookings.filter(b=>b.status==='New').length ? ` (${data.wixBookings.filter(b=>b.status==='New').length})` : '')],
+      ['support', 'Support' + (data.supportTickets.filter(t=>t.status==='open').length ? ` (${data.supportTickets.filter(t=>t.status==='open').length})` : '')],
+      ['rebuildclasses', 'Rebuild Pending Classes'],
     ]},
     { label: 'Money', tabs: [
       ['fees', 'Fees'],
-      ['rebuildclasses', 'Rebuild Pending Classes'],
+      ['payroll', 'Payroll'],
       ['expenses', 'Expenses'],
       ['reports', 'Reports & Export'],
     ]},
     { label: 'People', tabs: [
+      ['students', 'Students & Subscriptions'],
       ['setup', 'Teachers & Subjects'],
       ['parents', 'Parents'],
-      ['admins', 'Manage Admins'],
+    ]},
+    { label: 'Teaching', tabs: [
       ['studyplans', 'Study Plans'],
       ['homework', 'Homework'],
       ['questionbank', 'Question Bank'],
     ]},
     { label: 'System', tabs: [
-      ['users', 'Setup'],
+      ['users', 'Settings'],
+      ['admins', 'Manage Admins'],
       ['ai', 'AI'],
       ['audit', 'Audit Log'],
-      ['support', 'Support' + (data.supportTickets.filter(t=>t.status==='open').length ? ` (${data.supportTickets.filter(t=>t.status==='open').length})` : '')],
     ]},
+    // Superuser admins only: backups, imports, clearing data, logging switches and the Academic Year roll-over.
+    ...(isCurrentUserSuperuserAdmin() ? [{ label: 'Superadmin', tabs: [['superadmin', 'Superadmin tools']] }] : []),
   ];
   const tabs = [['dashboard','Dashboard'], ...tabGroups.flatMap(g => g.tabs)]; // flat list still needed wherever code just wants "all tabs"
   const activeGroupLabel = (tabGroups.find(g => g.tabs.some(([key])=>key===currentTab)) || {}).label;
@@ -21927,6 +21947,8 @@ function render() {
   else if (currentTab === 'chat') body = renderChat();
   else if (currentTab === 'log') body = renderLog();
   else if (currentTab === 'reports') body = renderReports();
+  else if (currentTab === 'payroll') body = renderReports('payroll');
+  else if (currentTab === 'superadmin') body = renderSuperadmin();
   else if (currentTab === 'parents') body = renderParents();
   else if (currentTab === 'users') body = renderUsers();
   else if (currentTab === 'admins') body = renderManageAdmins();
@@ -22011,7 +22033,7 @@ async function initApp() {
 
   // Restore tab from URL hash (e.g. app.libeducation.com/#payroll)
   const hashTab = tabFromHash(location.hash.replace('#', ''));
-  const validTabs = ['dashboard','students','teachers','subjects','schedule','fees','expenses','payroll','reports','wixbookings','audit','ai','users','admins','parents','setup','support','settings','homework'];
+  const validTabs = ['dashboard','students','teachers','subjects','schedule','fees','expenses','payroll','reports','wixbookings','audit','ai','users','admins','parents','setup','support','settings','homework','superadmin'];
   if (hashTab && validTabs.includes(hashTab)) currentTab = hashTab;
   // Deep link: #rates-fees → student portal with Rates & Fees panel open
   if (hashTab === 'rates-fees') {
