@@ -285,7 +285,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-27 20:30 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-27 22:00 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1165,6 +1165,7 @@ let aiNextMonth = {loading:false,result:'',error:''};
 let aiSubAdvice = {loading:false,result:'',error:''};
 let feeMessageForRequestId = '';
 let feeMessageDraft = '';
+let feeMessageShort = false;   // Message box: short second reminder instead of the full message
 let feeMessageCopyStatus = '';
 // Support system state
 let supportModal = null; // { category, description, loading, error, success } or null
@@ -4463,6 +4464,7 @@ async function loadStudentsAndSubscriptions() {
       id: r.id, studentId: r.student_id, subjectId: r.subject_id, type: r.type,
       classes: Number(r.classes), amountPaid: Number(r.amount_paid) || 0, date: r.date, kind: r.kind,
       paymentReference: r.payment_reference || '', paymentRemarks: r.payment_remarks || '', calcNote: r.calc_note || '', requestMonth: r.request_month || '',
+      reminderSentAt: r.reminder_sent_at || '', reminderCount: Number(r.reminder_count) || 0,
       transferGroupId: r.transfer_group_id || '',
       expiresOn: r.expires_on || '', expiredBatchId: r.expired_batch_id || '',
       createdAt: r.created_at || ''   // teachers' list (teacher_my_subscriptions) has no saved time
@@ -8787,7 +8789,7 @@ function feeQuoteHintHtml(d, which) {
   return differs ? `${sum} — you've entered your own amount. <button type="button" class="btn-small" onclick="useQuoteAmount('${which}')">Use ₹${q.amount.toFixed(2)}</button>` : sum;
 }
 // The saved working of an auto-raised fee request (SQL 59); stays on the row after it is marked paid.
-function calcNoteHtml(r) { return r && r.calcNote ? `<div class="hint" style="font-size:11px;white-space:normal;min-width:220px;max-width:360px">🧮 ${esc(r.calcNote)}</div>` : ''; }
+function calcNoteHtml(r) { return r && r.calcNote ? `<div class="hint" style="font-size:11px;white-space:normal;min-width:220px;max-width:360px">🧮 ${esc(r.calcNote).replace(/\n/g, '<br>')}</div>` : ''; }
 function requestFormDraft(which) { return which === 'edit' ? editRequestDraft : which === 'pay' ? subDraft : requestDraft; }
 // Typing in Classes/Amount updates the draft and the hint in place (no full
 // render, so the cursor stays in the box).
@@ -8843,7 +8845,7 @@ function requestCalcNote() {
 }
 function requestCalcHtml() {
   const d = requestDraft, note = requestCalcNote();
-  return (note ? `<div class="hint" style="font-size:12px">🧮 ${esc(note)}</div>` : '') + (d.calcMsg ? `<div class="hint" style="color:var(--brick)">${esc(d.calcMsg)}</div>` : '');
+  return (note ? `<div class="hint" style="font-size:12px">🧮 ${esc(note).replace(/\n/g, '<br>')}</div>` : '') + (d.calcMsg ? `<div class="hint" style="color:var(--brick)">${esc(d.calcMsg)}</div>` : '');
 }
 function useQuoteAmount(which) {
   const d = requestFormDraft(which);
@@ -9037,100 +9039,31 @@ async function calculatorPushFeeRequest() {
   render();
 }
 
+// Message box: "Short reminder" swaps the text (any edits are replaced); shows when the family was last reminded.
+function setFeeMessageShort(on) {
+  const r = data.subscriptions.find(x => x.id === feeMessageForRequestId);
+  feeMessageShort = !!on;
+  feeMessageDraft = r ? familyFeeMessage(r.studentId, feeMessageShort) : '';
+  feeMessageCopyStatus = '';
+  render();
+}
+function feeMessageShortToggleHtml() {
+  const r = data.subscriptions.find(x => x.id === feeMessageForRequestId);
+  return `<div class="row-form" style="margin:4px 0;align-items:center"><label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" ${feeMessageShort ? 'checked' : ''} onchange="setFeeMessageShort(this.checked)"> Short reminder (opening line says “gentle reminder … still due”)</label> ${r ? familyReminderHtml(r.studentId) : ''}</div>`
+    + (feeReminderMsg ? `<div class="hint" style="color:var(--brick)">${esc(feeReminderMsg)}</div>` : '');
+}
 function generateFeeMessageForRequest(requestId) {
   const r = data.subscriptions.find(x => x.id === requestId);
+  feeMessageShort = false;
   feeMessageDraft = r ? familyFeeMessage(r.studentId) : '';   // the whole family's pending requests in one message
   feeMessageForRequestId = requestId;
   feeMessageCopyStatus = '';
   render();
 }
-// Pure version of generateFeeMessageForRequest — same text, no state change.
-// Used by waChips in the reports table so chips are available without navigating away.
+// Text of the fee message for a request's family (all its pending requests), without changing any state.
 function feeMessageTextForRequest(requestId) {
   const r = data.subscriptions.find(x => x.id === requestId);
-  if (!r) return '';
-  const s = data.students.find(x => x.id === r.studentId);
-  const subj = subject(r.subjectId);
-  if (!s || !subj) return '';
-
-  const parentName = s.parentName || s.name;
-  const classCount = Number(r.classes) || 0;
-  const amount = (r.amountPaid || 0).toFixed(2);
-
-  // Mode and class type from student details
-  const mode = s.modePreference || '';
-  const classType = s.classTypePreference || r.type || '';
-  const classTypeMode = [classType, mode].filter(Boolean).join(', ');
-
-  // Month: prefer AUTO-YYYY-MM reference, fallback to request date month
-  let monthLabel = '';
-  if (r.paymentReference && r.paymentReference.startsWith('AUTO-')) {
-    const ym = r.paymentReference.replace('AUTO-', ''); // "2026-10"
-    const [yr, mo] = ym.split('-');
-    const d = new Date(Number(yr), Number(mo) - 1, 1);
-    monthLabel = d.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
-  } else if (r.date) {
-    const [yr, mo] = r.date.split('-');
-    const d = new Date(Number(yr), Number(mo) - 1, 1);
-    monthLabel = d.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
-  }
-
-  // Remaining classes before this payment
-  const remaining = studentRemaining(s.id, r.subjectId, r.type);
-  let remainingLine = '';
-  if (remaining < 0) {
-    remainingLine = `Classes currently available: ${remaining} (overdue - please pay at the earliest)`;
-  } else {
-    remainingLine = `Classes currently available: ${remaining} (before this payment)`;
-  }
-
-  // Login credentials
-  const studentLogin = data.users.find(u => u.role === 'Student' && u.linkedId === s.id && !u.archived);
-  const credLine = studentLogin ? `Login ID and password: ${studentLogin.username}` : '';
-
-  const lines = [
-    `Dear ${parentName},`,
-    ``,
-    `We would like to remind you that the tuition fee for ${s.name}’s ${subj.name} classes is due.`,
-    ``,
-    `Fee Details`,
-    classTypeMode ? `Class type: ${classTypeMode}` : '',
-    `Classes Included: ${classCount}`,
-    `Amount Payable: Rs ${amount}`,
-    ``,
-    remainingLine.replace(/^Classes currently available:/, 'Classes Remaining:'),
-    ``,
-    `Payment Options`,
-    upiId ? `UPI: ${upiId}` : '',
-    `Online Payment: ${RAZORPAY_FEE_PAGE}`,
-    `While making the online payment, please enter the following details:`,
-    `Tuition Fee: ${inrText(r.amountPaid)}`,
-    `Student Name: ${s.name}`,
-    ``,
-    feeContactMobile ? `After completing the payment, kindly share the payment confirmation screenshot at ${feeContactMobile} for our records.` : '',
-    ``,
-    credLine ? `App Login` : '',
-    credLine ? `${credLine} (same as login ID for first-time login)` : '',
-    credLine ? `Stable Release: https://app.libeducation.com` : '',
-    credLine ? `Latest Release: https://app.kakali.workers.dev/` : '',
-    credLine ? `LIB Education Website: https://www.libeducation.com/` : '',
-    ``,
-    `Discount offers: https://www.libeducation.com/discountoffers`,
-    ``,
-    `Thank you for choosing LIB Education. We appreciate your continued trust and support.`,
-    ``,
-    `Regards,`,
-    `LIB Education`,
-  ].filter(l => l !== null && l !== undefined && !(l === '' && false));
-
-  // Collapse multiple consecutive blank lines to one
-  const out = [];
-  let prevBlank = false;
-  for (const l of lines) {
-    if (l === '') { if (!prevBlank) out.push(''); prevBlank = true; }
-    else { out.push(l); prevBlank = false; }
-  }
-  return out.join('\n').trim();
+  return r ? familyFeeMessage(r.studentId) : '';
 }
 // ---------- families: one combined fee message per family ----------
 // Students are one family when they share a parent login, or any parent phone number or main mobile (compared on
@@ -9185,45 +9118,70 @@ function familyPendingRequests(studentId) {
 }
 function familyParentName(studentId) { const m = familyMembers(studentId); const p = m.find(s => s.parentName); return p ? p.parentName : (m[0] ? m[0].name : ''); }
 // Every parent number in the family (each once), else the main mobiles.
-function familyPhones(studentId) {
+function familyPhones(studentId) { return familyPhoneList(studentId).map(p => p.number); }
+// The same numbers with whose they are: the child's parent name (no mother/father is saved) or "Main mobile · <child>".
+function familyPhoneList(studentId) {
   const seen = new Set(), out = [];
-  const add = n => { const k = phoneKey(n); if (k && !seen.has(k)) { seen.add(k); out.push(n); } };
+  const add = (n, label) => { const k = phoneKey(n); if (k && !seen.has(k)) { seen.add(k); out.push({ number: n, label }); } };
   const m = familyMembers(studentId);
-  m.forEach(s => phoneNumbersFor(s.id, 'parent').forEach(p => add(p.number)));
-  if (!out.length) m.forEach(s => add(s.mobileNumber));
+  m.forEach(s => phoneNumbersFor(s.id, 'parent').forEach(p => add(p.number, s.parentName || 'Parent')));
+  if (!out.length) m.forEach(s => add(s.mobileNumber, 'Main mobile · ' + s.name.split(' ')[0]));
   return out;
 }
-// Fee-message WhatsApp launcher: try the installed Windows desktop app first,
-// then fall back to WhatsApp Web if the browser stays in the foreground.
-function openFeeWhatsApp(phone, button) {
-  const message = button && button.dataset ? (button.dataset.waText || '') : '';
+// Fee-message WhatsApp: phones open wa.me (the WhatsApp app takes it); computers get "📤 app" (WhatsApp Desktop,
+// no extra tab) and a small "Web" button (WhatsApp Web), so no second window is opened by itself.
+// A button inside the Message box sends the box's text as edited (data-wa-box).
+function openFeeWhatsApp(phone, button, how) {
+  const box = button && button.dataset && button.dataset.waBox ? document.getElementById('feeMessageTextarea') : null;
+  const message = box ? box.value : (button && button.dataset ? (button.dataset.waText || '') : '');
   const num = String(phone || '').replace(/\D/g, '');
   const encoded = encodeURIComponent(message);
-  const webUrl = num ? `https://wa.me/${num}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
-  const desktopUrl = num ? `whatsapp://send?phone=${num}&text=${encoded}` : `whatsapp://send?text=${encoded}`;
-  let leftPage = false;
-  const markLeft = () => { leftPage = true; };
-  window.addEventListener('blur', markLeft, { once: true });
-  window.open(desktopUrl, '_blank');
-  setTimeout(() => {
-    window.removeEventListener('blur', markLeft);
-    if (!leftPage && document.visibilityState === 'visible') window.open(webUrl, '_blank', 'noopener');
-  }, 1400);
+  if (how === 'app') location.href = num ? `whatsapp://send?phone=${num}&text=${encoded}` : `whatsapp://send?text=${encoded}`;
+  else window.open(num ? `https://wa.me/${num}?text=${encoded}` : `https://wa.me/?text=${encoded}`, '_blank', 'noopener');
+  if (button && button.dataset && button.dataset.waFamily) markFeeReminderSent(button.dataset.waFamily);
 }
-function familyWaChips(studentId, messageText) {
+function familyWaChips(studentId, messageText, fromBox) {
   if (!messageText) return '';
   const chipStyle = 'display:inline-flex;align-items:center';
-  const phones = familyPhones(studentId);
-  const makeButton = (phone, label) => `<button type="button" class="btn-small" style="${chipStyle}" data-wa-text="${escAttr(messageText)}" onclick="openFeeWhatsApp('${phone}',this)">📤 ${label}</button>`;
-  if (!phones.length) return makeButton('', 'WhatsApp');
+  const mobile = isMobileDevice();
+  const data_ = `data-wa-text="${escAttr(messageText)}" data-wa-family="${escAttr(studentId)}"${fromBox ? ' data-wa-box="1"' : ''}`;
+  const makeButton = (num, label, title) => mobile
+    ? `<button type="button" class="btn-small" style="${chipStyle}" title="${escAttr(title)}" ${data_} onclick="openFeeWhatsApp('${num}',this,'web')">📤 ${label}</button>`
+    : `<span style="display:inline-flex;gap:2px;align-items:center;margin:2px 4px 2px 0"><button type="button" class="btn-small" style="${chipStyle}" title="Open in WhatsApp Desktop: ${escAttr(title)}" ${data_} onclick="openFeeWhatsApp('${num}',this,'app')">📤 ${label}</button><button type="button" class="btn-small" title="Open in WhatsApp Web instead" ${data_} onclick="openFeeWhatsApp('${num}',this,'web')">Web</button></span>`;
+  const phones = familyPhoneList(studentId);
+  if (!phones.length) return makeButton('', 'WhatsApp', 'No number on file: pick the chat in WhatsApp');
   return phones.map(ph => {
-    const clean = ph.replace(/\D/g, '');
+    const clean = ph.number.replace(/\D/g, '');
     const num = clean.length === 10 ? '91' + clean : clean;
-    return makeButton(num, esc(ph));
+    return makeButton(num, `${esc(ph.label)} · ${esc(ph.number)}`, ph.label + ' · ' + ph.number);
   }).join('');
 }
+// "Reminder sent": pressing a 📤 button stamps every pending request of the family (SQL 65 adds the columns).
+let feeReminderMsg = '';
+async function markFeeReminderSent(studentId) {
+  const reqs = familyPendingRequests(studentId);
+  if (!reqs.length) return;
+  const now = new Date().toISOString();
+  feeReminderMsg = '';
+  for (const r of reqs) {
+    const count = (r.reminderCount || 0) + 1;
+    const { error } = await sb.from('subscriptions').update({ reminder_sent_at: now, reminder_count: count }).eq('id', r.id).eq('kind', 'Request');
+    if (error) { feeReminderMsg = /reminder_/.test(error.message || '') ? 'Reminder date not saved: run SQL 65 (fee-requests/65-fee-reminder-sent.sql) in Supabase first.' : 'Reminder date not saved: ' + error.message; break; }
+    r.reminderSentAt = now; r.reminderCount = count;
+  }
+  render();
+}
+// "Reminded 27 Oct 2026, 9:40 pm (2×)" for a family, from its latest stamp.
+function familyReminderHtml(studentId) {
+  const reqs = familyPendingRequests(studentId).filter(r => r.reminderSentAt);
+  if (!reqs.length) return '';
+  const last = reqs.reduce((a, r) => r.reminderSentAt > a.reminderSentAt ? r : a);
+  const when = new Date(last.reminderSentAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const times = Math.max(...reqs.map(r => r.reminderCount || 1));
+  return `<span class="hint" style="color:var(--forest)">📨 Reminded ${esc(when)}${times > 1 ? ` (${times}×)` : ''}</span>`;
+}
 function requestMonthLong(r) {
-  const ym = r.paymentReference && r.paymentReference.startsWith('AUTO-') ? r.paymentReference.slice(5) : (r.date || '').slice(0, 7);
+  const ym = r.requestMonth ? r.requestMonth.slice(0, 7) : r.paymentReference && r.paymentReference.startsWith('AUTO-') ? r.paymentReference.slice(5) : (r.date || '').slice(0, 7);
   if (!/^\d{4}-\d{2}$/.test(ym)) return '';
   const [yr, mo] = ym.split('-').map(Number);
   return new Date(yr, mo - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
@@ -9231,29 +9189,49 @@ function requestMonthLong(r) {
 // Razorpay payment page (asks for amount, email, phone, student name); payments are matched and marked paid by hand.
 const RAZORPAY_FEE_PAGE = 'https://pages.razorpay.com/pl_P9Dy5JA4jygV77/view';
 function inrText(n) { return 'Rs ' + (Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-// One message for every pending request in the family; a single request keeps the usual one-subject message.
-function familyFeeMessage(studentId) {
+// Pay by: the 7th of the month a monthly-run request is for, else 7 days after a request was raised by hand.
+function requestPayBy(r) {
+  if (r.requestMonth) return r.requestMonth.slice(0, 7) + '-07';
+  if (!r.date) return '';
+  const d = new Date(r.date + 'T00:00:00'); d.setDate(d.getDate() + 7);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function longDate(ymd) { const [y, m, d] = ymd.split('-').map(Number); return new Date(y, m - 1, d).toLocaleString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }); }
+function joinAnd(list) { return list.length > 1 ? list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1] : (list[0] || ''); }
+// "N classes still available" / "N classes already taken but not yet paid" (never a minus number for parents).
+function remainingText(left) {
+  if (left < 0) return `${-left} class${left === -1 ? '' : 'es'} already taken but not yet paid (please pay at the earliest)`;
+  return `${left} class${left === 1 ? '' : 'es'} still available (before this payment)`;
+}
+// One message for every pending request in the family (one request or many: same layout).
+// short = a second reminder: the same message, only the opening says "gentle reminder … still due".
+function familyFeeMessage(studentId, short) {
   const reqs = familyPendingRequests(studentId);
   if (!reqs.length) return '';
-  if (reqs.length === 1) return feeMessageTextForRequest(reqs[0].id);
   const kids = familyMembers(studentId).filter(s => reqs.some(r => r.studentId === s.id));
   const months = [...new Set(reqs.map(requestMonthLong).filter(Boolean))];
   const total = reqs.reduce((a, r) => a + (r.amountPaid || 0), 0);
   const names = kids.map(s => s.name);
-  const nameList = names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] : names[0];
-  const lines = [`Dear ${familyParentName(studentId)},`, '', `We would like to remind you that the tuition fees for ${nameList}’s classes are due.`, '', 'Fee Details'];
+  const many = reqs.length > 1;
+  const payBy = reqs.map(requestPayBy).filter(Boolean).sort()[0] || '';
+  const payLine = payBy && payBy >= todayStr ? `Please pay by ${longDate(payBy)}.` : 'Please pay at the earliest.';
+  const forMonth = months.length ? ` for ${joinAnd(months)}` : '';
+  const subjLabel = r => { const subj = subject(r.subjectId); return subj ? subj.name : 'Subject'; };
+  const opening = short ? 'This is a gentle reminder' : 'We would like to remind you';
+  const lines = [`Dear ${familyParentName(studentId)},`, '', `${opening} that the tuition fee${many ? 's' : ''}${forMonth} for the classes of ${joinAnd(names)} ${many ? 'are' : 'is'}${short ? ' still' : ''} due. ${payLine}`, '', 'Fee Details'];
   kids.forEach(s => {
     const mine = reqs.filter(r => r.studentId === s.id);
     lines.push('');
     if (kids.length > 1) lines.push(`${s.name}:`);
     mine.forEach((r, i) => {
-      const subj = subject(r.subjectId);
       const typeMode = [r.type, s.modePreference].filter(Boolean).join(', ');
-      const left = studentRemaining(s.id, r.subjectId, r.type);
-      lines.push(`${i + 1}. ${subj ? subj.name : 'Subject'} (${typeMode})`);
-      lines.push(`   Classes Included: ${r.classes}`);
-      lines.push(`   Amount Payable: ${inrText(r.amountPaid)}`);
-      lines.push(`   Classes Remaining: ${left}${left < 0 ? ' (overdue - please pay at the earliest)' : ' (before this payment)'}`);
+      const why = parentWhyOf(r);
+      lines.push(`${many ? (i + 1) + '. ' : ''}${subjLabel(r)} (${typeMode})${months.length > 1 ? ', ' + requestMonthLong(r) : ''}`);
+      const ind = many ? '   ' : '';
+      lines.push(`${ind}Classes Included: ${r.classes}`);
+      if (why) lines.push(`${ind}How we worked it out: ${why}`);
+      lines.push(`${ind}Amount Payable: ${inrText(r.amountPaid)}`);
+      lines.push(`${ind}Right now: ${remainingText(studentRemaining(s.id, r.subjectId, r.type))}`);
     });
     if (kids.length > 1 && mine.length > 1) lines.push(`Subtotal for ${s.name}: ${inrText(mine.reduce((a, r) => a + (r.amountPaid || 0), 0))}`);
   });
@@ -9262,13 +9240,19 @@ function familyFeeMessage(studentId) {
   if (upiId) lines.push(`UPI: ${upiId}`);
   lines.push(`Online Payment: ${RAZORPAY_FEE_PAGE}`, 'While making the online payment, please enter the following details:', `Tuition Fee: ${inrText(total)}`, `Student Name: ${names.join(', ')}`, '');
   if (feeContactMobile) lines.push(`After completing the payment, kindly share the payment confirmation screenshot at ${feeContactMobile} for our records.`, '');
-  const logins = kids.map(s => ({ s, u: data.users.find(u => u.role === 'Student' && u.linkedId === s.id && !u.archived) })).filter(x => x.u);
-  if (logins.length) {
+  // The parent login shows every child's fees, so it is given when the family has one; else each child's login.
+  const parentIds = new Set((data.parentStudents || []).filter(m => kids.some(s => s.id === m.studentId)).map(m => m.parentUserId));
+  const parentLogin = data.users.find(u => u.role === 'Parent' && parentIds.has(u.id) && !u.archived);
+  const logins = parentLogin ? [] : kids.map(s => ({ s, u: data.users.find(u => u.role === 'Student' && u.linkedId === s.id && !u.archived) })).filter(x => x.u);
+  if (parentLogin || logins.length) {
     lines.push('App Login');
-    logins.forEach(x => lines.push(`${kids.length > 1 ? x.s.name + ' - ' : ''}Login ID and password: ${x.u.username} (same as login ID for first-time login)`));
+    if (parentLogin) lines.push(`Parent login (shows ${kids.length > 1 ? 'all your children’s' : 'your child’s'} classes and fees): ${parentLogin.username}`);
+    logins.forEach(x => lines.push(`${kids.length > 1 ? x.s.name + ' - ' : ''}Login ID: ${x.u.username}`));
+    lines.push('Password: same as the login ID, unless you have already changed it.');
     lines.push('Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/', '');
   }
-  lines.push('Discount offers: https://www.libeducation.com/discountoffers', '', 'Thank you for choosing LIB Education. We appreciate your continued trust and support.', '', 'Regards,', 'LIB Education');
+  lines.push('Discount offers: https://www.libeducation.com/discountoffers', '', 'Thank you for choosing LIB Education. We appreciate your continued trust and support.', '');
+  lines.push('Regards,', 'LIB Education');
   const out = []; let prevBlank = false;
   for (const l of lines) { if (l === '') { if (!prevBlank) out.push(''); prevBlank = true; } else { out.push(l); prevBlank = false; } }
   return out.join('\n').trim();
@@ -9378,7 +9362,7 @@ function pendingFeeRequestsByFamilyHtml() {
   const list = [...fams.values()].map(sid => ({ sid, reqs: familyPendingRequests(sid) }))
     .sort((a, b) => studentNameWithCode(a.reqs[0].studentId).localeCompare(studentNameWithCode(b.reqs[0].studentId)));
   const grand = reqs.reduce((a, r) => a + (r.amountPaid || 0), 0);
-  return familySkippedHtml() + `<div class="hint" style="margin-bottom:6px">${reqs.length} request${reqs.length === 1 ? '' : 's'} from ${list.length} famil${list.length === 1 ? 'y' : 'ies'} · ₹${grand.toFixed(2)} in total. Brothers and sisters (same parent login or parent mobile) are shown together with one message.</div>
+  return familySkippedHtml() + (feeReminderMsg ? `<div class="hint" style="color:var(--brick)">${esc(feeReminderMsg)}</div>` : '') + `<div class="hint" style="margin-bottom:6px">${reqs.length} request${reqs.length === 1 ? '' : 's'} from ${list.length} famil${list.length === 1 ? 'y' : 'ies'} · ₹${grand.toFixed(2)} in total. Brothers and sisters (same parent login or parent mobile) are shown together with one message.</div>
     <div class="row-form" style="margin:8px 0;align-items:center">
       <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" ${allSelected ? 'checked' : ''} onchange="selectAllPendingRequests(this.checked)"> Select all pending requests</label>
       <button class="btn-small" onclick="selectAllPendingRequests(false)" ${selectedCount ? '' : 'disabled'}>Clear selection</button>
@@ -9390,9 +9374,9 @@ function pendingFeeRequestsByFamilyHtml() {
         const total = f.reqs.reduce((a, r) => a + (r.amountPaid || 0), 0);
         const kids = [...new Set(f.reqs.map(r => r.studentId))];
         const phones = familyPhones(f.sid);
-        const head = `<tr style="background:var(--soft)"><td colspan="9">
+        const head = `<tr style="background:var(--soft)"><td colspan="9" style="white-space:normal">
           <b>${esc(familyParentName(f.sid))}</b> · ${esc(phones.join(', ') || '—')}${copyBtnHtml(phones[0])} · ${f.reqs.length} request${f.reqs.length === 1 ? '' : 's'} · <b>Family total ₹${total.toFixed(2)}</b>
-          <span style="margin-left:6px"><button class="btn-small" onclick="generateFeeMessageForRequest('${f.reqs[0].id}')">Message</button>${familyWaChips(f.sid, familyFeeMessage(f.sid))}${f.reqs.length > 1 ? `<button class="btn-small btn-primary" onclick="startMarkAllPaid('${f.sid}')">Mark all paid</button>` : ''}</span>
+          <span style="margin-left:6px"><button class="btn-small" onclick="generateFeeMessageForRequest('${f.reqs[0].id}')">Message</button>${familyWaChips(f.sid, familyFeeMessage(f.sid))}${f.reqs.length > 1 ? `<button class="btn-small btn-primary" onclick="startMarkAllPaid('${f.sid}')">Mark all paid</button>` : ''}</span> ${familyReminderHtml(f.sid)}
         </td></tr>`;
         const rows = kids.map(kid => {
           const mine = f.reqs.filter(r => r.studentId === kid);
@@ -9455,7 +9439,20 @@ function demandPriceText(q) {
 function demandRowNote(r) {
   const price = r.amountEdited ? `${r.classes} classes, amount set by admin ${rupees(r.amount)} (${specialRateRow(r.student.id, r.subj.id, r.ty) ? 'special rate' : 'Fee setup'} ${rupees(r.quoteAmount)})` : demandPriceText(feeQuote(r.subj.id, r.ty, r.mode, r.classes, r.student.id));
   const classesNote = r.classesEdited ? `${r.why} → classes changed by admin to ${r.classes}` : r.why;
-  return `${r.manual ? 'Calculated ' + todayStr + ' for ' + monthLabelOf(r.month) : demandRunLabel(r.month)} · ${classesNote}. Amount: ${price}${r.leaveAdjustment ? `. Teacher-leave adjustment: −${r.leaveAdjustment} class${r.leaveAdjustment===1?'':'es'} (${r.leaveNote})` : ''}${r.reviewFlag ? `. REVIEW: ${r.reviewFlag}` : ''}`;
+  return `${r.manual ? 'Calculated ' + todayStr + ' for ' + monthLabelOf(r.month) : demandRunLabel(r.month)} · ${classesNote}. Amount: ${price}${r.leaveAdjustment ? `. Teacher-leave adjustment: −${r.leaveAdjustment} class${r.leaveAdjustment===1?'':'es'} (${r.leaveNote})` : ''}${r.reviewFlag ? `. REVIEW: ${r.reviewFlag}` : ''}`
+    + (r.parentWhy && !r.classesEdited ? `\n${PARENT_WHY_PREFIX}${r.classes} classes): ${r.parentWhy}` : '');
+}
+// The parent-friendly reason saved as the working's last line; used in fee messages only while the request still
+// has the classes it was worked out for (an edited request drops it rather than contradict the change).
+const PARENT_WHY_PREFIX = 'For parent (';
+function parentWhyOf(r) {
+  const m = /\nFor parent \(([\d.]+) classes\): (.+)$/.exec((r && r.calcNote) || '');
+  return m && Number(m[1]) === Number(r.classes) ? m[2] : '';
+}
+// "Mon & Thu" (or "2 × Sat") from a weekday → classes-per-day map.
+function weekdayListText(weekly) {
+  const order = [1, 2, 3, 4, 5, 6, 0], days = order.filter(d => Number(weekly[d]) > 0).map(d => (Number(weekly[d]) > 1 ? weekly[d] + ' × ' : '') + DAY_NAMES[d]);
+  return days.length > 1 ? days.slice(0, -1).join(', ') + ' & ' + days[days.length - 1] : (days[0] || '');
 }
 function demandFrequencyFor(student, subj, ty, month) {
   const [yr, mo] = month.split('-').map(Number);
@@ -9520,23 +9517,32 @@ function demandCalcFor(student, subj, ty, month) {
   const displayLeave = demandTeacherLeaveAdjustment(student, subj, ty, month);
   const expectedDisplay = displayFrequency.review ? null : Math.max(0, displayFrequency.expected - displayLeave.count);
   if (!languageGrade && expected <= 0) return { skip: `Teacher-leave adjustment leaves no expected classes for ${monthLabelOf(month)}; review manually.`, review: true };
-  let method, classes, why;
+  const [cyr, cmo] = month.split('-').map(Number), monthName = new Date(cyr, cmo - 1, 1).toLocaleString('en-IN', { month: 'long' });
+  const owedText = n => `${n} class${n === 1 ? '' : 'es'} already taken but not yet paid`;
+  let method, classes, why, parentWhy;
   if (languageGrade) {
     method = 'Language grade'; classes = Number(lastPay.classes);
     why = `Language-grade rule: repeat last valid payment ${classes} classes from ${lastPay.date}; balance ${left} (${left<0?`${owed} owed`:`${left} left`}) shown separately; owed classes are not added`;
+    parentWhy = `same as your last payment (${classes} classes)`;
   } else if (FEE_PACKAGE_SIZES.includes(Number(lastPay.classes))) {
     if (left > expected) return { skip: `Fixed package ${lastPay.classes}: ${left} classes left, above expected usage ${expected} for ${monthLabelOf(month)}.` };
     method = 'Fixed package'; classes = Number(lastPay.classes);
     why = `Fixed package: repeat ${classes} classes (last paid ${lastPay.date}); expected ${frequency.expected}, teacher-leave reduction ${leave.count}, net expected ${expected}; balance ${left<0?`${owed} owed`:`${left} left`}; owed is covered within this package`;
+    parentWhy = `your ${classes}-class package${owed ? ` (${owedText(owed)} will come out of it)` : ''}`;
   } else {
     method = frequency.method;
     classes = halfRound(expected - left);
     why = `${frequency.method}: ${frequency.expected} expected classes − ${leave.count} teacher-leave adjustment − balance ${left<0?`(${owed} owed)`:`${left} left`} = ${classes} classes`;
+    const days = weekdayListText(frequency.weekly || {});
+    const parts = [`${days ? days + ' classes' : 'classes'} in ${monthName} = ${frequency.expected}`];
+    if (leave.count) parts.push(`minus ${leave.count} cancelled for teacher leave`);
+    if (owed) parts.push(`plus ${owedText(owed)}`); else if (left > 0) parts.push(`minus ${left} still available`);
+    parentWhy = parts.join(', ') + (parts.length > 1 ? ` = ${classes}` : '');
   }
   if (!Number.isFinite(classes) || classes <= 0) return { skip: `No positive class request calculated (balance ${left}, expected ${expected}).` };
   const q = feeQuote(subj.id, ty, mode, classes, student.id);
   if (!q || !q.rate || !q.amount || q.amount <= 0) return { skip: `Missing or zero ${specialRateRow(student.id, subj.id, ty) ? 'special' : 'Fee Setup'} rate for ${catLabel(subj.category)}, ${ty}, ${mode}; no zero-value request created.`, review: true };
-  return { row: { student, subj, ty, month, method, why, left, owed, mode, classes, baseClasses: classes, amount: q.amount, quoteAmount: q.amount, include: true, classesEdited: false, amountEdited: false, expected, expectedDisplay, expectedDisplayNote: displayFrequency.review || '', frequencyMethod: frequency.method, leaveAdjustment: leave.count, leaveNote: leave.note, reviewFlag: '' } };
+  return { row: { student, subj, ty, month, method, why, parentWhy, left, owed, mode, classes, baseClasses: classes, amount: q.amount, quoteAmount: q.amount, include: true, classesEdited: false, amountEdited: false, expected, expectedDisplay, expectedDisplayNote: displayFrequency.review || '', frequencyMethod: frequency.method, leaveAdjustment: leave.count, leaveNote: leave.note, reviewFlag: '' } };
 }
 function demandDataSignature() {
   const stable = rows => rows.slice().sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
@@ -11245,10 +11251,13 @@ let payCheckoutMsg = '';
 function togglePayCheckoutSelect(id) {
   if (payCheckoutSelected.has(id)) { payCheckoutSelected.delete(id); render(); return; }
   const s = data.subscriptions.find(x=>x.id===id);
-  if (s && s.paymentReference) return; // already initiated — must be reset by admin first
+  if (s && paymentInitiated(s)) return; // already initiated — must be reset by admin first
   payCheckoutSelected.add(id);
   render();
 }
+// A request raised by the monthly run carries AUTO-YYYY-MM as its reference; only a UPI checkout reference means
+// the student or parent has started paying.
+function paymentInitiated(r) { return !!r.paymentReference && !r.paymentReference.startsWith('AUTO-'); }
 function isMobileDevice() {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
 }
@@ -13277,13 +13286,15 @@ function renderStudents() {
           <span><b>Total ₹${myTotal.toFixed(2)}</b>${others.length ? ` · with ${esc(otherNames.join(', '))} (same family): <b>₹${famTotal.toFixed(2)}</b>` : ''}</span>
           <button class="btn-small" onclick="generateFeeMessageForRequest('${famPending[0].id}')">Message${others.length ? ' (family)' : ''}</button>
           ${familyWaChips(student.id, familyFeeMessage(student.id))}
+          ${familyReminderHtml(student.id)}
           ${famPending.length > 1 ? `<button class="btn-small btn-primary" onclick="startMarkAllPaid('${student.id}')">Mark all paid${others.length ? ' (family)' : ''}</button>` : ''}
         </div>
         ${showMsg ? `<div style="padding:8px 0">
-                <textarea id="feeMessageTextarea" rows="8" style="width:100%;max-width:520px;font-family:inherit;font-size:14px;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box">${esc(feeMessageDraft)}</textarea>
+                ${feeMessageShortToggleHtml()}
+                <textarea id="feeMessageTextarea" rows="8" oninput="feeMessageDraft=this.value" style="width:100%;max-width:520px;font-family:inherit;font-size:14px;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box">${esc(feeMessageDraft)}</textarea>
                 <div class="row-form" style="margin-top:6px">
                   <button class="btn-small btn-primary" onclick="copyFeeMessage()">Copy</button>
-                  ${familyWaChips(student.id, feeMessageDraft)}
+                  ${familyWaChips(student.id, feeMessageDraft, true)}
                   <button class="btn-small" onclick="dismissFeeMessage()">Close</button>
                   ${aiOn()&&!aiFeeMsg.loading?'<button class="btn-small" style="background:var(--gold);border-color:var(--gold);color:#000" onclick="aiImproveFeeMessage()">✨ Improve</button>':aiOn()&&aiFeeMsg.loading?'<button class="btn-small" style="background:var(--gold);border-color:var(--gold);color:#000" disabled>Improving...</button>':""}
                   ${feeMessageCopyStatus ? `<span class="hint" style="color:${feeMessageCopyStatus==='Copied!'?'var(--forest)':'var(--brick)'}">${esc(feeMessageCopyStatus)}</span>` : ''}
@@ -13304,7 +13315,7 @@ function renderStudents() {
                 ${rejectPaymentMsg[r.id] ? `<div class="hint" style="color:var(--brick)">${esc(rejectPaymentMsg[r.id])}</div>` : ''}
                 ${isMarking ? `<span class="hint">Confirming payment — fill in the details below.</span>` : isEditing ? `<span class="hint">Editing — see below.</span>` : `
                   <button class="btn-small btn-primary" onclick="startMarkPaid('${r.id}')">Mark as Paid</button>
-                  ${r.paymentReference ? `<button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="rejectPayment('${r.id}')">Reject Payment</button>` : ''}
+                  ${paymentInitiated(r) ? `<button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="rejectPayment('${r.id}')">Reject Payment</button>` : ''}
                   <button class="btn-small" onclick="startEditRequest('${r.id}')">Edit</button>
                   <button class="icon-btn" onclick="cancelFeeRequest('${r.id}')" title="Cancel request">✕</button>
                 `}
@@ -14599,7 +14610,7 @@ function renderFees() {
                   const fk=familyKeyOf(r.student.id), famRows=demandPreviewRows.filter(x=>familyKeyOf(x.student.id)===fk), famKids=[...new Set(famRows.map(x=>x.student.name))], multi=famKids.length>1;
                   const famHead=multi&&(!prev||familyKeyOf(prev.student.id)!==fk)?`<tr style="background:var(--soft)"><td colspan="10"><b>Family: ${esc(familyParentName(r.student.id))}</b> · ${esc(famKids.join(', '))}</td></tr>`:'';
                   const famFoot=multi&&(!next||familyKeyOf(next.student.id)!==fk)?`<tr><td colspan="8" style="text-align:right"><b>Family total</b></td><td><b>${famRows.filter(x=>x.include).reduce((a,x)=>a+x.amount,0).toFixed(2)}</b></td><td></td></tr>`:'';
-                  return famHead+`<tr${r.include?'':' style="opacity:0.5"'}><td><input type="checkbox" ${r.include?'checked':''} onchange="demandRowSet(${i},'include',this.checked)"></td><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(r.method)}</td><td${r.left<0?' style="color:var(--brick)"':''}>${r.left<0?`${-r.left} owed`:r.left}</td><td>${r.expectedDisplay===null?`<span class="hint" title="${esc(r.expectedDisplayNote)}">Review frequency</span>`:r.expectedDisplay}</td><td><input type="number" min="0.5" step="0.5" style="width:70px" value="${r.classes}" onchange="demandRowSet(${i},'classes',this.value)"></td><td><input type="number" min="1" step="1" style="width:90px" value="${r.amount}" onchange="demandRowSet(${i},'amount',this.value)"></td><td><span class="hint" style="font-size:11px;display:block;min-width:280px;white-space:normal">${esc(demandRowNote(r))}</span></td></tr>`+(mine.length>1&&(!next||next.student.id!==r.student.id)?`<tr><td colspan="8" class="hint" style="text-align:right">Subtotal for ${esc(r.student.name)}</td><td><b>${mine.reduce((a,x)=>a+x.amount,0).toFixed(2)}</b></td><td></td></tr>`:'')+famFoot; }).join('')}
+                  return famHead+`<tr${r.include?'':' style="opacity:0.5"'}><td><input type="checkbox" ${r.include?'checked':''} onchange="demandRowSet(${i},'include',this.checked)"></td><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(r.method)}</td><td${r.left<0?' style="color:var(--brick)"':''}>${r.left<0?`${-r.left} owed`:r.left}</td><td>${r.expectedDisplay===null?`<span class="hint" title="${esc(r.expectedDisplayNote)}">Review frequency</span>`:r.expectedDisplay}</td><td><input type="number" min="0.5" step="0.5" style="width:70px" value="${r.classes}" onchange="demandRowSet(${i},'classes',this.value)"></td><td><input type="number" min="1" step="1" style="width:90px" value="${r.amount}" onchange="demandRowSet(${i},'amount',this.value)"></td><td><span class="hint" style="font-size:11px;display:block;min-width:280px;white-space:normal">${esc(demandRowNote(r)).replace(/\n/g,'<br>')}</span></td></tr>`+(mine.length>1&&(!next||next.student.id!==r.student.id)?`<tr><td colspan="8" class="hint" style="text-align:right">Subtotal for ${esc(r.student.name)}</td><td><b>${mine.reduce((a,x)=>a+x.amount,0).toFixed(2)}</b></td><td></td></tr>`:'')+famFoot; }).join('')}
               </table></div>
               <div class="hint" style="margin-top:8px">${inc.length} request${inc.length===1?'':'s'} will be created${demandPreviewRows.length>inc.length?' · '+(demandPreviewRows.length-inc.length)+' unticked':''} · Total ₹${inc.reduce((a,r)=>a+r.amount,0).toFixed(2)}</div>
               ${skippedHtml}
@@ -15800,9 +15811,9 @@ function renderStudentReportCards(student, viewMonth, monthSetterFn, titlePrefix
       <div class="table-scroll"><table>
         <tr><th></th><th>Subject</th><th>Type</th><th>Classes</th><th>Amount</th><th>Requested</th><th>Status</th></tr>
         ${myPendingRequests.map(r=>`<tr>
-          <td><input type="checkbox" ${payCheckoutSelected.has(r.id)?'checked':''} ${r.paymentReference?'disabled title="Already initiated — contact admin to reset before paying again"':''} onchange="togglePayCheckoutSelect('${r.id}')"></td>
+          <td><input type="checkbox" ${payCheckoutSelected.has(r.id)?'checked':''} ${paymentInitiated(r)?'disabled title="Already initiated — contact admin to reset before paying again"':''} onchange="togglePayCheckoutSelect('${r.id}')"></td>
           <td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td>
-          <td>${r.paymentReference ? `<span class="hint">Initiated (${esc(r.paymentReference)}) <a href="#" onclick="startUndoPaymentInitiation('${r.id}'); return false;" style="color:var(--brick)">Undo</a></span>` : (r.paymentRemarks ? `<span class="hint" style="color:var(--brick)">${esc(r.paymentRemarks)}</span>` : '<span class="hint">—</span>')}</td>
+          <td>${paymentInitiated(r) ? `<span class="hint">Initiated (${esc(r.paymentReference)}) <a href="#" onclick="startUndoPaymentInitiation('${r.id}'); return false;" style="color:var(--brick)">Undo</a></span>` : (r.paymentRemarks ? `<span class="hint" style="color:var(--brick)">${esc(r.paymentRemarks)}</span>` : '<span class="hint">—</span>')}</td>
         </tr>`).join('')}
       </table></div>
       ${payCheckoutMsg ? `<div class="hint" style="color:var(--brick)">${esc(payCheckoutMsg)}</div>` : ''}
@@ -22573,7 +22584,7 @@ function render() {
         ${iosInstallHelpHtml()}
       </div>
     </div>
-    ${feeMessageForRequestId && currentTab !== 'students' ? `<div class="modal-backdrop" onclick="dismissFeeMessage()"></div><div class="modal-box"><h3>Fee message</h3><textarea id="feeMessageTextarea" rows="5" style="width:100%;font-family:inherit;font-size:14px;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box;resize:vertical">${esc(feeMessageDraft)}</textarea><div class="row-form" style="margin-top:8px"><button class="btn-small btn-primary" onclick="copyFeeMessage()">Copy</button>${familyWaChips((data.subscriptions.find(x=>x.id===feeMessageForRequestId)||{}).studentId||'', feeMessageDraft)} <button class="btn-small" onclick="dismissFeeMessage()">Close</button> ${feeMessageCopyStatus ? `<span class="hint" style="color:${feeMessageCopyStatus==='Copied!'?'var(--forest)':'var(--brick)'}">${esc(feeMessageCopyStatus)}</span>` : ''}</div></div>` : ''}
+    ${feeMessageForRequestId && currentTab !== 'students' ? `<div class="modal-backdrop" onclick="dismissFeeMessage()"></div><div class="modal-box"><h3>Fee message</h3>${feeMessageShortToggleHtml()}<textarea id="feeMessageTextarea" rows="12" oninput="feeMessageDraft=this.value" style="width:100%;font-family:inherit;font-size:14px;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box;resize:vertical">${esc(feeMessageDraft)}</textarea><div class="row-form" style="margin-top:8px"><button class="btn-small btn-primary" onclick="copyFeeMessage()">Copy</button>${familyWaChips((data.subscriptions.find(x=>x.id===feeMessageForRequestId)||{}).studentId||'', feeMessageDraft, true)} <button class="btn-small" onclick="dismissFeeMessage()">Close</button> ${feeMessageCopyStatus ? `<span class="hint" style="color:${feeMessageCopyStatus==='Copied!'?'var(--forest)':'var(--brick)'}">${esc(feeMessageCopyStatus)}</span>` : ''}</div></div>` : ''}
     ${helpPanelHtml()}
     ${aiHelpPanelHtml()}
   `;
