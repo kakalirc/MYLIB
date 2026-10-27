@@ -285,7 +285,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-27 19:45 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-27 19:50 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -4036,6 +4036,12 @@ async function undoDemoDone(id) {
   dl.status = 'Pending'; dl.doneAt = ''; dl.doneNote = '';
   const wb = await syncWixFromDemo(id, 'Scheduled');
   demoLogMsg = 'Back to Pending.' + (wb ? ' Website booking back to Scheduled.' : ''); render();
+}
+// From a website booking card: open the Lost form on its row in the Demo Register.
+function wixMarkLost(id) {
+  demoLogsStatusFilter = ''; demoLogsTeacherFilter = ''; demoLogsMonthFilter = '';
+  startDemoLost(id);
+  setTimeout(() => { const el = document.getElementById('demo-register-heading'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 150);
 }
 function startDemoLost(id) {
   demoLostId = id; demoLostDraft = { reason: '', note: '' }; render();
@@ -14823,9 +14829,10 @@ function renderWixBookings() {
       scheduleBlock = `
         <div style="font-size:12px;background:var(--hover,rgba(0,0,0,.04));border-radius:6px;padding:8px;margin-top:10px">
           <div>📅 <b>${scheduledTeacher ? esc(scheduledTeacher.name) : '?'}</b> · ${dayDate(b.scheduledDate)}${b.scheduledTime ? ' at ' + b.scheduledTime : ''}</div>
-          ${b.demoLogId ? `<div class="hint" style="font-size:11px;margin-top:2px">✓ Demo log linked — mark Converted / Cancelled there once the demo happens</div>` : ''}
+          ${b.demoLogId ? `<div class="hint" style="font-size:11px;margin-top:2px">✓ Demo log linked. Once the demo happens, mark it Done here, then Converted or Lost.</div>` : ''}
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          ${demoOutcomeReady && b.demoLogId && (data.demoLogs.find(x => x.id === b.demoLogId) || {}).status === 'Pending' ? `<button class="btn-small btn-primary" style="background:var(--forest)" onclick="markDemoDone('${b.demoLogId}')">✓ Mark done</button>` : ''}
           <button class="btn-small btn-primary" onclick="rescheduleWixBooking('${b.id}')">🔄 Reschedule</button>
           <button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="cancelWixBooking('${b.id}')">✕ Cancel booking</button>
           ${wixMsgBtns}
@@ -14836,7 +14843,8 @@ function renderWixBookings() {
         <div style="font-size:12px;background:var(--hover,rgba(0,0,0,.04));border-radius:6px;padding:8px;margin-top:10px">
           <div>📅 <b>${scheduledTeacher ? esc(scheduledTeacher.name) : '?'}</b> · ${dayDate(b.scheduledDate)}${b.scheduledTime ? ' at ' + b.scheduledTime : ''}</div>
           ${b.status === 'Done'
-            ? `<div style="margin-top:2px">✓ Demo done${dl && dl.doneAt ? ' on ' + esc(dayDate(dl.doneAt)) : ''}. Mark it Converted or Lost in the Demo Register below.</div>`
+            ? `<div style="margin-top:2px">✓ Demo done${dl && dl.doneAt ? ' on ' + esc(dayDate(dl.doneAt)) : ''}. Convert to Student below, or mark it Lost.</div>
+               ${dl ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="wixMarkLost('${dl.id}')">Mark lost</button><button class="btn-small" onclick="undoDemoDone('${dl.id}')">↩ Not done</button></div>` : ''}`
             : `<div style="margin-top:2px">Lost${dl && (dl.lostReason || dl.lostNote) ? ': ' + esc([dl.lostReason, dl.lostNote].filter(Boolean).join(' · ')) : ''}. Reopen it in the Demo Register if the parent comes back.</div>`}
           ${dl && dl.doneNote ? `<div class="hint" style="font-size:11px;margin-top:2px">Teacher: “${esc(dl.doneNote)}”</div>` : ''}
         </div>`;
