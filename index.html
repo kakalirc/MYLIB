@@ -285,7 +285,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-27 19:50 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-27 20:00 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1261,6 +1261,7 @@ let demoLogsMonthFilter = '';      // 'YYYY-MM' or '' for all months (Demo Regis
 let demoOutcomeReady = true;       // false until SQL 64 (demo outcome columns) has been run
 let demoLostId = '';               // demo log id with the "Mark lost" form open
 let demoLostDraft = { reason: '', note: '' };
+let demoLostOnCard = false;        // Lost form opened from a website booking card (not the register row)
 let teacherDoneId = '';            // teacher: demo with the "Mark done" box open
 let teacherDoneNote = '';
 let demoMsgTeacher = '';
@@ -4037,14 +4038,28 @@ async function undoDemoDone(id) {
   const wb = await syncWixFromDemo(id, 'Scheduled');
   demoLogMsg = 'Back to Pending.' + (wb ? ' Website booking back to Scheduled.' : ''); render();
 }
-// From a website booking card: open the Lost form on its row in the Demo Register.
+// From a website booking card: the Lost form opens on the card itself.
 function wixMarkLost(id) {
-  demoLogsStatusFilter = ''; demoLogsTeacherFilter = ''; demoLogsMonthFilter = '';
-  startDemoLost(id);
-  setTimeout(() => { const el = document.getElementById('demo-register-heading'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 150);
+  demoLostId = id; demoLostOnCard = true; demoLostDraft = { reason: '', note: '' }; render();
 }
 function startDemoLost(id) {
-  demoLostId = id; demoLostDraft = { reason: '', note: '' }; render();
+  demoLostId = id; demoLostOnCard = false; demoLostDraft = { reason: '', note: '' }; render();
+}
+function demoLostFieldsHtml(id) {
+  return `<select onchange="demoLostDraft.reason=this.value" style="padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px">
+      <option value="">Reason (optional)…</option>
+      ${DEMO_LOST_REASONS.map(r => `<option value="${escAttr(r)}" ${demoLostDraft.reason===r?'selected':''}>${esc(r)}</option>`).join('')}
+    </select>
+    <input type="text" placeholder="Note (optional)" value="${escAttr(demoLostDraft.note)}" oninput="demoLostDraft.note=this.value" style="width:220px;max-width:100%;padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px">
+    <button class="btn-small btn-primary" onclick="saveDemoLost('${id}')">Save as Lost</button>
+    <button class="btn-small" onclick="demoLostId='';render()">Cancel</button>`;
+}
+function wixLostFormHtml(id) {
+  if (demoLostId !== id || !demoLostOnCard) return '';
+  return `<div style="background:rgba(160,82,45,0.07);border:1px solid var(--brick);border-radius:6px;padding:10px;margin-top:10px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--brick);margin-bottom:8px">MARK LOST</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">${demoLostFieldsHtml(id)}</div>
+    </div>`;
 }
 async function saveDemoLost(id) {
   const dl = data.demoLogs.find(d => d.id === id); if (!dl) return;
@@ -14832,11 +14847,12 @@ function renderWixBookings() {
           ${b.demoLogId ? `<div class="hint" style="font-size:11px;margin-top:2px">✓ Demo log linked. Once the demo happens, mark it Done here, then Converted or Lost.</div>` : ''}
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-          ${demoOutcomeReady && b.demoLogId && (data.demoLogs.find(x => x.id === b.demoLogId) || {}).status === 'Pending' ? `<button class="btn-small btn-primary" style="background:var(--forest)" onclick="markDemoDone('${b.demoLogId}')">✓ Mark done</button>` : ''}
+          ${demoOutcomeReady && b.demoLogId && (data.demoLogs.find(x => x.id === b.demoLogId) || {}).status === 'Pending' ? `<button class="btn-small btn-primary" style="background:var(--forest)" onclick="markDemoDone('${b.demoLogId}')">✓ Mark done</button>` + (demoLostId === b.demoLogId && demoLostOnCard ? '' : ` <button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="wixMarkLost('${b.demoLogId}')">Mark lost</button>`) : ''}
           <button class="btn-small btn-primary" onclick="rescheduleWixBooking('${b.id}')">🔄 Reschedule</button>
           <button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="cancelWixBooking('${b.id}')">✕ Cancel booking</button>
           ${wixMsgBtns}
-        </div>`;
+        </div>
+        ${b.demoLogId ? wixLostFormHtml(b.demoLogId) : ''}`;
     } else if (b.status === 'Done' || b.status === 'Lost') {
       const dl = b.demoLogId ? data.demoLogs.find(x => x.id === b.demoLogId) : null;
       scheduleBlock = `
@@ -14844,10 +14860,12 @@ function renderWixBookings() {
           <div>📅 <b>${scheduledTeacher ? esc(scheduledTeacher.name) : '?'}</b> · ${dayDate(b.scheduledDate)}${b.scheduledTime ? ' at ' + b.scheduledTime : ''}</div>
           ${b.status === 'Done'
             ? `<div style="margin-top:2px">✓ Demo done${dl && dl.doneAt ? ' on ' + esc(dayDate(dl.doneAt)) : ''}. Convert to Student below, or mark it Lost.</div>
-               ${dl ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="wixMarkLost('${dl.id}')">Mark lost</button><button class="btn-small" onclick="undoDemoDone('${dl.id}')">↩ Not done</button></div>` : ''}`
-            : `<div style="margin-top:2px">Lost${dl && (dl.lostReason || dl.lostNote) ? ': ' + esc([dl.lostReason, dl.lostNote].filter(Boolean).join(' · ')) : ''}. Reopen it in the Demo Register if the parent comes back.</div>`}
+               ${dl ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">${demoLostId === dl.id && demoLostOnCard ? '' : `<button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="wixMarkLost('${dl.id}')">Mark lost</button>`}<button class="btn-small" onclick="undoDemoDone('${dl.id}')">↩ Not done</button></div>` : ''}`
+            : `<div style="margin-top:2px">Lost${dl && (dl.lostReason || dl.lostNote) ? ': ' + esc([dl.lostReason, dl.lostNote].filter(Boolean).join(' · ')) : ''}. Parent came back?</div>
+               ${dl ? `<div style="margin-top:6px"><button class="btn-small" onclick="reopenDemoLost('${dl.id}')">↩ Reopen</button></div>` : ''}`}
           ${dl && dl.doneNote ? `<div class="hint" style="font-size:11px;margin-top:2px">Teacher: “${esc(dl.doneNote)}”</div>` : ''}
-        </div>`;
+        </div>
+        ${dl ? wixLostFormHtml(dl.id) : ''}`;
     } else if (b.status === 'Cancelled') {
       scheduleBlock = `
         <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -15034,17 +15052,8 @@ function renderWixBookings() {
                 </div>
               </td></tr>`;
             }
-            const lostForm = demoLostId === d.id ? `<tr style="background:var(--soft)"><td colspan="12" style="padding:10px">
-                <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-                  <b style="font-size:13px">Mark lost: ${esc(d.studentName || '')}</b>
-                  <select onchange="demoLostDraft.reason=this.value" style="padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px">
-                    <option value="">Reason (optional)…</option>
-                    ${DEMO_LOST_REASONS.map(r => `<option value="${escAttr(r)}" ${demoLostDraft.reason===r?'selected':''}>${esc(r)}</option>`).join('')}
-                  </select>
-                  <input type="text" placeholder="Note (optional)" value="${escAttr(demoLostDraft.note)}" oninput="demoLostDraft.note=this.value" style="width:220px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px">
-                  <button class="btn-small btn-primary" onclick="saveDemoLost('${d.id}')">Save as Lost</button>
-                  <button class="btn-small" onclick="demoLostId='';render()">Cancel</button>
-                </div>
+            const lostForm = demoLostId === d.id && !demoLostOnCard ? `<tr style="background:var(--soft)"><td colspan="12" style="padding:10px">
+                <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><b style="font-size:13px">Mark lost: ${esc(d.studentName || '')}</b>${demoLostFieldsHtml(d.id)}</div>
               </td></tr>` : '';
             return `<tr><td>${d.date?dayDate(d.date):'—'}</td><td>${d.demoTime||'—'}</td><td>${esc(tName)}</td><td>${esc(d.subjectId?subjectName(d.subjectId):'—')}</td><td>${esc(d.board||'—')}</td><td>${esc(d.studentName||'—')}</td><td>${esc(d.parentMobile||'—')}${copyBtnHtml(d.parentMobile)}</td><td>${esc(d.notes||'—')}</td><td>${linkSection}</td><td>${statusBadge}</td><td>${d.status==='Converted'?'₹'+d.bonusAmount:'—'}</td><td>${actions}</td></tr>` + lostForm;
           }).join('')
