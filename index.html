@@ -285,7 +285,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-27 22:00 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-27 22:20 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -9189,14 +9189,6 @@ function requestMonthLong(r) {
 // Razorpay payment page (asks for amount, email, phone, student name); payments are matched and marked paid by hand.
 const RAZORPAY_FEE_PAGE = 'https://pages.razorpay.com/pl_P9Dy5JA4jygV77/view';
 function inrText(n) { return 'Rs ' + (Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-// Pay by: the 7th of the month a monthly-run request is for, else 7 days after a request was raised by hand.
-function requestPayBy(r) {
-  if (r.requestMonth) return r.requestMonth.slice(0, 7) + '-07';
-  if (!r.date) return '';
-  const d = new Date(r.date + 'T00:00:00'); d.setDate(d.getDate() + 7);
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-}
-function longDate(ymd) { const [y, m, d] = ymd.split('-').map(Number); return new Date(y, m - 1, d).toLocaleString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }); }
 function joinAnd(list) { return list.length > 1 ? list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1] : (list[0] || ''); }
 // "N classes still available" / "N classes already taken but not yet paid" (never a minus number for parents).
 function remainingText(left) {
@@ -9213,12 +9205,13 @@ function familyFeeMessage(studentId, short) {
   const total = reqs.reduce((a, r) => a + (r.amountPaid || 0), 0);
   const names = kids.map(s => s.name);
   const many = reqs.length > 1;
-  const payBy = reqs.map(requestPayBy).filter(Boolean).sort()[0] || '';
-  const payLine = payBy && payBy >= todayStr ? `Please pay by ${longDate(payBy)}.` : 'Please pay at the earliest.';
   const forMonth = months.length ? ` for ${joinAnd(months)}` : '';
   const subjLabel = r => { const subj = subject(r.subjectId); return subj ? subj.name : 'Subject'; };
-  const opening = short ? 'This is a gentle reminder' : 'We would like to remind you';
-  const lines = [`Dear ${familyParentName(studentId)},`, '', `${opening} that the tuition fee${many ? 's' : ''}${forMonth} for the classes of ${joinAnd(names)} ${many ? 'are' : 'is'}${short ? ' still' : ''} due. ${payLine}`, '', 'Fee Details'];
+  // First message: plain fee details; the Short reminder (second message) is the one that says "reminder".
+  const opening = short
+    ? `This is a gentle reminder that the tuition fee${many ? 's' : ''}${forMonth} for the classes of ${joinAnd(names)} ${many ? 'are' : 'is'} still due.`
+    : `Please find below the tuition fee details${forMonth} for the classes of ${joinAnd(names)}.`;
+  const lines = [`Dear ${familyParentName(studentId)},`, '', opening, '', 'Fee Details'];
   kids.forEach(s => {
     const mine = reqs.filter(r => r.studentId === s.id);
     lines.push('');
