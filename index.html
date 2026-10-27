@@ -285,7 +285,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-27 19:30 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-27 19:45 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1257,6 +1257,14 @@ let demoLinkMsg = '';
 let demoLinkSearch = '';
 let demoLogsTeacherFilter = '';
 let demoLogsStatusFilter = '';
+let demoLogsMonthFilter = '';      // 'YYYY-MM' or '' for all months (Demo Register list + results)
+let demoOutcomeReady = true;       // false until SQL 64 (demo outcome columns) has been run
+let demoLostId = '';               // demo log id with the "Mark lost" form open
+let demoLostDraft = { reason: '', note: '' };
+let teacherDoneId = '';            // teacher: demo with the "Mark done" box open
+let teacherDoneNote = '';
+let demoMsgTeacher = '';
+const DEMO_LOST_REASONS = ['Fees too high', 'Timing did not suit', 'Did not like the teaching', 'Joined elsewhere', 'No reply after demo', 'Just trying / not interested', 'Other'];
 let demoBonusMonth = monthStr;
 let editingDemoId = '';
 let editDemoDraft = {};
@@ -2925,7 +2933,11 @@ async function loadDemoLogs() {
   const cols = currentRole === 'Admin'
     ? 'id,teacher_id,date,demo_time,converted_at,subject_id,board,student_name,parent_mobile,notes,linked_student_id,status,bonus_amount,bonus_paid,created_at'
     : 'id,teacher_id,date,demo_time,converted_at,subject_id,board,student_name,status,bonus_amount,bonus_paid,created_at';
-  const { data: rows, error } = await sb.from('demo_logs').select(cols).order('date', { ascending: false }).order('created_at', { ascending: false });
+  // SQL 64 adds the Done/Lost columns; without it, load the old columns and hide the Done/Lost buttons.
+  const outcomeCols = currentRole === 'Admin' ? ',done_at,done_note,lost_at,lost_reason,lost_note' : ',done_at,done_note';
+  let { data: rows, error } = await sb.from('demo_logs').select(cols + outcomeCols).order('date', { ascending: false }).order('created_at', { ascending: false });
+  demoOutcomeReady = !error;
+  if (error) ({ data: rows, error } = await sb.from('demo_logs').select(cols).order('date', { ascending: false }).order('created_at', { ascending: false }));
   if (!error && rows) {
     data.demoLogs = rows.map(r => ({
       id: r.id, teacherId: r.teacher_id, date: r.date, subjectId: r.subject_id || '',
@@ -2933,6 +2945,7 @@ async function loadDemoLogs() {
       parentMobile: r.parent_mobile || '', notes: r.notes || '',
       linkedStudentId: r.linked_student_id || '', status: r.status || 'Pending',
       demoTime: r.demo_time || '', convertedAt: r.converted_at || '', bonusAmount: r.bonus_amount == null ? 100 : Number(r.bonus_amount), bonusPaid: !!r.bonus_paid,
+      doneAt: r.done_at || '', doneNote: r.done_note || '', lostAt: r.lost_at || '', lostReason: r.lost_reason || '', lostNote: r.lost_note || '',
       createdAt: r.created_at || ''
     }));
   }
@@ -3860,9 +3873,9 @@ async function deleteDemoLog(id) {
 async function convertDemoLog(id) {
   const dl = data.demoLogs.find(d => d.id === id);
   if (!dl || !dl.linkedStudentId) { demoLogMsg = 'Please link a student before converting.'; render(); return; }
-  const { error } = await sb.from('demo_logs').update({ status: 'Converted', converted_at: todayStr }).eq('id', id);
+  const { error } = await sb.from('demo_logs').update(demoConvertFields(dl)).eq('id', id);
   if (error) { demoLogMsg = 'Error: ' + error.message; render(); return; }
-  if (dl) { dl.status = 'Converted'; dl.convertedAt = todayStr; }
+  applyDemoConvert(dl);
   // Sync linked Wix booking → Converted
   const wb = data.wixBookings.find(b => b.demoLogId === id);
   if (wb) {
@@ -3892,10 +3905,10 @@ async function createAndLinkDemo(id, nameFromDemo) {
   data.students.push({ id: row.id, name: row.name, archived: false, code: row.student_code || '' });
   demoLinkStudentId = row.id;
   // Now link the demo log
-  const { error: linkErr } = await sb.from('demo_logs').update({ linked_student_id: row.id, status: 'Converted', converted_at: todayStr }).eq('id', id);
-  if (linkErr) { demoLinkMsg = 'Student created but link failed: ' + linkErr.message; render(); return; }
   const dl = data.demoLogs.find(d => d.id === id);
-  if (dl) { dl.linkedStudentId = row.id; dl.status = 'Converted'; dl.convertedAt = todayStr; }
+  const { error: linkErr } = await sb.from('demo_logs').update({ linked_student_id: row.id, ...demoConvertFields(dl) }).eq('id', id);
+  if (linkErr) { demoLinkMsg = 'Student created but link failed: ' + linkErr.message; render(); return; }
+  if (dl) { dl.linkedStudentId = row.id; applyDemoConvert(dl); }
   // Sync wix booking
   const wb = data.wixBookings.find(b => b.demoLogId === id);
   if (wb) {
@@ -3922,10 +3935,10 @@ function demoLinkSearchInput(el) {
 async function linkDemoToStudent(id) {
   if (!demoLinkStudentId) { demoLinkMsg = 'Please pick a student.'; render(); return; }
   demoLinkMsg = 'Saving…'; render();
-  const { error } = await sb.from('demo_logs').update({ linked_student_id: demoLinkStudentId, status: 'Converted', converted_at: todayStr }).eq('id', id);
-  if (error) { demoLinkMsg = 'Error: ' + error.message; render(); return; }
   const dl = data.demoLogs.find(d => d.id === id);
-  if (dl) { dl.linkedStudentId = demoLinkStudentId; dl.status = 'Converted'; dl.convertedAt = todayStr; }
+  const { error } = await sb.from('demo_logs').update({ linked_student_id: demoLinkStudentId, ...demoConvertFields(dl) }).eq('id', id);
+  if (error) { demoLinkMsg = 'Error: ' + error.message; render(); return; }
+  if (dl) { dl.linkedStudentId = demoLinkStudentId; applyDemoConvert(dl); }
   // Sync linked Wix booking → Converted
   const wb = data.wixBookings.find(b => b.demoLogId === id);
   if (wb) {
@@ -3934,6 +3947,137 @@ async function linkDemoToStudent(id) {
   }
   demoLinkingId = ''; demoLinkStudentId = ''; demoLinkMsg = '';
   demoLogMsg = 'Linked student and marked Converted — ₹100 bonus will appear in payroll.' + (wb ? ' Wix booking updated.' : ''); render();
+}
+// Converting also records the demo as done (admins may skip straight from Pending) and clears any Lost reason.
+function demoDoneDate(dl) {
+  return (dl && dl.doneAt) || (dl && dl.date && dl.date <= todayStr ? dl.date : todayStr);
+}
+function demoConvertFields(dl) {
+  const f = { status: 'Converted', converted_at: todayStr };
+  if (demoOutcomeReady) Object.assign(f, { done_at: demoDoneDate(dl), lost_at: null, lost_reason: null, lost_note: null });
+  return f;
+}
+function applyDemoConvert(dl) {
+  if (!dl) return;
+  if (demoOutcomeReady) { dl.doneAt = demoDoneDate(dl); dl.lostAt = ''; dl.lostReason = ''; dl.lostNote = ''; }
+  dl.status = 'Converted'; dl.convertedAt = todayStr;
+}
+// Keep the website booking's status in step with its demo log.
+async function syncWixFromDemo(demoId, status) {
+  const wb = data.wixBookings.find(b => b.demoLogId === demoId);
+  if (!wb) return null;
+  await sb.from('wix_demo_bookings').update({ status }).eq('id', wb.id);
+  wb.status = status;
+  return wb;
+}
+// Demo needs a result: Done with no Converted/Lost yet, or still Pending after the demo date.
+function demoWaiting(d) {
+  return d.status === 'Done' || (d.status === 'Pending' && !!d.date && d.date < todayStr);
+}
+function demoDaysSince(dateStr) {
+  if (!dateStr) return 0;
+  return Math.max(0, Math.round((new Date(todayStr + 'T00:00:00') - new Date(dateStr.slice(0, 10) + 'T00:00:00')) / 86400000));
+}
+function demoStatusBadge(d, forAdmin) {
+  const col = { Converted: 'var(--forest)', Done: 'var(--accent)', Lost: 'var(--brick)', Cancelled: 'var(--brick)' }[d.status] || 'var(--gold-dark,#b8860b)';
+  let h = '<span style="color:' + col + ';font-weight:' + (d.status === 'Converted' || d.status === 'Done' ? 600 : 400) + '">' + esc(d.status) + '</span>';
+  if (d.status === 'Done' && d.doneAt) {
+    const days = demoDaysSince(d.doneAt);
+    h += '<div class="hint" style="font-size:11px">' + esc(dayDate(d.doneAt)) + '</div>';
+    if (forAdmin && days >= 3) h += '<div style="font-size:11px;color:var(--brick);font-weight:600">Waiting ' + days + ' days for a result</div>';
+  }
+  if (d.status === 'Pending' && d.date && d.date < todayStr) h += '<div style="font-size:11px;color:var(--brick)">Demo date passed</div>';
+  if (d.doneNote) h += '<div class="hint" style="font-size:11px;max-width:200px">“' + esc(d.doneNote) + '”</div>';
+  if (forAdmin && d.status === 'Lost' && (d.lostReason || d.lostNote)) h += '<div class="hint" style="font-size:11px;max-width:200px">' + esc([d.lostReason, d.lostNote].filter(Boolean).join(' · ')) + '</div>';
+  return h;
+}
+// Demo Register "Demo results": one row per teacher for the month/teacher picked above, plus Lost reasons.
+function demoResultsHtml() {
+  const list = data.demoLogs.filter(d => (!demoLogsTeacherFilter || d.teacherId === demoLogsTeacherFilter) && (!demoLogsMonthFilter || (d.date || '').startsWith(demoLogsMonthFilter)));
+  if (!list.length) return '';
+  const byT = {};
+  list.forEach(d => {
+    const r = byT[d.teacherId] || (byT[d.teacherId] = { Pending: 0, Done: 0, Converted: 0, Lost: 0, Cancelled: 0 });
+    if (r[d.status] != null) r[d.status]++;
+  });
+  const rate = r => { const given = r.Done + r.Converted + r.Lost; return given ? Math.round(r.Converted / given * 100) + '%' : '—'; };
+  const tot = { Pending: 0, Done: 0, Converted: 0, Lost: 0, Cancelled: 0 };
+  const rows = Object.keys(byT).map(id => ({ id, name: teacherLabel(data.teachers.find(t => t.id === id) || { name: '?', code: '' }), r: byT[id] }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  rows.forEach(x => Object.keys(tot).forEach(k => { tot[k] += x.r[k]; }));
+  const cells = r => `<td>${r.Done + r.Converted + r.Lost}</td><td>${r.Converted}</td><td>${r.Lost}</td><td>${r.Done}</td><td>${r.Pending}</td><td>${r.Cancelled}</td><td><b>${rate(r)}</b></td>`;
+  const reasons = {};
+  list.filter(d => d.status === 'Lost').forEach(d => { const k = d.lostReason || 'No reason given'; reasons[k] = (reasons[k] || 0) + 1; });
+  const reasonList = Object.entries(reasons).sort((a, b) => b[1] - a[1]);
+  return `<div style="margin-top:16px">
+      <h3 style="margin:0 0 4px">Demo results <span class="hint" style="font-size:12px;font-weight:400">· ${demoLogsMonthFilter ? esc(monthLabelOf(demoLogsMonthFilter)) : 'all months'} (by demo date)</span></h3>
+      <div class="hint" style="margin-bottom:6px">Given = Done + Converted + Lost. Converted % = Converted out of demos given. Waiting = Done but not yet Converted or Lost.</div>
+      <div class="table-scroll"><table><tr><th>Teacher</th><th>Given</th><th>Converted</th><th>Lost</th><th>Waiting</th><th>Pending</th><th>Cancelled</th><th>Converted %</th></tr>
+        ${rows.map(x => `<tr><td>${esc(x.name)}</td>${cells(x.r)}</tr>`).join('')}
+        ${rows.length > 1 ? `<tr style="font-weight:600"><td>Total</td>${cells(tot)}</tr>` : ''}
+      </table></div>
+      ${reasonList.length ? `<div style="margin-top:8px;font-size:13px"><b>Why demos were lost:</b> ${reasonList.map(([k, n]) => `${esc(k)} <b>${n}</b>`).join(' · ')}</div>` : ''}
+    </div>`;
+}
+async function markDemoDone(id) {
+  const dl = data.demoLogs.find(d => d.id === id); if (!dl) return;
+  const doneAt = demoDoneDate(dl);
+  const { error } = await sb.from('demo_logs').update({ status: 'Done', done_at: doneAt }).eq('id', id);
+  if (error) { demoLogMsg = 'Error: ' + error.message; render(); return; }
+  dl.status = 'Done'; dl.doneAt = doneAt;
+  const wb = await syncWixFromDemo(id, 'Done');
+  demoLogMsg = 'Marked Done. Mark it Converted or Lost once you hear from the parent.' + (wb ? ' Website booking updated.' : ''); render();
+}
+async function undoDemoDone(id) {
+  const dl = data.demoLogs.find(d => d.id === id); if (!dl) return;
+  if (!confirm('Put this demo back to Pending (not done yet)?')) return;
+  const { error } = await sb.from('demo_logs').update({ status: 'Pending', done_at: null, done_note: null }).eq('id', id);
+  if (error) { demoLogMsg = 'Error: ' + error.message; render(); return; }
+  dl.status = 'Pending'; dl.doneAt = ''; dl.doneNote = '';
+  const wb = await syncWixFromDemo(id, 'Scheduled');
+  demoLogMsg = 'Back to Pending.' + (wb ? ' Website booking back to Scheduled.' : ''); render();
+}
+function startDemoLost(id) {
+  demoLostId = id; demoLostDraft = { reason: '', note: '' }; render();
+}
+async function saveDemoLost(id) {
+  const dl = data.demoLogs.find(d => d.id === id); if (!dl) return;
+  const row = { status: 'Lost', lost_at: todayStr, lost_reason: demoLostDraft.reason || null, lost_note: (demoLostDraft.note || '').trim() || null, done_at: demoDoneDate(dl) };
+  const { error } = await sb.from('demo_logs').update(row).eq('id', id);
+  if (error) { demoLogMsg = 'Error: ' + error.message; render(); return; }
+  Object.assign(dl, { status: 'Lost', lostAt: todayStr, lostReason: row.lost_reason || '', lostNote: row.lost_note || '', doneAt: row.done_at });
+  const wb = await syncWixFromDemo(id, 'Lost');
+  demoLostId = ''; demoLostDraft = { reason: '', note: '' };
+  demoLogMsg = 'Marked Lost.' + (wb ? ' Website booking updated.' : ''); render();
+}
+async function reopenDemoLost(id) {
+  const dl = data.demoLogs.find(d => d.id === id); if (!dl) return;
+  const { error } = await sb.from('demo_logs').update({ status: 'Done', lost_at: null, lost_reason: null, lost_note: null }).eq('id', id);
+  if (error) { demoLogMsg = 'Error: ' + error.message; render(); return; }
+  Object.assign(dl, { status: 'Done', lostAt: '', lostReason: '', lostNote: '' });
+  const wb = await syncWixFromDemo(id, 'Done');
+  demoLogMsg = 'Reopened: back to Done.' + (wb ? ' Website booking updated.' : ''); render();
+}
+async function undoDemoConvert(id) {
+  const dl = data.demoLogs.find(d => d.id === id); if (!dl) return;
+  if (dl.bonusPaid) { demoLogMsg = 'The demo bonus for this demo is already paid, so it cannot be undone.'; render(); return; }
+  if (!confirm('Undo Converted for ' + (dl.studentName || 'this demo') + '?\n\nThe demo goes back to Done and the ₹' + dl.bonusAmount + ' bonus comes off the teacher\'s payroll. The student record is kept.')) return;
+  const { error } = await sb.from('demo_logs').update({ status: 'Done', converted_at: null, linked_student_id: null }).eq('id', id);
+  if (error) { demoLogMsg = 'Error: ' + error.message; render(); return; }
+  Object.assign(dl, { status: 'Done', convertedAt: '', linkedStudentId: '' });
+  const wb = await syncWixFromDemo(id, 'Done');
+  demoLogMsg = 'Converted undone: back to Done.' + (wb ? ' Website booking updated.' : ''); render();
+}
+// Teacher marks their own demo done (SQL 64 function checks it is theirs and the date has come).
+async function teacherMarkDemoDone(id) {
+  const { data: res, error } = await sb.rpc('teacher_mark_demo_done', { p_id: id, p_note: teacherDoneNote.trim() || null });
+  if (error || !res || !res.ok) { demoMsgTeacher = 'Could not save: ' + (error ? error.message : (res && res.error) || 'unknown error'); render(); return; }
+  const dl = data.demoLogs.find(d => d.id === id);
+  if (dl) { dl.status = 'Done'; dl.doneAt = res.done_at || todayStr; dl.doneNote = teacherDoneNote.trim(); }
+  teacherDoneId = ''; teacherDoneNote = '';
+  demoMsgTeacher = 'Marked done. Thank you!';
+  trackUse('demo_done');
+  render();
 }
 async function markDemoBonusPaid(id) {
   const { error } = await sb.from('demo_logs').update({ bonus_paid: true }).eq('id', id);
@@ -9797,7 +9941,7 @@ const SUPPORT_KB = {
 - Dashboard: at-a-glance stats, AI summaries and students at risk.
 - Class Log (Daily work): record daily attendance. Pick the date, find the student, mark Present/Absent/Holiday.
 - Communication (Daily work): chat with teachers, students and parents, and post announcements.
-- Demo Bookings (Daily work): demo bookings from the website arrive here (New → Scheduled → Converted/Cancelled). A converted demo gives the teacher a demo bonus.
+- Demo Bookings (Daily work): demo bookings from the website arrive here (New → Scheduled → Done → Converted or Lost, or Cancelled). Teachers mark their own demos Done on their Dashboard; admins can set any status, mark Lost with an optional reason, and skip straight from Pending to Converted. A converted demo gives the teacher a demo bonus. The Demo Register shows Demo results per teacher (Converted %) and why demos were lost.
 - Support (Daily work): view and resolve issues raised by teachers, students or parents.
 - Rebuild Pending Classes (Daily work): rebuild the pending class schedule from each student's class frequency.
 - Fees (Money): per-class rates (Fee setup), discount structure, fee calculator, students needing renewal, Razorpay payments to confirm, pending fee requests, all subscription payments and the UPI / contact details used in fee messages.
@@ -13342,6 +13486,8 @@ function renderDashboard() {
     { num: needingRenewal, label: `Student${needingRenewal===1?'':'s'} needing renewal`, action: "rptRenewalOpen=true; setTab('fees'); setTimeout(()=>{ const el=document.getElementById('studentsNeedingRenewalSection'); if(el) el.scrollIntoView({behavior:'smooth'}); },120)" },
     { num: unreadChats, label: `Unread chat${unreadChats===1?'':'s'}`, tab: 'chat' },
   ];
+  const demosWaiting = data.demoLogs.filter(demoWaiting).length;
+  if (demosWaiting) cards.push({ num: demosWaiting, label: `Demo${demosWaiting===1?'':'s'} waiting for a result`, action: "demoLogsStatusFilter='Waiting'; setTab('wixbookings'); setTimeout(()=>{ const el=document.getElementById('demo-register-heading'); if(el) el.scrollIntoView({behavior:'smooth'}); },150)" });
   const expiring = expiringSoon();
   // The card counts CLASSES (the unused classes that will be lost), not payments; the list below shows the payments.
   const expiringClasses = Math.round(expiring.reduce((a, r) => a + r.unused, 0) * 100) / 100;
@@ -13361,7 +13507,9 @@ function renderDashboard() {
   // Demo funnel summary (admin only)
   const fNew = data.wixBookings.filter(b=>b.status==='New').length;
   const fSched = data.wixBookings.filter(b=>b.status==='Scheduled').length;
+  const fDone = data.wixBookings.filter(b=>b.status==='Done').length;
   const fConv = data.wixBookings.filter(b=>b.status==='Converted').length;
+  const fLost = data.wixBookings.filter(b=>b.status==='Lost').length;
   const fCancelled = data.wixBookings.filter(b=>b.status==='Cancelled').length;
   const fTotal = data.wixBookings.length;
   const convRate = fTotal > 0 ? Math.round((fConv / fTotal) * 100) : 0;
@@ -13369,7 +13517,7 @@ function renderDashboard() {
     <div class="card" style="margin-bottom:16px">
       <h2 style="margin-bottom:10px">Demo Funnel <span class="hint" style="font-size:12px;font-weight:400">· ${fTotal} total · ${convRate}% converted</span></h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        ${[['New',fNew,'var(--brick)'],['Scheduled',fSched,'var(--accent)'],['Converted',fConv,'var(--green)'],['Cancelled',fCancelled,'#888']].map(([label,cnt,color])=>`
+        ${[['New',fNew,'var(--brick)'],['Scheduled',fSched,'var(--accent)'],['Done',fDone,'#6b5ca5'],['Converted',fConv,'var(--green)'],['Lost',fLost,'#a0522d'],['Cancelled',fCancelled,'#888']].map(([label,cnt,color])=>`
           <div onclick="setTab('wixbookings');wixBookingsFilter='${label}';render()" style="cursor:pointer;flex:1;min-width:90px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px 12px;text-align:center;transition:border-color 0.15s" onmouseover="this.style.borderColor='${color}'" onmouseout="this.style.borderColor='var(--line)'">
             <div style="font-family:'Zilla Slab',serif;font-size:26px;font-weight:700;color:${cnt===0?'var(--muted)':color};line-height:1">${cnt}</div>
             <div style="font-size:11.5px;color:var(--muted);margin-top:4px">${label}</div>
@@ -14614,12 +14762,12 @@ function renderFees() {
 }
 
 function renderWixBookings() {
-  const filters = ['New', 'Scheduled', 'Converted', 'Cancelled', 'All'];
+  const filters = ['New', 'Scheduled', 'Done', 'Converted', 'Lost', 'Cancelled', 'All'];
   const newCount = data.wixBookings.filter(b => b.status === 'New').length;
   const list = data.wixBookings.filter(b => (wixBookingsFilter === 'All' || b.status === wixBookingsFilter) && (!wixPaidReady || wixPaidFilter === 'All' || (wixPaidFilter === 'Paid') === !!b.paid));
   const d = wixBookingScheduleDraft;
   const ed = wixBookingEditDraft;
-  const statusColor = s => s === 'New' ? 'var(--brick)' : s === 'Scheduled' ? 'var(--accent)' : s === 'Converted' ? 'var(--green)' : '#888';
+  const statusColor = s => s === 'New' ? 'var(--brick)' : s === 'Scheduled' ? 'var(--accent)' : s === 'Done' ? '#6b5ca5' : s === 'Converted' ? 'var(--green)' : s === 'Lost' ? '#a0522d' : '#888';
 
   // Age indicator helper — only for active (New/Scheduled) bookings
   function ageIndicator(submittedAt) {
@@ -14682,6 +14830,16 @@ function renderWixBookings() {
           <button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="cancelWixBooking('${b.id}')">✕ Cancel booking</button>
           ${wixMsgBtns}
         </div>`;
+    } else if (b.status === 'Done' || b.status === 'Lost') {
+      const dl = b.demoLogId ? data.demoLogs.find(x => x.id === b.demoLogId) : null;
+      scheduleBlock = `
+        <div style="font-size:12px;background:var(--hover,rgba(0,0,0,.04));border-radius:6px;padding:8px;margin-top:10px">
+          <div>📅 <b>${scheduledTeacher ? esc(scheduledTeacher.name) : '?'}</b> · ${dayDate(b.scheduledDate)}${b.scheduledTime ? ' at ' + b.scheduledTime : ''}</div>
+          ${b.status === 'Done'
+            ? `<div style="margin-top:2px">✓ Demo done${dl && dl.doneAt ? ' on ' + esc(dayDate(dl.doneAt)) : ''}. Mark it Converted or Lost in the Demo Register below.</div>`
+            : `<div style="margin-top:2px">Lost${dl && (dl.lostReason || dl.lostNote) ? ': ' + esc([dl.lostReason, dl.lostNote].filter(Boolean).join(' · ')) : ''}. Reopen it in the Demo Register if the parent comes back.</div>`}
+          ${dl && dl.doneNote ? `<div class="hint" style="font-size:11px;margin-top:2px">Teacher: “${esc(dl.doneNote)}”</div>` : ''}
+        </div>`;
     } else if (b.status === 'Cancelled') {
       scheduleBlock = `
         <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -14697,7 +14855,7 @@ function renderWixBookings() {
     let convertBlock = '';
     if (alreadyConverted) {
       convertBlock = `<div style="margin-top:8px;font-size:12px;color:var(--green)">🎓 Student created: <b>${esc(convertedStudent ? convertedStudent.name : b.convertedStudentId)}</b></div>`;
-    } else if (b.status === 'Converted' || b.status === 'Scheduled') {
+    } else if (['Converted', 'Scheduled', 'Done', 'Lost'].includes(b.status)) {
       if (isConverting) {
         convertBlock = `
           <div style="background:rgba(60,94,66,0.07);border:1px solid var(--green,#3c5e42);border-radius:6px;padding:10px;margin-top:10px">
@@ -14789,20 +14947,22 @@ function renderWixBookings() {
         </select>
         <select onchange="demoLogsStatusFilter=this.value;render()" style="padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px">
           <option value="">All Statuses</option>
-          <option value="Pending" ${demoLogsStatusFilter==='Pending'?'selected':''}>Pending</option>
-          <option value="Converted" ${demoLogsStatusFilter==='Converted'?'selected':''}>Converted</option>
-          <option value="Cancelled" ${demoLogsStatusFilter==='Cancelled'?'selected':''}>Cancelled</option>
+          ${[['Waiting', 'Waiting for a result'], ['Pending', 'Pending'], ['Done', 'Done'], ['Converted', 'Converted'], ['Lost', 'Lost'], ['Cancelled', 'Cancelled']].map(([v, l]) => `<option value="${v}" ${demoLogsStatusFilter===v?'selected':''}>${l}</option>`).join('')}
         </select>
+        <input type="month" value="${demoLogsMonthFilter}" onchange="demoLogsMonthFilter=this.value;render()" title="Demo month (empty = all months)" style="padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px">
+        ${demoLogsMonthFilter ? `<button class="btn-small" style="font-size:11px" onclick="demoLogsMonthFilter='';render()">All months</button>` : ''}
       </div>
+      ${demoOutcomeReady ? '' : '<div class="hint" style="color:var(--brick);margin-bottom:8px">Run SQL 64 (demos/64-demo-outcome.sql) in Supabase to turn on Done and Lost.</div>'}
       ${(()=>{
         const filtered = data.demoLogs
-          .filter(d => (!demoLogsTeacherFilter || d.teacherId===demoLogsTeacherFilter) && (!demoLogsStatusFilter || d.status===demoLogsStatusFilter));
-        if (!filtered.length) return '<div class="empty">No demo logs yet.</div>';
+          .filter(d => (!demoLogsTeacherFilter || d.teacherId===demoLogsTeacherFilter) && (!demoLogsMonthFilter || (d.date || '').startsWith(demoLogsMonthFilter))
+            && (!demoLogsStatusFilter || (demoLogsStatusFilter === 'Waiting' ? demoWaiting(d) : d.status===demoLogsStatusFilter)));
+        if (!filtered.length) return '<div class="empty">No demo logs' + (demoLogsStatusFilter || demoLogsMonthFilter || demoLogsTeacherFilter ? ' match these filters.' : ' yet.') + '</div>';
         return '<div class="table-scroll"><table><tr><th>Date</th><th>Time</th><th>Teacher</th><th>Subject</th><th>Board</th><th>Student</th><th>Parent Mobile</th><th>Notes</th><th>Linked Student</th><th>Status</th><th>Bonus</th><th></th></tr>'
           + filtered.map(d => {
             const tName = teacherLabel(data.teachers.find(t=>t.id===d.teacherId)||{name:'?',code:''});
             const sName = d.linkedStudentId ? (data.students.find(s=>s.id===d.linkedStudentId)||{name:'?'}).name : '—';
-            const statusBadge = d.status==='Converted' ? '<span style="color:var(--forest);font-weight:600">Converted</span>' : d.status==='Cancelled' ? '<span style="color:var(--brick)">Cancelled</span>' : '<span style="color:var(--gold-dark,#b8860b)">Pending</span>';
+            const statusBadge = demoStatusBadge(d, true);
             const linkSection = demoLinkingId===d.id
               ? '<div style="display:flex;flex-direction:column;gap:4px">'
                 + '<input type="text" placeholder="Search existing student…" value="'+esc(demoLinkSearch)+'" oninput="demoLinkSearchInput(this)" style="font-size:12px;padding:2px 6px;border:1px solid var(--line);border-radius:4px;width:180px">'
@@ -14818,7 +14978,7 @@ function renderWixBookings() {
                 + ' <button class="btn-small" style="font-size:11px" onclick="demoLinkingId=\'\';demoLinkStudentId=\'\';demoLinkSearch=\'\';render()">Cancel</button>'
                 + (demoLinkMsg ? '<div style="font-size:11px;color:'+(demoLinkMsg.startsWith('✓')?'var(--green)':'var(--brick)')+'">'+esc(demoLinkMsg)+'</div>' : '')
                 + '</div>'
-              : (d.status==='Pending' ? '<button class="btn-small btn-primary" style="font-size:11px" onclick="demoLinkingId=\''+d.id+'\';demoLinkStudentId=\'\';demoLinkMsg=\'\';demoLinkSearch=\'\';render()">Link &amp; Convert</button>' : (sName!=='—'?esc(sName):'<span class="hint">—</span>'));
+              : (['Pending', 'Done', 'Lost'].includes(d.status) ? '<button class="btn-small btn-primary" style="font-size:11px" onclick="demoLinkingId=\''+d.id+'\';demoLinkStudentId=\'\';demoLinkMsg=\'\';demoLinkSearch=\'\';render()">Link &amp; Convert</button>' : (sName!=='—'?esc(sName):'<span class="hint">—</span>'));
             const msgBtns = (() => {
               if (!d.parentMobile) return '';
               const clean = d.parentMobile.replace(/\D/g, '');
@@ -14827,11 +14987,18 @@ function renderWixBookings() {
               return ` <a href="https://wa.me/${num}?text=${enc}" target="_blank" class="btn-small" style="text-decoration:none;display:inline-flex;align-items:center;font-size:11px" title="Send demo confirmation on WhatsApp">📤 WA</a>`
                 + ` <button class="btn-small" style="font-size:11px" title="Copy demo confirmation message" onclick="copyText(demoConfirmMessage(data.demoLogs.find(x=>x.id==='${d.id}')),this)">Copy msg</button>`;
             })();
+            const btn = (label, fn, style) => `<button class="btn-small" style="font-size:11px${style ? ';' + style : ''}" onclick="${fn}('${d.id}')">${label}</button>`;
+            const editBtn = `<button class="btn-small" style="font-size:11px" onclick="startEditDemo(data.demoLogs.find(x=>x.id==='${d.id}'))">Edit</button>`;
+            const oc = demoOutcomeReady;
             const actions = (d.status==='Pending'
-              ? `<button class="btn-small" style="font-size:11px" onclick="startEditDemo(data.demoLogs.find(x=>x.id==='${d.id}'))">Edit</button> <button class="btn-small" style="font-size:11px;color:var(--brick)" onclick="cancelDemoLog('${d.id}')">Cancel</button> <button class="btn-small" style="font-size:11px;color:var(--brick)" onclick="deleteDemoLog('${d.id}')">Delete</button>`
+              ? [editBtn, oc ? btn('✓ Done', 'markDemoDone', 'color:var(--forest);border-color:var(--forest)') : '', oc ? btn('Lost', 'startDemoLost', 'color:var(--brick)') : '', btn('Cancel', 'cancelDemoLog', 'color:var(--brick)'), btn('Delete', 'deleteDemoLog', 'color:var(--brick)')]
+              : d.status==='Done'
+                ? [editBtn, btn('Lost', 'startDemoLost', 'color:var(--brick)'), btn('↩ Not done', 'undoDemoDone')]
+              : d.status==='Lost'
+                ? [editBtn, btn('↩ Reopen', 'reopenDemoLost'), btn('Delete', 'deleteDemoLog', 'color:var(--brick)')]
               : d.status==='Converted'
-                ? `<button class="btn-small" style="font-size:11px" onclick="startEditDemo(data.demoLogs.find(x=>x.id==='${d.id}'))">Edit</button>`
-                : `<button class="btn-small" style="font-size:11px" onclick="startEditDemo(data.demoLogs.find(x=>x.id==='${d.id}'))">Edit</button> <button class="btn-small" style="font-size:11px;color:var(--brick)" onclick="deleteDemoLog('${d.id}')">Delete</button>`)
+                ? [editBtn, !d.bonusPaid && oc ? btn('↩ Undo convert', 'undoDemoConvert') : '']
+                : [editBtn, btn('Delete', 'deleteDemoLog', 'color:var(--brick)')]).filter(Boolean).join(' ')
               + msgBtns;
             if (editingDemoId === d.id) {
               return `<tr style="background:var(--soft)"><td colspan="11" style="padding:10px">
@@ -14859,10 +15026,23 @@ function renderWixBookings() {
                 </div>
               </td></tr>`;
             }
-            return `<tr><td>${d.date?dayDate(d.date):'—'}</td><td>${d.demoTime||'—'}</td><td>${esc(tName)}</td><td>${esc(d.subjectId?subjectName(d.subjectId):'—')}</td><td>${esc(d.board||'—')}</td><td>${esc(d.studentName||'—')}</td><td>${esc(d.parentMobile||'—')}${copyBtnHtml(d.parentMobile)}</td><td>${esc(d.notes||'—')}</td><td>${linkSection}</td><td>${statusBadge}</td><td>${d.status==='Converted'?'₹'+d.bonusAmount:'—'}</td><td>${actions}</td></tr>`;
+            const lostForm = demoLostId === d.id ? `<tr style="background:var(--soft)"><td colspan="12" style="padding:10px">
+                <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+                  <b style="font-size:13px">Mark lost: ${esc(d.studentName || '')}</b>
+                  <select onchange="demoLostDraft.reason=this.value" style="padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px">
+                    <option value="">Reason (optional)…</option>
+                    ${DEMO_LOST_REASONS.map(r => `<option value="${escAttr(r)}" ${demoLostDraft.reason===r?'selected':''}>${esc(r)}</option>`).join('')}
+                  </select>
+                  <input type="text" placeholder="Note (optional)" value="${escAttr(demoLostDraft.note)}" oninput="demoLostDraft.note=this.value" style="width:220px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px">
+                  <button class="btn-small btn-primary" onclick="saveDemoLost('${d.id}')">Save as Lost</button>
+                  <button class="btn-small" onclick="demoLostId='';render()">Cancel</button>
+                </div>
+              </td></tr>` : '';
+            return `<tr><td>${d.date?dayDate(d.date):'—'}</td><td>${d.demoTime||'—'}</td><td>${esc(tName)}</td><td>${esc(d.subjectId?subjectName(d.subjectId):'—')}</td><td>${esc(d.board||'—')}</td><td>${esc(d.studentName||'—')}</td><td>${esc(d.parentMobile||'—')}${copyBtnHtml(d.parentMobile)}</td><td>${esc(d.notes||'—')}</td><td>${linkSection}</td><td>${statusBadge}</td><td>${d.status==='Converted'?'₹'+d.bonusAmount:'—'}</td><td>${actions}</td></tr>` + lostForm;
           }).join('')
           + '</table></div>';
       })()}
+      ${demoResultsHtml()}
     </div>`;
 }
 
@@ -17972,10 +18152,18 @@ function renderTeacherDashboard(teacher) {
       return '<div class="card" id="teacherDemoSection"><h2>My Demo Classes <span style="font-size:13px;color:var(--hint);font-weight:400">— bonus earned on student admission</span></h2>'
         + '<div class="hint">Demos you gave where the student later took admission earn you ₹100 per student (added to monthly payroll). Contact details of demo students are not shown here.</div>'
         + (monthBonus > 0 ? '<div style="margin:8px 0;padding:8px 12px;background:var(--soft);border-radius:8px;font-size:13px"><b style="color:var(--forest)">' + monthBonusDesc + '</b> for ' + teacherEarningsMonth + ' (included in your payroll)</div>' : '')
-        + '<div class="table-scroll"><table><tr><th>Date</th><th>Time</th><th>Subject</th><th>Board</th><th>Student</th><th>Status</th><th>Bonus</th></tr>'
+        + (demoOutcomeReady ? '<div class="hint" style="margin-top:4px">After you give a demo, press <b>✓ Mark done</b>. You can add a line on how it went.</div>' : '')
+        + (demoMsgTeacher ? '<div style="margin:6px 0;font-size:13px;color:' + (demoMsgTeacher.startsWith('Could not') ? 'var(--brick)' : 'var(--forest)') + '">' + esc(demoMsgTeacher) + '</div>' : '')
+        + '<div class="table-scroll"><table><tr><th>Date</th><th>Time</th><th>Subject</th><th>Board</th><th>Student</th><th>Status</th><th>Bonus</th><th></th></tr>'
         + myDemos.map(d => {
-            const statusBadge = d.status==='Converted' ? '<span style="color:var(--forest);font-weight:600">Converted</span>' : d.status==='Cancelled' ? '<span style="color:var(--brick)">Cancelled</span>' : '<span style="color:var(--gold-dark,#b8860b)">Pending</span>';
-            return '<tr><td>'+esc(d.date||'—')+'</td><td>'+(d.demoTime||'—')+'</td><td>'+esc(d.subjectId?subjectName(d.subjectId):'—')+'</td><td>'+esc(d.board||'—')+'</td><td>'+esc(d.studentName||'—')+'</td><td>'+statusBadge+'</td><td>'+(d.status==='Converted'?'₹'+d.bonusAmount:d.status==='Cancelled'?'<span class="hint">—</span>':'<span class="hint">Pending</span>')+'</td></tr>';
+            const statusBadge = demoStatusBadge(d, false);
+            const canMark = demoOutcomeReady && d.status === 'Pending' && d.date && d.date <= todayStr;
+            const action = !canMark ? '' : teacherDoneId === d.id
+              ? '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center"><input type="text" placeholder="How did it go? (optional)" value="' + escAttr(teacherDoneNote) + '" oninput="teacherDoneNote=this.value" style="width:190px;font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:4px">'
+                + '<button class="btn-small btn-primary" style="font-size:11px" onclick="teacherMarkDemoDone(\'' + d.id + '\')">Save</button> <button class="btn-small" style="font-size:11px" onclick="teacherDoneId=\'\';render()">Cancel</button></div>'
+              : '<button class="btn-small btn-primary" style="font-size:11px" onclick="teacherDoneId=\'' + d.id + '\';teacherDoneNote=\'\';demoMsgTeacher=\'\';render()">✓ Mark done</button>';
+            const bonusCell = d.status==='Converted' ? '₹'+d.bonusAmount : (d.status==='Cancelled' || d.status==='Lost') ? '<span class="hint">—</span>' : '<span class="hint">Pending</span>';
+            return '<tr><td>'+esc(d.date?dayDate(d.date):'—')+'</td><td>'+(d.demoTime||'—')+'</td><td>'+esc(d.subjectId?subjectName(d.subjectId):'—')+'</td><td>'+esc(d.board||'—')+'</td><td>'+esc(d.studentName||'—')+'</td><td>'+statusBadge+'</td><td>'+bonusCell+'</td><td>'+action+'</td></tr>';
           }).join('')
         + '</table></div>'
         + (totalBonus > 0 ? `<div style="margin-top:8px;font-size:13px;color:var(--forest)"><b>Total bonus earned (all time): ₹${totalBonus.toFixed(0)}</b></div>` : '')
