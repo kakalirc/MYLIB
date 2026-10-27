@@ -285,7 +285,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-27 20:00 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-27 20:30 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1776,7 +1776,7 @@ function researchMdHtml(md) {
 function toggleTeacherMobileTabMenu() { teacherMobileTabMenuOpen = !teacherMobileTabMenuOpen; render(); }
 function setTeacherPortalTab(t) {
   teacherPortalTab = t;
-  if (t === 'dashboard' || t === 'pendingactions') { loadClassFrequencyRows().then(() => render()); }
+  if (t === 'dashboard' || t === 'pendingactions') { loadClassFrequencyRows().then(() => render()); loadTeacherPendingExtras(true); }
   if (t === 'frequency') { frequencyMsg = ''; loadClassFrequencyRows().then(() => render()); }
   trackUse('tab:' + t, true);
   teacherMobileTabMenuOpen = false;
@@ -6957,6 +6957,7 @@ async function logout() {
     ]);
   }
   resetResearchState();
+  resetTeacherPendingExtra();
   teacherPortalTab = 'dashboard'; // the next login starts on the Dashboard, so a tab's data is loaded when it is opened
   isLoggedIn = false; currentUsername = ''; currentRole = ''; currentLinkedId = ''; currentUserId = ''; parentSelectedChildId = ''; pwIsDefault = false; userMsg.changePw = ''; spAssignments = []; spPapers = {}; spOpen = null; spPhotoUrls = {};
   biometricOfferShown = false; // allow the enrollment banner on the next password login
@@ -17834,13 +17835,9 @@ function openScheduleSetupSchedule(studentId, subjectId, classType) {
   teacherMobileTabMenuOpen = false;
   render();
 }
-function teacherScheduleSetupHtml(teacher) {
-  if (frequencyLoading) {
-    return '<div class="card" id="scheduleSetupRequired"><h2>🗓️ Schedule Setup Required</h2><div class="empty">Checking class frequency and schedule setup…</div></div>';
-  }
-  if (frequencyLoadError) {
-    return '<div class="card" id="scheduleSetupRequired"><h2>🗓️ Schedule Setup Required</h2><div class="hint" style="color:var(--brick)">Could not check setup status because Class Frequency failed to load. Use Refresh to try again.</div><button class="btn-small" onclick="loadClassFrequencyRows().then(()=>render())">↻ Refresh</button></div>';
-  }
+// Students of this teacher with classes left but no weekly frequency or no future Pending class.
+// Used by the Schedule Setup Required card and the Pending Action Items count (needs Class Frequency loaded).
+function teacherScheduleSetupIssues(teacher) {
   var pairs = frequencyEligiblePairs(teacher.id);
   var issues = [];
   pairs.forEach(function(pair){
@@ -17864,6 +17861,16 @@ function teacherScheduleSetupHtml(teacher) {
     var ia=a.action==='frequency'?0:1, ib=b.action==='frequency'?0:1;
     return ia-ib || (a.student.name||'').localeCompare(b.student.name||'') || (a.subject.name||'').localeCompare(b.subject.name||'') || a.type.localeCompare(b.type);
   });
+  return issues;
+}
+function teacherScheduleSetupHtml(teacher) {
+  if (frequencyLoading) {
+    return '<div class="card" id="scheduleSetupRequired"><h2>🗓️ Schedule Setup Required</h2><div class="empty">Checking class frequency and schedule setup…</div></div>';
+  }
+  if (frequencyLoadError) {
+    return '<div class="card" id="scheduleSetupRequired"><h2>🗓️ Schedule Setup Required</h2><div class="hint" style="color:var(--brick)">Could not check setup status because Class Frequency failed to load. Use Refresh to try again.</div><button class="btn-small" onclick="loadClassFrequencyRows().then(()=>render())">↻ Refresh</button></div>';
+  }
+  var issues = teacherScheduleSetupIssues(teacher);
   if (!issues.length) return '';
   var html='<div class="card" id="scheduleSetupRequired" style="border-left:4px solid var(--gold-dark,#b8860b)">';
   html+='<h2>⚠️ Schedule Setup Required <span class="tag absent">'+issues.length+' item'+(issues.length===1?'':'s')+'</span></h2>';
@@ -17877,6 +17884,146 @@ function teacherScheduleSetupHtml(teacher) {
   });
   html+='</table></div><button class="btn-small" style="margin-top:8px" onclick="Promise.all([loadClassFrequencyRows(),loadScheduledClasses()]).then(()=>render())">↻ Refresh list</button></div>';
   return html;
+}
+
+// ===== Teacher Pending Action Items =====
+// Practice paper attempts and saved Lesson prep briefs are not loaded at login, so the Dashboard and the
+// Pending Action Items page fetch them here (only when the teacher has that access).
+let teacherPendingExtra = { teacherId: '', loading: false, loaded: false, papersToReview: [], papersOverdue: [] };
+const PENDING_UNMARKED_DAYS = 30;   // "Classes not marked" looks back this many days
+const PENDING_PREP_DAYS = 7;        // a Lesson prep brief for the student from the last 7 days counts as prepared
+async function loadTeacherPendingExtras(force) {
+  if (!sb || currentRole !== 'Teacher' || !currentLinkedId) return;
+  const tid = currentLinkedId;
+  if (teacherPendingExtra.loading || (!force && teacherPendingExtra.loaded && teacherPendingExtra.teacherId === tid)) return;
+  teacherPendingExtra = { ...teacherPendingExtra, teacherId: tid, loading: true };
+  let toReview = [], overdue = [];
+  try {
+    const jobs = [];
+    if (teacherQbAccess) jobs.push((async () => {
+      const pp = await sb.from('qb_practice_papers').select('id,title').eq('created_by_teacher_id', tid);
+      const papers = pp.data || [];
+      if (!papers.length) return;
+      const titles = {}; papers.forEach(p => { titles[p.id] = p.title || 'Practice paper'; });
+      const sa = await sb.from('qb_student_assignments').select('id,paper_id,student_id,status,submitted_at,available_until').in('paper_id', papers.map(p => p.id));
+      const nowIso = new Date().toISOString();
+      (sa.data || []).forEach(a => {
+        const row = { ...a, title: titles[a.paper_id] };
+        if (a.status === 'submitted') toReview.push(row);
+        else if (a.status !== 'reviewed' && a.available_until && a.available_until < nowIso) overdue.push(row);
+      });
+    })());
+    if (teacherResearchAccess && researchNotes === null) jobs.push((async () => {
+      const notes = await sb.from('teacher_research_notes').select('*').order('created_at', { ascending: false }).limit(300);
+      if (!notes.error && researchNotes === null) researchNotes = notes.data || [];
+    })());
+    await Promise.all(jobs);
+  } catch (e) { /* tables not set up yet: those sections just stay empty */ }
+  if (currentLinkedId !== tid) return;   // logged out meanwhile
+  toReview.sort((a, b) => String(a.submitted_at || '').localeCompare(String(b.submitted_at || '')));
+  overdue.sort((a, b) => String(a.available_until || '').localeCompare(String(b.available_until || '')));
+  teacherPendingExtra = { teacherId: tid, loading: false, loaded: true, papersToReview: toReview, papersOverdue: overdue };
+  render();
+}
+function resetTeacherPendingExtra() { teacherPendingExtra = { teacherId: '', loading: false, loaded: false, papersToReview: [], papersOverdue: [] }; }
+function pendingDateOffset(days) {
+  const d = new Date(todayStr + 'T00:00:00'); d.setDate(d.getDate() + days);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+// Everything waiting on this teacher, worked out once so the page, the Dashboard banner and the menu count always agree.
+// action = counted in the banner; watch = "Keep an eye on" reminders, not counted.
+function teacherPendingItems(teacher) {
+  const tid = teacher.id;
+  if (teacherPendingExtra.teacherId !== tid || (!teacherPendingExtra.loaded && !teacherPendingExtra.loading)) loadTeacherPendingExtras();
+  const now = new Date();
+  const nowHm = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+  const fromDate = pendingDateOffset(-PENDING_UNMARKED_DAYS);
+  const byDateTime = (a, b) => a.date === b.date ? (a.time || '').localeCompare(b.time || '') : a.date.localeCompare(b.date);
+  const mine = scheduledClasses.filter(sc => sc.teacherId === tid);
+  const notMarked = mine.filter(sc => sc.status === 'Pending' && sc.date < todayStr && sc.date >= fromDate).sort((a, b) => -byDateTime(a, b));
+  // Today's classes whose time has passed and are still Pending. Placeholder times are left to "timings to correct".
+  const todayDue = mine.filter(sc => sc.status === 'Pending' && sc.date === todayStr && !isProvisionalScheduleTime(sc) && (!sc.time || sc.time.slice(0, 5) <= nowHm));
+  const timings = mine.filter(sc => isProvisionalScheduleTime(sc) && sc.status !== 'Done' && sc.date >= todayStr).sort(byDateTime);
+  const setupReady = !frequencyLoading && !frequencyLoadError;
+  const setup = setupReady ? teacherScheduleSetupIssues(teacher) : [];
+  const demos = demoOutcomeReady ? data.demoLogs.filter(d => d.teacherId === tid && d.status === 'Pending' && d.date && d.date <= todayStr).sort((a, b) => a.date.localeCompare(b.date)) : [];
+  const homework = homeworkData.filter(h => h.teacherId === tid && h.status === 'submitted').sort((a, b) => String(a.submittedAt || '').localeCompare(String(b.submittedAt || '')));
+  const papers = teacherQbAccess && teacherPendingExtra.teacherId === tid ? teacherPendingExtra.papersToReview : [];
+  const activeStudents = studentsForTeacher(tid).filter(s => !s.archived);
+  const withPlan = new Set((data.studyPlans || []).filter(p => p.teacherId === tid).map(p => p.studentId));
+  const noPlan = byName(activeStudents.filter(s => !withPlan.has(s.id)));
+  const chats = chatTotalUnread();
+  const notifs = unreadNotificationCount();
+  const announcements = unreadAnnouncementCount();
+  const noAvailability = !teacherAvailability.some(a => a.teacherId === tid);
+
+  // Keep an eye on
+  let prep = [];
+  if (teacherResearchAccess && aiOn() && Array.isArray(researchNotes)) {
+    const tomorrow = pendingDateOffset(1);
+    const since = pendingDateOffset(-PENDING_PREP_DAYS);
+    const seen = new Set();
+    mine.filter(sc => sc.status === 'Pending' && (sc.date === todayStr || sc.date === tomorrow) && sc.studentId && sc.subjectId).sort(byDateTime).forEach(sc => {
+      const key = sc.studentId + '|' + sc.subjectId;
+      if (seen.has(key)) return;
+      seen.add(key);
+      const subjName = String(subjectName(sc.subjectId) || '').trim().toLowerCase();
+      const prepared = researchNotes.some(n => n.student_id === sc.studentId && String(n.created_at || '').slice(0, 10) >= since
+        && (!n.subject_name || String(n.subject_name).trim().toLowerCase() === subjName));
+      if (!prepared) prep.push(sc);
+    });
+  }
+  const hwLate = homeworkData.filter(h => h.teacherId === tid && hwIsLate(h)).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const papersLate = teacherQbAccess && teacherPendingExtra.teacherId === tid ? teacherPendingExtra.papersOverdue : [];
+  const support = (data.supportTickets || []).filter(t => t.status !== 'resolved');   // loadSupportTickets only reads the teacher's own
+
+  const counts = [
+    ['pendNotMarked', notMarked.length, 'class' + (notMarked.length === 1 ? '' : 'es') + ' not marked'],
+    ['pendToday', todayDue.length, 'class' + (todayDue.length === 1 ? '' : 'es') + ' today not done'],
+    ['pendTimings', timings.length, 'class timing' + (timings.length === 1 ? '' : 's') + ' to correct'],
+    ['pendSetup', setup.length, 'schedule setup item' + (setup.length === 1 ? '' : 's')],
+    ['pendDemos', demos.length, 'demo' + (demos.length === 1 ? '' : 's') + ' to mark done'],
+    ['pendHomework', homework.length, 'homework to review'],
+    ['pendPapers', papers.length, 'practice paper' + (papers.length === 1 ? '' : 's') + ' to review'],
+    ['pendNoPlan', noPlan.length, 'student' + (noPlan.length === 1 ? '' : 's') + ' without a study plan'],
+    ['pendChats', chats, 'unread chat' + (chats === 1 ? '' : 's')],
+    ['pendNotifs', notifs, 'unread notification' + (notifs === 1 ? '' : 's')],
+    ['pendAnnouncements', announcements, 'unread announcement' + (announcements === 1 ? '' : 's')],
+    ['pendAvailability', noAvailability ? 1 : 0, 'availability not set'],
+  ].filter(c => c[1] > 0).map(([id, n, label]) => ({ id, n, label }));
+  const total = counts.reduce((a, c) => a + c.n, 0);
+  return { notMarked, todayDue, timings, setup, setupReady, demos, homework, papers, noPlan, chats, notifs, announcements, noAvailability,
+    prep, hwLate, papersLate, support, counts, total, extrasLoading: teacherPendingExtra.loading };
+}
+function teacherPendingGo(id) { const el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: 'smooth' }); }
+function teacherPendingGiveAttendance(scId) {
+  const sc = scheduledClasses.find(x => x.id === scId);
+  setTeacherPortalTab('attendance');
+  if (!sc) return;
+  logDraft.date = sc.date; logDraft.studentId = sc.studentId || ''; logDraft.subjectId = sc.subjectId || '';
+  if (TYPES.includes(sc.classType)) logDraft.classType = sc.classType;
+  render(); window.scrollTo(0, 0);
+}
+function teacherPendingHomework() { setTeacherPortalTab('homework'); hwFilterStatus = 'submitted'; render(); }
+function teacherPendingLateHomework() { setTeacherPortalTab('homework'); hwFilterStatus = 'late'; render(); }
+function teacherPendingPapers() {
+  setTeacherPortalTab('questionbank');
+  qbSubTab = 'papers'; qbPaperView = 'list'; qbPaperId = null; qbReviewId = null; render();
+}
+function teacherPendingPrep(subjectId, studentId) {
+  setTeacherPortalTab('research');
+  setResearchField('subjectId', subjectId);
+  setResearchField('studentId', studentId);
+  render(); window.scrollTo(0, 0);
+}
+// Gold strip at the top of the teacher Dashboard; hidden when nothing is counted.
+function teacherPendingBannerHtml(p) {
+  if (!p.total) return '';
+  const named = p.counts.slice(0, 3).map(c => c.n + ' ' + c.label).join(', ') + (p.counts.length > 3 ? ' and more' : '');
+  return '<div class="card" style="border-left:4px solid var(--gold);background:var(--soft);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
+    + '<div style="flex:1;min-width:220px"><b style="font-size:15px">⚠ You have ' + p.total + ' pending action item' + (p.total === 1 ? '' : 's') + '</b>'
+    + '<div class="hint" style="margin-top:2px">' + esc(named) + '</div></div>'
+    + '<button class="btn-primary" onclick="setTeacherPortalTab(\'pendingactions\')">Go to Pending Action Items</button></div>';
 }
 
 function renderTeacherDashboard(teacher) {
@@ -18108,11 +18255,82 @@ function renderTeacherDashboard(teacher) {
     return h;
   })();
 
+  const pend = teacherPendingItems(teacher);
   if (teacherPortalTab === 'pendingactions') {
-    return `${timingReviewHtml}${todaySchedHtml}${teacherScheduleSetupHtml(teacher)}${expiryListHtml}`;
+    const p = pend;
+    const sec = (id, title, count, hint, body, color) => '<div class="card" id="' + id + '" style="border-left:4px solid ' + (color || 'var(--gold)') + '">'
+      + '<h2>' + title + (count ? ' <span class="tag absent">' + count + '</span>' : '') + '</h2>'
+      + (hint ? '<div class="hint">' + hint + '</div>' : '') + body + '</div>';
+    const table = (heads, rows) => '<div class="table-scroll"><table><tr>' + heads.map(h => '<th>' + h + '</th>').join('') + '</tr>' + rows.join('') + '</table></div>';
+    const td = v => '<td>' + v + '</td>';
+    const scStudent = sc => esc(studentNameWithCode(sc.studentId));
+    const scSubject = sc => sc.subjectId ? esc(subjectName(sc.subjectId)) : '—';
+    const act = [];
+    if (p.notMarked.length) act.push(sec('pendNotMarked', '📝 Classes not marked', p.notMarked.length,
+      'Classes from the last ' + PENDING_UNMARKED_DAYS + ' days that are still Pending, so attendance was never given. Give attendance (Present or Absent) and they drop off this list. You can only give attendance for this month; for an older class, ask the office.',
+      table(['Date', 'Time', 'Student', 'Subject', 'Type', ''], p.notMarked.map(sc => '<tr>' + td(esc(dayDate(sc.date))) + td(esc(sc.time || '—')) + td(scStudent(sc)) + td(scSubject(sc)) + td(esc(sc.classType || '—'))
+        + td(isCurrentMonth(sc.date) ? '<button class="btn-small btn-primary" onclick="teacherPendingGiveAttendance(\'' + sc.id + '\')">Give attendance</button>' : '<span class="hint">Last month: ask the office</span>') + '</tr>')), 'var(--brick)'));
+    if (todaySchedHtml) act.push('<div id="pendToday">' + (p.todayDue.length ? '<div class="hint" style="margin:0 0 6px 4px"><b>' + p.todayDue.length + ' class' + (p.todayDue.length === 1 ? '' : 'es') + ' today</b> already past ' + (p.todayDue.length === 1 ? 'its' : 'their') + ' time and still Pending. <a href="#" onclick="setTeacherPortalTab(\'attendance\');return false">Give attendance</a></div>' : '') + todaySchedHtml + '</div>');
+    if (timingReviewHtml) act.push('<div id="pendTimings">' + timingReviewHtml + '</div>');
+    const setupHtml = teacherScheduleSetupHtml(teacher);
+    if (setupHtml) act.push('<div id="pendSetup">' + setupHtml + '</div>');
+    if (p.demos.length) act.push(sec('pendDemos', '🎓 Demos to mark done', p.demos.length,
+      'Demos you were given for today or earlier. After the demo, press ✓ Mark done. You can add a line on how it went.',
+      (demoMsgTeacher ? '<div style="margin:6px 0;font-size:13px;color:' + (demoMsgTeacher.startsWith('Could not') ? 'var(--brick)' : 'var(--forest)') + '">' + esc(demoMsgTeacher) + '</div>' : '')
+      + table(['Date', 'Time', 'Subject', 'Student', ''], p.demos.map(d => '<tr>' + td(esc(dayDate(d.date))) + td(esc(d.demoTime || '—')) + td(esc(d.subjectId ? subjectName(d.subjectId) : '—')) + td(esc(d.studentName || '—'))
+        + td(teacherDoneId === d.id
+          ? '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center"><input type="text" placeholder="How did it go? (optional)" value="' + escAttr(teacherDoneNote) + '" oninput="teacherDoneNote=this.value" style="width:190px;font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:4px">'
+            + '<button class="btn-small btn-primary" style="font-size:11px" onclick="teacherMarkDemoDone(\'' + d.id + '\')">Save</button> <button class="btn-small" style="font-size:11px" onclick="teacherDoneId=\'\';render()">Cancel</button></div>'
+          : '<button class="btn-small btn-primary" style="font-size:11px" onclick="teacherDoneId=\'' + d.id + '\';teacherDoneNote=\'\';demoMsgTeacher=\'\';render()">✓ Mark done</button>') + '</tr>'))));
+    if (p.homework.length) act.push(sec('pendHomework', '📚 Homework to review', p.homework.length, 'Homework your students have handed in. Check it and press Mark reviewed on the Homework page.',
+      table(['Student', 'Homework', 'Subject', 'Handed in'], p.homework.map(h => '<tr>' + td(esc(studentNameWithCode(h.studentId))) + td(esc(h.title || '—')) + td(esc(h.subjectId ? subjectName(h.subjectId) : '—')) + td(h.submittedAt ? esc(dayDate(String(h.submittedAt).slice(0, 10))) : '—') + '</tr>'))
+      + '<button class="btn-small btn-primary" style="margin-top:8px" onclick="teacherPendingHomework()">Open Homework</button>'));
+    if (p.papers.length) act.push(sec('pendPapers', '🧾 Practice papers to review', p.papers.length, 'Practice papers your students have submitted. Mark the written answers and press Mark reviewed.',
+      table(['Student', 'Paper', 'Submitted'], p.papers.map(a => '<tr>' + td(esc(studentNameWithCode(a.student_id))) + td(esc(a.title)) + td(a.submitted_at ? esc(dayDate(String(a.submitted_at).slice(0, 10))) : '—') + '</tr>'))
+      + '<button class="btn-small btn-primary" style="margin-top:8px" onclick="teacherPendingPapers()">Open Question Bank papers</button>'));
+    if (p.noPlan.length) act.push(sec('pendNoPlan', '🗺️ Students without a study plan', p.noPlan.length, 'Make a study plan for each of your students so they and their parents can follow the work.',
+      '<div style="font-size:13px;margin:6px 0">' + p.noPlan.map(s => esc(studentLabel(s))).join(', ') + '</div><button class="btn-small btn-primary" onclick="setTeacherPortalTab(\'studyplans\')">Open Study Plans</button>'));
+    const quick = [];
+    if (p.chats) quick.push(['pendChats', '💬 ' + p.chats + ' unread chat' + (p.chats === 1 ? '' : 's'), 'Open chat', 'toggleChatPanel()']);
+    if (p.notifs) quick.push(['pendNotifs', '🔔 ' + p.notifs + ' unread notification' + (p.notifs === 1 ? '' : 's'), 'Open notifications', 'window.scrollTo(0,0);toggleNotifPanel()']);
+    if (p.announcements) quick.push(['pendAnnouncements', '📣 ' + p.announcements + ' unread announcement' + (p.announcements === 1 ? '' : 's'), 'Open announcements', 'window.scrollTo(0,0);toggleAnnouncementPanel()']);
+    if (p.noAvailability) quick.push(['pendAvailability', '🕒 Your weekly availability is not set, so the office cannot plan classes or demos around your free times', 'Set availability', "setTeacherPortalTab('availability')"]);
+    if (quick.length) act.push('<div class="card" style="border-left:4px solid var(--gold)">' + quick.map(([id, text, btn, onclick]) =>
+      '<div id="' + id + '" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--line)"><span style="font-size:14px">' + esc(text) + '</span><button class="btn-small btn-primary" onclick="' + onclick + '">' + btn + '</button></div>').join('') + '</div>');
+
+    const watch = [];
+    if (p.prep.length) watch.push(sec('pendPrep', '🧠 Lesson prep not done', p.prep.length, 'Classes today and tomorrow where you have no saved Lesson prep brief for the student in the last ' + PENDING_PREP_DAYS + ' days.',
+      table(['Date', 'Time', 'Student', 'Subject', ''], p.prep.map(sc => '<tr>' + td(esc(dayDate(sc.date))) + td(esc(sc.time || '—')) + td(scStudent(sc)) + td(scSubject(sc)) + td('<button class="btn-small" onclick="teacherPendingPrep(\'' + sc.subjectId + '\',\'' + sc.studentId + '\')">Prepare</button>') + '</tr>')), 'var(--line)'));
+    if (expiryListHtml) watch.push(expiryListHtml);
+    const tRenewal = renewalRows(teacher.id);
+    if (tRenewal.length) watch.push(sec('pendRenewal', 'Students needing renewal', tRenewal.length, 'Your students whose remaining classes have reached zero, or who have never subscribed to a subject you teach.',
+      table(['Student', 'Subject', 'Type', 'Remaining'], tRenewal.map(r => '<tr>' + td(esc(r.studentName)) + td(esc(r.subjectName)) + td(r.neverSubscribed ? '<span class="hint">Never subscribed</span>' : r.type) + td(r.remaining) + '</tr>')), 'var(--line)'));
+    if (lowBalStudents.length) watch.push(sec('pendLowBal', '⚠️ Low balance', lowBalStudents.length, 'Students running low on classes with you.',
+      table(['Student', 'Subject', 'Classes left'], lowBalStudents.map(b => '<tr>' + td(esc(studentLabel(b.student))) + td(esc(b.subjectName)) + td('<b style="color:' + (b.remaining <= 2 ? 'var(--brick)' : '#e67e22') + '">' + b.remaining + '</b>') + '</tr>')), 'var(--line)'));
+    if (notSeenList.length) watch.push(sec('pendNotSeen', '👀 Students not seen in 10+ days', notSeenList.length, 'Your students whose last class with you was more than 10 days ago.',
+      table(['Student', 'Last class', 'Days ago'], notSeenList.map(n => '<tr>' + td(esc(studentLabel(n.student))) + td(esc(dayDate(n.lastDate))) + td(n.days) + '</tr>'))
+      + '<button class="btn-small" style="margin-top:8px" onclick="setTeacherPortalTab(\'students\')">Open My Students</button>', 'var(--line)'));
+    if (p.hwLate.length) watch.push(sec('pendHwLate', '⏰ Homework overdue from students', p.hwLate.length, 'Homework past its due date that the student has not handed in yet. Remind the student, or mark it complete if they showed it to you.',
+      table(['Student', 'Homework', 'Due'], p.hwLate.map(h => '<tr>' + td(esc(studentNameWithCode(h.studentId))) + td(esc(h.title || '—')) + td(esc(dayDate(h.dueDate))) + '</tr>'))
+      + '<button class="btn-small" style="margin-top:8px" onclick="teacherPendingLateHomework()">Open Homework</button>', 'var(--line)'));
+    if (p.papersLate.length) watch.push(sec('pendPapersLate', '⏰ Practice papers overdue from students', p.papersLate.length, 'Practice papers past their due date that the student has not submitted yet.',
+      table(['Student', 'Paper', 'Due'], p.papersLate.map(a => '<tr>' + td(esc(studentNameWithCode(a.student_id))) + td(esc(a.title)) + td(esc(dayDate(String(a.available_until).slice(0, 10)))) + '</tr>'))
+      + '<button class="btn-small" style="margin-top:8px" onclick="teacherPendingPapers()">Open Question Bank papers</button>', 'var(--line)'));
+    if (p.support.length) watch.push(sec('pendSupport', '🛟 My support requests still open', p.support.length, 'Requests you sent to the office that are not resolved yet. Nothing to do: the office will reply.',
+      table(['Sent on', 'Type', 'Request'], p.support.map(t => '<tr>' + td(t.created_at ? esc(dayDate(String(t.created_at).slice(0, 10))) : '—') + td(esc(t.category || '—')) + td(esc(String(t.description || '').slice(0, 120))) + '</tr>')), 'var(--line)'));
+
+    const chips = p.counts.map(c => '<button class="btn-small" style="margin:3px 4px 0 0" onclick="teacherPendingGo(\'' + c.id + '\')">' + c.n + ' ' + esc(c.label) + '</button>').join('');
+    const head = '<div class="card"><h2 style="margin-top:0">Pending Action Items</h2>'
+      + (p.total ? '<div style="font-size:15px"><b>' + p.total + ' item' + (p.total === 1 ? '' : 's') + ' need your action.</b> Tap one to jump to it.</div><div style="margin-top:6px">' + chips + '</div>'
+        : '<div style="font-size:15px;color:var(--forest)"><b>✓ All clear.</b> Nothing needs your action right now.</div>')
+      + (p.extrasLoading ? '<div class="hint" style="margin-top:6px">Checking practice papers and lesson prep…</div>' : '')
+      + (!p.setupReady && frequencyLoading ? '<div class="hint" style="margin-top:6px">Checking schedule setup…</div>' : '') + '</div>';
+    return head + act.join('')
+      + (watch.length ? '<h2 style="margin:22px 0 4px 4px;font-size:17px">Keep an eye on</h2><div class="hint" style="margin:0 0 10px 4px">Reminders. These are not counted as pending items.</div>' + watch.join('') : '');
   }
 
   return `
+    ${teacherPendingBannerHtml(pend)}
     ${celebHtml}
     ${milestonesHtml}
     <div class="stat-grid">
@@ -18405,11 +18623,14 @@ function renderTeacherPortal() {
     ['profile', 'My Profile'],
     ['setup', 'Setup'],
   ];
+  const pendingTotal = teacherPendingItems(teacher).total;
+  const pendingBadge = pendingTotal ? ` <span style="color:var(--gold-dark,#b8860b)">(${pendingTotal})</span>` : '';
+  teacherMobileTabsList[1] = ['pendingactions', 'Pending Action Items' + (pendingTotal ? ` (${pendingTotal})` : '')];
   const currentTeacherTabLabel = (teacherMobileTabsList.find(([key])=>key===teacherPortalTab) || [,''])[1];
   const sidebarHtml = `
     <div class="sidebar-nav">
       <div class="sidebar-item ${teacherPortalTab==='dashboard'?'active':''}" onclick="setTeacherPortalTab('dashboard')" style="font-weight:700;margin-bottom:10px">Dashboard</div>
-      <div class="sidebar-item ${teacherPortalTab==='pendingactions'?'active':''}" onclick="setTeacherPortalTab('pendingactions')" style="font-weight:700;margin-bottom:10px">Pending Action Items</div>
+      <div class="sidebar-item ${teacherPortalTab==='pendingactions'?'active':''}" onclick="setTeacherPortalTab('pendingactions')" style="font-weight:700;margin-bottom:10px">Pending Action Items${pendingBadge}</div>
       ${teacherTabGroups.map(g => {
         const isCollapsed = !!sidebarCollapsedGroups[g.label] && g.label !== activeGroupLabel;
         return `
