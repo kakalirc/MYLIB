@@ -284,7 +284,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-27 17:30 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-27 18:40 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -627,7 +627,7 @@ const APP_USAGE_SCREENS = {
   schedule: 'Class Schedule', students: 'Students', studyplans: 'Study Plans', homework: 'Homework', questionbank: 'Question Bank',
   research: 'Research', attendance: 'Give Attendance', report: 'Attendance Report', availability: 'Availability', profile: 'My Profile',
   setup: 'Setup / Teachers & Subjects', dashboard: 'Dashboard', log: 'Class Log', chat: 'Communication', wixbookings: 'Demo Bookings',
-  fees: 'Fees', rebuildclasses: 'Rebuild Pending Classes', expenses: 'Expenses', reports: 'Reports & Export', parents: 'Parents', admins: 'Manage Admins', users: 'Setup',
+  fees: 'Fees', rebuildclasses: 'Rebuild Pending Classes', expenses: 'Expenses', reports: 'Reports & Export', payroll: 'Payroll', parents: 'Parents', admins: 'Manage Admins', users: 'Settings', superadmin: 'Superadmin tools',
   audit: 'Audit Log', support: 'Support', ai: 'AI',
 };
 function appUsageFeatureLabel(f) {
@@ -1279,6 +1279,12 @@ let registerTeacherFilter = '';
 let reportStudentId = '';
 let reportMonth = monthStr;
 let refundReportMonth = monthStr;
+// Reports: Razorpay payments history (SQL 61 table; month by India date of the payment).
+let rzpReportMonth = monthStr;
+let rzpReportFilter = 'All';       // All | Fee | Demo | Set aside | Waiting
+let rzpReportRows = null;          // null = not loaded yet
+let rzpReportMsg = '';
+let rzpReportLoading = false;
 let allPaymentsMonth = monthStr;
 let allPaymentsShowAll = false;
 let allPaymentsStudentFilter = '';
@@ -9642,21 +9648,24 @@ const SUPPORT_KB = {
 - Dashboard: at-a-glance stats, AI summaries and students at risk.
 - Class Log (Daily work): record daily attendance. Pick the date, find the student, mark Present/Absent/Holiday.
 - Communication (Daily work): chat with teachers, students and parents, and post announcements.
-- Students & Subscriptions (Daily work): add or edit students, enrol them in subjects, record payments, refunds and credit transfers, see subscription history and receipts.
 - Demo Bookings (Daily work): demo bookings from the website arrive here (New → Scheduled → Converted/Cancelled). A converted demo gives the teacher a demo bonus.
-- Fees (Money): per-class rates (Fee setup), discount structure, fee calculator and the UPI / contact details used in fee messages.
+- Support (Daily work): view and resolve issues raised by teachers, students or parents.
+- Rebuild Pending Classes (Daily work): rebuild the pending class schedule from each student's class frequency.
+- Fees (Money): per-class rates (Fee setup), discount structure, fee calculator, students needing renewal, Razorpay payments to confirm, pending fee requests, all subscription payments and the UPI / contact details used in fee messages.
+- Payroll (Money): each teacher's earnings for the month, demo bonuses, adjustments, mark paid and salary slips.
 - Expenses (Money): monthly overhead costs such as rent and electricity.
-- Reports & Export (Money): students needing renewal, pending fee requests, all payments, refunds, teacher payroll and Excel export.
+- Reports & Export (Money): student report, student balances, refunds, Razorpay payments history, net profit and Excel export.
+- Students & Subscriptions (People): add or edit students, enrol them in subjects, record payments, refunds and credit transfers, see subscription history and receipts.
 - Teachers & Subjects (People): add teachers and subjects, and set which teacher teaches each subject.
 - Parents (People): parent contact details and which children they are linked to.
-- Manage Admins (People): add or remove admin accounts.
-- Study Plans (People): read-only view of every teacher's study plans and progress, plus the Textbook library (every uploaded book; rename, retag or delete).
-- Homework (People): every homework set by teachers, with filters by teacher, student and status.
-- Question Bank (People): Review Queue (approve new or edited questions), Full Question Bank, Archived, Practice Papers and Past Papers. Pick board, subject and grade to see questions. Old-syllabus questions stay hidden unless you tick "Old syllabus only".
-- Setup (System): grades, categories, boards and subject names; Question Bank access and Research access (which teachers get those tabs); add users and manage their logins; change your password; backups.
+- Study Plans (Teaching): read-only view of every teacher's study plans and progress, plus the Textbook library (every uploaded book; rename, retag or delete).
+- Homework (Teaching): every homework set by teachers, with filters by teacher, student and status.
+- Question Bank (Teaching): Review Queue (approve new or edited questions), Full Question Bank, Archived, Practice Papers and Past Papers. Pick board, subject and grade to see questions. Old-syllabus questions stay hidden unless you tick "Old syllabus only".
+- Settings (System, once called Setup): grades, categories, boards and subject names; Question Bank access and Research access (which teachers get those tabs); add users and manage their logins; change your password.
+- Manage Admins (System): add or remove admin accounts.
 - AI (System): AI Settings (master switch, API key, cost estimate prices), AI access (per role and per person) and AI usage (calls and estimated cost per user and feature).
 - Audit Log (System): every change made in the app, login activity, and App usage (which features each person uses). Each part opens with a tap.
-- Support (System): view and resolve issues raised by teachers, students or parents.`,
+- Superadmin tools (Superadmin, superuser admins only): Academic Year, Export all data, Import backup, truncate old Audit & Login entries, clear all data and Audit Logging Controls. Each opens with the unlock password.`,
   Teacher: `My LIB app guide for Teacher:
 - Dashboard: today's classes, students needing renewal, low balances, students not seen in a while, your demo classes and student notes.
 - Class Schedule (Teaching): your classes by day or month. Set up a weekly schedule, add an extra class, mark a class done or remove a pending one.
@@ -11280,7 +11289,7 @@ async function actuallySaveSessionEdit(id, count, date) {
   render();
 }
 
-// Address-bar names that differ from the tab key: Setup (key 'users') shows as #setup,
+// Address-bar names that differ from the tab key: Settings (key 'users', once called Setup) shows as #setup,
 // so Teachers & Subjects (key 'setup') shows as #teachers-subjects. Old #users links still work.
 const TAB_HASH = { users: 'setup', setup: 'teachers-subjects' };
 function tabFromHash(h) { const k = Object.keys(TAB_HASH).find(k => TAB_HASH[k] === h); return k || h; }
@@ -11466,6 +11475,79 @@ function setRegisterTeacherFilter(v) { registerTeacherFilter = v; render(); }
 function setReportStudent(v) { reportStudentId = v; render(); }
 function setReportMonth(v) { reportMonth = v; render(); }
 function setRefundReportMonth(v) { refundReportMonth = v; render(); }
+async function loadRazorpayReport() {
+  if (currentRole !== 'Admin') return;
+  const [y, m] = rzpReportMonth.split('-').map(Number);
+  // IST month = UTC from the 1st 00:00 IST (previous day 18:30 UTC) to the next 1st 00:00 IST
+  const from = new Date(Date.UTC(y, m - 1, 1) - 330 * 60000).toISOString(), to = new Date(Date.UTC(y, m, 1) - 330 * 60000).toISOString();
+  const cols = 'id,amount,fee,email,contact,method,description,notes,captured_at,match_status,booking_id';
+  let res = await sb.from('razorpay_payments').select(cols + ',fee_dismissed').gte('captured_at', from).lt('captured_at', to).order('captured_at', { ascending: true });
+  if (res.error) res = await sb.from('razorpay_payments').select(cols).gte('captured_at', from).lt('captured_at', to).order('captured_at', { ascending: true });   // SQL 62 not run yet
+  rzpReportMsg = res.error ? (/razorpay_payments/.test(res.error.message || '') ? 'Run SQL 61 (razorpay/61-razorpay-demo-payments.sql) first.' : 'Could not load: ' + res.error.message) : '';
+  rzpReportRows = res.error ? [] : (res.data || []);
+}
+function setRzpReportMonth(v) { rzpReportMonth = v || monthStr; rzpReportRows = null; loadRazorpayReport().then(() => render()); }
+// What became of each payment: fee requests paid with it, a demo booking, set aside, or still waiting.
+function rzpReportItems() {
+  return (rzpReportRows || []).map(p => {
+    const fees = data.subscriptions.filter(s => s.paymentReference === p.id && s.kind === 'Payment');
+    const booking = data.wixBookings.find(b => b.paymentId === p.id) || (p.booking_id ? data.wixBookings.find(b => String(b.id) === String(p.booking_id)) : null);
+    let status, detail = '', recorded = 0;
+    if (fees.length) {
+      status = 'Fee';
+      recorded = fees.reduce((a, s) => a + (s.amountPaid || 0), 0);
+      detail = fees.map(s => `${studentNameWithCode(s.studentId)} · ${subjectName(s.subjectId)} (${s.type}) · ${s.classes} class${Number(s.classes) === 1 ? '' : 'es'} · ₹${(s.amountPaid || 0).toFixed(2)}`).join('\n');
+    } else if (['matched', 'manual'].includes(p.match_status)) {
+      status = 'Demo';
+      recorded = Number(p.amount || 0);
+      detail = `${booking ? booking.studentName : 'Booking'}${p.match_status === 'manual' ? ' (linked by you)' : ' (automatic)'}`;
+    } else if (p.fee_dismissed || p.match_status === 'ignored') {
+      status = 'Set aside';
+      detail = p.fee_dismissed ? 'Not a fee' : 'Not a demo';
+    } else status = 'Waiting';
+    const when = p.captured_at ? new Date(p.captured_at) : null;
+    return { p, status, detail, recorded, amount: Number(p.amount || 0),
+      date: when ? when.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : '',
+      time: when ? when.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }) : '',
+      name: rzpNamesTyped(p).join(', ') };
+  });
+}
+function razorpayReportHtml() {
+  if (rzpReportRows === null) { if (!rzpReportLoading) { rzpReportLoading = true; loadRazorpayReport().then(() => { rzpReportLoading = false; render(); }); } return '<div class="hint">Loading…</div>'; }
+  if (rzpReportMsg) return `<div class="hint" style="color:var(--brick)">${esc(rzpReportMsg)}</div>`;
+  const all = rzpReportItems();
+  const list = all.filter(x => rzpReportFilter === 'All' || x.status === rzpReportFilter);
+  const sum = (arr, f) => arr.reduce((a, x) => a + f(x), 0);
+  const by = st => all.filter(x => x.status === st);
+  const fee = by('Fee'), feeIn = sum(fee, x => x.amount), feeRec = sum(fee, x => x.recorded);
+  const tag = st => ({ Fee: 'var(--forest,#3c5e42)', Demo: 'var(--accent,#4e7cf6)', 'Set aside': '#888', Waiting: 'var(--brick)' })[st];
+  const totals = `
+    <div class="table-scroll"><table style="max-width:560px">
+      <tr><td>Received on Razorpay</td><td>${all.length}</td><td>₹${sum(all, x => x.amount).toFixed(2)}</td></tr>
+      <tr><td>Fees: received / recorded in app</td><td>${fee.length}</td><td>₹${feeIn.toFixed(2)} / ₹${feeRec.toFixed(2)}</td></tr>
+      <tr><td>Fees: difference (Razorpay charge or excess)</td><td></td><td>₹${(feeIn - feeRec).toFixed(2)}</td></tr>
+      <tr><td>Demo bookings</td><td>${by('Demo').length}</td><td>₹${sum(by('Demo'), x => x.amount).toFixed(2)}</td></tr>
+      <tr><td>Set aside</td><td>${by('Set aside').length}</td><td>₹${sum(by('Set aside'), x => x.amount).toFixed(2)}</td></tr>
+      <tr><td>Waiting to confirm</td><td>${by('Waiting').length}</td><td>₹${sum(by('Waiting'), x => x.amount).toFixed(2)}</td></tr>
+    </table></div>`;
+  const table = list.length ? `
+    <div class="table-scroll" style="margin-top:10px"><table>
+      <tr><th>Date</th><th>Amount</th><th>Phone / email</th><th>Name typed</th><th>Method</th><th>Payment ID</th><th>What happened</th></tr>
+      ${list.map(x => `<tr><td>${x.date}<div class="hint" style="font-size:11px;margin:2px 0 0">${x.time}</div></td><td>₹${x.amount.toFixed(2)}</td><td>${esc(x.p.contact || '')}${x.p.email ? `<div class="hint" style="font-size:11px;margin:2px 0 0">${esc(x.p.email)}</div>` : ''}</td><td>${esc(x.name)}</td><td>${esc(x.p.method || '')}</td><td style="font-size:11px">${esc(x.p.id)}</td>
+        <td><span class="tag" style="background:${tag(x.status)};color:#fff;font-size:11px">${x.status}</span>${x.detail ? `<div style="font-size:12px;white-space:pre-line;margin-top:2px">${esc(x.detail)}</div>` : ''}${x.status === 'Fee' && Math.abs(x.amount - x.recorded) > 0.005 ? `<div class="hint" style="font-size:11px;margin:2px 0 0">Recorded ₹${x.recorded.toFixed(2)}</div>` : ''}</td></tr>`).join('')}
+    </table></div>` : `<div class="empty">No ${rzpReportFilter === 'All' ? '' : rzpReportFilter.toLowerCase() + ' '}Razorpay payments this month.</div>`;
+  return totals + table;
+}
+function exportRazorpayReport() {
+  const wb = XLSX.utils.book_new();
+  const rows = rzpReportItems().filter(x => rzpReportFilter === 'All' || x.status === rzpReportFilter).map(x => ({
+    Date: x.date, Time: x.time, Amount: x.amount, Razorpay_Fee: x.p.fee == null ? '' : Number(x.p.fee), Phone: x.p.contact || '', Email: x.p.email || '',
+    Name_Typed: x.name, Method: x.p.method || '', Payment_ID: x.p.id, What_Happened: x.status, Details: x.detail.replace(/\n/g, '; '),
+    Recorded_In_App: x.status === 'Fee' || x.status === 'Demo' ? x.recorded : ''
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length ? rows : [{ Date: 'None' }]), 'Razorpay ' + rzpReportMonth);
+  XLSX.writeFile(wb, 'razorpay-payments-' + rzpReportMonth + '.xlsx');
+}
 function setAllPaymentsMonth(v) { allPaymentsMonth = v; allPaymentsShowAll = false; render(); }
 function toggleAllPaymentsShowAll() { allPaymentsShowAll = !allPaymentsShowAll; render(); }
 function setAllPaymentsStudentFilter(v) { allPaymentsStudentFilter = v; render(); }
@@ -13106,8 +13188,8 @@ function renderDashboard() {
   const unreadChats = chatTotalUnread();
   const cards = [
     { num: todaysClasses, label: `Class${todaysClasses===1?'':'es'} logged today`, tab: 'log' },
-    { num: pendingFeeRequests, label: `Pending fee request${pendingFeeRequests===1?'':'s'}`, action: "setTab('reports'); setTimeout(()=>{ const el=document.getElementById('pendingFeeRequestsSection'); if(el) el.scrollIntoView({behavior:'smooth'}); },120)" },
-    { num: needingRenewal, label: `Student${needingRenewal===1?'':'s'} needing renewal`, action: "setTab('reports'); setTimeout(()=>{ const el=document.getElementById('studentsNeedingRenewalSection'); if(el) el.scrollIntoView({behavior:'smooth'}); },120)" },
+    { num: pendingFeeRequests, label: `Pending fee request${pendingFeeRequests===1?'':'s'}`, action: "rptPendingOpen=true; setTab('fees'); setTimeout(()=>{ const el=document.getElementById('pendingFeeRequestsSection'); if(el) el.scrollIntoView({behavior:'smooth'}); },120)" },
+    { num: needingRenewal, label: `Student${needingRenewal===1?'':'s'} needing renewal`, action: "rptRenewalOpen=true; setTab('fees'); setTimeout(()=>{ const el=document.getElementById('studentsNeedingRenewalSection'); if(el) el.scrollIntoView({behavior:'smooth'}); },120)" },
     { num: unreadChats, label: `Unread chat${unreadChats===1?'':'s'}`, tab: 'chat' },
   ];
   const expiring = expiringSoon();
@@ -13314,7 +13396,7 @@ function renderLog() {
 }
 
 // ---------- render: reports ----------
-function renderReports() {
+function renderReports(only) {
   const balTotals = { grand: 0, totalUsed: 0, totalLeft: 0 };
   TYPES.forEach(ty => { balTotals[ty] = { sub:0, used:0, left:0 }; });
 
@@ -13746,6 +13828,20 @@ function renderReports() {
       <tr class="total"><td colspan="3">Total</td><td>${refundTotalClasses}</td><td>${refundTotalAmount.toFixed(2)}</td><td></td></tr>
     </table></div>` : '<div class="empty">No refunds issued this month.</div>';
 
+  const payrollCardHtml = `
+    <div class="card">
+      <h2>Teacher payroll <button class="help-btn" onclick="openHelp('payroll',event)">?</button></h2>
+      <div class="row-form">
+        <input type="month" value="${payrollMonth}" onchange="setPayrollMonth(this.value)">
+        <input type="text" id="payrollTeacherSearchBox" placeholder="Search by name, ID, or mobile…" oninput="filterPayrollTeacherPicker()" style="width:200px">
+        <select id="payrollTeacherPickerSelect" onchange="setPayrollTeacherFilter(this.value)">${payrollTeacherOptions}</select>
+      </div>
+      ${payrollMsg ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${esc(payrollMsg)}</div>` : ''}
+      ${payrollHtml}
+      ${payrollTeacherPool.length ? `<div class="row-form" style="margin-top:12px"><button class="btn-gold" onclick="exportTeacherPayroll()">Export Teacher Payroll report</button>${payrollTeacherPool.length > 1 ? `<button class="btn-small" onclick="printAllSalarySlips()">📄 Print all salary slips</button>` : ''}</div>` : ''}
+    </div>
+  `;
+  if (only === 'payroll') return payrollCardHtml;
   return `
     <div class="card">
       <h2>Student report</h2>
@@ -13809,22 +13905,22 @@ function renderReports() {
     ${aiAttendanceGapCardHtml()}
     ${aiAtRiskCardHtml()}
     <div class="card">
+      <h2>Razorpay payments <button class="help-btn" onclick="openHelp('razorpay-report',event)">?</button></h2>
+      <div class="hint">Every payment Razorpay reported to the app (from 23 Oct 2026), and what was done with it. Refunds made in Razorpay are not shown.</div>
+      <div class="row-form">
+        <input type="month" value="${rzpReportMonth}" onchange="setRzpReportMonth(this.value)">
+        <select onchange="rzpReportFilter=this.value;render()">${['All', 'Fee', 'Demo', 'Set aside', 'Waiting'].map(f => `<option value="${f}" ${rzpReportFilter === f ? 'selected' : ''}>${f === 'All' ? 'All payments' : f}</option>`).join('')}</select>
+        <button class="btn-small" onclick="setRzpReportMonth(rzpReportMonth)">↻ Refresh</button>
+      </div>
+      ${razorpayReportHtml()}
+      ${rzpReportRows && rzpReportRows.length ? `<div class="row-form" style="margin-top:12px"><button class="btn-gold" onclick="exportRazorpayReport()">Export Razorpay payments report</button></div>` : ''}
+    </div>
+    <div class="card">
       <h2>Refunds issued <button class="help-btn" onclick="openHelp('refunds',event)">?</button></h2>
       <div class="hint">Classes and money refunded for unused subscriptions, by month.</div>
       <div class="row-form"><input type="month" value="${refundReportMonth}" onchange="setRefundReportMonth(this.value)"></div>
       ${refundsHtml}
       ${refundRows.length ? `<div class="row-form" style="margin-top:12px"><button class="btn-gold" onclick="exportRefunds()">Export Refunds report</button></div>` : ''}
-    </div>
-    <div class="card">
-      <h2>Teacher payroll <button class="help-btn" onclick="openHelp('payroll',event)">?</button></h2>
-      <div class="row-form">
-        <input type="month" value="${payrollMonth}" onchange="setPayrollMonth(this.value)">
-        <input type="text" id="payrollTeacherSearchBox" placeholder="Search by name, ID, or mobile…" oninput="filterPayrollTeacherPicker()" style="width:200px">
-        <select id="payrollTeacherPickerSelect" onchange="setPayrollTeacherFilter(this.value)">${payrollTeacherOptions}</select>
-      </div>
-      ${payrollMsg ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${esc(payrollMsg)}</div>` : ''}
-      ${payrollHtml}
-      ${payrollTeacherPool.length ? `<div class="row-form" style="margin-top:12px"><button class="btn-gold" onclick="exportTeacherPayroll()">Export Teacher Payroll report</button>${payrollTeacherPool.length > 1 ? `<button class="btn-small" onclick="printAllSalarySlips()">📄 Print all salary slips</button>` : ''}</div>` : ''}
     </div>
     <div class="card">
       <h2>Net profit — fee collection minus teacher payroll and other expenses</h2>
@@ -14208,18 +14304,6 @@ function renderFees() {
       ${allPaymentsHtml}
       ${allPaymentsFiltered.length ? `<div class="row-form" style="margin-top:12px"><button class="btn-gold" onclick="exportSubscriptionHistory()">Export Subscription History</button></div>` : ''}
     </div>
-    ${isCurrentUserSuperuserAdmin() ? `
-    <div class="card" style="border-color:var(--brick)">
-      <h2 style="color:var(--brick)">Academic Year (Superuser only)</h2>
-      <div class="hint">Current: <b>${esc(globalAcademicYear || 'Not set')}</b>. Changing this advances Grade (and Category, where applicable) for every student except those graded Adult — a once-a-year, whole-school action.</div>
-      ${bulkAcademicYearMsg ? `<div class="hint" style="color:${bulkAcademicYearMsg.startsWith('Grade update complete')?'var(--forest)':'var(--brick)'}">${esc(bulkAcademicYearMsg)}</div>` : ''}
-      <div class="row-form">
-        <input type="text" id="bulkAcademicYearInput" placeholder="e.g. 2026-27" style="width:140px">
-        <button class="btn-small" style="background:var(--brick);color:#fff" onclick="startBulkAcademicYearChange()">Advance everyone</button>
-      </div>
-    </div>
-    ${bulkAcademicYearConfirmModalHtml()}
-    ` : ''}
     ${expiryRulesCardHtml()}
     <div class="card">
       <h2>Fee Message Settings <button class="help-btn" onclick="openHelp('fee-msg-settings',event)">?</button></h2>
@@ -15078,7 +15162,30 @@ function renderUsers() {
     </div>
     ${bioSettingsCardHtml()}
 
-    ${isCurrentUserSuperuserAdmin() ? `
+    ${photoSizeErrorPopupHtml()}
+  `;
+}
+
+// ---------- Superadmin page (superuser admins only; every section needs the unlock password) ----------
+function renderSuperadmin() {
+  if (!isCurrentUserSuperuserAdmin()) return '<div class="card"><div class="empty">This page is for superuser admins only.</div></div>';
+  return `
+    <div class="card">
+      <h2>Superadmin</h2>
+      <div class="hint">Whole-school and data actions, for superuser admins only. Each section opens with the unlock password.</div>
+    </div>
+    <div class="card" style="border-color:var(--brick)">
+      <h2 style="color:var(--brick)">Academic Year</h2>
+      ${!dangerZoneUnlocked ? dangerZoneLockHtml('academic') : `
+      <div class="hint">Current: <b>${esc(globalAcademicYear || 'Not set')}</b>. Changing this advances Grade (and Category, where applicable) for every student except those graded Adult — a once-a-year, whole-school action.</div>
+      ${bulkAcademicYearMsg ? `<div class="hint" style="color:${bulkAcademicYearMsg.startsWith('Grade update complete')?'var(--forest)':'var(--brick)'}">${esc(bulkAcademicYearMsg)}</div>` : ''}
+      <div class="row-form">
+        <input type="text" id="bulkAcademicYearInput" placeholder="e.g. 2026-27" style="width:140px">
+        <button class="btn-small" style="background:var(--brick);color:#fff" onclick="startBulkAcademicYearChange()">Advance everyone</button>
+      </div>
+      `}
+    </div>
+    ${bulkAcademicYearConfirmModalHtml()}
     <div class="card" style="border-color:var(--brick)">
       <h2 style="color:var(--brick)">Export all data (for Access)</h2>
       ${!dangerZoneUnlocked ? dangerZoneLockHtml('export') : `
@@ -15145,8 +15252,6 @@ function renderUsers() {
       </div>
       `}
     </div>
-    ` : ''}
-    ${photoSizeErrorPopupHtml()}
   `;
 }
 
@@ -18147,6 +18252,7 @@ const HELP = {
   'fee-calc': { t:'Fee calculator', b:"<ul><li>Calculates the expected fee based on a student's enrolled subjects and class type.</li><li>Click Push fee request to send the amount straight to the student's fee requests.</li></ul>" },
   'renewal': { t:'Students needing renewal', b:'<ul><li>Active students with 0 or fewer classes remaining in any subject.</li><li>Also shows students enrolled in a subject who have never bought classes (Never subscribed).</li><li>Click Request Fees to jump to the Fee Calculator for that student.</li></ul>' },
   'bulk-parents': { t:'Create all parent logins', b:"<ul><li>Preview lists every active student's family that needs a parent login. Nothing is saved until you press Create.</li><li>Brothers and sisters with the same parent mobile or main mobile share one login with all of them linked.</li><li>Login ID and password are the parent's 10-digit mobile. When the parent logs in with it, the app asks them to change the password.</li><li>A family that already has a parent login is not given a second one; only children missing from it are linked.</li><li>Skipped: students with no phone number, or a number saved on more than 4 students.</li><li>After Create, each family's row has 📤 WhatsApp buttons with the message ready (app link, login ID, password). Later, open a parent from Manage parent logins to send it again.</li></ul>" },
+  'razorpay-report': { t:'Razorpay payments', b:"<ul><li>Every payment Razorpay sent to the app in the month (India time), from 23 Oct 2026 when the webhook started.</li><li><b>Fee</b>: confirmed on the Fees page; shows the students, subjects and amounts recorded. <b>Demo</b>: linked to a website demo booking. <b>Set aside</b>: Not a fee / Not a demo. <b>Waiting</b>: still in Razorpay payments to confirm.</li><li>Fees difference = received minus recorded: Razorpay's charge added on top, or excess paid.</li><li>Refunds made in Razorpay are not shown; record them in the app as usual.</li></ul>" },
   'pending-fees': { t:'Pending fee requests', b:"<ul><li>All fee requests across all students not yet marked Paid, grouped by family.</li><li>Brothers and sisters are one family when they share a parent login or a parent mobile number (main Mobile or any Parent number). Tick <b>Bill separately</b> on a student's page to keep them out of the family.</li><li>Message makes one WhatsApp message for the whole family with every subject and the total.</li><li>Mark paid marks one request; Mark all paid marks every request of the family with one date and reference.</li><li><b>Razorpay payments to confirm</b> (above the list): payments from the Razorpay page, each with a suggested family from the paying phone or the student name typed, and the amount. Confirm marks those requests paid with the Razorpay payment ID as reference. Wrong family? Pick another one and tick the requests it covers. Not a fee sets it aside; Show set-aside payments brings it back.</li></ul>" },
   'all-payments': { t:'All subscription payments', b:'<ul><li>Every payment recorded for the selected month, across all students.</li><li>Use the filters to narrow by teacher or subject.</li><li>Export downloads the filtered list as Excel.</li></ul>' },
   'refunds': { t:'Refunds issued', b:'<ul><li>All refunds recorded for the selected month.</li><li>Export downloads the list as Excel.</li></ul>' },
@@ -21768,29 +21874,34 @@ function render() {
     { label: 'Daily work', tabs: [
       ['log', 'Class Log'],
       ['chat', 'Communication' + (chatTotalUnread() ? ` (${chatTotalUnread()})` : '')],
-      ['students', 'Students & Subscriptions'],
       ['wixbookings', 'Demo Bookings' + (data.wixBookings.filter(b=>b.status==='New').length ? ` (${data.wixBookings.filter(b=>b.status==='New').length})` : '')],
+      ['support', 'Support' + (data.supportTickets.filter(t=>t.status==='open').length ? ` (${data.supportTickets.filter(t=>t.status==='open').length})` : '')],
+      ['rebuildclasses', 'Rebuild Pending Classes'],
     ]},
     { label: 'Money', tabs: [
       ['fees', 'Fees'],
-      ['rebuildclasses', 'Rebuild Pending Classes'],
+      ['payroll', 'Payroll'],
       ['expenses', 'Expenses'],
       ['reports', 'Reports & Export'],
     ]},
     { label: 'People', tabs: [
+      ['students', 'Students & Subscriptions'],
       ['setup', 'Teachers & Subjects'],
       ['parents', 'Parents'],
-      ['admins', 'Manage Admins'],
+    ]},
+    { label: 'Teaching', tabs: [
       ['studyplans', 'Study Plans'],
       ['homework', 'Homework'],
       ['questionbank', 'Question Bank'],
     ]},
     { label: 'System', tabs: [
-      ['users', 'Setup'],
+      ['users', 'Settings'],
+      ['admins', 'Manage Admins'],
       ['ai', 'AI'],
       ['audit', 'Audit Log'],
-      ['support', 'Support' + (data.supportTickets.filter(t=>t.status==='open').length ? ` (${data.supportTickets.filter(t=>t.status==='open').length})` : '')],
     ]},
+    // Superuser admins only: backups, imports, clearing data, logging switches and the Academic Year roll-over.
+    ...(isCurrentUserSuperuserAdmin() ? [{ label: 'Superadmin', tabs: [['superadmin', 'Superadmin tools']] }] : []),
   ];
   const tabs = [['dashboard','Dashboard'], ...tabGroups.flatMap(g => g.tabs)]; // flat list still needed wherever code just wants "all tabs"
   const activeGroupLabel = (tabGroups.find(g => g.tabs.some(([key])=>key===currentTab)) || {}).label;
@@ -21836,6 +21947,8 @@ function render() {
   else if (currentTab === 'chat') body = renderChat();
   else if (currentTab === 'log') body = renderLog();
   else if (currentTab === 'reports') body = renderReports();
+  else if (currentTab === 'payroll') body = renderReports('payroll');
+  else if (currentTab === 'superadmin') body = renderSuperadmin();
   else if (currentTab === 'parents') body = renderParents();
   else if (currentTab === 'users') body = renderUsers();
   else if (currentTab === 'admins') body = renderManageAdmins();
@@ -21920,7 +22033,7 @@ async function initApp() {
 
   // Restore tab from URL hash (e.g. app.libeducation.com/#payroll)
   const hashTab = tabFromHash(location.hash.replace('#', ''));
-  const validTabs = ['dashboard','students','teachers','subjects','schedule','fees','expenses','payroll','reports','wixbookings','audit','ai','users','admins','parents','setup','support','settings','homework'];
+  const validTabs = ['dashboard','students','teachers','subjects','schedule','fees','expenses','payroll','reports','wixbookings','audit','ai','users','admins','parents','setup','support','settings','homework','superadmin'];
   if (hashTab && validTabs.includes(hashTab)) currentTab = hashTab;
   // Deep link: #rates-fees → student portal with Rates & Fees panel open
   if (hashTab === 'rates-fees') {
