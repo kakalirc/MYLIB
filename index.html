@@ -285,7 +285,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-27 21:45 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-27 21:55 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -9049,7 +9049,7 @@ function setFeeMessageShort(on) {
 }
 function feeMessageShortToggleHtml() {
   const r = data.subscriptions.find(x => x.id === feeMessageForRequestId);
-  return `<div class="row-form" style="margin:4px 0;align-items:center"><label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" ${feeMessageShort ? 'checked' : ''} onchange="setFeeMessageShort(this.checked)"> Short reminder (amounts and payment details only)</label> ${r ? familyReminderHtml(r.studentId) : ''}</div>`
+  return `<div class="row-form" style="margin:4px 0;align-items:center"><label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" ${feeMessageShort ? 'checked' : ''} onchange="setFeeMessageShort(this.checked)"> Short reminder (same message without App Login and Discount offers)</label> ${r ? familyReminderHtml(r.studentId) : ''}</div>`
     + (feeReminderMsg ? `<div class="hint" style="color:var(--brick)">${esc(feeReminderMsg)}</div>` : '');
 }
 function generateFeeMessageForRequest(requestId) {
@@ -9204,7 +9204,7 @@ function remainingText(left) {
   return `${left} class${left === 1 ? '' : 'es'} still available (before this payment)`;
 }
 // One message for every pending request in the family (one request or many: same layout).
-// short = a second reminder: amounts, pay-by and payment details only.
+// short = a second reminder: the same message without App Login and Discount offers.
 function familyFeeMessage(studentId, short) {
   const reqs = familyPendingRequests(studentId);
   if (!reqs.length) return '';
@@ -9217,34 +9217,25 @@ function familyFeeMessage(studentId, short) {
   const payLine = payBy && payBy >= todayStr ? `Please pay by ${longDate(payBy)}.` : 'Please pay at the earliest.';
   const forMonth = months.length ? ` for ${joinAnd(months)}` : '';
   const subjLabel = r => { const subj = subject(r.subjectId); return subj ? subj.name : 'Subject'; };
-  const lines = [`Dear ${familyParentName(studentId)},`, ''];
-  if (short) {
-    lines.push(`This is a gentle reminder that the tuition fee${many ? 's' : ''}${forMonth} for ${joinAnd(names)} ${many ? 'are' : 'is'} still due: ${inrText(total)}.`, '');
-    kids.forEach(s => {
-      const mine = reqs.filter(r => r.studentId === s.id);
-      lines.push(`${kids.length > 1 ? s.name + ': ' : ''}${mine.map(r => `${subjLabel(r)} ${inrText(r.amountPaid)}`).join(', ')}`);
+  const opening = short ? 'This is a gentle reminder' : 'We would like to remind you';
+  const lines = [`Dear ${familyParentName(studentId)},`, '', `${opening} that the tuition fee${many ? 's' : ''}${forMonth} for the classes of ${joinAnd(names)} ${many ? 'are' : 'is'}${short ? ' still' : ''} due. ${payLine}`, '', 'Fee Details'];
+  kids.forEach(s => {
+    const mine = reqs.filter(r => r.studentId === s.id);
+    lines.push('');
+    if (kids.length > 1) lines.push(`${s.name}:`);
+    mine.forEach((r, i) => {
+      const typeMode = [r.type, s.modePreference].filter(Boolean).join(', ');
+      const why = parentWhyOf(r);
+      lines.push(`${many ? (i + 1) + '. ' : ''}${subjLabel(r)} (${typeMode})${months.length > 1 ? ', ' + requestMonthLong(r) : ''}`);
+      const ind = many ? '   ' : '';
+      lines.push(`${ind}Classes Included: ${r.classes}`);
+      if (why) lines.push(`${ind}How we worked it out: ${why}`);
+      lines.push(`${ind}Amount Payable: ${inrText(r.amountPaid)}`);
+      lines.push(`${ind}Right now: ${remainingText(studentRemaining(s.id, r.subjectId, r.type))}`);
     });
-    lines.push('', payLine, '');
-  } else {
-    lines.push(`We would like to remind you that the tuition fee${many ? 's' : ''}${forMonth} for the classes of ${joinAnd(names)} ${many ? 'are' : 'is'} due. ${payLine}`, '', 'Fee Details');
-    kids.forEach(s => {
-      const mine = reqs.filter(r => r.studentId === s.id);
-      lines.push('');
-      if (kids.length > 1) lines.push(`${s.name}:`);
-      mine.forEach((r, i) => {
-        const typeMode = [r.type, s.modePreference].filter(Boolean).join(', ');
-        const why = parentWhyOf(r);
-        lines.push(`${many ? (i + 1) + '. ' : ''}${subjLabel(r)} (${typeMode})${months.length > 1 ? ', ' + requestMonthLong(r) : ''}`);
-        const ind = many ? '   ' : '';
-        lines.push(`${ind}Classes Included: ${r.classes}`);
-        if (why) lines.push(`${ind}How we worked it out: ${why}`);
-        lines.push(`${ind}Amount Payable: ${inrText(r.amountPaid)}`);
-        lines.push(`${ind}Right now: ${remainingText(studentRemaining(s.id, r.subjectId, r.type))}`);
-      });
-      if (kids.length > 1 && mine.length > 1) lines.push(`Subtotal for ${s.name}: ${inrText(mine.reduce((a, r) => a + (r.amountPaid || 0), 0))}`);
-    });
-    lines.push('', `Total due: ${inrText(total)}`, '');
-  }
+    if (kids.length > 1 && mine.length > 1) lines.push(`Subtotal for ${s.name}: ${inrText(mine.reduce((a, r) => a + (r.amountPaid || 0), 0))}`);
+  });
+  lines.push('', `Total due: ${inrText(total)}`, '');
   lines.push('Payment Options');
   if (upiId) lines.push(`UPI: ${upiId}`);
   lines.push(`Online Payment: ${RAZORPAY_FEE_PAGE}`, 'While making the online payment, please enter the following details:', `Tuition Fee: ${inrText(total)}`, `Student Name: ${names.join(', ')}`, '');
@@ -9262,7 +9253,7 @@ function familyFeeMessage(studentId, short) {
       lines.push('Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/', '');
     }
     lines.push('Discount offers: https://www.libeducation.com/discountoffers', '', 'Thank you for choosing LIB Education. We appreciate your continued trust and support.', '');
-  }
+  } else lines.push('Thank you for choosing LIB Education.', '');
   lines.push('Regards,', 'LIB Education');
   const out = []; let prevBlank = false;
   for (const l of lines) { if (l === '') { if (!prevBlank) out.push(''); prevBlank = true; } else { out.push(l); prevBlank = false; } }
