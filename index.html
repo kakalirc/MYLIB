@@ -1721,7 +1721,7 @@ function researchMdHtml(md) {
 function toggleTeacherMobileTabMenu() { teacherMobileTabMenuOpen = !teacherMobileTabMenuOpen; render(); }
 function setTeacherPortalTab(t) {
   teacherPortalTab = t;
-  if (t === 'dashboard') { loadClassFrequencyRows().then(() => render()); }
+  if (t === 'dashboard' || t === 'pendingactions') { loadClassFrequencyRows().then(() => render()); }
   if (t === 'frequency') { frequencyMsg = ''; loadClassFrequencyRows().then(() => render()); }
   trackUse('tab:' + t, true);
   teacherMobileTabMenuOpen = false;
@@ -12951,10 +12951,10 @@ function renderDashboard() {
     { num: needingRenewal, label: `Student${needingRenewal===1?'':'s'} needing renewal`, action: "setTab('reports'); setTimeout(()=>{ const el=document.getElementById('studentsNeedingRenewalSection'); if(el) el.scrollIntoView({behavior:'smooth'}); },120)" },
     { num: unreadChats, label: `Unread chat${unreadChats===1?'':'s'}`, tab: 'chat' },
   ];
-  const expiring = expiringSoon();
+  const _teacherExpiryStudentIds = new Set(studentsForTeacher(teacher.id).map(function(st){return st.id;}));
+  const expiring = expiringSoon().filter(function(r){return _teacherExpiryStudentIds.has(r.studentId);});
   // The card counts CLASSES (the unused classes that will be lost), not payments; the list below shows the payments.
   const expiringClasses = Math.round(expiring.reduce((a, r) => a + r.unused, 0) * 100) / 100;
-  if (expirySettings.enabled) cards.push({ num: expiringClasses, label: `Class${expiringClasses===1?'':'es'} expiring in ${EXPIRY_WARN_DAYS} days`, action: "var e=document.getElementById('expiryList'); if(e) e.scrollIntoView({behavior:'smooth'})" });
   const expiryListHtml = expiring.length ? `
     <div class="card" id="expiryList">
       <h2>Expiring in the next ${EXPIRY_WARN_DAYS} days</h2>
@@ -17240,9 +17240,7 @@ function teacherScheduleSetupHtml(teacher) {
     var ia=a.action==='frequency'?0:1, ib=b.action==='frequency'?0:1;
     return ia-ib || (a.student.name||'').localeCompare(b.student.name||'') || (a.subject.name||'').localeCompare(b.subject.name||'') || a.type.localeCompare(b.type);
   });
-  if (!issues.length) {
-    return '<div class="card" id="scheduleSetupRequired" style="border-left:4px solid var(--forest)"><h2 style="color:var(--forest)">✓ Schedule Setup Required</h2><div class="hint">No missing class-frequency or future-schedule setup was found for your active students with remaining subscribed classes.</div><button class="btn-small" onclick="Promise.all([loadClassFrequencyRows(),loadScheduledClasses()]).then(()=>render())">↻ Refresh</button></div>';
-  }
+  if (!issues.length) return '';
   var html='<div class="card" id="scheduleSetupRequired" style="border-left:4px solid var(--gold-dark,#b8860b)">';
   html+='<h2>⚠️ Schedule Setup Required <span class="tag absent">'+issues.length+' item'+(issues.length===1?'':'s')+'</span></h2>';
   html+='<div class="hint">Students assigned to you with remaining subscribed classes but missing a usable weekly frequency or future Pending schedule. Overdue Pending classes do not count as a future schedule.</div>';
@@ -17411,12 +17409,12 @@ function renderTeacherDashboard(teacher) {
         ${expiring.map(r => `<tr><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${fmtN(r.unused)}</td><td>${esc(r.expiresOn)}</td><td style="color:var(--brick)">${r.daysLeft}</td></tr>`).join('')}
       </table></div>
     </div>` : '';
-  // Build today's schedule card HTML
+  // Pending Action Items: timing review and today's classes are separate, independently hideable sections.
+  const needsReviewClasses = scheduledClasses.filter(function(sc){return sc.teacherId===teacher.id && isProvisionalScheduleTime(sc) && sc.status!=='Done' && sc.date>=todayStr;}).sort(function(a,b){return a.date===b.date?(a.time||'').localeCompare(b.time||''):a.date.localeCompare(b.date);});
+  const timingReviewHtml = needsReviewClasses.length ? '<div class="card" style="border-left:4px solid var(--gold);background:var(--soft)"><h2 style="margin-top:0">⚠ Please Review and Correct Class Timings</h2><div class="hint">Some class timings are provisional after the pending-class rebuild. Please review and correct these times before conducting the classes. Batch classes may show 00:00; Individual classes may show 01:00 or 02:00. Use Edit in Today’s Classes for today’s lessons, or open Class Schedule to correct upcoming lessons. This notice remains while classes still have the agreed placeholder times. Corrected times no longer appear on this list.</div><div class="hint"><b>Timings awaiting review:</b> '+needsReviewClasses.length+' · Next: '+esc(needsReviewClasses[0].date)+' '+esc(needsReviewClasses[0].time||'—')+' · '+esc(studentNameWithCode(needsReviewClasses[0].studentId))+'</div></div>' : '';
   const todaySchedHtml = (function(){
-    const needsReview = scheduledClasses.filter(function(sc){return sc.teacherId===teacher.id && isProvisionalScheduleTime(sc) && sc.status!=='Done' && sc.date>=todayStr;}).sort(function(a,b){return a.date===b.date?(a.time||'').localeCompare(b.time||''):a.date.localeCompare(b.date);});
-    const notice = needsReview.length ? '<div class="card" style="border-left:4px solid var(--gold);background:var(--soft)"><h2 style="margin-top:0">⚠ Please Review and Correct Class Timings</h2><div class="hint">Some class timings are provisional after the pending-class rebuild. Please review and correct these times before conducting the classes. Batch classes may show 00:00; Individual classes may show 01:00 or 02:00. Use Edit in Today’s Classes for today’s lessons, or open Class Schedule to correct upcoming lessons. This notice remains while classes still have the agreed placeholder times. Corrected times no longer appear on this list.</div><div class="hint"><b>Timings awaiting review:</b> '+needsReview.length+' · Next: '+esc(needsReview[0].date)+' '+esc(needsReview[0].time||'—')+' · '+esc(studentNameWithCode(needsReview[0].studentId))+'</div></div>' : '';
-    if (!myScheduledToday.length) return notice;
-    var h=notice+'<div class="card" style="border-left:4px solid var(--primary)">';
+    if (!myScheduledToday.length) return '';
+    var h='<div class="card" style="border-left:4px solid var(--primary)">';
     h+='<h2>🗓️ Today\'s Classes</h2>';
     h+='<div class="table-scroll"><table>';
     h+='<tr><th>Time</th><th>Student</th><th>Subject</th><th>Type</th><th>Status</th></tr>';
@@ -17486,9 +17484,11 @@ function renderTeacherDashboard(teacher) {
     return h;
   })();
 
+  if (teacherPortalTab === 'pendingactions') {
+    return `${timingReviewHtml}${todaySchedHtml}${teacherScheduleSetupHtml(teacher)}${expiryListHtml}`;
+  }
+
   return `
-    ${todaySchedHtml}
-    ${teacherScheduleSetupHtml(teacher)}
     ${celebHtml}
     ${milestonesHtml}
     <div class="stat-grid">
@@ -17499,7 +17499,6 @@ function renderTeacherDashboard(teacher) {
         </div>
       `).join('')}
     </div>
-    ${expiryListHtml}
     <div class="card">
       <h2>Welcome back, ${esc(teacher.name)}</h2>
       <div class="hint"><span class="nav-hint-desktop">Use the menu on the left</span><span class="nav-hint-mobile">Use the ☰ menu at the top</span> to get to your schedule, availability, attendance, students, and everything else. The boxes above show what's waiting for you today. Click any of them to go straight there.</div>
@@ -17760,6 +17759,7 @@ function renderTeacherPortal() {
   // Phone burger menu keeps its original flat order.
   const teacherMobileTabsList = [
     ['dashboard', 'Dashboard'],
+    ['pendingactions', 'Pending Action Items'],
     ['schedule', 'Class Schedule'],
     ['frequency', 'Class Frequency'],
     ['students', 'My Students'],
@@ -17777,6 +17777,7 @@ function renderTeacherPortal() {
   const sidebarHtml = `
     <div class="sidebar-nav">
       <div class="sidebar-item ${teacherPortalTab==='dashboard'?'active':''}" onclick="setTeacherPortalTab('dashboard')" style="font-weight:700;margin-bottom:10px">Dashboard</div>
+      <div class="sidebar-item ${teacherPortalTab==='pendingactions'?'active':''}" onclick="setTeacherPortalTab('pendingactions')" style="font-weight:700;margin-bottom:10px">Pending Action Items</div>
       ${teacherTabGroups.map(g => {
         const isCollapsed = !!sidebarCollapsedGroups[g.label] && g.label !== activeGroupLabel;
         return `
@@ -17809,7 +17810,7 @@ function renderTeacherPortal() {
 }
 // The page for the selected teacher tab, without the menu (renderTeacherPortal wraps it in the sidebar layout).
 function teacherPortalBodyHtml(teacher) {
-  if (teacherPortalTab === 'dashboard') {
+  if (teacherPortalTab === 'dashboard' || teacherPortalTab === 'pendingactions') {
     return renderTeacherDashboard(teacher);
   }
   if (teacherPortalTab === 'schedule') {
