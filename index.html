@@ -1721,6 +1721,7 @@ function researchMdHtml(md) {
 function toggleTeacherMobileTabMenu() { teacherMobileTabMenuOpen = !teacherMobileTabMenuOpen; render(); }
 function setTeacherPortalTab(t) {
   teacherPortalTab = t;
+  if (t === 'dashboard') { loadClassFrequencyRows().then(() => render()); }
   if (t === 'frequency') { frequencyMsg = ''; loadClassFrequencyRows().then(() => render()); }
   trackUse('tab:' + t, true);
   teacherMobileTabMenuOpen = false;
@@ -6250,6 +6251,10 @@ async function loadAfterLogin() {
     loadSubjectNames(),
     loadMyAnnouncements(),
     loadNotifications(),
+    // The teacher dashboard is the default tab on login, so load frequency rows
+    // before the first dashboard render; otherwise an empty initial cache makes
+    // every assigned student appear to need frequency setup until Refresh is used.
+    currentRole === 'Teacher' ? loadClassFrequencyRows() : Promise.resolve(),
   ]);
   await loadMyPhoto();
 }
@@ -8607,26 +8612,36 @@ function feeMessageTextForRequest(requestId) {
   const lines = [
     `Dear ${parentName},`,
     ``,
-    `Fee payment is due for ${s.name} - ${subj.name}${monthLabel ? ', ' + monthLabel : ''}.`,
+    `We would like to remind you that the tuition fee for ${s.name}’s ${subj.name} classes is due.`,
     ``,
+    `Fee Details`,
     classTypeMode ? `Class type: ${classTypeMode}` : '',
-    `Classes due: ${classCount}`,
-    `Amount due: Rs ${amount}`,
+    `Classes Included: ${classCount}`,
+    `Amount Payable: Rs ${amount}`,
     ``,
-    remainingLine,
+    remainingLine.replace(/^Classes currently available:/, 'Classes Remaining:'),
     ``,
-    upiId ? `Pay via UPI: ${upiId}` : '',
-    `Or pay online: ${RAZORPAY_FEE_PAGE}`,
-    `(enter Tuition Fee ${inrText(r.amountPaid)} and Student Name: ${s.name})`,
+    `Payment Options`,
+    upiId ? `UPI: ${upiId}` : '',
+    `Online Payment: ${RAZORPAY_FEE_PAGE}`,
+    `While making the online payment, please enter the following details:`,
+    `Tuition Fee: ${inrText(r.amountPaid)}`,
+    `Student Name: ${s.name}`,
     ``,
-    feeContactMobile ? `After payment, please share a screenshot to ${feeContactMobile}.` : '',
+    feeContactMobile ? `After completing the payment, kindly share the payment confirmation screenshot at ${feeContactMobile} for our records.` : '',
     ``,
+    credLine ? `App Login` : '',
     credLine ? `${credLine} (same as login ID for first-time login)` : '',
-    credLine ? `https://app.libeducation.com/#rates-fees` : '',
+    credLine ? `Stable Release: https://app.libeducation.com` : '',
+    credLine ? `Latest Release: https://app.kakali.workers.dev/` : '',
+    credLine ? `LIB Education Website: https://www.libeducation.com/` : '',
     ``,
     `Discount offers: https://www.libeducation.com/discountoffers`,
     ``,
-    `- LIB Education`,
+    `Thank you for choosing LIB Education. We appreciate your continued trust and support.`,
+    ``,
+    `Regards,`,
+    `LIB Education`,
   ].filter(l => l !== null && l !== undefined && !(l === '' && false));
 
   // Collapse multiple consecutive blank lines to one
@@ -8747,7 +8762,7 @@ function familyFeeMessage(studentId) {
   const total = reqs.reduce((a, r) => a + (r.amountPaid || 0), 0);
   const names = kids.map(s => s.name);
   const nameList = names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] : names[0];
-  const lines = [`Dear ${familyParentName(studentId)},`, '', `Fee payment is due for ${nameList}${months.length === 1 ? ', ' + months[0] : ''}:`];
+  const lines = [`Dear ${familyParentName(studentId)},`, '', `We would like to remind you that the tuition fees for ${nameList}’s classes are due.`, '', 'Fee Details'];
   kids.forEach(s => {
     const mine = reqs.filter(r => r.studentId === s.id);
     lines.push('');
@@ -8756,21 +8771,25 @@ function familyFeeMessage(studentId) {
       const subj = subject(r.subjectId);
       const typeMode = [r.type, s.modePreference].filter(Boolean).join(', ');
       const left = studentRemaining(s.id, r.subjectId, r.type);
-      lines.push(`${i + 1}. ${subj ? subj.name : 'Subject'} (${typeMode})${months.length > 1 ? ', ' + requestMonthLong(r) : ''}: ${r.classes} class${Number(r.classes) === 1 ? '' : 'es'}, ${inrText(r.amountPaid)}`);
-      lines.push(`   Classes available now: ${left}${left < 0 ? ' (overdue - please pay at the earliest)' : ''}`);
+      lines.push(`${i + 1}. ${subj ? subj.name : 'Subject'} (${typeMode})`);
+      lines.push(`   Classes Included: ${r.classes}`);
+      lines.push(`   Amount Payable: ${inrText(r.amountPaid)}`);
+      lines.push(`   Classes Remaining: ${left}${left < 0 ? ' (overdue - please pay at the earliest)' : ' (before this payment)'}`);
     });
     if (kids.length > 1 && mine.length > 1) lines.push(`Subtotal for ${s.name}: ${inrText(mine.reduce((a, r) => a + (r.amountPaid || 0), 0))}`);
   });
   lines.push('', `Total due: ${inrText(total)}`, '');
-  if (upiId) lines.push(`Pay via UPI: ${upiId}`);
-  lines.push(`Or pay online: ${RAZORPAY_FEE_PAGE}`, `(enter Tuition Fee ${inrText(total)} and Student Name: ${names.join(', ')})`, '');
-  if (feeContactMobile) lines.push(`After payment, please share a screenshot to ${feeContactMobile}.`, '');
+  lines.push('Payment Options');
+  if (upiId) lines.push(`UPI: ${upiId}`);
+  lines.push(`Online Payment: ${RAZORPAY_FEE_PAGE}`, 'While making the online payment, please enter the following details:', `Tuition Fee: ${inrText(total)}`, `Student Name: ${names.join(', ')}`, '');
+  if (feeContactMobile) lines.push(`After completing the payment, kindly share the payment confirmation screenshot at ${feeContactMobile} for our records.`, '');
   const logins = kids.map(s => ({ s, u: data.users.find(u => u.role === 'Student' && u.linkedId === s.id && !u.archived) })).filter(x => x.u);
   if (logins.length) {
+    lines.push('App Login');
     logins.forEach(x => lines.push(`${kids.length > 1 ? x.s.name + ' - ' : ''}Login ID and password: ${x.u.username} (same as login ID for first-time login)`));
-    lines.push('https://app.libeducation.com/#rates-fees', '');
+    lines.push('Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/', '');
   }
-  lines.push('Discount offers: https://www.libeducation.com/discountoffers', '', '- LIB Education');
+  lines.push('Discount offers: https://www.libeducation.com/discountoffers', '', 'Thank you for choosing LIB Education. We appreciate your continued trust and support.', '', 'Regards,', 'LIB Education');
   const out = []; let prevBlank = false;
   for (const l of lines) { if (l === '') { if (!prevBlank) out.push(''); prevBlank = true; } else { out.push(l); prevBlank = false; } }
   return out.join('\n').trim();
@@ -17162,6 +17181,82 @@ function renderTeacherSetup() {
     ${bioSettingsCardHtml()}
   `;
 }
+function openScheduleSetupFrequency(studentId, subjectId) {
+  frequencySearch = '';
+  frequencyFilterSubjectId = subjectId;
+  frequencyFilterStatus = 'all';
+  frequencyFilterDay = '';
+  frequencyFiltersApplied = true;
+  frequencyEditStudentId = studentId;
+  frequencyEditSubjectId = subjectId;
+  frequencyDraft = Object.fromEntries(FREQUENCY_DAYS.map(([key]) => [key, (frequencyRowFor(studentId, subjectId) ? Math.max(0, Number(frequencyRowFor(studentId, subjectId)[key]) || 0) : 0)]));
+  frequencyEditorOpen = true;
+  frequencyNewPickerOpen = false;
+  frequencyMsg = '';
+  teacherPortalTab = 'frequency';
+  teacherMobileTabMenuOpen = false;
+  loadClassFrequencyRows().then(function(){
+    var saved = frequencyRowFor(studentId, subjectId);
+    frequencyDraft = Object.fromEntries(FREQUENCY_DAYS.map(([key]) => [key, saved ? Math.max(0, Number(saved[key]) || 0) : 0]));
+    render();
+  });
+  render();
+}
+function openScheduleSetupSchedule(studentId, subjectId, classType) {
+  weeklyPatternMsg = '';
+  weeklyGeneratedView = null;
+  weeklyPatternDraft = { studentId: studentId, subjectId: subjectId, classType: classType, startDate: todayStr, days: [{ weekday: '', time: '' }] };
+  teacherPortalTab = 'schedule';
+  teacherMobileTabMenuOpen = false;
+  render();
+}
+function teacherScheduleSetupHtml(teacher) {
+  if (frequencyLoading) {
+    return '<div class="card" id="scheduleSetupRequired"><h2>🗓️ Schedule Setup Required</h2><div class="empty">Checking class frequency and schedule setup…</div></div>';
+  }
+  if (frequencyLoadError) {
+    return '<div class="card" id="scheduleSetupRequired"><h2>🗓️ Schedule Setup Required</h2><div class="hint" style="color:var(--brick)">Could not check setup status because Class Frequency failed to load. Use Refresh to try again.</div><button class="btn-small" onclick="loadClassFrequencyRows().then(()=>render())">↻ Refresh</button></div>';
+  }
+  var pairs = frequencyEligiblePairs(teacher.id);
+  var issues = [];
+  pairs.forEach(function(pair){
+    var saved = frequencyRowFor(pair.student.id, pair.subject.id);
+    var weeklyTotal = saved ? frequencyCountTotal(saved) : 0;
+    var frequencyMissing = !saved || weeklyTotal <= 0;
+    TYPES.forEach(function(type){
+      var remaining = studentRemaining(pair.student.id, pair.subject.id, type);
+      if (remaining <= 0) return;
+      if (frequencyMissing) {
+        issues.push({student:pair.student,subject:pair.subject,type:type,issue:'Class frequency not set',action:'frequency',remaining:remaining});
+        return;
+      }
+      var hasFuturePending = scheduledClasses.some(function(sc){
+        return sc.studentId===pair.student.id && sc.teacherId===teacher.id && sc.subjectId===pair.subject.id && sc.classType===type && sc.status==='Pending' && sc.date>=todayStr;
+      });
+      if (!hasFuturePending) issues.push({student:pair.student,subject:pair.subject,type:type,issue:'Future class schedule not generated',action:'schedule',remaining:remaining});
+    });
+  });
+  issues.sort(function(a,b){
+    var ia=a.action==='frequency'?0:1, ib=b.action==='frequency'?0:1;
+    return ia-ib || (a.student.name||'').localeCompare(b.student.name||'') || (a.subject.name||'').localeCompare(b.subject.name||'') || a.type.localeCompare(b.type);
+  });
+  if (!issues.length) {
+    return '<div class="card" id="scheduleSetupRequired" style="border-left:4px solid var(--forest)"><h2 style="color:var(--forest)">✓ Schedule Setup Required</h2><div class="hint">No missing class-frequency or future-schedule setup was found for your active students with remaining subscribed classes.</div><button class="btn-small" onclick="Promise.all([loadClassFrequencyRows(),loadScheduledClasses()]).then(()=>render())">↻ Refresh</button></div>';
+  }
+  var html='<div class="card" id="scheduleSetupRequired" style="border-left:4px solid var(--gold-dark,#b8860b)">';
+  html+='<h2>⚠️ Schedule Setup Required <span class="tag absent">'+issues.length+' item'+(issues.length===1?'':'s')+'</span></h2>';
+  html+='<div class="hint">Students assigned to you with remaining subscribed classes but missing a usable weekly frequency or future Pending schedule. Overdue Pending classes do not count as a future schedule.</div>';
+  html+='<div class="table-scroll"><table><tr><th>Student</th><th>Subject</th><th>Class type</th><th>Issue</th><th>Remaining</th><th>Action</th></tr>';
+  issues.forEach(function(item){
+    var action = item.action==='frequency'
+      ? '<button class="btn-small btn-primary" onclick="openScheduleSetupFrequency(\''+item.student.id+'\',\''+item.subject.id+'\')">Set frequency</button>'
+      : '<button class="btn-small btn-primary" onclick="openScheduleSetupSchedule(\''+item.student.id+'\',\''+item.subject.id+'\',\''+item.type+'\')">Set schedule</button>';
+    html+='<tr><td>'+esc(studentLabel(item.student))+'</td><td>'+esc(item.subject.name)+'</td><td>'+esc(item.type)+'</td><td>'+esc(item.issue)+'</td><td>'+item.remaining+'</td><td>'+action+'</td></tr>';
+  });
+  html+='</table></div><button class="btn-small" style="margin-top:8px" onclick="Promise.all([loadClassFrequencyRows(),loadScheduledClasses()]).then(()=>render())">↻ Refresh list</button></div>';
+  return html;
+}
+
 function renderTeacherDashboard(teacher) {
   const classesToday = data.sessions.filter(s=>s.teacherId===teacher.id && s.date===todayStr).reduce((a,s)=>a+s.count,0);
 
@@ -17392,6 +17487,7 @@ function renderTeacherDashboard(teacher) {
   })();
 
   return `
+    ${teacherScheduleSetupHtml(teacher)}
     ${todaySchedHtml}
     ${celebHtml}
     ${milestonesHtml}
