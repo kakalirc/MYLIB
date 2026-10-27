@@ -627,7 +627,7 @@ const APP_USAGE_SCREENS = {
   schedule: 'Class Schedule', students: 'Students', studyplans: 'Study Plans', homework: 'Homework', questionbank: 'Question Bank',
   research: 'Research', attendance: 'Give Attendance', report: 'Attendance Report', availability: 'Availability', profile: 'My Profile',
   setup: 'Setup / Teachers & Subjects', dashboard: 'Dashboard', log: 'Class Log', chat: 'Communication', wixbookings: 'Demo Bookings',
-  fees: 'Fees', expenses: 'Expenses', reports: 'Reports & Export', parents: 'Parents', admins: 'Manage Admins', users: 'Setup',
+  fees: 'Fees', rebuildclasses: 'Rebuild Pending Classes', expenses: 'Expenses', reports: 'Reports & Export', parents: 'Parents', admins: 'Manage Admins', users: 'Setup',
   audit: 'Audit Log', support: 'Support', ai: 'AI',
 };
 function appUsageFeatureLabel(f) {
@@ -3835,6 +3835,15 @@ async function saveEditDemo(id) {
   if (dl) { Object.assign(dl, { date: updates.date, teacherId: updates.teacher_id, subjectId: updates.subject_id||'', board: updates.board||'', studentName: updates.student_name||'', parentMobile: updates.parent_mobile||'', notes: updates.notes||'', demoTime: updates.demo_time||'' }); }
   editingDemoId = ''; editDemoDraft = {};
   demoLogMsg = 'Updated.'; render();
+}
+// No separate timing-review table is used. Provisional times are identified by the agreed
+// placeholder convention and cease to require review when the teacher changes the time.
+function isProvisionalScheduleTime(sc) {
+  if (!sc || sc.status === 'Done' || sc.status === 'Cancelled') return false;
+  const t = (sc.time || '').slice(0,5);
+  if (sc.classType === 'Group' || sc.classType === 'Batch') return t === '00:00';
+  if (sc.classType === 'Individual') return t === '01:00' || t === '02:00';
+  return false;
 }
 async function loadScheduledClasses() {
   const { data: rows, error } = await selectAllPaged('scheduled_classes', ['date', 'time']);
@@ -13786,6 +13795,92 @@ function renderParents() {
   return block1 + searchBlock + manageBlock;
 }
 
+// ---------- Fees: Rebuild Pending Classes ----------
+function rebuildActiveStudents() { return data.students.filter(s => !s.archived).sort((a,b)=>studentLabel(a).localeCompare(studentLabel(b))); }
+function rebuildScopeStudentIds() {
+  if (rebuildClassesScope === 'selected') return rebuildClassesStudentId ? [rebuildClassesStudentId] : [];
+  return rebuildActiveStudents().map(s=>s.id);
+}
+function rebuildEligiblePairs(studentIds) {
+  const out = [];
+  studentIds.forEach(studentId => {
+    const st = data.students.find(s=>s.id===studentId && !s.archived); if (!st) return;
+    subjectsForStudent(st.id).forEach(subj => {
+      const fr = frequencyRows.find(r=>r.student_id===st.id && r.subject_id===subj.id);
+      if (!fr || !subj.teacherId) return;
+      TYPES.forEach(ty => {
+        const remaining = Math.max(0, Number(studentRemaining(st.id, subj.id, ty)) || 0);
+        const weeklyCount = FREQUENCY_DAYS.reduce((a,[key])=>a+Math.max(0,Number(fr[key])||0),0);
+        if (remaining > 0 && weeklyCount > 0) out.push({studentId:st.id, studentName:studentLabel(st), subjectId:subj.id, subjectName:subj.name, teacherId:subj.teacherId, type:ty, remaining, weeklyCount, frequency:fr});
+      });
+    });
+  });
+  return out;
+}
+function buildRebuildPreview() {
+  const ids = new Set(rebuildScopeStudentIds());
+  const targets = scheduledClasses.filter(sc=>ids.has(sc.studentId) && sc.status==='Pending' && sc.date>=todayStr);
+  const overdue = scheduledClasses.filter(sc=>ids.has(sc.studentId) && sc.status==='Pending' && sc.date<todayStr);
+  const eligible = rebuildEligiblePairs([...ids]);
+  const pairs = eligible.map(p=>({...p, futurePending:targets.filter(sc=>sc.studentId===p.studentId&&sc.subjectId===p.subjectId&&sc.classType===p.type).length, overduePending:overdue.filter(sc=>sc.studentId===p.studentId&&sc.subjectId===p.subjectId&&sc.classType===p.type).length}));
+  rebuildClassesPreview = { ids:[...ids], targets:targets.map(sc=>sc.id), overdueCount:overdue.length, pairs, noFrequency:rebuildActiveStudents().filter(st=>ids.has(st.id)).filter(st=>!subjectsForStudent(st.id).some(subj=>frequencyRows.some(fr=>fr.student_id===st.id&&fr.subject_id===subj.id))).length, createdAt:new Date().toISOString() };
+  rebuildClassesMsg = '';
+  render();
+}
+function rebuildPatternFor(pair) {
+  const days = [];
+  const keys = {monday_count:1,tuesday_count:2,wednesday_count:3,thursday_count:4,friday_count:5,saturday_count:6,sunday_count:0};
+  FREQUENCY_DAYS.forEach(([key])=>{
+    const n = Math.max(0,Math.floor(Number(pair.frequency[key])||0));
+    for (let i=0;i<n;i++) {
+      // These are explicitly provisional placeholders, not real lesson times.
+      const time = pair.type === 'Group' ? '00:00' : (i % 2 === 0 ? '01:00' : '02:00');
+      days.push({weekday:keys[key],time});
+    }
+  });
+  return days;
+}
+async function executeRebuildPendingClasses() {
+  if (rebuildClassesBusy || !rebuildClassesPreview) return;
+  const preview = rebuildClassesPreview;
+  if (!preview.ids.length) { rebuildClassesMsg='Choose at least one active student.'; render(); return; }
+  const pairCount=preview.pairs.length;
+  const targetCount=preview.targets.length;
+  const msg=`This will remove ${targetCount} future Pending class records for ${preview.ids.length} active student(s), preserve ${preview.overdueCount} overdue Pending records and all Done/other-status records, then regenerate from saved Class Frequency for ${pairCount} student/subject/type combinations. Placeholder times will be identified for teacher review from the agreed time convention; no new database table is required. Continue?`;
+  if (!confirm(msg)) return;
+  rebuildClassesBusy=true; rebuildClassesMsg='Removing future pending classes…'; render();
+  try {
+    // Delete only eligible future Pending records, scoped to the selected active students.
+    for (const id of preview.targets) {
+      const { error } = await sb.from('scheduled_classes').delete().eq('id',id).eq('status','Pending').gte('date',todayStr);
+      if (error) throw new Error('Could not remove pending class '+id+': '+error.message);
+    }
+    await loadScheduledClasses();
+    let generated=0, skipped=0; const errors=[];
+    for (let i=0;i<preview.pairs.length;i++) {
+      const pair=preview.pairs[i];
+      // Do not attempt generation when retained overdue records are likely to consume the RPC's quota.
+      if (pair.overduePending > 0) { skipped++; errors.push(`${pair.studentName} / ${pair.subjectName} (${pair.type}): ${pair.overduePending} overdue pending class(es) retained; review/reschedule these before regenerating.`); continue; }
+      const pattern=rebuildPatternFor(pair);
+      if (!pattern.length) { skipped++; continue; }
+      const {data:result,error}=await sb.rpc('schedule_weekly_pattern',{p_student_id:pair.studentId,p_teacher_id:pair.teacherId,p_subject_id:pair.subjectId,p_class_type:pair.type,p_start_date:todayStr,p_pattern:pattern});
+      if (error || !result || !result.ok) { skipped++; errors.push(`${pair.studentName} / ${pair.subjectName} (${pair.type}): ${error?error.message:(result&&result.error||'schedule generation failed')}`); continue; }
+      generated += Number(result.generated)||0;
+      await loadScheduledClasses();
+    }
+    await Promise.all([loadScheduledClasses(),loadClassFrequencyRows()]);
+    rebuildClassesMsg=`Rebuild finished. Removed ${targetCount} future pending class(es); generated ${generated} class(es); skipped ${skipped} combination(s). Overdue classes were preserved.`+(errors.length?'\n\nNeeds attention:\n• '+errors.join('\n• '):'');
+    rebuildClassesPreview=null;
+  } catch(e) { rebuildClassesMsg='Rebuild stopped: '+(e.message||String(e))+'. Check the schedule before running again; some changes may already have been applied.'; await loadScheduledClasses(); }
+  finally { rebuildClassesBusy=false; render(); }
+}
+function renderRebuildPendingClasses() {
+  const students=rebuildActiveStudents();
+  const preview=rebuildClassesPreview;
+  const pairRows=preview&&preview.pairs.length?`<div class="table-scroll"><table><tr><th>Student</th><th>Subject</th><th>Type</th><th>Remaining</th><th>Future pending to remove</th><th>Overdue retained</th><th>Weekly frequency</th></tr>${preview.pairs.map(p=>`<tr><td>${esc(p.studentName)}</td><td>${esc(p.subjectName)}</td><td>${esc(p.type)}</td><td>${p.remaining}</td><td>${p.futurePending}</td><td>${p.overduePending}</td><td>${p.weeklyCount}/week</td></tr>`).join('')}</table></div>`:'<div class="empty">No eligible student/subject/type combinations with remaining subscription and saved Class Frequency were found.</div>';
+  return `<div class="card"><h2>Rebuild Pending Classes</h2><div class="hint">Preview first. The rebuild removes only future-dated Pending classes for the selected active students. Overdue Pending classes, Done classes, and other statuses are preserved. New schedules use the saved Class Frequency table and existing <code>schedule_weekly_pattern</code> RPC; subscription limits and teacher conflicts remain enforced by that existing backend function.</div><div class="row-form" style="margin-top:12px"><label>Scope<select onchange="rebuildClassesScope=this.value;rebuildClassesPreview=null;render()"><option value="all" ${rebuildClassesScope==='all'?'selected':''}>All active students</option><option value="selected" ${rebuildClassesScope==='selected'?'selected':''}>One active student</option></select></label>${rebuildClassesScope==='selected'?`<label>Student<select onchange="rebuildClassesStudentId=this.value;rebuildClassesPreview=null;render()"><option value="">Select student…</option>${students.map(st=>`<option value="${st.id}" ${rebuildClassesStudentId===st.id?'selected':''}>${esc(studentLabel(st))}</option>`).join('')}</select></label>`:''}<button class="btn-primary" onclick="loadClassFrequencyRows().then(buildRebuildPreview)" ${rebuildClassesBusy?'disabled':''}>Preview Rebuild</button></div>${preview?`<div class="hint" style="margin-top:12px"><b>Preview summary:</b> ${preview.ids.length} active student(s); ${preview.targets.length} future Pending class(es) to remove; ${preview.overdueCount} overdue Pending class(es) to preserve; ${preview.pairs.length} eligible combinations. Students/subjects without saved frequency or positive remaining balance will not be regenerated.</div>${pairRows}<div class="hint" style="margin-top:8px;color:var(--brick)"><b>Placeholder times:</b> Batch = 00:00; Individual = 01:00 / 02:00. Generated times are provisional and should be corrected by teachers in Dashboard → Today’s Classes. Combinations with retained overdue Pending classes are skipped to avoid the existing scheduler quota being blocked.</div><button class="btn-primary" style="margin-top:12px" onclick="executeRebuildPendingClasses()" ${rebuildClassesBusy?'disabled':''}>${rebuildClassesBusy?'Working…':'Confirm Rebuild'}</button>`:''}${rebuildClassesMsg?`<div class="hint" style="white-space:pre-wrap;margin-top:12px;color:${rebuildClassesMsg.startsWith('Rebuild finished')?'var(--forest)':'var(--brick)'}">${esc(rebuildClassesMsg)}</div>`:''}</div>`;
+}
+
 function renderFees() {
   // Fee management cards (moved from Reports)
   const zeroBalanceRows = renewalRows();
@@ -16196,6 +16291,11 @@ let editScheduleDraft = { date: '', time: '' };
 let teacherDashboardTimeEditId = '';
 let teacherDashboardTimeDraft = {};
 let teacherDashboardTimeState = {};
+let rebuildClassesScope = 'all'; // all active students | selected active students
+let rebuildClassesStudentId = '';
+let rebuildClassesPreview = null;
+let rebuildClassesMsg = '';
+let rebuildClassesBusy = false;
 
 function scheduleSet(field, val) {
   scheduleDraft[field] = val;
@@ -16281,6 +16381,7 @@ async function saveTeacherDashboardClassTime(id, newTime) {
     render();
     return;
   }
+  // A successful edit confirms the provisional time. Clear its review marker when present.
   await loadScheduledClasses();
   teacherDashboardTimeEditId = '';
   delete teacherDashboardTimeDraft[id];
@@ -17218,8 +17319,10 @@ function renderTeacherDashboard(teacher) {
     </div>` : '';
   // Build today's schedule card HTML
   const todaySchedHtml = (function(){
-    if (!myScheduledToday.length) return '';
-    var h='<div class="card" style="border-left:4px solid var(--primary)">';
+    const needsReview = scheduledClasses.filter(function(sc){return sc.teacherId===teacher.id && isProvisionalScheduleTime(sc) && sc.status!=='Done' && sc.date>=todayStr;}).sort(function(a,b){return a.date===b.date?(a.time||'').localeCompare(b.time||''):a.date.localeCompare(b.date);});
+    const notice = needsReview.length ? '<div class="card" style="border-left:4px solid var(--gold);background:var(--soft)"><h2 style="margin-top:0">⚠ Please Review and Correct Class Timings</h2><div class="hint">Some class timings are provisional after the pending-class rebuild. Please review and correct these times before conducting the classes. Batch classes may show 00:00; Individual classes may show 01:00 or 02:00. Use Edit in Today’s Classes for today’s lessons, or open Class Schedule to correct upcoming lessons. This notice remains while classes still have the agreed placeholder times. Corrected times no longer appear on this list.</div><div class="hint"><b>Timings awaiting review:</b> '+needsReview.length+' · Next: '+esc(needsReview[0].date)+' '+esc(needsReview[0].time||'—')+' · '+esc(studentNameWithCode(needsReview[0].studentId))+'</div></div>' : '';
+    if (!myScheduledToday.length) return notice;
+    var h=notice+'<div class="card" style="border-left:4px solid var(--primary)">';
     h+='<h2>🗓️ Today\'s Classes</h2>';
     h+='<div class="table-scroll"><table>';
     h+='<tr><th>Time</th><th>Student</th><th>Subject</th><th>Type</th><th>Status</th></tr>';
@@ -17233,7 +17336,7 @@ function renderTeacherDashboard(teacher) {
         var draftTime=teacherDashboardTimeDraft[sc.id] || sc.time || '';
         timeCell='<input type="time" aria-label="Change class time" value="'+escAttr(draftTime)+'" onchange="saveTeacherDashboardClassTime(\''+sc.id+'\',this.value)" style="width:112px;max-width:100%;padding:5px;border:1px solid var(--line);border-radius:6px">';
       } else {
-        timeCell='<b>'+(sc.time||'—')+'</b> ';
+        timeCell=(isProvisionalScheduleTime(sc)?'<span title="Provisional timing requires review" style="color:var(--brick);font-weight:700">⚠ </span>':'')+'<b>'+(sc.time||'—')+'</b> ';
         if (sc.status==='Done') {
           timeCell+='<button class="btn-small" disabled title="Completed classes cannot be edited" style="opacity:.45;cursor:not-allowed">Edit</button>';
         } else {
@@ -21414,6 +21517,7 @@ function render() {
     ]},
     { label: 'Money', tabs: [
       ['fees', 'Fees'],
+      ['rebuildclasses', 'Rebuild Pending Classes'],
       ['expenses', 'Expenses'],
       ['reports', 'Reports & Export'],
     ]},
@@ -21471,6 +21575,7 @@ function render() {
   else if (currentTab === 'setup') body = renderSetup();
   else if (currentTab === 'students') body = renderStudents();
   else if (currentTab === 'fees') body = renderFees();
+  else if (currentTab === 'rebuildclasses') body = renderRebuildPendingClasses();
   else if (currentTab === 'expenses') body = renderExpenses();
   else if (currentTab === 'chat') body = renderChat();
   else if (currentTab === 'log') body = renderLog();
