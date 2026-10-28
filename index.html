@@ -222,6 +222,9 @@ if (location.hostname !== 'app.libeducation.com') {
   .login-card input { width: 100%; margin-bottom: 10px; text-align: left; }
   .login-card button { width: 100%; }
   .login-error { color: var(--brick); font-size: 12.5px; margin-bottom: 10px; }
+  .login-busy-spin { display:inline-block; width:14px; height:14px; border:2px solid rgba(255,255,255,0.45); border-top-color:#fff; border-radius:50%; animation:spin 0.8s linear infinite; vertical-align:-2px; margin-right:8px; }
+  .login-card button:disabled { opacity:0.75; cursor:wait; }
+  .login-step { font-size: 12.5px; color: var(--muted); margin-top: 8px; min-height: 1.2em; }
   .footer-note { text-align: center; font-size: 11px; color: var(--muted); margin-top: 22px; line-height: 1.6; }
   .security-banner { background: rgba(166,67,46,0.08); border: 1px solid var(--brick); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; font-size: 13px; color: var(--ink); }
   .security-banner b { color: var(--brick); }
@@ -330,7 +333,7 @@ if (location.hostname !== 'app.libeducation.com') {
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-28 10:40 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-28 10:55 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -533,6 +536,17 @@ let addingChildToParentId = null;
 let parentAddMsg = '';
 let selectedParentUserId = '';
 let loginError = '';
+let loginStep = ''; // while a login is running: the line under the 'Logging in to My LIB…' button
+// Shows the busy button + step line without a full render(), so the typed username/password stay put.
+function setLoginStep(step) {
+  loginStep = step || '';
+  const btn = document.getElementById('loginBtn');
+  if (btn) { btn.disabled = !!loginStep; btn.innerHTML = loginStep ? '<span class="login-busy-spin"></span>Logging in to My LIB…' : 'Log in'; }
+  const bio = document.getElementById('bioLoginBtn');
+  if (bio) bio.disabled = !!loginStep;
+  const line = document.getElementById('loginStepLine');
+  if (line) line.textContent = loginStep;
+}
 
 // "Today" in the user's own time zone (India). toISOString() would give the UTC date, which is still YESTERDAY from
 // midnight to 5:30 am IST - and the database's expiry run works on the Indian date, so the two must agree.
@@ -6742,7 +6756,13 @@ async function offerBiometricEnrollment() {
     try { localStorage.setItem('lib_bio_offer_done', '1'); } catch(e) {}
   };
 }
+function loadingStepText(role) {
+  if (role === 'Parent') return "Loading your children's classes…";
+  if (role === 'Student') return 'Loading your classes…';
+  return 'Loading your classes and students…';
+}
 async function loginWithBiometric() {
+  if (loginStep) return;
   if (!biometricLockActive || !biometricLockedProfile) {
     // Session has expired — show inline toast on login screen
     const existing = document.getElementById('bio-exp-toast');
@@ -6778,7 +6798,9 @@ async function loginWithBiometric() {
   currentUserId = userId;
   aiUserEnabled = profile.ai_enabled !== false;
   loginError = '';
-  await loadAfterLogin();
+  setLoginStep(loadingStepText(currentRole));
+  const slow = setTimeout(() => setLoginStep('Almost there…'), 4000);
+  try { await loadAfterLogin(); } finally { clearTimeout(slow); loginStep = ''; }
   if (currentRole === 'Student') {
     const linked = data.students.find(s => s.id === currentLinkedId);
     if (linked) loadStudentLeaderboard(linked);
@@ -6835,6 +6857,14 @@ async function attemptLogin() {
   const u = document.getElementById('loginUser').value.trim();
   const p = document.getElementById('loginPass').value;
   if (!u || !p) { loginError = 'Enter a username and password.'; render(); return; }
+  if (loginStep) return; // already logging in (double tap / Enter twice)
+  try { await attemptLoginSteps(u, p); } finally { loginStep = ''; }
+}
+async function attemptLoginSteps(u, p) {
+  loginError = '';
+  const oldErr = document.querySelector('.login-card .login-error');
+  if (oldErr) oldErr.remove();
+  setLoginStep('Checking your password…');
   const email = u + '@' + EMAIL_DOMAIN;
   const { data: authData, error } = await sb.auth.signInWithPassword({ email, password: p });
   if (error) {
@@ -6843,6 +6873,7 @@ async function attemptLogin() {
     render();
     return;
   }
+  setLoginStep('Opening your account…');
   const { data: profile, error: profErr } = await sb.from('profiles').select('*').eq('id', authData.user.id).single();
   if (profErr || !profile) {
     loginError = 'Could not load account details. Contact the admin.';
@@ -6866,7 +6897,10 @@ async function attemptLogin() {
   pwIsDefault = role === 'Parent' && p === u;   // bulk-made parent logins start with password = login ID
   aiUserEnabled = profile.ai_enabled !== false;
   logLoginEvent('login', currentUserId, currentUsername, role); // not awaited: the log write shouldn't hold up the login
-  await loadAfterLogin();
+  setLoginStep(loadingStepText(role));
+  const slow = setTimeout(() => setLoginStep('Almost there…'), 4000);
+  try { await loadAfterLogin(); } finally { clearTimeout(slow); }
+  loginStep = '';
   if (role === 'Teacher') {
     const linked = data.teachers.find(t=>t.id===linkedId);
     if (linked && linked.archived) { await logout(); loginError = 'This account has been archived. Contact the admin.'; render(); return; }
@@ -15749,6 +15783,7 @@ function closeGuideChooser() {
 // ---------- login screen ----------
 function renderLogin() {
   const app = document.getElementById('app');
+  const busy = loginStep && !loginError ? loginStep : ''; // an error ends the busy state
   app.innerHTML = `
     <div class="login-wrap">
       <div style="display:flex; flex-direction:column; align-items:center;">
@@ -15762,10 +15797,11 @@ function renderLogin() {
             <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter') attemptLogin()" style="flex:1;padding-right:40px;">
             <button onclick="(function(){var e=document.getElementById('loginPass');var b=document.getElementById('loginPassToggle');if(e.type==='password'){e.type='text';b.textContent='🙈';}else{e.type='password';b.textContent='👁';}e.focus();})()" id="loginPassToggle" title="Show/hide password" style="position:absolute;right:6px;background:none;border:none;cursor:pointer;font-size:17px;padding:4px;color:var(--text-muted,#888);user-select:none;">👁</button>
           </div>
-          <button class="btn-primary" onclick="attemptLogin()">Log in</button>
+          <button class="btn-primary" id="loginBtn" onclick="attemptLogin()" ${busy ? 'disabled' : ''}>${busy ? '<span class="login-busy-spin"></span>Logging in to My LIB…' : 'Log in'}</button>
+          <div class="login-step" id="loginStepLine" aria-live="polite">${esc(busy)}</div>
           ${biometricLockActive ? `
           <div class="bio-or">or</div>
-          <button class="bio-btn" onclick="loginWithBiometric()" type="button">
+          <button class="bio-btn" id="bioLoginBtn" onclick="loginWithBiometric()" type="button" ${busy ? 'disabled' : ''}>
             <span style="font-size:22px;line-height:1;flex-shrink:0">👆</span>
             <span style="flex:1;min-width:0">
               <div class="bio-btn-main">Login as ${esc(bioGetUsername())}</div>
