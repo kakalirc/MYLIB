@@ -11,7 +11,7 @@ def guide():
     g.add('menu', 'Overview', 'The admin menu', 'The menu on the left (☰ menu at the top on a phone) is in groups.', table(
         ['Group', 'Pages'], [
             ['Dashboard', 'Stats, classes expiring, demo funnel, AI students at risk'],
-            ['Daily work', 'Class Log, Communication, Demo Bookings, Support, Rebuild Pending Classes'],
+            ['Daily work', 'Class Log, New registrations, Communication, Demo Bookings, Support, Rebuild Pending Classes'],
             ['Money', 'Fees, Payroll, Expenses, Reports &amp; Export'],
             ['People', 'Students &amp; Subscriptions, Teachers &amp; Subjects, Parents'],
             ['Teaching', 'Study Plans, Homework, Question Bank'],
@@ -22,7 +22,7 @@ def guide():
                   '<b>…/#fees</b> or <b>…/#setup</b>, so a bookmark opens that page.'))
 
     g.add('monthly', 'Overview', 'Your month at a glance', 'The jobs that come round every month.', table(['When', 'Job', 'Where'], [
-        ['Every day', 'Log classes, answer chats and support, follow up demos', 'Class Log, Communication, Support, Demo Bookings'],
+        ['Every day', 'Log classes, answer chats and support, follow up demos and new registrations', 'Class Log, New registrations, Communication, Support, Demo Bookings'],
         ['1st to 7th', 'Raise the month’s fee requests and send fee messages', 'Fees › Raise fee requests'],
         ['As payments come', 'Confirm Razorpay payments, mark requests paid', 'Fees'],
         ['Any time', 'Send a Short reminder to families still due', 'Fees › Pending fee requests › Message'],
@@ -40,6 +40,16 @@ def guide():
         'Below the form: the teacher’s classes for the <b>Selected day</b> or the <b>Whole month</b>, with a month total.',
         'Dates show the weekday, for example <b>Tue, 27 Oct 2026</b>.',
     ]))
+
+    g.add('registrations', 'Daily work', 'New registrations', 'Families register online; you decide who becomes a student.', steps([
+        ('Share the link', '<b>app.libeducation.com/register.html</b> (also on the login screen). On the page: 📋 Copy link, or type a mobile and 📤 Send link on WhatsApp.'),
+        ('Check the form', 'New forms show here, with a count on the menu and Dashboard. ⚑ flags: mobile already a family, had a demo, several forms. 📞 Call or 💬 WhatsApp to confirm.'),
+        ('Accept', 'Correct name, grade, board, mode, type and academic year, then <b>Add student</b>. Same mobile as a family: add as brother/sister.'),
+        ('Send the logins', 'Accept makes the parent login (mobile) and student login (student code). Send both with the 📤 buttons.'),
+    ]) + bullets([
+        'Subjects are not enrolled for you: open the student and enrol them with a teacher. The form\'s subjects, school and message show on the student\'s page.',
+        '<b>Reject</b> (Reopen undoes it) or tick forms and <b>Archive</b>. Nothing is deleted: <b>Show archived</b> brings them back.',
+    ]) + note('Junk is blocked', 'Bots are stopped, at most 3 forms per mobile and 30 a day in total, and nothing becomes a student until you Accept.', 'tip'))
 
     g.add('demos', 'Daily work', 'Demo Bookings', 'Demo bookings from the website, from first call to admission.', chips([
         ('New', 'c-red', 'Just booked: call the family, then Confirm a teacher and time'),
@@ -175,13 +185,15 @@ def guide():
         ['Audit Log', 'Every change made in the app, login activity and App usage (who uses which feature)'],
     ]) + h3('Superadmin tools') + bullets([
         'Only superuser admins see this menu. Each card opens with the unlock password.',
-        '<b>Academic Year:</b> set the new year and move every student (except Adult) up a grade.',
+        '<b>Academic Year:</b> <b>Advance everyone</b> sets the new year and moves every student (except Adult) up a grade. '
+        '<b>Set year only</b> and <b>Fill blank student years</b> never change grades.',
         '<b>Export all data</b> and <b>Import backup</b>.',
         '<b>Danger zone:</b> remove old Audit and Login entries, clear all data, audit logging on or off.',
     ]) + note('Cannot be undone', 'Export a backup before any danger-zone action.', 'warn'))
 
     g.add('quickref', 'Quick reference', 'Quick reference', 'I want to… where do I go?', table(['I want to…', 'Go to'], [
         ['Log a class', 'Class Log'],
+        ['Register a new student', 'New registrations (send the form link)'],
         ['Book or follow up a demo', 'Demo Bookings'],
         ['Raise this month’s fees', 'Fees › Raise fee requests'],
         ['Send a fee message or reminder', 'Fees › Pending fee requests › Message'],
