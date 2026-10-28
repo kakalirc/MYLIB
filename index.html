@@ -57,6 +57,26 @@ if (location.hostname !== 'app.libeducation.com') {
   /* Online presence dot */
   .online-dot { width:10px;height:10px;border-radius:50%;background:#22c55e;border:2px solid var(--paper);position:absolute;bottom:1px;right:1px; }
   .avatar-wrap { position:relative;flex-shrink:0; }
+  /* Star Teacher (teacher points game) */
+  .star-pill { display:inline-block; font-size:11.5px; font-weight:700; color:var(--forest); background:#e3eee4; border-radius:10px; padding:1px 7px; margin-left:4px; vertical-align:middle; }
+  .sidebar-item.active .star-pill { background:#fff; }
+  .star-row { display:flex; gap:16px; flex-wrap:wrap; } .star-row > .card { flex:1; min-width:240px; }
+  .star-big { font-family:'Zilla Slab',serif; font-size:46px; font-weight:700; line-height:1; }
+  .star-lvl { display:inline-block; background:var(--soft); border:1px solid var(--line); border-radius:14px; padding:2px 12px; font-weight:700; font-size:13px; margin-left:6px; vertical-align:middle; }
+  .star-bar { height:12px; background:#ece5d3; border-radius:8px; overflow:hidden; margin:12px 0 6px; } .star-bar > div { height:100%; background:linear-gradient(90deg,var(--gold),#e0b85c); }
+  .star-levels { display:flex; justify-content:space-between; gap:6px; flex-wrap:wrap; font-size:11.5px; color:var(--muted); margin-top:8px; }
+  .star-stat { display:flex; justify-content:space-between; gap:8px; padding:7px 0; border-bottom:1px dashed var(--line); } .star-stat:last-child { border:0; }
+  .star-tip { display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--line); } .star-tip:last-child { border:0; }
+  .star-plus { font-weight:700; color:var(--forest); white-space:nowrap; }
+  .star-grp { background:var(--soft); font-weight:700; font-size:12.5px; color:var(--brick); }
+  .star-mini { display:inline-block; width:56px; height:6px; background:#ece5d3; border-radius:4px; vertical-align:middle; margin-right:6px; overflow:hidden; } .star-mini > i { display:block; height:100%; background:var(--forest); }
+  .star-badges { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px; }
+  .star-badge { border:1px solid var(--line); border-radius:10px; padding:10px; text-align:center; background:#fff; font-size:13px; } .star-badge .ic { font-size:28px; } .star-badge b { display:block; margin:4px 0 2px; }
+  .star-badge.off { opacity:.55; background:transparent; filter:grayscale(1); }
+  .star-dash { cursor:pointer; border-left:4px solid var(--forest); padding:10px 16px; }
+  .star-toast { position:fixed; right:20px; bottom:20px; z-index:9999; background:var(--ink); color:#fff; padding:12px 16px; border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,.25); cursor:pointer; max-width:340px; }
+  .star-toast small { display:block; color:#cfd6cf; margin-top:2px; font-size:12.5px; }
+  @media (max-width:600px) { .star-toast { left:12px; right:12px; bottom:12px; max-width:none; } .star-ways td, .star-ways th { padding:6px 4px; } .star-ways .star-lim { display:none; } }
   .help-btn { display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;border:1px solid var(--line);background:none;color:var(--hint);font-size:10px;font-weight:700;cursor:pointer;margin-left:6px;vertical-align:middle;line-height:1;padding:0; }
   .help-btn:hover { background:var(--forest);color:#fff;border-color:var(--forest); }
   .modal-backdrop { position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:998; }
@@ -310,7 +330,7 @@ if (location.hostname !== 'app.libeducation.com') {
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-28 10:15 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-28 10:35 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -630,6 +650,7 @@ function aiUsageUserLabel(r) {
 let trackOff = false;   // set once the server says SQL 49 is not there, so we stop trying
 const trackLast = {};   // feature → last time logged; screen opens are logged at most once a minute
 function trackUse(feature, once) {
+  if (typeof starArm === 'function') starArm(feature);   // Star Teacher pop-up
   if (trackOff || !isLoggedIn || !currentUserId || biometricLockActive) return;
   const now = Date.now();
   if (once && trackLast[feature] && now - trackLast[feature] < 60000) return;
@@ -1862,6 +1883,7 @@ function setTeacherPortalTab(t) {
   if (t === 'homework') { hwShowForm = false; hwMsg = ''; hwFilterStudentId = ''; hwFilterStatus = 'assigned'; loadHomework().then(() => render()); return; }
   if (t === 'questionbank' && !teacherQbAccess) { teacherPortalTab = 'dashboard'; render(); return; }
   if (t === 'research' && !teacherResearchAccess) { teacherPortalTab = 'dashboard'; render(); return; }
+  if (t === 'starteacher') { if (!starOn) { teacherPortalTab = 'dashboard'; render(); return; } loadTeacherPendingExtras(true); loadStarExtras(); }
   if (t === 'research') { researchNotesMsg = ''; researchOpenNoteId = ''; insightsStudentId = ''; if (teacherQbAccess) loadInsights(); loadResources().then(render); loadStudyPlans().then(render); loadResearchData(); return; }
   if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); return; }
   render();
@@ -1930,7 +1952,9 @@ async function load() {
     currentRole === 'Teacher' ? loadTeacherQbAccess() : Promise.resolve(),
     currentRole === 'Teacher' ? loadTeacherResearchAccess() : Promise.resolve(),
     currentRole === 'Student' || currentRole === 'Parent' ? loadResources() : Promise.resolve(),
+    currentRole === 'Admin' || currentRole === 'Teacher' ? loadStarSettings() : Promise.resolve(),
   ]);
+  if (currentRole === 'Teacher' && starOn) loadStarExtras(true);   // after Question Bank / Research access are known
 
   loaded = true;
   setupChatRealtime();
@@ -5089,9 +5113,9 @@ async function loadStudyPlans() {
   if (!data.studyPlans) data.studyPlans = [];
   let q = sb.from('study_plans').select('*');
   if (currentRole === 'Teacher') {
-    const teacher = data.teachers.find(t=>t.id===currentLinkedId);
-    if (!teacher) return;
-    q = q.eq('teacher_id', teacher.id);
+    // currentLinkedId, not data.teachers: at login the teacher list is still loading alongside this.
+    if (!currentLinkedId) return;
+    q = q.eq('teacher_id', currentLinkedId);
   } else if (currentRole === 'Student') {
     q = q.eq('student_id', currentLinkedId);
   } else if (currentRole === 'Parent') {
@@ -6900,9 +6924,11 @@ async function refreshAllData(silent) {
       currentRole === 'Teacher' ? loadTeacherResearchAccess() : Promise.resolve(),
       currentRole === 'Student' || currentRole === 'Parent' ? loadResources() : Promise.resolve(),
       currentRole === 'Admin' ? loadUsersAndParents() : Promise.resolve(),
+      currentRole === 'Admin' || currentRole === 'Teacher' ? loadStarSettings() : Promise.resolve(),
       loadMyAnnouncements(),
       loadNotifications(),
     ]);
+    if (starOn && (currentRole === 'Teacher' || starAdminOpen)) loadStarExtras(true);
     await Promise.all([
       loadMyPhoto(),
     ]);
@@ -7034,6 +7060,7 @@ async function logout() {
   }
   resetResearchState();
   resetTeacherPendingExtra();
+  resetStarState();
   teacherPortalTab = 'dashboard'; // the next login starts on the Dashboard, so a tab's data is loaded when it is opened
   isLoggedIn = false; currentUsername = ''; currentRole = ''; currentLinkedId = ''; currentUserId = ''; parentSelectedChildId = ''; pwIsDefault = false; userMsg.changePw = ''; spAssignments = []; spPapers = {}; spOpen = null; spPhotoUrls = {};
   biometricOfferShown = false; // allow the enrollment banner on the next password login
@@ -10051,7 +10078,7 @@ const SUPPORT_KB = {
 - Study Plans (Teaching): read-only view of every teacher's study plans and progress, plus the Textbook library (every uploaded book; rename, retag or delete).
 - Homework (Teaching): every homework set by teachers, with filters by teacher, student and status.
 - Question Bank (Teaching): Review Queue (approve new or edited questions), Full Question Bank, Archived, Practice Papers and Past Papers. Pick board, subject and grade to see questions. Old-syllabus questions stay hidden unless you tick "Old syllabus only".
-- Settings (System, once called Setup): grades, categories, boards and subject names; Question Bank access and Research access (which teachers get those tabs); add users and manage their logins; change your password.
+- Settings (System, once called Setup): grades, categories, boards and subject names; Question Bank access and Research access (which teachers get those tabs); Star Teacher (switch the teacher points game on or off, set its start date, and see the admin-only leaderboard); add users and manage their logins; change your password.
 - Manage Admins (System): add or remove admin accounts.
 - AI (System): AI Settings (master switch, API key, cost estimate prices), AI access (per role and per person) and AI usage (calls and estimated cost per user and feature).
 - Audit Log (System): every change made in the app, login activity, and App usage (which features each person uses). Each part opens with a tap.
@@ -10059,6 +10086,7 @@ const SUPPORT_KB = {
   Teacher: `My LIB app guide for Teacher:
 - Dashboard: today's classes, students needing renewal, low balances, students not seen in a while, your demo classes and student notes. A gold strip shows how many items need your action.
 - Pending Action Items (top of the menu): everything waiting for you, such as classes not marked (last 30 days), class timings to correct, Class Frequency not set, demos to mark done, homework or papers to review, students without a study plan, unread chats and availability not set. Tap an item to go there. 'Keep an eye on' lists reminders that are not counted.
+- Star Teacher (below Pending Action Items, when the office has switched it on): a monthly points game, just for fun. Points for classes marked the same day, remarks, homework given and reviewed within 48 hours, practice papers, study plans, lesson prep, shared resources, demos, renewals and using the app. Levels Bronze 100, Silver 250, Gold 450, Platinum 700; badges stay in your trophy shelf. The +number in the menu is what you can earn right now (see Earn now). Only you see your points.
 - Demo classes: after you give a demo, press ✓ Mark done on your Dashboard and add a line on how it went. If the student joins you get a ₹100 bonus in payroll.
 - Class Schedule (Teaching): your classes by day or month. Set up a weekly schedule, add an extra class, mark a class done or remove a pending one. Classes at 00:00, 01:00 or 02:00 are placeholder times: put in the real time.
 - Class Frequency (Teaching): how many classes each of your students has on each weekday, per subject. The office uses it for monthly fees and the schedule, so update it when a timetable changes.
@@ -15562,6 +15590,8 @@ function renderUsers() {
       ` : ''}
     </div>
 
+    ${starAdminCardHtml()}
+
     <div class="card">
       <h2>Add user</h2>
       <div class="hint">Admin has full access. Student and Teacher accounts only see their own attendance and (for students) subscription details.</div>
@@ -18102,6 +18132,512 @@ function teacherPendingBannerHtml(p) {
     + '<button class="btn-primary" onclick="setTeacherPortalTab(\'pendingactions\')">Go to Pending Action Items</button></div>';
 }
 
+// ================= Star Teacher =================
+// A monthly points game for teachers (no money). Points are worked out from saved data each time the page draws,
+// so nothing is stored and a changed rule also changes past months. Teachers see only their own points; admins see
+// everyone in Settings → Star Teacher. The on/off switch, the start date and a teacher's own app usage come from
+// SQL 66 (fee_settings.star_teacher_on / star_teacher_start and my_star_teacher()). Nothing before the start date counts.
+const STAR_DEFAULT_START = '2026-11-01';
+const STAR_LEVELS = [['Starter', 0, '🌱'], ['Bronze', 100, '🥉'], ['Silver', 250, '🥈'], ['Gold', 450, '🥇'], ['Platinum', 700, '💎']];
+// Screens that count for "Use a feature". App usage events are grouped by the screen they belong to.
+const STAR_FEATURES = { schedule: 'Class Schedule', frequency: 'Class Frequency', students: 'My Students', studyplans: 'Study Plans', homework: 'Homework',
+  questionbank: 'Question Bank', research: 'Research', attendance: 'Give Attendance', report: 'My Attendance Report', availability: 'Availability', chat: 'Chat' };
+const STAR_ACTION_FEATURE = { attendance: 'attendance', class: 'schedule', homework: 'homework', studyplan: 'studyplans', paper: 'questionbank', brief: 'research', resource: 'research', chat: 'chat', ai: 'research' };
+// trackUse() actions that can earn points: the pop-up label, and whether the extra data (papers, briefs, resources) must be re-read.
+const STAR_ACTIONS = { 'attendance.give': ['class marked', false], 'homework.assign': ['homework given', false], 'homework.review': ['homework reviewed', false],
+  'studyplan.save': ['study plan saved', false], 'paper.make': ['practice paper', true], 'paper.assign': ['practice paper assigned', true], 'paper.mark': ['practice paper reviewed', true],
+  'brief.make': ['lesson prep', true], 'resource.share': ['resource shared', true], 'demo_done': ['demo marked done', false] };
+let starOn = false;                  // Settings switch: teachers see Star Teacher only when on
+let starStart = STAR_DEFAULT_START;  // first day that counts
+let starSetupMissing = false;        // SQL 66 not run yet
+let starSettingsRowId = null;        // fee_settings row the admin switch saves to
+let starSaving = false, starMsg = '';
+let starUsage = {};                  // teacherId → { 'YYYY-MM': { days, features: [] } }
+let starExtra = { loading: false, loaded: false, papers: [], assigns: [], qbActs: [], resources: [], notes: [] };
+let starMonth = todayStr.slice(0, 7);
+let starAdminOpen = false, starAdminMonth = todayStr.slice(0, 7), starAdminRow = '';
+let starWatch = null, starArmUntil = 0, starArmLabel = '';   // teacher pop-ups after an earning action
+
+function starFeatureOf(ev) {
+  const f = String(ev || '');
+  const k = f.startsWith('tab:') ? f.slice(4) : STAR_ACTION_FEATURE[f.split('.')[0]];
+  return k && STAR_FEATURES[k] ? k : '';
+}
+function starDay(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (isNaN(d)) return String(ts).slice(0, 10);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function starDayDiff(a, b) { return Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000); }
+function starPrevMonth(ym) { const [y, m] = ym.split('-').map(Number); return m === 1 ? (y - 1) + '-12' : y + '-' + String(m - 1).padStart(2, '0'); }
+// Months from the start month to this month (just this month while the game has not started).
+function starMonths() {
+  const out = [], last = todayStr.slice(0, 7);
+  let m = starStart.slice(0, 7);
+  if (m > last) return [last];
+  while (m <= last) { out.push(m); const [y, mo] = m.split('-').map(Number); m = mo === 12 ? (y + 1) + '-01' : y + '-' + String(mo + 1).padStart(2, '0'); }
+  return out;
+}
+function starLevel(total) {
+  let i = 0;
+  STAR_LEVELS.forEach((l, j) => { if (total >= l[1]) i = j; });
+  const nx = STAR_LEVELS[i + 1];
+  return { index: i, name: STAR_LEVELS[i][0], icon: STAR_LEVELS[i][2], from: STAR_LEVELS[i][1], next: nx ? { name: nx[0], icon: nx[2], at: nx[1], need: nx[1] - total } : null };
+}
+function starPill(n) { return starOn && n > 0 && todayStr >= starStart ? ' <span class="star-pill">+' + n + ' pts</span>' : ''; }
+
+async function loadStarSettings() {
+  if (!sb || (currentRole !== 'Admin' && currentRole !== 'Teacher')) return;
+  if (currentRole === 'Teacher') {
+    const { data: r, error } = await sb.rpc('my_star_teacher');
+    starSetupMissing = !!error;
+    const row = (!error && r) ? r : {};
+    starOn = row.on === true;
+    starStart = row.start || STAR_DEFAULT_START;
+    const mine = {};
+    (row.usage || []).forEach(u => { mine[u.month] = { days: Number(u.days) || 0, features: u.features || [] }; });
+    starUsage = { [currentLinkedId]: mine };
+    return;
+  }
+  const { data: rows, error } = await sb.from('fee_settings').select('id, star_teacher_on, star_teacher_start').order('updated_at', { ascending: false, nullsFirst: false }).limit(1);
+  starSetupMissing = !!error;
+  const row = (!error && rows && rows[0]) || {};
+  starSettingsRowId = row.id || null;
+  starOn = row.star_teacher_on === true;
+  starStart = row.star_teacher_start || STAR_DEFAULT_START;
+}
+// Practice papers, Question Bank reviews, resources and lesson prep briefs (and, for admins, everyone's app usage).
+// Teachers only get their own rows back from the database.
+async function loadStarExtras(force) {
+  if (!sb || starExtra.loading || (starExtra.loaded && !force)) return;
+  starExtra = { ...starExtra, loading: true };
+  const isT = currentRole === 'Teacher', tid = currentLinkedId;
+  const since = starStart + 'T00:00:00+05:30';
+  const rowsOf = r => (r && !r.error && r.data) ? r.data : [];
+  const out = { papers: [], assigns: [], qbActs: [], resources: [], notes: [] };
+  const jobs = [], done = {};
+  const starJob = (label, p) => (done[label] = false, p).then(() => { done[label] = true; }, e => { done[label] = true; throw new Error(label + ': ' + ((e && e.message) || e)); });
+  if (!isT || teacherQbAccess) {
+    jobs.push(starJob('practice papers', (async () => {
+      let pq = sb.from('qb_practice_papers').select('id,title,total_marks,created_at,created_by_teacher_id').not('created_by_teacher_id', 'is', null);
+      if (isT) pq = pq.eq('created_by_teacher_id', tid);
+      out.papers = rowsOf(await pq);
+      if (out.papers.length) out.assigns = await insightsSelectIn('qb_student_assignments', 'id,paper_id,student_id,status,submitted_at,reviewed_at,total_score', 'paper_id', out.papers.map(p => p.id));
+    })()));
+    jobs.push(starJob('question bank', (async () => {
+      const cols = 'id,approved_by,approved_at,added_by,created_at';
+      let qs, linked = {};
+      if (isT) {
+        if (!currentUserId) return;
+        qs = rowsOf(await sb.from('qb_questions').select(cols).or('approved_by.eq.' + currentUserId + ',added_by.eq.' + currentUserId));
+        linked[currentUserId] = tid;
+      } else {
+        const [a, b, p] = await Promise.all([
+          sb.from('qb_questions').select(cols).not('approved_by', 'is', null).gte('approved_at', since).limit(5000),
+          sb.from('qb_questions').select(cols).not('added_by', 'is', null).gte('created_at', since).limit(5000),
+          sb.from('profiles').select('id, role, linked_teacher_id'),
+        ]);
+        qs = rowsOf(a).concat(rowsOf(b));
+        rowsOf(p).forEach(r => { if (r.role === 'Teacher' && r.linked_teacher_id) linked[r.id] = r.linked_teacher_id; });
+      }
+      const seen = new Set();
+      qs.forEach(q => {
+        if (q.approved_by && linked[q.approved_by] && !seen.has('a' + q.id)) { seen.add('a' + q.id); out.qbActs.push({ teacherId: linked[q.approved_by], at: q.approved_at }); }
+        if (q.added_by && linked[q.added_by] && !seen.has('n' + q.id)) { seen.add('n' + q.id); out.qbActs.push({ teacherId: linked[q.added_by], at: q.created_at }); }
+      });
+    })()));
+  }
+  if (!isT || teacherResearchAccess) {
+    jobs.push(starJob('resources', (async () => { out.resources = rowsOf(await sb.from('teacher_resources').select('id,teacher_id,shared,created_at').gte('created_at', since)); })()));
+    jobs.push(starJob('lesson prep', (async () => { out.notes = rowsOf(await sb.from('teacher_research_notes').select('id,teacher_id,student_id,created_at').gte('created_at', since)); })()));
+  }
+  if (!isT) jobs.push(starJob('app usage', (async () => {
+    const r = await appUsageSelect(since, new Date(Date.now() + 86400000).toISOString());
+    const agg = {};
+    (r.rows || []).forEach(e => {
+      if (e.role !== 'Teacher' || !e.linked_id) return;
+      const d = starDay(e.created_at), m = d.slice(0, 7);
+      const t = agg[e.linked_id] = agg[e.linked_id] || {};
+      const mm = t[m] = t[m] || { days: new Set(), features: new Set() };
+      mm.days.add(d); mm.features.add(e.feature);
+    });
+    starUsage = {};
+    Object.entries(agg).forEach(([t, months]) => {
+      starUsage[t] = {};
+      Object.entries(months).forEach(([m, v]) => { starUsage[t][m] = { days: v.days.size, features: [...v.features] }; });
+    });
+  })()));
+  const errs = [];
+  // A table not set up yet just leaves its rows empty; give up waiting after 30 seconds so the page never hangs.
+  await Promise.race([Promise.all(jobs.map(j => j.catch(e => { errs.push(String((e && e.message) || e)); }))), new Promise(r => setTimeout(() => { errs.push('still waiting after 30 s for ' + (Object.keys(done).filter(l => !done[l]).join(', ') || 'nothing')); r(); }, 30000))]);
+  starExtra = { loading: false, loaded: true, error: errs.join('; '), ...out };
+  render();
+}
+// Draws a Star Teacher block; a bad row of data shows a short message instead of breaking the whole page.
+function starSafe(fn, where) {
+  try { return fn(); } catch (e) { console.error('Star Teacher', where, e); return '<div class="card hint" style="color:var(--brick)">Star Teacher could not be counted (' + esc(where + ': ' + ((e && e.message) || e)) + '). Please send this line to support.</div>'; }
+}
+function resetStarState() {
+  starOn = false; starStart = STAR_DEFAULT_START; starSetupMissing = false; starSettingsRowId = null; starMsg = '';
+  starUsage = {}; starExtra = { loading: false, loaded: false, papers: [], assigns: [], qbActs: [], resources: [], notes: [] };
+  starMonth = todayStr.slice(0, 7); starAdminRow = ''; starWatch = null; starArmUntil = 0;
+}
+
+// Points for one teacher in one month ('YYYY-MM'). rows = the Ways to earn list with this month's counts.
+function starScore(tid, month) {
+  const isT = currentRole === 'Teacher';
+  const qbOn = isT ? !!teacherQbAccess : true;
+  const resOn = isT ? !!(teacherResearchAccess && aiMasterEnabled) : true;
+  const inMonth = d => !!d && d.slice(0, 7) === month && d >= starStart && d <= todayStr;
+  const rows = [];
+  const add = (key, group, label, pts, limit, n, go, extra) => rows.push(Object.assign({ key, group, label, pts, limit, n, points: pts * n, go }, extra || {}));
+
+  // Classes: how soon after the class it was marked (the day it was saved, in your own time zone)
+  const sess = data.sessions.filter(s => s.teacherId === tid && inMonth(s.date));
+  const lag = s => s.createdAt ? starDayDiff(s.date, starDay(s.createdAt)) : 99;
+  const same = sess.filter(s => lag(s) <= 0).length;
+  const byDate = {};
+  sess.forEach(s => { (byDate[s.date] = byDate[s.date] || []).push(s); });
+  const fullDays = Object.values(byDate).filter(list => list.every(s => lag(s) <= 0)).length;
+  add('same', 'Classes', 'Mark a class the same day', 2, 'per class', same, 'attendance', { of: sess.length });
+  add('next', 'Classes', 'Mark a class the next day', 1, 'per class', sess.filter(s => lag(s) === 1).length, '');
+  add('remark', 'Classes', 'Add a remark on what was taught', 1, 'per class', sess.filter(s => String(s.remarks || '').trim().length >= 3).length, 'attendance', { of: sess.length });
+  add('fullday', 'Classes', "All of the day's classes marked the same day", 5, 'once a day', fullDays, '', { unit: 'days' });
+
+  // Homework
+  const hw = homeworkData.filter(h => h.teacherId === tid);
+  const givenByDay = {};
+  hw.forEach(h => { const d = starDay(h.createdAt) || h.assignedDate; if (inMonth(d)) givenByDay[d] = (givenByDay[d] || 0) + 1; });
+  const givenAll = Object.values(givenByDay).reduce((a, n) => a + n, 0);
+  const reviewed = hw.filter(h => h.status === 'reviewed' && inMonth(starDay(h.reviewedAt)));
+  const fast = (sub, rev) => !!(sub && rev) && new Date(rev) - new Date(sub) <= 48 * 3600000;
+  const hwFast = reviewed.filter(h => fast(h.submittedAt, h.reviewedAt)).length;
+  add('hwgive', 'Homework', 'Give homework', 2, 'max 3 a day', Object.values(givenByDay).reduce((a, n) => a + Math.min(3, n), 0), 'homework');
+  add('hwfast', 'Homework', 'Review within 48 hours of hand-in', 3, 'per homework', hwFast, 'homework', { of: reviewed.length });
+  add('hwnote', 'Homework', 'Add marks or a comment when reviewing', 1, 'per homework', reviewed.filter(h => (h.marks !== '' && h.marks != null) || String(h.teacherFeedback || '').trim()).length, '');
+
+  // Practice papers and Question Bank
+  const papers = starExtra.papers.filter(p => p.created_by_teacher_id === tid);
+  const paperById = new Map(papers.map(p => [p.id, p]));
+  const assigns = starExtra.assigns.filter(a => paperById.has(a.paper_id));
+  const assigned = papers.filter(p => inMonth(starDay(p.created_at)) && assigns.some(a => a.paper_id === p.id));
+  const papRev = assigns.filter(a => a.status === 'reviewed' && inMonth(starDay(a.reviewed_at)));
+  const pct = a => { const p = paperById.get(a.paper_id); return p && Number(p.total_marks) > 0 && a.total_score != null ? Number(a.total_score) / Number(p.total_marks) : null; };
+  const byStu = {};
+  assigns.filter(a => a.status === 'reviewed' && a.reviewed_at && pct(a) != null).forEach(a => { (byStu[a.student_id] = byStu[a.student_id] || []).push(a); });
+  let improved = 0;
+  const improvedStudents = new Set();
+  Object.entries(byStu).forEach(([sid, list]) => {
+    list.sort((a, b) => String(a.reviewed_at).localeCompare(String(b.reviewed_at)));
+    for (let i = 1; i < list.length; i++) if (inMonth(starDay(list[i].reviewed_at)) && pct(list[i]) > pct(list[i - 1])) { improved++; improvedStudents.add(sid); }
+  });
+  const qbN = starExtra.qbActs.filter(a => a.teacherId === tid && inMonth(starDay(a.at))).length;
+  if (qbOn) {
+    add('paper', 'Practice papers', 'Make a practice paper and assign it', 5, 'per paper', assigned.length, 'questionbank');
+    add('weak', 'Practice papers', 'Paper made from "weak chapters" (Research → Student insights)', 5, 'extra, per paper', assigned.filter(p => /weak chapters/i.test(p.title || '')).length, resOn ? 'research' : '');
+    add('paprev', 'Practice papers', 'Review a practice paper', 3, 'per paper', papRev.length, 'questionbank');
+    add('improve', 'Practice papers', 'A student scores higher than on their last paper', 10, 'per student, per paper', improved, '');
+    add('qb', 'Practice papers', 'Review or add a Question Bank question', 1, 'max 20 a month', Math.min(20, qbN), 'questionbank', { of: 20 });
+  }
+
+  // Planning
+  const plans = (data.studyPlans || []).filter(p => p.teacherId === tid);
+  const active = studentsForTeacher(tid).filter(s => !s.archived);
+  const planned = new Set(plans.filter(p => starDay(p.createdAt) <= month + '-31').map(p => p.studentId));
+  const withPlan = active.filter(s => planned.has(s.id)).length;
+  const fullHouse = active.length > 0 && withPlan === active.length && month >= starStart.slice(0, 7) && month <= todayStr.slice(0, 7);
+  add('plan', 'Planning', 'Make or update a study plan', 3, 'per plan, once a month', plans.filter(p => inMonth(starDay(p.updatedAt || p.createdAt))).length, 'studyplans');
+  add('allplans', 'Planning', 'Every one of your students has a study plan', 10, 'once a month', fullHouse ? 1 : 0, 'studyplans', { of: active.length, ofN: withPlan });
+  const notes = starExtra.notes.filter(n => n.teacher_id === tid && n.student_id && inMonth(starDay(n.created_at)));
+  const mySess = data.sessions.filter(s => s.teacherId === tid);
+  const prepped = notes.filter(n => { const d = starDay(n.created_at); return mySess.some(s => s.studentId === n.student_id && s.date >= d && starDayDiff(d, s.date) <= 7); }).length;
+  const shared = starExtra.resources.filter(r => r.teacher_id === tid && r.shared && inMonth(starDay(r.created_at))).length;
+  if (resOn) {
+    add('prep', 'Planning', 'Lesson prep brief for a student, then their class within 7 days', 2, 'per brief', prepped, 'research');
+    add('share', 'Planning', 'Share a resource with students', 3, 'max 5 a month', Math.min(5, shared), 'research', { of: 5 });
+  }
+
+  // Demos and students
+  const demos = data.demoLogs.filter(d => d.teacherId === tid);
+  const converted = demos.filter(d => d.status === 'Converted' && inMonth(d.convertedAt || d.date)).length;
+  add('demo', 'Demos and students', 'Mark a demo done', 2, 'per demo', demos.filter(d => (d.status === 'Done' || d.status === 'Converted') && inMonth(d.date)).length, '');
+  add('convert', 'Demos and students', 'A demo student joins', 20, 'per demo', converted, '');
+  const mySubj = new Set(data.subjects.filter(s => s.teacherId === tid).map(s => s.id));
+  const pays = data.subscriptions.filter(p => p.kind === 'Payment' && mySubj.has(p.subjectId));
+  add('renew', 'Demos and students', 'A student of yours renews', 10, 'per renewal', pays.filter(p => inMonth(p.date) && pays.some(q => q !== p && q.studentId === p.studentId && q.subjectId === p.subjectId && q.date < p.date)).length, '');
+
+  // App usage (SQL 66)
+  const u = (starUsage[tid] || {})[month] || { days: 0, features: [] };
+  const feats = [...new Set((u.features || []).map(starFeatureOf).filter(Boolean))];
+  add('days', 'App usage', 'Open the app', 1, 'once a day', u.days, '', { unit: 'days' });
+  add('feat', 'App usage', 'Use a feature (Study Plans, Homework, Research, Chat…)', 2, 'per feature, once a month', feats.length, '', { unit: 'features' });
+
+  const total = rows.reduce((a, r) => a + r.points, 0);
+  const allRev = reviewed.length + papRev.length;
+  const allFast = hwFast + papRev.filter(a => fast(a.submitted_at, a.reviewed_at)).length;
+  const badges = [
+    { key: 'ontime', icon: '⏰', name: 'On-time star', how: 'Every class marked the same day', got: sess.length > 0 && same === sess.length, prog: sess.length ? same + ' of ' + sess.length : 'no classes yet' },
+    { key: 'quick', icon: '⚡', name: 'Quick reviewer', how: 'Every homework and paper reviewed within 48 hours', got: allRev > 0 && allFast === allRev, prog: allRev ? allFast + ' of ' + allRev : 'nothing reviewed yet' },
+    { key: 'hwhero', icon: '📚', name: 'Homework hero', how: '10 or more homework given', got: givenAll >= 10, prog: Math.min(givenAll, 10) + ' of 10' },
+    ...(qbOn ? [
+      { key: 'setter', icon: '📝', name: 'Paper setter', how: '3 or more practice papers assigned', got: assigned.length >= 3, prog: Math.min(assigned.length, 3) + ' of 3' },
+      { key: 'booster', icon: '🚀', name: 'Booster', how: '2 or more students score higher', got: improvedStudents.size >= 2, prog: Math.min(improvedStudents.size, 2) + ' of 2' }] : []),
+    { key: 'fullhouse', icon: '🏠', name: 'Full house', how: 'Every student has a study plan', got: fullHouse, prog: withPlan + ' of ' + active.length },
+    ...(resOn ? [{ key: 'sharer', icon: '🤝', name: 'Sharer', how: '5 or more resources shared', got: shared >= 5, prog: Math.min(shared, 5) + ' of 5' }] : []),
+    { key: 'closer', icon: '🎯', name: 'Demo closer', how: 'A demo student joins', got: converted >= 1, prog: converted + ' of 1' },
+    { key: 'explorer', icon: '🧭', name: 'Explorer', how: '5 or more features used', got: feats.length >= 5, prog: Math.min(feats.length, 5) + ' of 5' },
+    { key: 'regular', icon: '📅', name: 'Regular', how: 'App opened on 20 or more days', got: u.days >= 20, prog: Math.min(u.days, 20) + ' of 20' },
+    { key: 'cleandesk', icon: '✅', name: 'Clean desk', how: 'No class marked more than a day late', got: sess.length > 0 && sess.every(s => lag(s) <= 1), prog: sess.length ? sess.filter(s => lag(s) <= 1).length + ' of ' + sess.length : 'no classes yet' },
+  ];
+  return { total, rows, badges, level: starLevel(total), feats };
+}
+// Days in a row (newest first) on which every class was marked the same day.
+function starStreak(tid) {
+  const byDate = {};
+  data.sessions.filter(s => s.teacherId === tid && s.date >= starStart && s.date <= todayStr).forEach(s => { (byDate[s.date] = byDate[s.date] || []).push(s); });
+  let n = 0;
+  for (const d of Object.keys(byDate).sort().reverse()) {
+    if (byDate[d].every(s => s.createdAt && starDayDiff(d, starDay(s.createdAt)) <= 0)) n++; else break;
+  }
+  return n;
+}
+// Chances to earn right now (this month), each with where to go. Also the +N on the menu.
+function starEarnNow(teacher) {
+  if (!starOn || todayStr < starStart) return { tips: [], total: 0 };
+  const p = teacherPendingItems(teacher);
+  const tips = [];
+  const now = Date.now();
+  if (p.homework.length) tips.push({ text: p.homework.length + ' homework waiting for review', hint: '+3 each if reviewed within 48 hours of hand-in, +1 for marks or a comment',
+    pts: p.homework.reduce((a, h) => a + 1 + (h.submittedAt && now - new Date(h.submittedAt) <= 48 * 3600000 ? 3 : 0), 0), go: 'teacherPendingHomework()' });
+  if (p.papers.length) tips.push({ text: p.papers.length + ' practice paper' + (p.papers.length === 1 ? '' : 's') + ' waiting for review', pts: p.papers.length * 3, go: 'teacherPendingPapers()' });
+  if (p.demos.length) tips.push({ text: p.demos.length + ' demo' + (p.demos.length === 1 ? '' : 's') + ' to mark done', pts: p.demos.length * 2, go: "setTeacherPortalTab('pendingactions')" });
+  if (p.noPlan.length) tips.push({ text: p.noPlan.slice(0, 3).map(s => s.name).join(', ') + (p.noPlan.length > 3 ? ' and ' + (p.noPlan.length - 3) + ' more' : '') + (p.noPlan.length === 1 ? ' has' : ' have') + ' no study plan',
+    hint: 'gets you the Full house badge too', pts: p.noPlan.length * 3 + 10, go: "setTeacherPortalTab('studyplans')" });
+  if (p.prep.length) tips.push({ text: 'Lesson prep for ' + p.prep.length + ' class' + (p.prep.length === 1 ? '' : 'es') + ' today or tomorrow', pts: p.prep.length * 2, go: "teacherPendingPrep('" + p.prep[0].subjectId + "','" + p.prep[0].studentId + "')" });
+  if (!starSetupMissing) {
+    const used = new Set(starScore(teacher.id, todayStr.slice(0, 7)).feats);
+    const can = Object.keys(STAR_FEATURES).filter(k => !used.has(k) && (k !== 'questionbank' || teacherQbAccess) && (k !== 'research' || (teacherResearchAccess && aiMasterEnabled)));
+    can.slice(0, 2).forEach(k => tips.push({ text: "You haven't used " + STAR_FEATURES[k] + ' this month', pts: 2, go: k === 'chat' ? 'toggleChatPanel()' : "setTeacherPortalTab('" + k + "')" }));
+  }
+  return { tips, total: tips.reduce((a, t) => a + t.pts, 0) };
+}
+function starGoHtml(go, light) {
+  if (!go) return '';
+  const onclick = go === 'chat' ? 'toggleChatPanel()' : "setTeacherPortalTab('" + go + "')";
+  return '<button class="btn-small' + (light ? '' : ' btn-primary') + '" onclick="' + onclick + '">Go</button>';
+}
+function starProgressHtml(r) {
+  if (r.key === 'allplans') return '<span class="star-mini"><i style="width:' + (r.of ? Math.round(100 * r.ofN / r.of) : 0) + '%"></i></span>' + r.ofN + ' of ' + r.of + ' students';
+  if (r.of) return '<span class="star-mini"><i style="width:' + Math.min(100, Math.round(100 * r.n / r.of)) + '%"></i></span>' + r.n + ' of ' + r.of;
+  return r.n + (r.unit ? ' ' + r.unit : '');
+}
+function starWaysHtml(sc, teacherView) {
+  let group = '';
+  const body = sc.rows.map(r => {
+    const head = r.group !== group ? '<tr><td colspan="5" class="star-grp">' + esc(r.group) + '</td></tr>' : '';
+    group = r.group;
+    return head + '<tr><td>' + esc(r.label) + '</td><td class="star-plus">+' + r.pts + '</td><td class="hint star-lim">' + esc(r.limit) + '</td><td style="font-size:12.5px;color:var(--muted)">' + starProgressHtml(r)
+      + (r.points ? ' <b style="color:var(--forest)">· ' + r.points + (r.points === 1 ? ' pt' : ' pts') + '</b>' : '') + '</td><td>' + (teacherView ? starGoHtml(r.go, true) : '') + '</td></tr>';
+  }).join('');
+  return '<div class="table-scroll"><table class="no-stack star-ways"><tr><th>What to do</th><th>Points</th><th class="star-lim">Limit</th><th>This month</th><th></th></tr>' + body + '</table></div>';
+}
+function starBadgesHtml(badges) {
+  return '<div class="star-badges">' + badges.map(b => '<div class="star-badge' + (b.got ? '' : ' off') + '"><div class="ic">' + b.icon + '</div><b>' + esc(b.name) + '</b><div class="hint">' + esc(b.how) + '</div>'
+    + (b.got ? '<div style="color:var(--forest);font-weight:700;margin-top:4px">✓ Earned</div>' : '<div class="hint" style="margin-top:4px">' + esc(b.prog) + '</div>') + '</div>').join('') + '</div>';
+}
+// Every badge won in earlier months plus this month so far, and Gold / Platinum months.
+function starTrophies(tid) {
+  const months = starMonths().filter(m => m >= starStart.slice(0, 7));
+  const count = {}, icons = {};
+  months.forEach(m => {
+    const sc = starScore(tid, m);
+    sc.badges.filter(b => b.got).forEach(b => { count[b.name] = (count[b.name] || 0) + 1; icons[b.name] = b.icon; });
+    if (m < todayStr.slice(0, 7) && sc.level.index >= 3) { const n = sc.level.name + ' month'; count[n] = (count[n] || 0) + 1; icons[n] = sc.level.icon; }
+  });
+  return Object.keys(count).map(n => ({ name: n, icon: icons[n], n: count[n] }));
+}
+
+function renderStarTeacher(teacher) {
+  const tid = teacher.id;
+  const months = starMonths();
+  if (!months.includes(starMonth)) starMonth = months[months.length - 1];
+  const thisMonth = todayStr.slice(0, 7);
+  const sc = starScore(tid, starMonth);
+  const lv = sc.level;
+  const notStarted = todayStr < starStart;
+  const prevM = starPrevMonth(starMonth);
+  const prev = prevM >= starStart.slice(0, 7) ? starScore(tid, prevM).total : null;
+  let best = null;
+  months.filter(m => m >= starStart.slice(0, 7)).forEach(m => { const t = starScore(tid, m).total; if (!best || t > best.t) best = { t, m }; });
+  const pctBar = lv.next ? Math.round(100 * (sc.total - lv.from) / (lv.next.at - lv.from)) : 100;
+  const earn = starMonth === thisMonth ? starEarnNow(teacher) : { tips: [], total: 0 };
+  const trophies = starTrophies(tid);
+  const got = sc.badges.filter(b => b.got).length;
+  const diff = prev == null ? '' : sc.total - prev;
+  return `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
+        <div><h2 style="margin:0">🏆 Star Teacher ${helpBtn('star-teacher')}</h2>
+          <div class="hint">A monthly game. Points start again on the 1st; badges you win stay in your trophy shelf. Only you can see your points.</div></div>
+        <select onchange="starMonth=this.value;render()">${months.slice().reverse().map(m => `<option value="${m}" ${m === starMonth ? 'selected' : ''}>${esc(monthLabelOf(m))}</option>`).join('')}</select>
+      </div>
+      ${notStarted ? `<div class="hint" style="margin-top:8px;color:var(--brick)"><b>The game starts on ${esc(dayDate(starStart))}.</b> Nothing before that counts. Have a look at the ways to earn points below.</div>` : ''}
+      ${starExtra.loading ? '<div class="hint" style="margin-top:6px">Counting practice papers, lesson prep and resources…</div>' : ''}
+    </div>
+    <div class="star-row">
+      <div class="card">
+        <div class="hint">${esc(monthLabelOf(starMonth))}</div>
+        <div style="margin-top:6px"><span class="star-big">${sc.total}</span> <span class="hint">points</span> <span class="star-lvl">${lv.icon} ${esc(lv.name)}</span></div>
+        <div class="star-bar"><div style="width:${Math.max(0, Math.min(100, pctBar))}%"></div></div>
+        <div style="font-weight:600">${lv.next ? lv.next.need + ' more point' + (lv.next.need === 1 ? '' : 's') + ' to ' + lv.next.icon + ' ' + esc(lv.next.name) : 'Top level reached. Well done!'}</div>
+        <div class="star-levels">${STAR_LEVELS.slice(1).map(l => `<span>${l[2]} ${l[0]} ${l[1]}</span>`).join('')}</div>
+      </div>
+      <div class="card">
+        <div class="hint" style="margin-bottom:6px">Compared with yourself</div>
+        <div class="star-stat"><span>vs ${esc(monthLabelOf(prevM))}${prev != null ? ' (' + prev + ')' : ''}</span>${prev == null ? '<span class="hint">—</span>' : diff >= 0 ? `<b style="color:var(--forest)">▲ ${diff} more</b>` : `<b style="color:var(--brick)">▼ ${-diff} fewer</b>`}</div>
+        <div class="star-stat"><span>Personal best</span><b>${best ? best.t + ' · ' + esc(monthLabelOf(best.m)) : '—'}</b></div>
+        <div class="star-stat"><span>🔥 On-time streak</span><b>${starStreak(tid)} day${starStreak(tid) === 1 ? '' : 's'}</b></div>
+        <div class="star-stat"><span>Badges this month</span><b>${got} of ${sc.badges.length}</b></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">🏅 Trophy shelf <span class="hint" style="font-weight:400;font-size:13px">every badge you've won</span></h2>
+      ${trophies.length ? `<div style="display:flex;gap:16px;flex-wrap:wrap;font-weight:600">${trophies.map(t => `<span>${t.icon} ${esc(t.name)} ×${t.n}</span>`).join('')}</div>` : '<div class="hint">No badges yet. Your first one is waiting below.</div>'}
+    </div>
+    ${starMonth === thisMonth && !notStarted ? `
+    <div class="card">
+      <h2 style="margin-top:0">⚡ Earn now ${earn.total ? `<span class="hint" style="font-weight:400;font-size:13px">${earn.total} points waiting for you</span>` : ''}</h2>
+      ${earn.tips.length ? earn.tips.map(t => `<div class="star-tip"><span style="flex:1">${esc(t.text)}${t.hint ? ` <span class="hint">· ${esc(t.hint)}</span>` : ''}</span><span class="star-plus">+${t.pts}</span><button class="btn-small btn-primary" onclick="${t.go}">Go</button></div>`).join('')
+        : '<div class="hint">Nothing waiting right now. Keep marking classes on the same day and adding remarks.</div>'}
+    </div>` : ''}
+    <div class="card">
+      <h2 style="margin-top:0">🎖 Badges you can win <span class="hint" style="font-weight:400;font-size:13px">${esc(monthLabelOf(starMonth))}</span></h2>
+      ${starBadgesHtml(sc.badges)}
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">📋 Ways to earn points</h2>
+      ${starWaysHtml(sc, true)}
+      ${starSetupMissing ? '<div class="hint" style="margin-top:6px">App usage points will show once the office finishes setting up the game.</div>' : ''}
+    </div>`;
+}
+// Thin line on the teacher Dashboard under the pending strip.
+function starDashLineHtml(teacher) {
+  if (!starOn) return '';
+  if (todayStr < starStart) return `<div class="card star-dash" onclick="setTeacherPortalTab('starteacher')">🏆 <b>Star Teacher</b> starts on ${esc(dayDate(starStart))}. See how to earn points →</div>`;
+  const sc = starScore(teacher.id, todayStr.slice(0, 7));
+  return `<div class="card star-dash" onclick="setTeacherPortalTab('starteacher')">🏆 <b>${sc.total} points</b> this month · ${sc.level.icon} ${esc(sc.level.name)}${sc.level.next ? ' · ' + sc.level.next.need + ' to ' + esc(sc.level.next.name) : ''} <span class="hint">Open Star Teacher →</span></div>`;
+}
+// Pop-up after an action that earned points (teacher only). trackUse() arms it; the next renders compare the score.
+function starArm(feature) {
+  const a = STAR_ACTIONS[feature];
+  if (!a || !starOn || currentRole !== 'Teacher') return;
+  starArmUntil = Date.now() + 15000; starArmLabel = a[0];
+  if (a[1]) loadStarExtras(true);
+}
+function starAfterRender() { try { starAfterRenderInner(); } catch (e) { console.error('Star Teacher pop-up', e); } }
+function starAfterRenderInner() {
+  if (!starOn || currentRole !== 'Teacher' || todayStr < starStart || !starExtra.loaded) return;
+  const month = todayStr.slice(0, 7);
+  const sc = starScore(currentLinkedId, month);
+  const prev = starWatch;
+  starWatch = { month, total: sc.total, got: sc.badges.filter(b => b.got).map(b => b.key), level: sc.level.index };
+  if (!prev || prev.month !== month || Date.now() > starArmUntil || sc.total <= prev.total) return;
+  const nb = sc.badges.find(b => b.got && !prev.got.includes(b.key));
+  const sub = nb ? '🎉 New badge: ' + nb.icon + ' ' + nb.name
+    : sc.level.index > prev.level ? '🎉 You reached ' + sc.level.icon + ' ' + sc.level.name
+    : sc.level.next ? sc.level.next.need + ' more to ' + sc.level.next.name : '';
+  starArmUntil = 0;
+  const el = document.createElement('div');
+  el.className = 'star-toast';
+  el.innerHTML = '<b>🏆 +' + (sc.total - prev.total) + ' points · ' + esc(starArmLabel) + '</b>' + (sub ? '<small>' + esc(sub) + '</small>' : '');
+  el.onclick = () => { el.remove(); setTeacherPortalTab('starteacher'); };
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 5000);
+}
+
+// Admin: Settings → Star Teacher (switch, start date, leaderboard)
+function toggleStarAdminCard() { starAdminOpen = !starAdminOpen; if (starAdminOpen) loadStarExtras(); render(); }
+async function saveStarSettings(on, start) {
+  if (!starSettingsRowId) { starMsg = 'Could not save: run SQL 66 first.'; render(); return; }
+  const fields = {};
+  if (on !== null) fields.star_teacher_on = on;
+  if (start) fields.star_teacher_start = start;
+  starSaving = true; starMsg = ''; render();
+  const { error } = await sb.from('fee_settings').update(fields).eq('id', starSettingsRowId);
+  starSaving = false;
+  if (error) { starMsg = 'Could not save: ' + error.message + (/star_teacher/.test(error.message) ? ' Run SQL 66 first.' : ''); render(); return; }
+  if (on !== null) starOn = on;
+  if (start) { starStart = start; starExtra.loaded = false; loadStarExtras(); }
+  starMsg = on === true ? 'Star Teacher is on. Teachers see it the next time they open or refresh the app.' : on === false ? 'Star Teacher is off. Teachers no longer see it.' : 'Start date saved.';
+  render();
+}
+function starAdminRows(month) {
+  return data.teachers.filter(t => !t.archived).map(t => {
+    const sc = starScore(t.id, month), prevM = starPrevMonth(month);
+    return { t, sc, prev: prevM >= starStart.slice(0, 7) ? starScore(t.id, prevM).total : null };
+  }).sort((a, b) => b.sc.total - a.sc.total || a.t.name.localeCompare(b.t.name));
+}
+function exportStarLeaderboard() {
+  const rows = starAdminRows(starAdminMonth).map((r, i) => {
+    const o = { Rank: i + 1, Teacher: teacherLabel(r.t), Points: r.sc.total, Level: r.sc.level.name, Badges: r.sc.badges.filter(b => b.got).map(b => b.name).join(', '), 'Last month': r.prev == null ? '' : r.prev };
+    r.sc.rows.forEach(x => { o[x.label] = x.points; });
+    return o;
+  });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Star Teacher ' + starAdminMonth);
+  XLSX.writeFile(wb, 'star-teacher-' + starAdminMonth + '.xlsx');
+}
+function starAdminCardHtml() {
+  const months = starMonths();
+  if (!months.includes(starAdminMonth)) starAdminMonth = months[months.length - 1];
+  let list = [], listErr = '';
+  try { if (starAdminOpen && starExtra.loaded) list = starAdminRows(starAdminMonth); } catch (e) { console.error('Star Teacher leaderboard', e); listErr = (e && e.message) || String(e); }
+  const zero = list.filter(r => r.sc.total === 0);
+  return `
+    <div class="card">
+      <h2 style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none" onclick="toggleStarAdminCard()">
+        <span style="font-size:12px;color:var(--muted)">${starAdminOpen ? '▼' : '▶'}</span>
+        🏆 Star Teacher ${helpBtn('star-teacher-admin')}
+        ${!starAdminOpen ? `<span class="tag" style="margin-left:auto;font-size:11px;font-weight:400">${starOn ? 'On' : 'Off'}</span>` : ''}
+      </h2>
+      ${starAdminOpen ? `
+      <div class="hint">A monthly points game for teachers, just for fun (no money). Teachers see only their own points, badges and level, never anyone else's. Only admins see this leaderboard.</div>
+      ${starSetupMissing ? '<div class="hint" style="color:var(--brick);margin-top:6px">Run SQL 66 (rewards/66-star-teacher.sql) in Supabase first. Until then the switch can\'t be saved and app usage points are not counted.</div>' : ''}
+      <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin:10px 0">
+        <label style="display:inline-flex;align-items:center;gap:6px;font-weight:600"><input type="checkbox" ${starOn ? 'checked' : ''} ${starSaving || starSetupMissing ? 'disabled' : ''} onchange="saveStarSettings(this.checked, null)"> Show Star Teacher to teachers</label>
+        <label style="display:inline-flex;align-items:center;gap:6px">Game starts on <input type="date" value="${escAttr(starStart)}" ${starSaving || starSetupMissing ? 'disabled' : ''} onchange="if(this.value) saveStarSettings(null, this.value)"></label>
+      </div>
+      ${starMsg ? `<div class="hint" style="color:${starMsg.startsWith('Could not') ? 'var(--brick)' : 'var(--forest)'}">${esc(starMsg)}</div>` : ''}
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0 6px">
+        <b>Leaderboard</b>
+        <select onchange="starAdminMonth=this.value;starAdminRow='';render()">${months.slice().reverse().map(m => `<option value="${m}" ${m === starAdminMonth ? 'selected' : ''}>${esc(monthLabelOf(m))}</option>`).join('')}</select>
+        ${list.length ? '<button class="btn-small" onclick="exportStarLeaderboard()">⬇ Excel</button>' : ''}
+      </div>
+      ${todayStr < starStart ? `<div class="hint">The game starts on ${esc(dayDate(starStart))}, so everyone is on 0 until then.</div>` : ''}
+      ${listErr ? `<div class="hint" style="color:var(--brick)">Could not count points: ${esc(listErr)}</div>` : ''}
+      ${starExtra.error ? `<div class="hint">Some data could not be read: ${esc(starExtra.error)}</div>` : ''}
+      ${!starExtra.loaded ? '<div class="hint">Loading…</div>' : `
+      <div class="table-scroll"><table class="no-stack">
+        <tr><th>#</th><th>Teacher</th><th>Points</th><th>Level</th><th>Badges</th><th>vs last month</th></tr>
+        ${list.map((r, i) => `
+          <tr style="cursor:pointer" onclick="starAdminRow=starAdminRow==='${r.t.id}'?'':'${r.t.id}';render()">
+            <td>${i + 1}</td><td><b>${esc(teacherLabel(r.t))}</b> <span class="hint">${starAdminRow === r.t.id ? '▲' : '▼'}</span></td><td><b>${r.sc.total}</b></td>
+            <td>${r.sc.level.icon} ${esc(r.sc.level.name)}</td>
+            <td style="font-size:16px">${r.sc.badges.filter(b => b.got).map(b => `<span title="${escAttr(b.name)}">${b.icon}</span>`).join('') || '<span class="hint">—</span>'}</td>
+            <td>${r.prev == null ? '<span class="hint">—</span>' : r.sc.total >= r.prev ? `<span style="color:var(--forest)">▲ ${r.sc.total - r.prev}</span>` : `<span style="color:var(--brick)">▼ ${r.prev - r.sc.total}</span>`}</td>
+          </tr>
+          ${starAdminRow === r.t.id ? `<tr><td colspan="6" style="background:var(--soft)">
+            <div class="table-scroll"><table class="no-stack">${r.sc.rows.filter(x => x.n).map(x => `<tr><td>${esc(x.label)}</td><td>${x.n}</td><td><b>${x.points} pt${x.points === 1 ? '' : 's'}</b></td></tr>`).join('') || '<tr><td class="hint">No points yet this month.</td></tr>'}</table></div>
+            <div class="hint" style="margin-top:6px">Badges: ${r.sc.badges.map(b => (b.got ? '✓ ' : '') + b.name + (b.got ? '' : ' (' + b.prog + ')')).join(' · ')}</div>
+          </td></tr>` : ''}`).join('')}
+      </table></div>
+      ${zero.length ? `<div class="hint" style="margin-top:8px"><b>Not playing yet (0 points):</b> ${esc(zero.map(r => r.t.name).join(', '))}</div>` : ''}
+      <div class="hint" style="margin-top:6px">Question Bank and lesson prep points only count for teachers who have that access. Tap a teacher to see their points.</div>`}
+      ` : ''}
+    </div>`;
+}
+
 function renderTeacherDashboard(teacher) {
   const classesToday = data.sessions.filter(s=>s.teacherId===teacher.id && s.date===todayStr).reduce((a,s)=>a+s.count,0);
 
@@ -18346,7 +18882,7 @@ function renderTeacherDashboard(teacher) {
     if (timingReviewHtml) act.push('<div id="pendTimings">' + timingReviewHtml + '</div>');
     const setupHtml = teacherScheduleSetupHtml(teacher);
     if (setupHtml) act.push('<div id="pendSetup">' + setupHtml + '</div>');
-    if (p.demos.length) act.push(sec('pendDemos', '🎓 Demos to mark done', p.demos.length,
+    if (p.demos.length) act.push(sec('pendDemos', '🎓 Demos to mark done' + starPill(p.demos.length * 2), p.demos.length,
       'Demos you were given for today or earlier. After the demo, press ✓ Mark done. You can add a line on how it went.',
       (demoMsgTeacher ? '<div style="margin:6px 0;font-size:13px;color:' + (demoMsgTeacher.startsWith('Could not') ? 'var(--brick)' : 'var(--forest)') + '">' + esc(demoMsgTeacher) + '</div>' : '')
       + table(['Date', 'Time', 'Subject', 'Student', ''], p.demos.map(d => '<tr>' + td(esc(dayDate(d.date))) + td(esc(d.demoTime || '—')) + td(esc(d.subjectId ? subjectName(d.subjectId) : '—')) + td(esc(d.studentName || '—'))
@@ -18354,13 +18890,13 @@ function renderTeacherDashboard(teacher) {
           ? '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center"><input type="text" placeholder="How did it go? (optional)" value="' + escAttr(teacherDoneNote) + '" oninput="teacherDoneNote=this.value" style="width:190px;font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:4px">'
             + '<button class="btn-small btn-primary" style="font-size:11px" onclick="teacherMarkDemoDone(\'' + d.id + '\')">Save</button> <button class="btn-small" style="font-size:11px" onclick="teacherDoneId=\'\';render()">Cancel</button></div>'
           : '<button class="btn-small btn-primary" style="font-size:11px" onclick="teacherDoneId=\'' + d.id + '\';teacherDoneNote=\'\';demoMsgTeacher=\'\';render()">✓ Mark done</button>') + '</tr>'))));
-    if (p.homework.length) act.push(sec('pendHomework', '📚 Homework to review', p.homework.length, 'Homework your students have handed in. Check it and press Mark reviewed on the Homework page.',
+    if (p.homework.length) act.push(sec('pendHomework', '📚 Homework to review' + starPill(p.homework.reduce((a, h) => a + 1 + (h.submittedAt && Date.now() - new Date(h.submittedAt) <= 48 * 3600000 ? 3 : 0), 0)), p.homework.length, 'Homework your students have handed in. Check it and press Mark reviewed on the Homework page.',
       table(['Student', 'Homework', 'Subject', 'Handed in'], p.homework.map(h => '<tr>' + td(esc(studentNameWithCode(h.studentId))) + td(esc(h.title || '—')) + td(esc(h.subjectId ? subjectName(h.subjectId) : '—')) + td(h.submittedAt ? esc(dayDate(String(h.submittedAt).slice(0, 10))) : '—') + '</tr>'))
       + '<button class="btn-small btn-primary" style="margin-top:8px" onclick="teacherPendingHomework()">Open Homework</button>'));
-    if (p.papers.length) act.push(sec('pendPapers', '🧾 Practice papers to review', p.papers.length, 'Practice papers your students have submitted. Mark the written answers and press Mark reviewed.',
+    if (p.papers.length) act.push(sec('pendPapers', '🧾 Practice papers to review' + starPill(p.papers.length * 3), p.papers.length, 'Practice papers your students have submitted. Mark the written answers and press Mark reviewed.',
       table(['Student', 'Paper', 'Submitted'], p.papers.map(a => '<tr>' + td(esc(studentNameWithCode(a.student_id))) + td(esc(a.title)) + td(a.submitted_at ? esc(dayDate(String(a.submitted_at).slice(0, 10))) : '—') + '</tr>'))
       + '<button class="btn-small btn-primary" style="margin-top:8px" onclick="teacherPendingPapers()">Open Question Bank papers</button>'));
-    if (p.noPlan.length) act.push(sec('pendNoPlan', '🗺️ Students without a study plan', p.noPlan.length, 'Make a study plan for each of your students so they and their parents can follow the work.',
+    if (p.noPlan.length) act.push(sec('pendNoPlan', '🗺️ Students without a study plan' + starPill(p.noPlan.length * 3 + 10), p.noPlan.length, 'Make a study plan for each of your students so they and their parents can follow the work.',
       '<div style="font-size:13px;margin:6px 0">' + p.noPlan.map(s => esc(studentLabel(s))).join(', ') + '</div><button class="btn-small btn-primary" onclick="setTeacherPortalTab(\'studyplans\')">Open Study Plans</button>'));
     const quick = [];
     if (p.chats) quick.push(['pendChats', '💬 ' + p.chats + ' unread chat' + (p.chats === 1 ? '' : 's'), 'Open chat', 'toggleChatPanel()']);
@@ -18371,7 +18907,7 @@ function renderTeacherDashboard(teacher) {
       '<div id="' + id + '" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--line)"><span style="font-size:14px">' + esc(text) + '</span><button class="btn-small btn-primary" onclick="' + onclick + '">' + btn + '</button></div>').join('') + '</div>');
 
     const watch = [];
-    if (p.prep.length) watch.push(sec('pendPrep', '🧠 Lesson prep not done', p.prep.length, 'Classes today and tomorrow where you have no saved Lesson prep brief for the student in the last ' + PENDING_PREP_DAYS + ' days.',
+    if (p.prep.length) watch.push(sec('pendPrep', '🧠 Lesson prep not done' + starPill(p.prep.length * 2), p.prep.length, 'Classes today and tomorrow where you have no saved Lesson prep brief for the student in the last ' + PENDING_PREP_DAYS + ' days.',
       table(['Date', 'Time', 'Student', 'Subject', ''], p.prep.map(sc => '<tr>' + td(esc(dayDate(sc.date))) + td(esc(sc.time || '—')) + td(scStudent(sc)) + td(scSubject(sc)) + td('<button class="btn-small" onclick="teacherPendingPrep(\'' + sc.subjectId + '\',\'' + sc.studentId + '\')">Prepare</button>') + '</tr>')), 'var(--line)'));
     if (expiryListHtml) watch.push(expiryListHtml);
     const tRenewal = renewalRows(teacher.id);
@@ -18403,6 +18939,7 @@ function renderTeacherDashboard(teacher) {
 
   return `
     ${teacherPendingBannerHtml(pend)}
+    ${starSafe(() => starDashLineHtml(teacher), 'dashboard')}
     ${celebHtml}
     ${milestonesHtml}
     <div class="stat-grid">
@@ -18698,11 +19235,15 @@ function renderTeacherPortal() {
   const pendingTotal = teacherPendingItems(teacher).total;
   const pendingBadge = pendingTotal ? ` <span style="color:var(--gold-dark,#b8860b)">(${pendingTotal})</span>` : '';
   teacherMobileTabsList[1] = ['pendingactions', 'Pending Action Items' + (pendingTotal ? ` (${pendingTotal})` : '')];
+  let starEarn = 0;
+  try { starEarn = starOn ? starEarnNow(teacher).total : 0; } catch (e) { console.error('Star Teacher menu', e); }
+  if (starOn) teacherMobileTabsList.splice(2, 0, ['starteacher', '🏆 Star Teacher' + (starEarn ? ` (+${starEarn})` : '')]);
   const currentTeacherTabLabel = (teacherMobileTabsList.find(([key])=>key===teacherPortalTab) || [,''])[1];
   const sidebarHtml = `
     <div class="sidebar-nav">
       <div class="sidebar-item ${teacherPortalTab==='dashboard'?'active':''}" onclick="setTeacherPortalTab('dashboard')" style="font-weight:700;margin-bottom:10px">Dashboard</div>
       <div class="sidebar-item ${teacherPortalTab==='pendingactions'?'active':''}" onclick="setTeacherPortalTab('pendingactions')" style="font-weight:700;margin-bottom:10px">Pending Action Items${pendingBadge}</div>
+      ${starOn ? `<div class="sidebar-item ${teacherPortalTab==='starteacher'?'active':''}" onclick="setTeacherPortalTab('starteacher')" style="font-weight:700;margin-bottom:10px">🏆 Star Teacher${starEarn ? ` <span class="star-pill" title="Points you can earn right now">+${starEarn}</span>` : ''}</div>` : ''}
       ${teacherTabGroups.map(g => {
         const isCollapsed = !!sidebarCollapsedGroups[g.label] && g.label !== activeGroupLabel;
         return `
@@ -18770,6 +19311,9 @@ function teacherPortalBodyHtml(teacher) {
   }
   if (teacherPortalTab === 'setup') {
     return renderTeacherSetup();
+  }
+  if (teacherPortalTab === 'starteacher' && starOn) {
+    return starSafe(() => renderStarTeacher(teacher), 'page');
   }
   const monthSessions = data.sessions.filter(s=>s.teacherId===teacher.id && s.date.startsWith(teacherViewMonth));
   const presentSessions = monthSessions.filter(s=>s.status==='Present');
@@ -18960,6 +19504,8 @@ const HELP = {
   'announcements': { t:'Announcements', b:"<ul><li>A short notice shown above the menu bar for the people you pick: everyone, a whole role (all teachers, students, parents or admins) or one person.</li><li>It stays until they dismiss it, it expires, or you delete it.</li></ul>" },
   'chat': { t:'Chat', b:"<ul><li>New message starts a one-to-one chat with a teacher, student or parent. New group chats with several people at once.</li><li>Unread messages show as a number on the menu and the 💬 button.</li></ul>" },
   'superadmin': { t:'Superadmin tools', b:"<ul><li>Only superuser admins see this menu. Each card opens with the unlock password.</li><li><b>Academic Year</b>: set the new year (e.g. 2026-27) and move every student (except Adult) up a grade.</li><li><b>Export all data</b> downloads every table as Excel; <b>Import backup</b> loads one back.</li><li><b>Danger zone</b>: export and remove old Audit and Login entries, clear all data, and switch audit logging on or off. These cannot be undone, so export first.</li></ul>" },
+  'star-teacher': { t:'Star Teacher', b:"<ul><li>A monthly game, just for fun. You earn points for good work: classes marked the same day, remarks, homework given and reviewed quickly, practice papers, study plans, lesson prep, shared resources, demos, renewals and using the app.</li><li>Points start again on the 1st of each month. Levels: Bronze 100, Silver 250, Gold 450, Platinum 700.</li><li><b>Earn now</b> shows what you can do today and how many points it gives; the number next to Star Teacher in the menu is the same total. <b>Ways to earn points</b> lists every rule.</li><li>Badges you win stay in your trophy shelf.</li><li>Only you can see your points. Other teachers never see them.</li></ul>" },
+  'star-teacher-admin': { t:'Star Teacher', b:"<ul><li>A points game for teachers, no money. Tick <b>Show Star Teacher to teachers</b> to switch it on; teachers see it after they open or refresh the app.</li><li><b>Game starts on</b>: nothing before this date counts.</li><li>The leaderboard is for admins only. Tap a teacher to see where their points came from. ⬇ Excel downloads the month.</li><li>Points are worked out from the saved classes, homework, papers, plans, demos, renewals and app usage, so changing the start date recounts everything.</li></ul>" },
   'pending-actions': { t:'Pending Action Items', b:"<ul><li>Everything waiting for you, counted on the menu and in the gold strip on your Dashboard. Tap an item to jump to it.</li><li>Counted: classes not marked (last 30 days), today's classes past their time, class timings to correct (00:00 / 01:00 / 02:00), schedule setup (Class Frequency), demos to mark done, homework and practice papers to review, students without a study plan, unread chats, notifications and announcements, and availability not set.</li><li><b>Keep an eye on</b> is a reminder list and is not counted: lesson prep, expiring classes, renewals, low balances, students not seen, late homework or papers, and your open support tickets.</li><li>You can give attendance only for the current month, so clear 'not marked' classes before the month ends.</li></ul>" },
   'teacher-demos': { t:'My Demo Classes', b:"<ul><li>Demo classes the office booked for you.</li><li>After you give a demo, press <b>✓ Mark done</b> and add a line on how it went. Until then it shows under Pending Action Items.</li><li>If the student joins, the office marks it Converted and you get a ₹100 demo bonus in that month's payroll.</li></ul>" },
   'pay-fees': { t:'Paying fees', b:"<ul><li>Fee requests are the fees due. They are added to the classes balance only after the payment is confirmed.</li><li><b>Pay by UPI</b>: tick the requests, press Pay ₹…, pay with the UPI ID or QR code and put the Unique ID shown in your UPI app's note. Then press Payment Completed and send the screenshot to the contact number.</li><li><b>Pay online (Razorpay)</b>: opens the payment page for card, UPI or net banking. Type the student's name so we can match it.</li><li>LIB Education confirms every payment by hand, so it can take a little time to show as paid.</li></ul>" },
@@ -22545,7 +23091,7 @@ function render() {
   if (!isLoggedIn) { renderLogin(); return; }
 
   if (currentRole === 'Student') { renderPortalShell(renderStudentPortal()); return; }
-  if (currentRole === 'Teacher') { renderPortalShell(renderTeacherPortal()); return; }
+  if (currentRole === 'Teacher') { renderPortalShell(renderTeacherPortal()); starAfterRender(); return; }
   if (currentRole === 'Parent') { renderPortalShell(renderParentPortal()); return; }
 
   const tabGroups = [
