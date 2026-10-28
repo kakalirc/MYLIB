@@ -2358,7 +2358,7 @@ function studentSpecialRatesHtml(student, enrolledSubjects) {
         <td><button class="btn-small" onclick="startEditSpecialRate('${r.id}')">Edit</button> <button class="btn-small" onclick="deleteSpecialRate('${r.id}')">Remove</button></td></tr>`).join('')}
     </table></div>` : '';
   return `<div class="student-section" style="background:#fff7e0">
-      <h3>Special fee rates</h3>
+      <h3>Special fee rates ${helpBtn('special-rates')}</h3>
       <div class="hint">An agreed per-class rate for this student. While it is in use it replaces the Fee setup rate everywhere this student's fee is worked out (Record payment, fee requests, Calculate, Raise fee requests, Fee calculator, the student's and parent's Applicable Rates). Bulk discount tiers still apply on top. Requests and payments already saved are not changed.</div>
       ${studentFeeRatesMissing ? `<div class="hint" style="color:var(--brick)">Run SQL 63 (fee-requests/63-student-special-rates.sql) in Supabase to turn this on.</div>` : ''}
       ${specialRateMsg ? `<div class="hint" style="color:${/saved|removed/.test(specialRateMsg)?'var(--forest)':'var(--brick)'}">${esc(specialRateMsg)}</div>` : ''}
@@ -7839,7 +7839,7 @@ function renderChat() {
   if (chatNewMode === 'group') return renderChatNewGroup();
   const announcementsHtml = currentRole === 'Admin' ? `
     <div class="card">
-      <h2>Announcements</h2>
+      <h2>Announcements ${helpBtn('announcements')}</h2>
       <div class="hint">Shown to whoever it's aimed at, right above their menu bar, until they dismiss it, it expires, or you delete it.</div>
       ${announcementMsg ? `<div class="hint" style="color:var(--brick)">${esc(announcementMsg)}</div>` : ''}
       <div class="row-form">
@@ -7938,7 +7938,7 @@ function renderChatList() {
   const list = chatConversations;
   return `
     <div class="card">
-      <h2>Chat</h2>
+      <h2>Chat ${helpBtn('chat')}</h2>
       <div class="row-form">
         <button class="btn-primary" onclick="setChatNewMode('direct')">New message</button>
         <button class="btn-small" onclick="setChatNewMode('group')">New group</button>
@@ -9060,7 +9060,7 @@ function setFeeMessageShort(on) {
 }
 function feeMessageShortToggleHtml() {
   const r = data.subscriptions.find(x => x.id === feeMessageForRequestId);
-  return `<div class="row-form" style="margin:4px 0;align-items:center"><label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" ${feeMessageShort ? 'checked' : ''} onchange="setFeeMessageShort(this.checked)"> Short reminder (opening line says “gentle reminder … still due”)</label> ${r ? familyReminderHtml(r.studentId) : ''}</div>`
+  return `<div class="row-form" style="margin:4px 0;align-items:center"><label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" ${feeMessageShort ? 'checked' : ''} onchange="setFeeMessageShort(this.checked)"> Short reminder (opening line says “gentle reminder … still due”)</label> ${helpBtn('fee-message')} ${r ? familyReminderHtml(r.studentId) : ''}</div>`
     + (feeReminderMsg ? `<div class="hint" style="color:var(--brick)">${esc(feeReminderMsg)}</div>` : '');
 }
 function generateFeeMessageForRequest(requestId) {
@@ -9971,18 +9971,20 @@ async function adminUpdateTicket() {
 const SUPPORT_KB = {
   Admin: `My LIB app guide for Admin:
 - Dashboard: at-a-glance stats, AI summaries and students at risk.
-- Class Log (Daily work): record daily attendance. Pick the date, find the student, mark Present/Absent/Holiday.
+- Class Log (Daily work): record a class for a teacher. Pick the date and teacher, then student, subject, Group/Individual, Online/Offline and Present or Absent (Absent still uses a class). The list below shows the Selected day or the Whole month.
 - Communication (Daily work): chat with teachers, students and parents, and post announcements.
 - Demo Bookings (Daily work): demo bookings from the website arrive here (New → Scheduled → Done → Converted or Lost, or Cancelled). Teachers mark their own demos Done on their Dashboard; admins can set any status, mark Lost with an optional reason, and skip straight from Pending to Converted. A converted demo gives the teacher a demo bonus. The Demo Register shows Demo results per teacher (Converted %) and why demos were lost.
 - Support (Daily work): view and resolve issues raised by teachers, students or parents.
-- Rebuild Pending Classes (Daily work): rebuild the pending class schedule from each student's class frequency.
-- Fees (Money): per-class rates (Fee setup), discount structure, fee calculator, students needing renewal, Razorpay payments to confirm, pending fee requests, all subscription payments and the UPI / contact details used in fee messages.
+- Rebuild Pending Classes (Daily work): rebuild the upcoming class schedule from each student's Class Frequency. Preview first. Only future Pending classes are removed; new classes get placeholder times (Group 00:00, Individual 01:00/02:00) that the teacher corrects.
+- Fees (Money): per-class rates (Fee setup), discount structure, fee calculator, students needing renewal, Razorpay payments to confirm, pending fee requests (grouped by family, Mark all paid), all subscription payments and the UPI / contact details used in fee messages.
+- Raise fee requests (Fees page): makes the month's requests for every student from Class Frequency, classes left, packages and teacher leave. Preview any day; Confirm only on the 1st-7th, once a month (Reset to redo). Each request keeps its working.
+- Fee messages: Message on a pending request makes one WhatsApp message for the whole family (subjects, total, how it was worked out, UPI, Razorpay link, parent login). Tick Short reminder for a follow-up. On a computer use 📤 Desktop or 📤 Web; sending records the reminder date.
 - Payroll (Money): each teacher's earnings for the month, demo bonuses, adjustments, mark paid and salary slips.
 - Expenses (Money): monthly overhead costs such as rent and electricity.
 - Reports & Export (Money): student report, student balances, refunds, Razorpay payments history, net profit and Excel export.
-- Students & Subscriptions (People): add or edit students, enrol them in subjects, record payments, refunds and credit transfers, see subscription history and receipts.
-- Teachers & Subjects (People): add teachers and subjects, and set which teacher teaches each subject.
-- Parents (People): parent contact details and which children they are linked to.
+- Students & Subscriptions (People): add or edit students, enrol them in subjects, record payments, refunds and credit transfers, see subscription history and receipts. Special fee rates sets an agreed per-class rate for one student (used instead of Fee setup). Bill separately keeps a student out of their family's combined fee message.
+- Teachers & Subjects (People): add teachers and subjects, and set which teacher teaches each subject. The Class Frequency button sets how many classes each student has on each weekday (used by Raise fee requests and Rebuild Pending Classes).
+- Parents (People): one parent login per family and which children are linked. Create all parent logins makes the missing ones (login ID and first password = parent's 10-digit mobile) with a 📤 WhatsApp button to send the details.
 - Study Plans (Teaching): read-only view of every teacher's study plans and progress, plus the Textbook library (every uploaded book; rename, retag or delete).
 - Homework (Teaching): every homework set by teachers, with filters by teacher, student and status.
 - Question Bank (Teaching): Review Queue (approve new or edited questions), Full Question Bank, Archived, Practice Papers and Past Papers. Pick board, subject and grade to see questions. Old-syllabus questions stay hidden unless you tick "Old syllabus only".
@@ -9992,8 +9994,11 @@ const SUPPORT_KB = {
 - Audit Log (System): every change made in the app, login activity, and App usage (which features each person uses). Each part opens with a tap.
 - Superadmin tools (Superadmin, superuser admins only): Academic Year, Export all data, Import backup, truncate old Audit & Login entries, clear all data and Audit Logging Controls. Each opens with the unlock password.`,
   Teacher: `My LIB app guide for Teacher:
-- Dashboard: today's classes, students needing renewal, low balances, students not seen in a while, your demo classes and student notes.
-- Class Schedule (Teaching): your classes by day or month. Set up a weekly schedule, add an extra class, mark a class done or remove a pending one.
+- Dashboard: today's classes, students needing renewal, low balances, students not seen in a while, your demo classes and student notes. A gold strip shows how many items need your action.
+- Pending Action Items (top of the menu): everything waiting for you, such as classes not marked (last 30 days), class timings to correct, Class Frequency not set, demos to mark done, homework or papers to review, students without a study plan, unread chats and availability not set. Tap an item to go there. 'Keep an eye on' lists reminders that are not counted.
+- Demo classes: after you give a demo, press ✓ Mark done on your Dashboard and add a line on how it went. If the student joins you get a ₹100 bonus in payroll.
+- Class Schedule (Teaching): your classes by day or month. Set up a weekly schedule, add an extra class, mark a class done or remove a pending one. Classes at 00:00, 01:00 or 02:00 are placeholder times: put in the real time.
+- Class Frequency (Teaching): how many classes each of your students has on each weekday, per subject. The office uses it for monthly fees and the schedule, so update it when a timetable changes.
 - My Students (Teaching): contact details, subjects and class balances (subscribed, used, left, next expiry) for students enrolled in your subjects. Use the search box to find one.
 - Study Plans (Teaching): make a topic list per student and subject, and mark each topic Not started / In progress / Done. You can export a plan as PDF. Add topics from textbook: upload a book or link one from the shared library (books for the subjects you teach), then Extract Topics; Unlink takes a book off that student only.
 - Homework (Teaching): + Assign homework to a student (title, subject, due date, study plan topic, attached file). When a student submits, review it, give marks and feedback, then Mark reviewed.
@@ -10020,6 +10025,7 @@ const SUPPORT_KB = {
 - Ask AI: ask about your own progress, classes remaining or what to focus on.
 - Leaderboard: your rank among students in each subject.
 - Further down: online class links, fee requests, subscription and attendance reports for the month, class schedule, payment history with receipts, and the fee calculator.
+- Paying fees: tick the fee requests and press Pay to pay by UPI (put the Unique ID shown in the UPI note, then Payment Completed), or press Pay online (Razorpay). Payments are confirmed by the office, so they take a little time to show.
 - Change Password: at the bottom of the page.
 - Chat (💬 at the top) to message your teacher or Admin. Support (at the top) to report a problem.`,
   Parent: `My LIB app guide for Parent (everything is on one page, scroll down):
@@ -10028,8 +10034,9 @@ const SUPPORT_KB = {
 - Study Plan, Homework and Practice Papers: what your child's teachers have set and how your child is doing.
 - From your teachers: notes, worksheets and links the teachers shared.
 - Further down: online class links, fee requests, subscription and attendance reports, class schedule, payment history with receipts (tap Receipt to download or print) and the fee calculator.
-- Paying fees: a fee request shows the amount with the UPI ID / QR code. Send the payment screenshot to the contact number shown so the Admin can mark it paid.
-- Change Password: at the bottom of the page.
+- Paying fees: tick the fee requests and press Pay to pay by UPI (UPI ID or QR code; put the Unique ID shown in the UPI note), then Payment Completed and send the screenshot to the contact number. Or press Pay online (Razorpay). The office confirms each payment by hand. The WhatsApp fee message shows each child's classes, amount and how it was worked out.
+- Change Password: at the bottom of the page. If your password is still your mobile number, a red box asks you to change it; please do.
+- Terms and Conditions and Privacy Policy: links on the login screen.
 - Chat (💬 at the top) to message the teacher or Admin. Support (at the top) to report a problem.`
 };
 // The guide for the logged-in person: teachers only get the Question Bank / Research lines for tabs they can open.
@@ -11766,7 +11773,7 @@ function renderExpenses() {
       </div>
     </div>
     <div class="card">
-      <h2>Expenses — ${esc(expenseMonth)}</h2>
+      <h2>Expenses — ${esc(expenseMonth)} ${helpBtn('expenses')}</h2>
       <div class="row-form"><input type="month" value="${escAttr(expenseMonth)}" onchange="setExpenseMonth(this.value)"></div>
       ${monthList.length ? `
       <div class="table-scroll"><table>
@@ -12668,7 +12675,7 @@ function renderClassFrequencyAdmin() {
     </div>`;
   return setupTabsHtml + frequencyDashboardHtml + `
     <div class="card">
-      <h2>Class Frequency</h2>
+      <h2>Class Frequency ${helpBtn('class-frequency')}</h2>
       <div class="hint">Configure weekly class counts for each enrolled student and subject. Every class is 60 minutes. This feature does not change scheduled classes.</div>
       <div class="row-form" style="margin-top:10px">
         <button class="btn-primary" onclick="startNewFrequencyAdmin()">+ New Frequency</button>
@@ -12747,7 +12754,7 @@ function renderClassFrequencyTeacher(teacher) {
   });
   return `
     <div class="card">
-      <h2>Class Frequency</h2>
+      <h2>Class Frequency ${helpBtn('class-frequency-teacher')}</h2>
       <div class="hint">Only students and subjects assigned to you are shown. Each class is 60 minutes. Weekly frequency settings do not change scheduled classes.</div>
       <div class="row-form">
         <input type="search" placeholder="Search my students or subjects" value="${escAttr(frequencySearch)}" oninput="frequencySearch=this.value">
@@ -13595,7 +13602,7 @@ function renderLog() {
 
     return `
       <div class="card">
-        <h2>Whose class are you marking?</h2>
+        <h2>Whose class are you marking? ${helpBtn('class-log')}</h2>
         <div class="row-form"><input type="date" value="${d.date}" onchange="logSet('date', this.value)"></div>
         <div class="row-form"><input type="text" id="classLogTeacherSearchBox" placeholder="Search by name, ID, or mobile…" oninput="filterClassLogTeacherList()" style="width:220px"></div>
         <ul class="plain" id="classLogTeacherList">${cards}</ul>
@@ -13680,7 +13687,7 @@ function renderLog() {
   return `
     <div class="card">
       <div class="row-form" style="justify-content:space-between">
-        <h2 style="margin:0">${esc(teacher.name)}'s register</h2>
+        <h2 style="margin:0">${esc(teacher.name)}'s register ${helpBtn('class-log')}</h2>
         <button class="btn-small" onclick="logSet('teacherId','')">← Switch teacher</button>
       </div>
       ${roster.length===0 ? '<div class="hint">No students are enrolled with this teacher yet. Map students to a subject taught by this teacher in Students & Subscriptions → Subject enrollment.</div>' : ''}
@@ -14336,7 +14343,7 @@ function renderParents() {
 
   const searchBlock = `
     <div class="card">
-      <h2>Manage parent logins</h2>
+      <h2>Manage parent logins ${helpBtn('parents')}</h2>
       <div class="hint">${parentUsers.length===0 ? 'No parent logins yet — add one above.' : 'Choose a parent to view or manage their children.'}</div>
       <div class="row-form">
         <input type="text" id="parentSearchBox1" placeholder="Search mobile, parent or child…" oninput="filterParentPicker('parentSearchBox1','parentPickerSelect1')" style="width:200px">
@@ -14488,7 +14495,7 @@ function renderRebuildPendingClasses() {
   const students=rebuildActiveStudents();
   const preview=rebuildClassesPreview;
   const pairRows=preview&&preview.pairs.length?`<div class="table-scroll"><table><tr><th>Student</th><th>Subject</th><th>Type</th><th>Remaining</th><th>Future pending to remove</th><th>Overdue retained</th><th>Weekly frequency</th></tr>${preview.pairs.map(p=>`<tr><td>${esc(p.studentName)}</td><td>${esc(p.subjectName)}</td><td>${esc(p.type)}</td><td>${p.remaining}</td><td>${p.futurePending}</td><td>${p.overduePending}</td><td>${p.weeklyCount}/week</td></tr>`).join('')}</table></div>`:'<div class="empty">No eligible student/subject/type combinations with remaining subscription and saved Class Frequency were found.</div>';
-  return `<div class="card"><h2>Rebuild Pending Classes</h2><div class="hint">Preview first. The rebuild removes only future-dated Pending classes for the selected active students. Overdue Pending classes, Done classes, and other statuses are preserved. New schedules use the saved Class Frequency table and existing <code>schedule_weekly_pattern</code> RPC; subscription limits and teacher conflicts remain enforced by that existing backend function.</div><div class="row-form" style="margin-top:12px"><label>Scope<select onchange="rebuildClassesScope=this.value;rebuildClassesPreview=null;render()"><option value="all" ${rebuildClassesScope==='all'?'selected':''}>All active students</option><option value="selected" ${rebuildClassesScope==='selected'?'selected':''}>One active student</option></select></label>${rebuildClassesScope==='selected'?`<label>Student<select onchange="rebuildClassesStudentId=this.value;rebuildClassesPreview=null;render()"><option value="">Select student…</option>${students.map(st=>`<option value="${st.id}" ${rebuildClassesStudentId===st.id?'selected':''}>${esc(studentLabel(st))}</option>`).join('')}</select></label>`:''}<button class="btn-primary" onclick="loadClassFrequencyRows().then(buildRebuildPreview)" ${rebuildClassesBusy?'disabled':''}>Preview Rebuild</button></div>${preview?`<div class="hint" style="margin-top:12px"><b>Preview summary:</b> ${preview.ids.length} active student(s); ${preview.targets.length} future Pending class(es) to remove; ${preview.overdueCount} overdue Pending class(es) to preserve; ${preview.pairs.length} eligible combinations. Only combinations with saved frequency and positive remaining balance are rebuilt; future Pending records outside those eligible combinations are left untouched.</div>${pairRows}<div class="hint" style="margin-top:8px;color:var(--brick)"><b>Placeholder times:</b> Batch = 00:00; Individual = 01:00 / 02:00. Generated times are provisional and should be corrected by teachers in Dashboard → Today’s Classes. Overdue Pending records are preserved for history and do not consume subscription quota.</div><button class="btn-primary" style="margin-top:12px" onclick="executeRebuildPendingClasses()" ${rebuildClassesBusy?'disabled':''}>${rebuildClassesBusy?'Working…':'Confirm Rebuild'}</button>`:''}${rebuildClassesMsg?`<div class="hint" style="white-space:pre-wrap;margin-top:12px;color:${rebuildClassesMsg.startsWith('Rebuild finished')?'var(--forest)':'var(--brick)'}">${esc(rebuildClassesMsg)}</div>`:''}</div>`;
+  return `<div class="card"><h2>Rebuild Pending Classes ${helpBtn('rebuild-classes')}</h2><div class="hint">Preview first. The rebuild removes only future-dated Pending classes for the selected active students. Overdue Pending classes, Done classes, and other statuses are preserved. New schedules use the saved Class Frequency table and existing <code>schedule_weekly_pattern</code> RPC; subscription limits and teacher conflicts remain enforced by that existing backend function.</div><div class="row-form" style="margin-top:12px"><label>Scope<select onchange="rebuildClassesScope=this.value;rebuildClassesPreview=null;render()"><option value="all" ${rebuildClassesScope==='all'?'selected':''}>All active students</option><option value="selected" ${rebuildClassesScope==='selected'?'selected':''}>One active student</option></select></label>${rebuildClassesScope==='selected'?`<label>Student<select onchange="rebuildClassesStudentId=this.value;rebuildClassesPreview=null;render()"><option value="">Select student…</option>${students.map(st=>`<option value="${st.id}" ${rebuildClassesStudentId===st.id?'selected':''}>${esc(studentLabel(st))}</option>`).join('')}</select></label>`:''}<button class="btn-primary" onclick="loadClassFrequencyRows().then(buildRebuildPreview)" ${rebuildClassesBusy?'disabled':''}>Preview Rebuild</button></div>${preview?`<div class="hint" style="margin-top:12px"><b>Preview summary:</b> ${preview.ids.length} active student(s); ${preview.targets.length} future Pending class(es) to remove; ${preview.overdueCount} overdue Pending class(es) to preserve; ${preview.pairs.length} eligible combinations. Only combinations with saved frequency and positive remaining balance are rebuilt; future Pending records outside those eligible combinations are left untouched.</div>${pairRows}<div class="hint" style="margin-top:8px;color:var(--brick)"><b>Placeholder times:</b> Batch = 00:00; Individual = 01:00 / 02:00. Generated times are provisional and should be corrected by teachers in Dashboard → Today’s Classes. Overdue Pending records are preserved for history and do not consume subscription quota.</div><button class="btn-primary" style="margin-top:12px" onclick="executeRebuildPendingClasses()" ${rebuildClassesBusy?'disabled':''}>${rebuildClassesBusy?'Working…':'Confirm Rebuild'}</button>`:''}${rebuildClassesMsg?`<div class="hint" style="white-space:pre-wrap;margin-top:12px;color:${rebuildClassesMsg.startsWith('Rebuild finished')?'var(--forest)':'var(--brick)'}">${esc(rebuildClassesMsg)}</div>`:''}</div>`;
 }
 
 function renderFees() {
@@ -14571,7 +14578,7 @@ function renderFees() {
         const dActive=isDemandPeriod(),dRan=isDemandAlreadyRun(dMonth);
         const dMonthLabel=monthLabelOf(dMonth);
         const ord=n=>n+(n===1?'st':n===2?'nd':n===3?'rd':'th');
-        return `<h2>Raise fee requests — ${dMonthLabel}</h2>
+        return `<h2>Raise fee requests — ${dMonthLabel} ${helpBtn('raise-fees')}</h2>
           <div class="hint" style="margin-bottom:6px">Raises one fee request per student, subject and class type (Group / Individual) for the selected month. How many classes depends on the saved class frequency, the last valid payment, current balance, and teacher-leave adjustments. Amount is from Fee setup with the Discount structure applied. Every request keeps its working, so you can answer any question about it later.</div>
           <details style="margin:8px 0;padding:8px 10px;border:1px solid var(--line);border-radius:8px"><summary style="cursor:pointer;font-weight:700">Rules (click to expand)</summary><div class="hint"><ul style="margin:8px 0 0 16px;padding:0">
             <li><b>Preview</b> works any day and saves nothing. <b>Confirm</b> works on the <b>1st to 7th</b> only. Can only be run <b>once per month</b>; use Reset to remove and re-run.</li>
@@ -14942,7 +14949,7 @@ function renderWixBookings() {
 
   return `
     <div class="card">
-      <h2>Wix Demo Bookings ${newCount > 0 ? `<span class="tag" style="background:var(--brick);color:#fff">${newCount} new</span>` : ''}</h2>
+      <h2>Wix Demo Bookings ${helpBtn('demo-bookings')} ${newCount > 0 ? `<span class="tag" style="background:var(--brick);color:#fff">${newCount} new</span>` : ''}</h2>
       <p class="hint" style="margin:0 0 12px">Paid demo bookings from the LIB Education website. Call the student, then schedule a teacher and time.</p>
       ${wixBookingsMsg ? `<div style="margin-bottom:10px;font-size:13px;font-weight:500;${wixBookingsMsg.includes('✓') ? 'color:var(--green)' : 'color:var(--brick)'}">${esc(wixBookingsMsg)}</div>` : ''}
       ${wixConvertMsg && !wixConvertingId ? `<div style="margin-bottom:10px;font-size:13px;font-weight:500;${wixConvertMsg.startsWith('✓') ? 'color:var(--green)' : 'color:var(--brick)'}">${esc(wixConvertMsg)}${wixConvertMsg.startsWith('✓') && wixLastCreatedStudentId ? ` <button class="btn-small btn-primary" style="font-size:12px;margin-left:8px" onclick="setTab('students');selectStudent('${wixLastCreatedStudentId}');wixConvertMsg='';wixLastCreatedStudentId='';render()">→ Open student record</button>` : ''}</div>` : ''}
@@ -14955,7 +14962,7 @@ function renderWixBookings() {
       ${list.length === 0 ? `<div class="empty">No ${wixBookingsFilter === 'All' ? '' : wixBookingsFilter.toLowerCase() + ' '}bookings.</div>` : cards}
     </div>
     <div class="card">
-      <h2 id="demo-register-heading">Demo Register</h2>
+      <h2 id="demo-register-heading">Demo Register ${helpBtn('demo-register')}</h2>
       <div class="hint">Track demos given by teachers. When a student subscribes after a demo, link them here to trigger the ₹100 bonus in that teacher's payroll.</div>
       ${wixBookingFromId ? (() => { const wb = data.wixBookings.find(x => x.id === wixBookingFromId); return wb ? `<div style="background:var(--accent,#4e7cf6);color:#fff;border-radius:6px;padding:8px 12px;margin:10px 0;font-size:13px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px"><span>📋 Scheduling Wix booking for <b>${esc(wb.studentName)}</b> (${esc(wb.phone)}) — fill in teacher &amp; date below, then Add.</span><button class="btn-small" style="border-color:rgba(255,255,255,.5);color:#fff;background:transparent" onclick="wixBookingFromId=null;demoLogDraft={...demoLogDraft,studentName:'',parentMobile:'',notes:''};render()">✕ Cancel</button></div>` : ''; })() : ''}
       <div class="row-form" style="flex-wrap:wrap;gap:8px;margin-bottom:10px">
@@ -15535,7 +15542,7 @@ function renderSuperadmin() {
   if (!isCurrentUserSuperuserAdmin()) return '<div class="card"><div class="empty">This page is for superuser admins only.</div></div>';
   return `
     <div class="card">
-      <h2>Superadmin</h2>
+      <h2>Superadmin ${helpBtn('superadmin')}</h2>
       <div class="hint">Whole-school and data actions, for superuser admins only. Each section opens with the unlock password.</div>
     </div>
     <div class="card" style="border-color:var(--brick)">
@@ -15810,7 +15817,7 @@ function renderStudentReportCards(student, viewMonth, monthSetterFn, titlePrefix
     </div>` : '';
   const pendingRequestsCard = myPendingRequests.length ? `
     <div class="card">
-      <h2>${titlePrefix} Fee Requests</h2>
+      <h2>${titlePrefix} Fee Requests ${helpBtn('pay-fees')}</h2>
       <div class="hint">Awaiting payment — these do not count toward the class balance above until paid. Select the ones you're paying now.</div>
       <div class="table-scroll"><table>
         <tr><th></th><th>Subject</th><th>Type</th><th>Classes</th><th>Amount</th><th>Requested</th><th>Status</th></tr>
@@ -16924,7 +16931,7 @@ function renderParentPortal() {
   const kidsDue = myChildren.map(c => ({ c, amt: pendingFeeRequests(c.id).reduce((a, r) => a + (r.amountPaid || 0), 0) })).filter(x => x.amt > 0);
   const familyDue = kidsDue.length > 1 ? `
     <div class="card" style="border-color:var(--gold)">
-      <h2 style="margin-top:0">Fees due for your children</h2>
+      <h2 style="margin-top:0">Fees due for your children ${helpBtn('pay-fees')}</h2>
       <div class="table-scroll"><table>
         ${kidsDue.map(x => `<tr><td><a href="#" onclick="setParentSelectedChild('${x.c.id}');return false">${esc(x.c.name)}</a></td><td>₹${x.amt.toFixed(2)}</td></tr>`).join('')}
         <tr><td><b>Total</b></td><td><b>₹${kidsDue.reduce((a, x) => a + x.amt, 0).toFixed(2)}</b></td></tr>
@@ -18335,7 +18342,7 @@ function renderTeacherDashboard(teacher) {
       table(['Sent on', 'Type', 'Request'], p.support.map(t => '<tr>' + td(t.created_at ? esc(dayDate(String(t.created_at).slice(0, 10))) : '—') + td(esc(t.category || '—')) + td(esc(String(t.description || '').slice(0, 120))) + '</tr>')), 'var(--line)'));
 
     const chips = p.counts.map(c => '<button class="btn-small" style="margin:3px 4px 0 0" onclick="teacherPendingGo(\'' + c.id + '\')">' + c.n + ' ' + esc(c.label) + '</button>').join('');
-    const head = '<div class="card"><h2 style="margin-top:0">Pending Action Items</h2>'
+    const head = '<div class="card"><h2 style="margin-top:0">Pending Action Items ' + helpBtn('pending-actions') + '</h2>'
       + (p.total ? '<div style="font-size:15px"><b>' + p.total + ' item' + (p.total === 1 ? '' : 's') + ' need your action.</b> Tap one to jump to it.</div><div style="margin-top:6px">' + chips + '</div>'
         : '<div style="font-size:15px;color:var(--forest)"><b>✓ All clear.</b> Nothing needs your action right now.</div>')
       + (p.extrasLoading ? '<div class="hint" style="margin-top:6px">Checking practice papers and lesson prep…</div>' : '')
@@ -18399,7 +18406,7 @@ function renderTeacherDashboard(teacher) {
       const monthBonusDesc = monthBonusItems.length === 1
         ? '₹' + monthBonus.toFixed(0) + ' demo bonus — ' + mbNames[0]
         : '₹' + monthBonus.toFixed(0) + ' demo bonus (' + monthBonusItems.length + ' demos: ' + mbNames.join(', ') + ')';
-      return '<div class="card" id="teacherDemoSection"><h2>My Demo Classes <span style="font-size:13px;color:var(--hint);font-weight:400">— bonus earned on student admission</span></h2>'
+      return '<div class="card" id="teacherDemoSection"><h2>My Demo Classes ' + helpBtn('teacher-demos') + ' <span style="font-size:13px;color:var(--hint);font-weight:400">— bonus earned on student admission</span></h2>'
         + '<div class="hint">Demos you gave where the student later took admission earn you ₹100 per student (added to monthly payroll). Contact details of demo students are not shown here.</div>'
         + (monthBonus > 0 ? '<div style="margin:8px 0;padding:8px 12px;background:var(--soft);border-radius:8px;font-size:13px"><b style="color:var(--forest)">' + monthBonusDesc + '</b> for ' + teacherEarningsMonth + ' (included in your payroll)</div>' : '')
         + (demoOutcomeReady ? '<div class="hint" style="margin-top:4px">After you give a demo, press <b>✓ Mark done</b>. You can add a line on how it went.</div>' : '')
@@ -18844,7 +18851,7 @@ function renderPortalShell(bodyHtml) {
 const HELP = {
   'sub-enrollment': { t:'Subject enrollment', b:'<ul><li>Lists subjects this student is currently studying.</li><li>Add a subject to allow payments, scheduling and attendance for it.</li><li>Remove to stop new scheduling — existing records are kept.</li><li>The Online Class Link column shows the teacher\'s join link (Zoom/Meet) — click Join ↗ to open it directly.</li></ul>' },
   'sub-balances': { t:'Subscription balances', b:'<ul><li>Shows subscribed, used and remaining classes per subject and class type.</li><li>Classes are drawn from the oldest payment first.</li><li>A balance of 0 or below means the student needs to renew.</li><li>Pending fee requests are not counted until marked Paid.</li></ul>' },
-  'fee-requests': { t:'Fee requests', b:"<ul><li>A placeholder for an expected payment — doesn't add to the class count until marked Paid.</li><li>Use it when a parent confirms they will pay soon.</li><li>Amount fills in by itself from Fee setup (rate for the subject's category, Group/Individual and Online/Offline × classes, with the discount tier applied). Online/Offline starts on the mode the student uses most. You can type your own amount for a special price.</li><li><b>Calculate</b> fills classes and amount with the same rules as Fees › Raise fee requests (package, regular weekdays, irregular, owed classes) for this month, and the working is saved on the request.</li><li>Once marked Paid it becomes a real payment and classes are added.</li><li>Message generates a WhatsApp-ready reminder with UPI details.</li></ul>" },
+  'fee-requests': { t:'Fee requests', b:"<ul><li>A placeholder for an expected payment — doesn't add to the class count until marked Paid.</li><li>Use it when a parent confirms they will pay soon.</li><li>Amount fills in by itself from Fee setup (rate for the subject's category, Group/Individual and Online/Offline × classes, with the discount tier applied). Online/Offline starts on the mode the student uses most. You can type your own amount for a special price.</li><li><b>Calculate</b> fills classes and amount with the same rules as Fees › Raise fee requests (package, regular weekdays, irregular, owed classes) for this month, and the working is saved on the request.</li><li>Once marked Paid it becomes a real payment and classes are added.</li><li>Message makes one WhatsApp message for the student's whole family (see the ? next to Short reminder in the message box).</li></ul>" },
   'record-payment': { t:'Record subscription payment', b:'<ul><li>Records a new class purchase for this student.</li><li>Pick subject, class type, Online/Offline and number of classes. The amount fills in from Fee setup (rate × classes, less any discount) — you can type a different amount.</li><li>The payment date sets the expiry date (120 to 365 days depending on batch size).</li><li>Reference and Remarks are optional, for your records.</li></ul>' },
   'issue-refund': { t:'Issue a refund', b:'<ul><li>Reduces a student\'s unused class count for a specific subject and type.</li><li>Only unused classes can be refunded — cannot refund classes already given.</li><li>The original payment record is unchanged; a Refund entry is created.</li></ul>' },
   'transfer-credits': { t:'Transfer class credits', b:"<ul><li>Moves already-purchased classes from one subject to another — no money involved.</li><li>Both subjects must be the same class type (Group or Individual).</li><li>If subjects have different teachers you'll be asked to confirm, since it changes who gets paid.</li></ul>" },
@@ -18888,6 +18895,24 @@ const HELP = {
   'ai-settings': { t:'AI Settings', b:'<ul><li>The master switch turns every AI feature on or off for everyone.</li><li>The API key is kept on the server and is never sent to teachers, students or parents.</li><li><b>Cost estimate</b>: the price per model and the ₹ per $ rate used to estimate costs in AI usage.</li><li>Each person can make up to 200 AI calls a day.</li></ul>' },
   'ai-access': { t:'AI access', b:'<ul><li>Turn AI on or off for a whole role (Teacher, Student, Parent), then for single people.</li><li>A person can use AI only when the master switch, their role and they themselves are all on. Admins always can.</li><li>When a role is off, everyone in it shows a locked Off.</li><li>People see a change after they log in again.</li></ul>' },
   'payment-history': { t:'Subscription Payment History', b:'<ul><li><b>Active</b> — this payment\'s classes are being used now.</li><li><b>Expired</b> — unused classes were removed after the expiry date.</li><li>The Expires on date shows when unused classes will be lost.</li><li>Contact the Admin to correct any details.</li></ul>' },
+  'raise-fees': { t:'Raise fee requests', b:"<ul><li>Makes the month's fee requests for every active student in one go: one request per student, subject and Group / Individual.</li><li><b>Preview Fee Requests</b> works any day and saves nothing. <b>Confirm</b> works only on the 1st to 7th of the month, once per month (Reset removes the run so you can do it again).</li><li>Classes come from the student's <b>Class Frequency</b> (each weekday counted in the month), minus clear teacher-leave days, against the classes they still have. Package students (30, 50, 60 or 100 classes) are asked for the same package again.</li><li>Amount = Fee setup rate (or the student's Special fee rate) × classes, with the Discount structure.</li><li>The preview is grouped by family. You can change classes or amount, or untick a row, before Confirm. Not raised shows who was left out and why.</li><li>Every request keeps its working, so you can explain the amount to a parent.</li></ul>" },
+  'fee-message': { t:'Fee message', b:"<ul><li>One WhatsApp message for the whole family: each child's subjects, classes and amount, the total, how it was worked out, UPI and Razorpay details and the parent's app login.</li><li>The first message starts 'Please find below the tuition fee details…'. Tick <b>Short reminder</b> for a follow-up; only the opening line changes to 'gentle reminder … still due'.</li><li>You can edit the text before sending. On a phone the WhatsApp button opens the app. On a computer use 📤 Desktop (WhatsApp app) or 📤 Web (WhatsApp Web).</li><li>Sending stamps the date, so you can see when the family was last reminded and how many times.</li></ul>" },
+  'special-rates': { t:'Special fee rates', b:"<ul><li>An agreed per-class rate for one student, subject and Group / Individual, from a date and optionally until a date.</li><li>While it is in use it replaces the Fee setup rate everywhere: Record payment, fee requests, Calculate, Raise fee requests, Fee calculator and the student's and parent's Applicable Rates.</li><li>Leave Offline rate empty if it is the same as Online. Discount tiers still apply on top.</li><li>Requests and payments already saved are not changed. Remove puts the student back on Fee setup rates.</li></ul>" },
+  'class-frequency': { t:'Class Frequency', b:"<ul><li>How many classes each student has on each weekday, per subject (each class is 60 minutes).</li><li>+ New Frequency or Edit: tick the weekdays and set the classes on each day.</li><li>Raise fee requests uses it to count the month's classes, and Rebuild Pending Classes uses it to make the schedule. Saving it does not change classes already scheduled.</li><li>Pairs still Not configured are listed so you can fill them in. Teachers can set it for their own students too.</li></ul>" },
+  'class-frequency-teacher': { t:'Class Frequency', b:"<ul><li>How many classes each of your students has on each weekday, per subject (each class is 60 minutes).</li><li>Tap Set or Edit, tick the weekdays and set the classes on each day, then Save.</li><li>The office uses it to work out monthly fees and to build the class schedule, so keep it up to date when a student's timetable changes.</li><li>Saving it does not change classes already scheduled. A student with no frequency shows under Pending Action Items.</li></ul>" },
+  'rebuild-classes': { t:'Rebuild Pending Classes', b:"<ul><li>Makes a fresh schedule of upcoming classes from each student's Class Frequency, for all active students or one student.</li><li>Always press <b>Preview Rebuild</b> first: it shows, per student and subject, the future Pending classes it will remove and how many it will make.</li><li>Only future Pending classes are removed. Done classes, overdue Pending classes and other statuses stay as they are. Subscription limits and teacher clashes are still checked.</li><li>New classes get placeholder times (Group 00:00, Individual 01:00 or 02:00). The teacher sees them under 'class timings to correct' and puts in the real time.</li></ul>" },
+  'demo-bookings': { t:'Demo Bookings', b:"<ul><li>Demo bookings from the website. The tabs follow each booking: <b>New → Scheduled → Done → Converted</b> or <b>Lost</b> (or Cancelled).</li><li>New: call the family, then Confirm a teacher and time (or Schedule in Demo Register).</li><li>Scheduled: Mark done after the demo, Mark lost (with an optional reason), Reschedule or Cancel.</li><li>Done: Convert to Student creates the student record; Mark lost if they did not join. Lost cards have Reopen.</li><li>Paid / Not paid: payments made on Razorpay mark the booking Paid by themselves. A payment the app could not match is shown at the top so you can pick the booking.</li></ul>" },
+  'demo-register': { t:'Demo Register', b:"<ul><li>Every demo a teacher gave, with its status: Pending, Done, Converted or Lost.</li><li>Teachers mark their own demos Done from their Dashboard. You can set any status, add a Lost reason, or go straight to Converted.</li><li><b>Link &amp; Convert</b> links the demo to the student who joined; the teacher gets a ₹100 demo bonus in that month's payroll.</li><li>Demo results shows each teacher's demos and Converted %, and why demos were lost.</li></ul>" },
+  'class-log': { t:'Class Log', b:"<ul><li>Pick the date and the teacher whose class you are marking.</li><li>Choose student, subject, Group / Individual, Online / Offline and Present or Absent, then Log class. Absent still uses a class.</li><li>The student's classes left are shown, with a warning when they have none.</li><li>The list below shows the teacher's classes for the <b>Selected day</b> or the <b>Whole month</b> (with a month total).</li></ul>" },
+  'expenses': { t:'Expenses', b:"<ul><li>Money the institute spends other than teacher pay: rent, electricity, internet and so on.</li><li>Add an expense with date, category, amount and an optional note. Edit or delete it from the month list.</li><li>Expenses come off fee collection in Reports → Net profit. Don't enter teacher salary here; payroll is counted separately.</li></ul>" },
+  'parents': { t:'Parents', b:"<ul><li>One parent login per family. Pick a parent to see or change which children are linked.</li><li><b>Create all parent logins</b> makes the missing logins in one go: login ID and first password are the parent's 10-digit mobile.</li><li>📤 WhatsApp sends the family their login details; you can resend from the parent's page.</li><li>Parents are asked to change the password after their first login.</li></ul>" },
+  'support-inbox': { t:'Support Inbox', b:"<ul><li>Problems reported by teachers, students and parents with the Support button.</li><li>Filter by Open, In progress or Resolved. Open a ticket to reply and change its status.</li><li>The person sees your reply and the status in their own Support window.</li></ul>" },
+  'announcements': { t:'Announcements', b:"<ul><li>A short notice shown above the menu bar for the people you pick: everyone, a whole role (all teachers, students, parents or admins) or one person.</li><li>It stays until they dismiss it, it expires, or you delete it.</li></ul>" },
+  'chat': { t:'Chat', b:"<ul><li>New message starts a one-to-one chat with a teacher, student or parent. New group chats with several people at once.</li><li>Unread messages show as a number on the menu and the 💬 button.</li></ul>" },
+  'superadmin': { t:'Superadmin tools', b:"<ul><li>Only superuser admins see this menu. Each card opens with the unlock password.</li><li><b>Academic Year</b>: set the new year (e.g. 2026-27) and move every student (except Adult) up a grade.</li><li><b>Export all data</b> downloads every table as Excel; <b>Import backup</b> loads one back.</li><li><b>Danger zone</b>: export and remove old Audit and Login entries, clear all data, and switch audit logging on or off. These cannot be undone, so export first.</li></ul>" },
+  'pending-actions': { t:'Pending Action Items', b:"<ul><li>Everything waiting for you, counted on the menu and in the gold strip on your Dashboard. Tap an item to jump to it.</li><li>Counted: classes not marked (last 30 days), today's classes past their time, class timings to correct (00:00 / 01:00 / 02:00), schedule setup (Class Frequency), demos to mark done, homework and practice papers to review, students without a study plan, unread chats, notifications and announcements, and availability not set.</li><li><b>Keep an eye on</b> is a reminder list and is not counted: lesson prep, expiring classes, renewals, low balances, students not seen, late homework or papers, and your open support tickets.</li><li>You can give attendance only for the current month, so clear 'not marked' classes before the month ends.</li></ul>" },
+  'teacher-demos': { t:'My Demo Classes', b:"<ul><li>Demo classes the office booked for you.</li><li>After you give a demo, press <b>✓ Mark done</b> and add a line on how it went. Until then it shows under Pending Action Items.</li><li>If the student joins, the office marks it Converted and you get a ₹100 demo bonus in that month's payroll.</li></ul>" },
+  'pay-fees': { t:'Paying fees', b:"<ul><li>Fee requests are the fees due. They are added to the classes balance only after the payment is confirmed.</li><li><b>Pay by UPI</b>: tick the requests, press Pay ₹…, pay with the UPI ID or QR code and put the Unique ID shown in your UPI app's note. Then press Payment Completed and send the screenshot to the contact number.</li><li><b>Pay online (Razorpay)</b>: opens the payment page for card, UPI or net banking. Type the student's name so we can match it.</li><li>LIB Education confirms every payment by hand, so it can take a little time to show as paid.</li></ul>" },
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -22400,7 +22425,7 @@ function renderAdminSupport() {
   const statusColor = { open:'var(--brick)', in_progress:'#d97706', resolved:'var(--forest)' };
   return `<div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-      <h2 style="margin:0">Support Inbox</h2>
+      <h2 style="margin:0">Support Inbox ${helpBtn('support-inbox')}</h2>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${filters.map(f=>`<button class="btn-small${supportAdminFilter===f?' btn-primary':''}" onclick="supportAdminFilter='${f}';render()">${filterLabels[f]}${counts[f]?' ('+counts[f]+')':''}</button>`).join('')}
       </div>
