@@ -47,7 +47,7 @@ def guide():
         ('Accept', 'Correct name, grade, board, mode, type and academic year, then <b>Add student</b>. Same mobile as a family: add as brother/sister.'),
         ('Send the logins', 'Accept makes the parent login (mobile) and student login (student code). Send both with the 📤 buttons.'),
     ]) + bullets([
-        'Subjects are not enrolled for you: open the student and enrol them with a teacher. The form\'s subjects, school and message show on the student\'s page.',
+        'Subjects are not enrolled for you: open the student and enrol them with a teacher. The form\'s subjects, school and message show on the student\'s page; <b>View original form</b> shows it all as sent.',
         '<b>Reject</b> (Reopen undoes it) or tick forms and <b>Archive</b>. Nothing is deleted: <b>Show archived</b> brings them back.',
     ]) + note('Junk is blocked', 'Bots are stopped, at most 3 forms per mobile and 30 a day in total, and nothing becomes a student until you Accept.', 'tip'))
 
