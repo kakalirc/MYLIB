@@ -9,3 +9,8 @@
 <FilesMatch "\.(png|pdf|json|js)$">
   Header set Cache-Control "public, max-age=86400"
 </FilesMatch>
+
+# Keep the user guide PDFs out of Google search (the login page should be the result)
+<FilesMatch "\.pdf$">
+  Header set X-Robots-Tag "noindex"
+</FilesMatch>
