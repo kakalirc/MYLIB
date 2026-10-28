@@ -1,7 +1,7 @@
-"""Builds guide-teacher.pdf, guide-student.pdf and guide-parent.pdf in the repo root.
+"""Builds guide-teacher.pdf, guide-student.pdf, guide-parent.pdf and guide-admin.pdf in the repo root.
 
 Run from anywhere:  python3 guides-src/build.py   (needs Node with Playwright, pdftotext, pypdf)
-Edit the wording in teacher.py, student.py and parent.py; the look lives in guide.py.
+Edit the wording in teacher.py, student.py, parent.py and admin.py; the look lives in guide.py.
 """
 import os, re, subprocess, sys
 from pypdf import PdfReader, PdfWriter
@@ -77,5 +77,5 @@ def build(mod):
 
 
 if __name__ == '__main__':
-    for name in sys.argv[1:] or ['teacher', 'student', 'parent']:
+    for name in sys.argv[1:] or ['teacher', 'student', 'parent', 'admin']:
         build(importlib.import_module(name))

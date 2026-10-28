@@ -285,7 +285,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-28 08:55 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-28 09:04 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -10106,6 +10106,8 @@ function supportModalHtml() {
   </div>`;
 }
 
+// The step-by-step PDF guide for each role (built from guides-src/), linked at the top of the Quick Guide.
+const HELP_GUIDE_PDF = { Admin: 'guide-admin.pdf', Teacher: 'guide-teacher.pdf', Student: 'guide-student.pdf', Parent: 'guide-parent.pdf' };
 function aiHelpPanelHtml() {
   if (!aiHelp.open) return '';
   const kb = supportKb();
@@ -10118,7 +10120,7 @@ function aiHelpPanelHtml() {
       <button class="help-close" onclick="toggleHelpAi()" style="position:static">&#x2715;</button>
     </div>
     <div style="flex:1;overflow-y:auto;max-height:55vh;border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:10px;font-size:13px;line-height:1.6">
-      ${aiHelp.messages.length === 0 ? `<div class="hint" style="margin-bottom:8px"><b>Quick Guide — ${esc(currentRole)}</b></div><ul style="margin:0;padding-left:18px">${faqLines.map(l=>`<li style="margin-bottom:4px">${esc(l)}</li>`).join('')}</ul>` :
+      ${aiHelp.messages.length === 0 ? `<div class="hint" style="margin-bottom:8px"><b>Quick Guide — ${esc(currentRole)}</b>${HELP_GUIDE_PDF[currentRole] ? ` · <a href="${HELP_GUIDE_PDF[currentRole]}" target="_blank" rel="noopener" style="color:var(--forest)">📖 Full guide (PDF)</a>` : ''}</div><ul style="margin:0;padding-left:18px">${faqLines.map(l=>`<li style="margin-bottom:4px">${esc(l)}</li>`).join('')}</ul>` :
         aiHelp.messages.map(m=>`<div style="margin-bottom:8px"><b style="color:${m.role==='user'?'var(--forest)':'var(--ink)'}">${m.role==='user'?'You':'Help Bot'}:</b> <span style="white-space:pre-wrap">${esc(m.content)}</span></div>`).join('')}
       ${aiHelp.loading ? '<div class="hint" style="text-align:center;padding:4px">Thinking…</div>' : ''}
     </div>

@@ -9,18 +9,20 @@ def guide():
     common.getting_started(g, 'the admin or your colleagues')
 
     g.add('whatsnew', 'Start here', 'What’s new in this edition', 'The biggest additions since the last guide.', g2(
-        box('Research tab', 'AI lesson prep briefs, student insights by chapter, question research from past papers and your own resource library.'),
-        box('My Students tab', 'Contact details, subjects and class balances for every student enrolled with you.'),
+        box('Pending Action Items', 'One list of everything waiting for you, with a count on the menu and a gold strip on your Dashboard.'),
+        box('Class Frequency', 'Set how many classes each student has on each weekday. The office uses it for fees and the schedule.'),
     ) + g2(
-        box('Smarter practice papers', 'Tick the sections you want and the lessons to cover. Old-syllabus questions stay out unless you ask for them.'),
-        box('Change MCQ marks', 'MCQs are still marked for you, but you can now change those marks when you review a paper.'),
-    ) + note('Where to find it', 'The <b>Question Bank</b> and <b>Research</b> tabs appear once the admin switches them on for you. '
+        box('Mark demos done', 'After a demo, press <b>✓ Mark done</b> and add a line on how it went.'),
+        box('Class timings to correct', 'Classes at 00:00, 01:00 or 02:00 are placeholders: put in the real time.'),
+    ) + note('Where to find it', 'Pending Action Items is at the top of the menu, under Dashboard. Class Frequency is in the Teaching group. '
              'Tap <b>?</b> next to a heading in the app for quick help on that screen.', 'tip'), new=True)
 
-    g.add('portal', 'Overview', 'Your portal', 'Up to twelve tabs. Everything is limited to your own classes and students.', table(
+    g.add('portal', 'Overview', 'Your portal', 'Up to fourteen tabs (* only when the admin switches it on for you). Everything is limited to your own classes and students.', table(
         ['Tab', 'What you do there'], [
             ['Dashboard', 'Today’s classes, earnings, alerts and AI tools'],
+            ['Pending Action Items', 'Everything waiting for you, one tap to each'],
             ['Class Schedule', 'Create, run and export your timetable'],
+            ['Class Frequency', 'Classes per weekday for each student and subject'],
             ['My Students', 'Contacts, subjects and class balances of your students'],
             ['Study Plans', 'Topic roadmap for each student and subject'],
             ['Homework', 'Assign, track and review homework'],
@@ -31,7 +33,7 @@ def guide():
             ['Give Attendance', 'Record the classes you have held'],
             ['My Profile', 'Contact details, bank and UPI, online class link, photo'],
             ['Setup', 'Change your password'],
-        ]) + note('* Switched on by the admin', 'You see the Question Bank and Research tabs only when the admin has turned them on for you.', 'tip'))
+        ]))
 
     g.add('dashboard', 'Overview', 'Dashboard', 'Everything you need at the start of the day.', g3(
         '<div class="stat"><div class="big">Given</div><div class="s">Classes given today</div></div>',
@@ -44,10 +46,37 @@ def guide():
         ['Student milestones', 'Alerts at 25, 50, 100 and 200 classes'],
         ['Low balance alert', 'Students down to their last few classes'],
         ['Not seen in a while', 'No class for 10 days or more'],
-        ['My demo classes', 'Status and bonus earned'],
+        ['My demo classes', 'Mark demos done; status and bonus earned'],
         ['Expiring soon', 'Classes about to lapse'],
         ['Study plans', '“X without a plan”: tap it to go straight to Study Plans'],
     ]))
+
+    g.add('pending', 'Overview', 'Pending Action Items', 'Everything waiting for you, in one place.', bullets([
+        'The number on the menu and the gold strip on your Dashboard count every item. Tap an item to go straight to it.',
+        'Attendance can be given only for the current month, so clear classes not marked before the month ends.',
+    ]) + table(['Counted item', 'What to do'], [
+        ['Classes not marked', 'Pending classes from the last 30 days'],
+        ['Today’s classes not done', 'Today’s classes whose time has passed'],
+        ['Class timings to correct', 'Classes at 00:00, 01:00 or 02:00'],
+        ['Schedule setup', 'No Class Frequency or no upcoming classes'],
+        ['Demos to mark done', 'Demos you have given'],
+        ['Homework and papers', 'Work your students have submitted'],
+        ['No study plan', 'Students without a plan yet'],
+        ['Unread messages', 'Chats, notifications and announcements'],
+        ['Availability not set', 'Add your weekly hours'],
+    ]) + note('Keep an eye on', 'Reminders, not counted: lesson prep, expiring classes, renewals, low balances, students not seen, '
+              'late homework or papers, your open support tickets.', 'tip'), new=True)
+
+    g.add('frequency', 'Classes', 'Class Frequency', 'How many classes each student has on each weekday.', steps([
+        ('Open Class Frequency', 'In the Teaching group. You see only your own students and subjects. Search by name or subject.'),
+        ('Tap Set or Edit', 'Next to the student and subject.'),
+        ('Tick the weekdays', 'And set how many classes on each day (each class is 60 minutes). Then Save.'),
+    ]) + note('Why it matters', ['The office works out each month’s fee from it.',
+                                 'The class schedule is rebuilt from it, so keep it up to date when a timetable changes.',
+                                 'Saving it does not change classes already scheduled.']) + h3('Placeholder class times') + bullets([
+        'When the office rebuilds the schedule, new classes get a placeholder time: <b>00:00</b> for Group, <b>01:00</b> or <b>02:00</b> for Individual.',
+        'They show under <b>Class timings to correct</b> in Pending Action Items. Open the class and set the real time.',
+    ]), new=True)
 
     g.add('schedule', 'Classes', 'Class schedule', 'Plan your classes and mark them done.', h3('Create') + bullets([
         '<b>Weekly pattern:</b> pick days and times; it repeats until the subscribed count is filled.',
@@ -84,7 +113,7 @@ def guide():
         'For each subject: classes subscribed, used and left, and the next expiry date.',
         'Search by student name, parent, phone or email.',
         'Fees and payments are not shown. Ask the admin about those.',
-    ]), new=True)
+    ]))
 
     g.add('studyplans', 'Students', 'Study Plans', 'A topic roadmap for each student and subject.', steps([
         ('Open the plan', 'In the Study Plans tab (it opens in Report view), tap a student’s row, then pick the subject.'),
@@ -136,7 +165,7 @@ def guide():
         '<span class="m-sel">CBSE</span><span class="m-sel">Sanskrit</span><span class="m-sel">Class 10</span>' + call(1) + '<br>'
         '<span class="m-sel">All types</span><span class="m-sel">All difficulties</span><span class="m-sel">Ch 3 · शिशुलालनम्</span>' + call(2)
         + '<span class="m-input">Search question text…</span>',
-        '① Board, subject and class unlock the filters. ② Then narrow by type, difficulty, chapter or text.'), new=True)
+        '① Board, subject and class unlock the filters. ② Then narrow by type, difficulty, chapter or text.'))
 
     g.add('qbreview', 'Question Bank', 'Reviewing questions', 'You know your subject best: check each question before approving it.', screen(
         '<div class="m-card"><div class="m-meta"><input type="checkbox"> <b>Section B</b><span class="m-tag">Short</span><b>2 marks</b>'
@@ -149,7 +178,7 @@ def guide():
         ('Fix anything wrong', 'Tap <b>Edit</b>: change the text, type, marks (half marks such as 1.5 are fine), difficulty, chapter or answer key. Tap Save.'),
         ('Approve', 'Tap <b>✓ Approve</b>. The question moves to the Full Question Bank and can be used in papers.'),
     ]) + note('Old syllabus', 'These questions are hidden; tick <b>Old syllabus only</b> to see them. Auto-fill never uses them, '
-              'but <b>Swap</b> can add one.', 'tip'), new=True)
+              'but <b>Swap</b> can add one.', 'tip'))
 
     g.add('qbchapters', 'Question Bank', 'Chapters and duplicates', 'Keep the bank tidy so papers are balanced across chapters.', h3('Chapters') + bullets([
         'Every question should belong to a textbook chapter. <b>No chapter</b> in red means it isn’t linked yet.',
@@ -161,7 +190,7 @@ def guide():
     ]) + h3('Duplicates') + chips([
         ('⚠ Duplicate', 'c-red', 'The same question appears more than once'),
         ('⚠ Already in bank', 'c-red', 'An approved copy already exists, so you can leave this one'),
-    ]) + note('Tip', 'Tick <b>Duplicates only</b> next to the filters to see just the repeated questions.', 'tip'), new=True)
+    ]) + note('Tip', 'Tick <b>Duplicates only</b> next to the filters to see just the repeated questions.', 'tip'))
 
     g.add('papers', 'Question Bank', 'Building a practice paper', 'A full board-style paper, filled from the approved bank in one tap.', steps([
         ('Start a paper', 'In <b>Practice Papers</b>, tap <b>+ New paper</b> and pick a blueprint, for example CBSE Class 10 Sanskrit, 80 marks. '
@@ -177,7 +206,7 @@ def guide():
         ['↑ ↓', 'Move it up or down'],
         ['Remove, + Add', 'Take one out, or add one to a section'],
         ['Re-run auto-fill', 'Fill the whole paper again, using the same sections and lessons'],
-    ]), new=True)
+    ]))
 
     g.add('assign', 'Question Bank', 'Assigning and downloading papers', 'Send a ready paper to your students, or print it.', steps([
         ('Open the paper', 'Tap it in the Practice Papers list.'),
@@ -195,7 +224,7 @@ def guide():
             '<div class="m-btns"><span class="m-btn">Back to draft</span><span class="m-btn p">Assign to students</span></div>'
             '<div class="m-tabs" style="margin-top:2mm"><span class="on">Students (6) <span class="m-badge" style="background:#c99a3c">2</span></span><span>Questions (38)</span>'
             '<span style="flex:1"></span><span>⬇ Question paper PDF</span><span>⬇ With answer key</span></div>',
-            'A ready paper: assign it, then download it with or without answers.'), new=True)
+            'A ready paper: assign it, then download it with or without answers.'))
 
     g.add('marking', 'Question Bank', 'Marking practice papers', 'MCQs are marked automatically. You mark the written answers.',
         '<p>A gold number on the <b>Practice Papers</b> tab shows how many papers are waiting. Open a paper, then its <b>Students</b> tab, '
@@ -209,7 +238,7 @@ def guide():
                    '<b>Save marks for later</b> keeps your work without finishing.'),
     ]) + note('Good to know', ['Answers you leave unmarked count as 0; the app asks before you finish.',
                                'The student and parent see the score and feedback as soon as you mark it reviewed.',
-                               'Reopen a reviewed paper with <b>View / edit marks</b> to change it.']), new=True)
+                               'Reopen a reviewed paper with <b>View / edit marks</b> to change it.']))
 
     # ---------------- Research ----------------
     g.add('research', 'Research', 'Research: lesson prep', 'An AI brief for the chapter you teach next.', steps([
@@ -218,7 +247,7 @@ def guide():
         ('Read the brief', 'Key points, a teaching order, common mistakes, examples and practice questions, plus matching questions from your Question Bank.'),
         ('Save it', 'Tap <b>Save</b> to keep it under <b>Saved briefs</b>, with the student’s name. Filter saved briefs by student.'),
     ]) + note('Check before class', 'AI can get things wrong. Check the brief against the textbook before you use it.', 'warn')
-        + note('Switched on by the admin', 'The Research tab appears only when the admin has turned it on for you and AI is on.', 'tip'), new=True)
+        + note('Switched on by the admin', 'The Research tab appears only when the admin has turned it on for you and AI is on.', 'tip'))
 
     g.add('research2', 'Research', 'Research: insights, question research, resources', 'Know where students struggle and what the board asks.', g3(
         box('Student insights', ['Marks by chapter and question type, from practice papers you marked', 'Under 60% shows as weak',
@@ -227,7 +256,7 @@ def guide():
                                   'The past questions themselves']),
         box('Resource library', ['Keep notes, worksheets, pictures and links by subject and chapter',
                                  'Tick <b>Share with students</b> to show an item to your students and their parents under “From your teachers”']),
-    ) + note('Good to know', 'Student insights and Question research use the Question Bank, so they need Question Bank access too.'), new=True)
+    ) + note('Good to know', 'Student insights and Question research use the Question Bank, so they need Question Bank access too.'))
 
     # ---------------- money and more ----------------
     g.add('earnings', 'Money', 'Earnings, salary slip and demos', 'See what you have earned, and when you were paid.', g2(
@@ -236,11 +265,12 @@ def guide():
         box('Payment status', ['Net payable for the month', 'Paid (with date and reference) or Pending', 'Printable salary slip']),
     ) + note('Your bank details', 'Enter your bank account, IFSC and UPI ID once in My Profile. After that only the admin can change them.')
         + h3('Demos and bonus: ₹100 for every demo student who joins') + chips([
-        ('Pending', 'c-gold', 'Demo given, student not enrolled yet'),
+        ('Pending', 'c-gold', 'Demo booked: press ✓ Mark done after you give it'),
+        ('Done', 'c-char', 'Demo given; the office follows up with the family'),
         ('Converted', 'c-green', 'Student enrolled: ₹100 bonus earned'),
-        ('Cancelled', 'c-grey', 'Demo did not go ahead: no bonus'),
+        ('Lost', 'c-grey', 'The student did not join: no bonus'),
     ]) + bullets([
-        'You see your own demos: date, time, subject, board, status and bonus. Demo students’ contact details are not shown.',
+        'Your own demos are on your Dashboard: date, time, subject, board, status and bonus. Demo students’ contact details are not shown.',
         'The bonus is added to your payroll for the month the student joins.',
     ]))
 
@@ -265,20 +295,20 @@ def guide():
     ]))
 
     g.add('quickref', 'Quick reference', 'Quick reference', 'I want to… where do I go?', table(['I want to…', 'Go to'], [
-        ['Plan my classes', 'Class Schedule'],
+        ['See what needs my action', 'Pending Action Items'],
+        ['Plan my classes, set leave', 'Class Schedule, Availability'],
+        ['Set a student’s weekly classes', 'Class Frequency'],
+        ['Mark a demo done', 'Dashboard › My Demo Classes › ✓ Mark done'],
         ['Record a class I held', 'Give Attendance'],
-        ['Set leave', 'Availability'],
         ['Plan a student’s topics', 'Study Plans'],
         ['Set or review homework', 'Homework'],
         ['Check new questions', 'Question Bank › Review Queue'],
         ['Make a practice paper', 'Question Bank › Practice Papers › + New paper'],
-        ['Print a paper or answer key', 'Open the paper › ⬇ Question paper PDF / With answer key'],
         ['Mark submitted papers', 'Practice Papers › paper › Students › Review'],
         ['See a student’s contacts and balance', 'My Students'],
         ['Prepare a lesson', 'Research › Lesson prep'],
         ['See what I earned', 'Dashboard › My earnings'],
         ['Print my salary slip', 'My Attendance Report'],
-        ['Update my bank details', 'My Profile'],
         ['Report a problem', 'Support button'],
     ]))
     return g
