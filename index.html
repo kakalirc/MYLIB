@@ -330,7 +330,7 @@ if (location.hostname !== 'app.libeducation.com') {
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-28 10:30 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-28 10:15 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -18200,15 +18200,16 @@ async function loadStarExtras(force) {
   const since = starStart + 'T00:00:00+05:30';
   const rowsOf = r => (r && !r.error && r.data) ? r.data : [];
   const out = { papers: [], assigns: [], qbActs: [], resources: [], notes: [] };
-  const jobs = [];
+  const jobs = [], done = {};
+  const starJob = (label, p) => (done[label] = false, p).then(() => { done[label] = true; }, e => { done[label] = true; throw new Error(label + ': ' + ((e && e.message) || e)); });
   if (!isT || teacherQbAccess) {
-    jobs.push((async () => {
+    jobs.push(starJob('practice papers', (async () => {
       let pq = sb.from('qb_practice_papers').select('id,title,total_marks,created_at,created_by_teacher_id').not('created_by_teacher_id', 'is', null);
       if (isT) pq = pq.eq('created_by_teacher_id', tid);
       out.papers = rowsOf(await pq);
       if (out.papers.length) out.assigns = await insightsSelectIn('qb_student_assignments', 'id,paper_id,student_id,status,submitted_at,reviewed_at,total_score', 'paper_id', out.papers.map(p => p.id));
-    })());
-    jobs.push((async () => {
+    })()));
+    jobs.push(starJob('question bank', (async () => {
       const cols = 'id,approved_by,approved_at,added_by,created_at';
       let qs, linked = {};
       if (isT) {
@@ -18229,13 +18230,13 @@ async function loadStarExtras(force) {
         if (q.approved_by && linked[q.approved_by] && !seen.has('a' + q.id)) { seen.add('a' + q.id); out.qbActs.push({ teacherId: linked[q.approved_by], at: q.approved_at }); }
         if (q.added_by && linked[q.added_by] && !seen.has('n' + q.id)) { seen.add('n' + q.id); out.qbActs.push({ teacherId: linked[q.added_by], at: q.created_at }); }
       });
-    })());
+    })()));
   }
   if (!isT || teacherResearchAccess) {
-    jobs.push((async () => { out.resources = rowsOf(await sb.from('teacher_resources').select('id,teacher_id,shared,created_at').gte('created_at', since)); })());
-    jobs.push((async () => { out.notes = rowsOf(await sb.from('teacher_research_notes').select('id,teacher_id,student_id,created_at').gte('created_at', since)); })());
+    jobs.push(starJob('resources', (async () => { out.resources = rowsOf(await sb.from('teacher_resources').select('id,teacher_id,shared,created_at').gte('created_at', since)); })()));
+    jobs.push(starJob('lesson prep', (async () => { out.notes = rowsOf(await sb.from('teacher_research_notes').select('id,teacher_id,student_id,created_at').gte('created_at', since)); })()));
   }
-  if (!isT) jobs.push((async () => {
+  if (!isT) jobs.push(starJob('app usage', (async () => {
     const r = await appUsageSelect(since, new Date(Date.now() + 86400000).toISOString());
     const agg = {};
     (r.rows || []).forEach(e => {
@@ -18250,10 +18251,16 @@ async function loadStarExtras(force) {
       starUsage[t] = {};
       Object.entries(months).forEach(([m, v]) => { starUsage[t][m] = { days: v.days.size, features: [...v.features] }; });
     });
-  })());
-  await Promise.all(jobs.map(j => j.catch(() => {})));   // a table not set up yet just leaves its rows empty
-  starExtra = { loading: false, loaded: true, ...out };
+  })()));
+  const errs = [];
+  // A table not set up yet just leaves its rows empty; give up waiting after 30 seconds so the page never hangs.
+  await Promise.race([Promise.all(jobs.map(j => j.catch(e => { errs.push(String((e && e.message) || e)); }))), new Promise(r => setTimeout(() => { errs.push('still waiting after 30 s for ' + (Object.keys(done).filter(l => !done[l]).join(', ') || 'nothing')); r(); }, 30000))]);
+  starExtra = { loading: false, loaded: true, error: errs.join('; '), ...out };
   render();
+}
+// Draws a Star Teacher block; a bad row of data shows a short message instead of breaking the whole page.
+function starSafe(fn, where) {
+  try { return fn(); } catch (e) { console.error('Star Teacher', where, e); return '<div class="card hint" style="color:var(--brick)">Star Teacher could not be counted (' + esc(where + ': ' + ((e && e.message) || e)) + '). Please send this line to support.</div>'; }
 }
 function resetStarState() {
   starOn = false; starStart = STAR_DEFAULT_START; starSetupMissing = false; starSettingsRowId = null; starMsg = '';
@@ -18512,7 +18519,8 @@ function starArm(feature) {
   starArmUntil = Date.now() + 15000; starArmLabel = a[0];
   if (a[1]) loadStarExtras(true);
 }
-function starAfterRender() {
+function starAfterRender() { try { starAfterRenderInner(); } catch (e) { console.error('Star Teacher pop-up', e); } }
+function starAfterRenderInner() {
   if (!starOn || currentRole !== 'Teacher' || todayStr < starStart || !starExtra.loaded) return;
   const month = todayStr.slice(0, 7);
   const sc = starScore(currentLinkedId, month);
@@ -18567,7 +18575,8 @@ function exportStarLeaderboard() {
 function starAdminCardHtml() {
   const months = starMonths();
   if (!months.includes(starAdminMonth)) starAdminMonth = months[months.length - 1];
-  const list = starAdminOpen && starExtra.loaded ? starAdminRows(starAdminMonth) : [];
+  let list = [], listErr = '';
+  try { if (starAdminOpen && starExtra.loaded) list = starAdminRows(starAdminMonth); } catch (e) { console.error('Star Teacher leaderboard', e); listErr = (e && e.message) || String(e); }
   const zero = list.filter(r => r.sc.total === 0);
   return `
     <div class="card">
@@ -18590,6 +18599,8 @@ function starAdminCardHtml() {
         ${list.length ? '<button class="btn-small" onclick="exportStarLeaderboard()">⬇ Excel</button>' : ''}
       </div>
       ${todayStr < starStart ? `<div class="hint">The game starts on ${esc(dayDate(starStart))}, so everyone is on 0 until then.</div>` : ''}
+      ${listErr ? `<div class="hint" style="color:var(--brick)">Could not count points: ${esc(listErr)}</div>` : ''}
+      ${starExtra.error ? `<div class="hint">Some data could not be read: ${esc(starExtra.error)}</div>` : ''}
       ${!starExtra.loaded ? '<div class="hint">Loading…</div>' : `
       <div class="table-scroll"><table class="no-stack">
         <tr><th>#</th><th>Teacher</th><th>Points</th><th>Level</th><th>Badges</th><th>vs last month</th></tr>
@@ -18912,7 +18923,7 @@ function renderTeacherDashboard(teacher) {
 
   return `
     ${teacherPendingBannerHtml(pend)}
-    ${starDashLineHtml(teacher)}
+    ${starSafe(() => starDashLineHtml(teacher), 'dashboard')}
     ${celebHtml}
     ${milestonesHtml}
     <div class="stat-grid">
@@ -19208,7 +19219,8 @@ function renderTeacherPortal() {
   const pendingTotal = teacherPendingItems(teacher).total;
   const pendingBadge = pendingTotal ? ` <span style="color:var(--gold-dark,#b8860b)">(${pendingTotal})</span>` : '';
   teacherMobileTabsList[1] = ['pendingactions', 'Pending Action Items' + (pendingTotal ? ` (${pendingTotal})` : '')];
-  const starEarn = starOn ? starEarnNow(teacher).total : 0;
+  let starEarn = 0;
+  try { starEarn = starOn ? starEarnNow(teacher).total : 0; } catch (e) { console.error('Star Teacher menu', e); }
   if (starOn) teacherMobileTabsList.splice(2, 0, ['starteacher', '🏆 Star Teacher' + (starEarn ? ` (+${starEarn})` : '')]);
   const currentTeacherTabLabel = (teacherMobileTabsList.find(([key])=>key===teacherPortalTab) || [,''])[1];
   const sidebarHtml = `
@@ -19285,7 +19297,7 @@ function teacherPortalBodyHtml(teacher) {
     return renderTeacherSetup();
   }
   if (teacherPortalTab === 'starteacher' && starOn) {
-    return renderStarTeacher(teacher);
+    return starSafe(() => renderStarTeacher(teacher), 'page');
   }
   const monthSessions = data.sessions.filter(s=>s.teacherId===teacher.id && s.date.startsWith(teacherViewMonth));
   const presentSessions = monthSessions.filter(s=>s.status==='Present');
