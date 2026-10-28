@@ -139,7 +139,7 @@ table.t tr { break-inside: avoid; }
 
 /* contents */
 .toc { margin-top: 2mm; }
-.toc a { display: flex; align-items: baseline; gap: 2.4mm; padding: 0.45mm 0; border-bottom: 1px solid var(--line); font-size: 8.9pt; }
+.toc a { display: flex; align-items: baseline; gap: 2.4mm; padding: 0.3mm 0; border-bottom: 1px solid var(--line); font-size: 8.9pt; }
 .toc .num { width: 6mm; color: var(--orange); font-weight: 700; font-size: 8.4pt; }
 .toc .tt { flex: 1; color: var(--char); font-weight: 500; }
 .toc .grp { font-size: 6.8pt; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }

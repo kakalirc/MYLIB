@@ -14,7 +14,7 @@ def guide():
     ) + g2(
         box('Mark demos done', 'After a demo, press <b>✓ Mark done</b> and add a line on how it went.'),
         box('Class timings to correct', 'Classes at 00:00, 01:00 or 02:00 are placeholders: put in the real time.'),
-    ) + note('Where to find it', 'Pending Action Items is at the top of the menu, under Dashboard. Class Frequency is in the Teaching group. '
+    ) + note('Where to find it', 'Pending Action Items is at the top of the menu, under Dashboard, with Star Teacher below it when it is on. Class Frequency is in the Teaching group. '
              'Tap <b>?</b> next to a heading in the app for quick help on that screen.', 'tip'), new=True)
 
     g.add('portal', 'Overview', 'Your portal', 'Up to fourteen tabs (* only when the admin switches it on for you). Everything is limited to your own classes and students.', table(
@@ -53,9 +53,8 @@ def guide():
 
     g.add('pending', 'Overview', 'Pending Action Items', 'Everything waiting for you, in one place.', bullets([
         'The number on the menu and the gold strip on your Dashboard count every item. Tap an item to go straight to it.',
-        'Attendance can be given only for the current month, so clear classes not marked before the month ends.',
+        'Attendance can be given only for the current month, so mark every class before the month ends.',
     ]) + table(['Counted item', 'What to do'], [
-        ['Classes not marked', 'Pending classes from the last 30 days'],
         ['Today’s classes not done', 'Today’s classes whose time has passed'],
         ['Class timings to correct', 'Classes at 00:00, 01:00 or 02:00'],
         ['Schedule setup', 'No Class Frequency or no upcoming classes'],
@@ -66,6 +65,18 @@ def guide():
         ['Availability not set', 'Add your weekly hours'],
     ]) + note('Keep an eye on', 'Reminders, not counted: lesson prep, expiring classes, renewals, low balances, students not seen, '
               'late homework or papers, your open support tickets.', 'tip'), new=True)
+
+    g.add('star', 'Overview', 'Star Teacher', 'A monthly points game, just for fun, when the office switches it on.', bullets([
+        'Find it below Pending Action Items. Only you see your own points.',
+        'Points for classes marked the same day, remarks, homework given and reviewed within 48 hours, practice papers, study plans, '
+        'lesson prep, shared resources, demos, renewals and using the app.',
+        'The <b>+number</b> next to it in the menu is what you can earn right now: open <b>Earn now</b> to see how.',
+    ]) + chips([
+        ('Bronze', 'c-orange', '100 points in the month'),
+        ('Silver', 'c-grey', '250 points'),
+        ('Gold', 'c-gold', '450 points'),
+        ('Platinum', 'c-char', '700 points'),
+    ]) + note('Trophy shelf', 'Badges you earn stay on your trophy shelf, even after the month ends.', 'tip'), new=True)
 
     g.add('frequency', 'Classes', 'Class Frequency', 'How many classes each student has on each weekday.', steps([
         ('Open Class Frequency', 'In the Teaching group. You see only your own students and subjects. Search by name or subject.'),
@@ -95,7 +106,8 @@ def guide():
         ('Mark it', 'Present or Absent, with remarks if needed.'),
         ('Check the balance', 'The form shows how many classes that student has left.'),
     ]) + note('Watch out', ['The app warns you if the student has no classes left or the entry is a duplicate.',
-                            'You can record the current month only. For earlier months, contact the admin.'], 'warn')
+                            'You can record the current month only, never a future date. A gold box says so; from the 25th it turns red '
+                            'and counts down the days until the month locks. For an earlier month, call the admin (tap the number).'], 'warn')
         + h3('My Attendance Report') + bullets([
             'Classes taught, by date, student and subject.',
             'Total present, absent and students taught.',

@@ -169,7 +169,7 @@ def guide():
     ) + note('Teacher access', 'Teachers see the Question Bank and Research tabs only when you switch them on in Settings.', 'tip'))
 
     g.add('settings', 'System', 'Settings, admins, AI and audit', 'How the app is set up.', table(['Page', 'What is there'], [
-        ['Settings', 'Grades, categories, boards, subject names; Question Bank access and Research access per teacher; add users; change your password'],
+        ['Settings', 'Grades, categories, boards, subject names; Question Bank access and Research access per teacher; Star Teacher switch, start date and leaderboard; add users; change your password'],
         ['Manage Admins', 'Add or remove admin accounts'],
         ['AI', 'Master switch, AI access per role and per person, AI usage and estimated cost'],
         ['Audit Log', 'Every change made in the app, login activity and App usage (who uses which feature)'],
