@@ -333,7 +333,9 @@ if (location.hostname !== 'app.libeducation.com') {
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-28 15:20 IST'; // updated automatically each time a new file is generated
+// The app links every WhatsApp message gives (never the address the sender happens to be on).
+const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
+const BUILD_TIMESTAMP = '2026-10-28 15:35 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -4368,7 +4370,7 @@ function demoConfirmMessage(d) {
   if (subj) lines.push(`📚 Subject: ${subj}${d.board ? ' (' + d.board + ')' : ''}`);
   if (tName) lines.push(`👨‍🏫 Teacher: ${tName}`);
   if (classLink) lines.push(`🔗 Demo Class Link: ${classLink}`);
-  lines.push(`\nPlease ensure your child is ready at the scheduled time. Looking forward to seeing you! 😊\n\n— LIB Education`);
+  lines.push(`\nPlease ensure your child is ready at the scheduled time. Looking forward to seeing you! 😊\n\n${APP_LINK_LINES.join('\n')}\n\n— LIB Education`);
   return lines.join('\n');
 }
 function wixBookingConfirmMessage(b) {
@@ -4394,7 +4396,7 @@ function wixBookingConfirmMessage(b) {
   if (b.subject) lines.push(`📚 Subject: ${b.subject}`);
   if (tName) lines.push(`👨‍🏫 Teacher: ${tName}`);
   if (classLink) lines.push(`🔗 Demo Class Link: ${classLink}`);
-  lines.push(`\nPlease ensure your child is ready at the scheduled time. Looking forward to seeing you! 😊\n\n— LIB Education`);
+  lines.push(`\nPlease ensure your child is ready at the scheduled time. Looking forward to seeing you! 😊\n\n${APP_LINK_LINES.join('\n')}\n\n— LIB Education`);
   return lines.join('\n');
 }
 function startEditDemo(d) {
@@ -5057,7 +5059,7 @@ function hwWhatsAppDraft(hw) {
   if (hw.description) msg += `\n${hw.description}`;
   if (hw.studyPlanTopic) msg += `\n🔗 Topic: ${hw.studyPlanTopic}`;
   if (hw.dueDate) msg += `\n📅 Due: ${dayDate(hw.dueDate)}`;
-  msg += `\n\n— My LIB Education`;
+  msg += `\n\n${APP_LINK_LINES.join('\n')}\n\n— My LIB Education`;
   return msg.replace(/\\n/g, '\n');
 }
 
@@ -5069,7 +5071,7 @@ function hwReviewWhatsAppDraft(hw) {
   let msg = `✅ *Homework Reviewed — ${sjName}*\n\n👤 ${sName}\n📝 ${hw.title}`;
   if (hw.marks !== '' && hw.marks != null) msg += `\n⭐ Score: ${hw.marks}${hw.totalMarks !== '' && hw.totalMarks != null ? ` / ${hw.totalMarks}` : ''}`;
   if (hw.teacherFeedback) msg += `\n💬 Feedback: ${hw.teacherFeedback}`;
-  msg += `\n\n— My LIB Education`;
+  msg += `\n\n${APP_LINK_LINES.join('\n')}\n\n— My LIB Education`;
   return msg.replace(/\\n/g, '\n');
 }
 
@@ -7276,13 +7278,13 @@ async function runBulkParents() {
 function bulkParentMessage(r) {
   const names = r.kids.map(s => s.name);
   const nameList = names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] : names[0];
-  const link = location.origin + location.pathname;
   const lines = [`Dear ${r.parentName || 'Parent'},`, ''];
   if (r.action === 'create') {
-    lines.push(`Your My LIB parent login is ready. You can see ${nameList}'s classes, attendance, homework and fees.`, '', `Open: ${link}`, `Login ID: ${r.username}`, `Password: ${r.username}${r.resend ? ' (unless you have already changed it)' : ''}`, '', 'Please change your password after you log in (Change your password, at the bottom of the page).');
+    lines.push(`Your My LIB parent login is ready. You can see ${nameList}'s classes, attendance, homework and fees.`, '', `Login ID: ${r.username}`, `Password: ${r.username}${r.resend ? ' (unless you have already changed it)' : ''}`, '', 'Please change your password after you log in (Change your password, at the bottom of the page).');
   } else {
-    lines.push(`${nameList} ${names.length > 1 ? 'are' : 'is'} now on your My LIB parent login.`, '', `Open: ${link}`, `Login ID: ${r.username}`, 'Password: the one you already use.');
+    lines.push(`${nameList} ${names.length > 1 ? 'are' : 'is'} now on your My LIB parent login.`, '', `Login ID: ${r.username}`, 'Password: the one you already use.');
   }
+  lines.push('', ...APP_LINK_LINES);
   return lines.join('\n');
 }
 function familyPhoneKeys(kids) { return [...new Set(kids.flatMap(s => phoneNumbersFor(s.id, 'parent').map(p => p.number).concat(s.mobileNumber || '')).map(phoneKey).filter(Boolean))]; }
@@ -8558,10 +8560,9 @@ async function runBulkStudents() {
   render();
 }
 function bulkStudentMessage(r) {
-  const link = location.origin + location.pathname;
   return [`Dear ${r.s.name},`, '', "Your My LIB student login is ready. You can see your classes, attendance, homework and practice papers.", '',
-    `Open: ${link}`, `Login ID: ${r.username}`, `Password: ${r.username}${r.resend ? ' (unless you have already changed it)' : ''}`, '',
-    'Please change your password after you log in (Change your password, at the bottom of the page).'].join('\n');
+    `Login ID: ${r.username}`, `Password: ${r.username}${r.resend ? ' (unless you have already changed it)' : ''}`, '',
+    'Please change your password after you log in (Change your password, at the bottom of the page).', '', ...APP_LINK_LINES].join('\n');
 }
 function bulkStudentWaHtml(r) {
   if (!r.phones.length) return '<span class="hint">No phone number saved.</span>';
@@ -9548,7 +9549,7 @@ function familyFeeMessage(studentId, short) {
     if (parentLogin) lines.push(`Parent login (shows ${kids.length > 1 ? 'all your children’s' : 'your child’s'} classes and fees): ${parentLogin.username}`);
     logins.forEach(x => lines.push(`${kids.length > 1 ? x.s.name + ' - ' : ''}Login ID: ${x.u.username}`));
     lines.push('Password: same as the login ID, unless you have already changed it.');
-    lines.push('Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/', '');
+    lines.push(...APP_LINK_LINES, '');
   }
   lines.push('Discount offers: https://www.libeducation.com/discountoffers', '', 'Thank you for choosing LIB Education. We appreciate your continued trust and support.', '');
   lines.push('Regards,', 'LIB Education');
@@ -11072,7 +11073,7 @@ function prospectQuoteText() {
   msg += `.`;
   if (upiId) msg += ` UPI: ${upiId}.`;
   if (feeContactMobile) msg += ` Contact: ${feeContactMobile}.`;
-  return msg;
+  return msg + '\n\n' + APP_LINK_LINES.join('\n');
 }
 function shareProspectQuote(how) {
   const msg = prospectQuoteText();
