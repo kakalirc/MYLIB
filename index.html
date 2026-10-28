@@ -335,7 +335,7 @@ if (location.hostname !== 'app.libeducation.com') {
 const APP_VERSION = '2026.10';
 // The app links every WhatsApp message gives (never the address the sender happens to be on).
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
-const BUILD_TIMESTAMP = '2026-10-28 15:35 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-28 16:20 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -369,7 +369,7 @@ function rateKey(categoryId, type, mode) { return categoryId + '_' + type + '_' 
 function catLabel(id) { const c = categories.find(c=>c.id===id); return c ? c.name : id; }
 function activeCategories() { return categories.filter(c=>!c.archived); }
 
-let data = { teachers: [], subjects: [], students: [], studentSubjects: [], subscriptions: [], sessions: [], users: [], parentStudents: [], studentPhoneNumbers: [], adminPhoneNumbers: [], demoLogs: [], teacherPayrollRecords: [], wixBookings: [], supportTickets: [] };
+let data = { teachers: [], subjects: [], students: [], studentSubjects: [], subscriptions: [], sessions: [], users: [], parentStudents: [], studentPhoneNumbers: [], adminPhoneNumbers: [], demoLogs: [], teacherPayrollRecords: [], wixBookings: [], supportTickets: [], registrations: [] };
 let loaded = false;
 let currentTab = 'dashboard';
 
@@ -1959,6 +1959,7 @@ async function load() {
     (currentRole === 'Admin' || currentRole === 'Teacher') ? loadTeacherPrivateNotes() : Promise.resolve(),
     (currentRole === 'Admin' || currentRole === 'Teacher') ? loadTeacherPayrollRecords() : Promise.resolve(),
     currentRole === 'Admin' ? loadWixBookings() : Promise.resolve(),
+    currentRole === 'Admin' ? loadRegistrations() : Promise.resolve(),
     currentRole === 'Admin' ? loadRazorpayFeePayments() : Promise.resolve(),
     currentRole === 'Admin' ? loadProspectQuotes() : Promise.resolve(),
     loadSupportTickets(),
@@ -7105,7 +7106,7 @@ async function logout() {
   expenseList = []; editingExpenseId = ''; pendingDeleteExpenseId = ''; expenseMsg = '';
   // Nor should anything else this login loaded: the next person to log in on this tab may have a different role,
   // and their load() only refills what their role can read.
-  data = { teachers: [], subjects: [], students: [], studentSubjects: [], subscriptions: [], sessions: [], users: [], parentStudents: [], studentPhoneNumbers: [], adminPhoneNumbers: [], demoLogs: [], teacherPayrollRecords: [], wixBookings: [], supportTickets: [] };
+  data = { teachers: [], subjects: [], students: [], studentSubjects: [], subscriptions: [], sessions: [], users: [], parentStudents: [], studentPhoneNumbers: [], adminPhoneNumbers: [], demoLogs: [], teacherPayrollRecords: [], wixBookings: [], supportTickets: [], registrations: [] };
   feeRates = {}; studentFeeRates = []; discountTiers = []; prospectQuotes = []; notifications = []; myAnnouncements = []; allAnnouncementsAdmin = [];
   auditRows = []; loginLogRows = []; scheduledClasses = []; teacherAvailability = []; teacherLeave = [];
   aiUsageRows = null; aiUsageNames = {}; appUsageRows = null; appUsageRecent = null; appUsageProfiles = [];
@@ -10270,6 +10271,7 @@ const SUPPORT_KB = {
 - Class Log (Daily work): record a class for a teacher. Pick the date and teacher, then student, subject, Group/Individual, Online/Offline and Present or Absent (Absent still uses a class). The list below shows the Selected day or the Whole month.
 - Communication (Daily work): chat with teachers, students and parents, and post announcements.
 - Demo Bookings (Daily work): demo bookings from the website arrive here (New → Scheduled → Done → Converted or Lost, or Cancelled). Teachers mark their own demos Done on their Dashboard; admins can set any status, mark Lost with an optional reason, and skip straight from Pending to Converted. A converted demo gives the teacher a demo bonus. The Demo Register shows Demo results per teacher (Converted %) and why demos were lost.
+- New registrations (Daily work): forms families send from the public link app.libeducation.com/register.html (no login). Accept adds the student (or a brother/sister to a family with the same mobile) and makes the parent login (mobile) and student login (student code); Reject or Delete junk. Copy or WhatsApp the link from this page.
 - Support (Daily work): view and resolve issues raised by teachers, students or parents.
 - Rebuild Pending Classes (Daily work): rebuild the upcoming class schedule from each student's Class Frequency. Preview first. Only future Pending classes are removed; new classes get placeholder times (Group 00:00, Individual 01:00/02:00) that the teacher corrects.
 - Fees (Money): per-class rates (Fee setup), discount structure, fee calculator, students needing renewal, Razorpay payments to confirm, pending fee requests (grouped by family, Mark all paid), all subscription payments and the UPI / contact details used in fee messages.
@@ -11911,7 +11913,7 @@ async function actuallySaveSessionEdit(id, count, date) {
 // so Teachers & Subjects (key 'setup') shows as #teachers-subjects. Old #users links still work.
 const TAB_HASH = { users: 'setup', setup: 'teachers-subjects' };
 function tabFromHash(h) { const k = Object.keys(TAB_HASH).find(k => TAB_HASH[k] === h); return k || h; }
-function setTab(t) { currentTab = t; if (t === 'setup' && setupSubTab === 'frequency') loadClassFrequencyRows().then(() => render()); trackUse('tab:' + t, true); location.hash = TAB_HASH[t] || t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'fees') { rzpFeeMsg = ''; loadRazorpayFeePayments().then(() => render()); } if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; tbAdminEditId=''; tbAdminMsg=''; Promise.all([loadStudyPlans(), loadTextbookLibrary()]).then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
+function setTab(t) { currentTab = t; if (t === 'setup' && setupSubTab === 'frequency') loadClassFrequencyRows().then(() => render()); trackUse('tab:' + t, true); location.hash = TAB_HASH[t] || t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'registrations') { regMsg = ''; loadRegistrations().then(() => render()); } if (t === 'fees') { rzpFeeMsg = ''; loadRazorpayFeePayments().then(() => render()); } if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; tbAdminEditId=''; tbAdminMsg=''; Promise.all([loadStudyPlans(), loadTextbookLibrary()]).then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
   if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); } }
 function setPayrollMonth(v) { payrollMonth = v; render(); }
 function setNetProfitMonth(v) { netProfitMonth = v; render(); }
@@ -13816,6 +13818,8 @@ function renderDashboard() {
     { num: needingRenewal, label: `Student${needingRenewal===1?'':'s'} needing renewal`, action: "rptRenewalOpen=true; setTab('fees'); setTimeout(()=>{ const el=document.getElementById('studentsNeedingRenewalSection'); if(el) el.scrollIntoView({behavior:'smooth'}); },120)" },
     { num: unreadChats, label: `Unread chat${unreadChats===1?'':'s'}`, tab: 'chat' },
   ];
+  const regWaiting = regNewCount();
+  if (regWaiting) cards.unshift({ num: regWaiting, label: `New registration${regWaiting===1?'':'s'} waiting`, tab: 'registrations' });
   const demosWaiting = data.demoLogs.filter(demoWaiting).length;
   if (demosWaiting) cards.push({ num: demosWaiting, label: `Demo${demosWaiting===1?'':'s'} waiting for a result`, action: "demoLogsStatusFilter='Waiting'; setTab('wixbookings'); setTimeout(()=>{ const el=document.getElementById('demo-register-heading'); if(el) el.scrollIntoView({behavior:'smooth'}); },150)" });
   const expiring = expiringSoon();
@@ -19692,6 +19696,7 @@ const HELP = {
   'expenses': { t:'Expenses', b:"<ul><li>Money the institute spends other than teacher pay: rent, electricity, internet and so on.</li><li>Add an expense with date, category, amount and an optional note. Edit or delete it from the month list.</li><li>Expenses come off fee collection in Reports → Net profit. Don't enter teacher salary here; payroll is counted separately.</li></ul>" },
   'bulk-students': { t:'Create all student logins', b:"<ul><li>Preview lists every active student who has no student login yet. Nothing is saved until you press Create.</li><li>Login ID and password are the student code (the same rule as the old SQL). When the student logs in with it, the app asks them to change the password.</li><li>Untick anyone you don't want a login for yet.</li><li>Skipped: students with no student code, or whose code is already used as another login ID.</li><li>After Create, each row has 📤 WhatsApp buttons (student mobile and parent numbers) with the message ready: app link, login ID, password. Later, open the student and use the 📤 buttons next to Login to send it again.</li></ul>" },
   'parents': { t:'Parents', b:"<ul><li>One parent login per family. Pick a parent to see or change which children are linked.</li><li><b>Create all parent logins</b> makes the missing logins in one go: login ID and first password are the parent's 10-digit mobile.</li><li>📤 WhatsApp sends the family their login details; you can resend from the parent's page.</li><li>Parents are asked to change the password after their first login.</li></ul>" },
+  'registrations': { t:'New registrations', b:"<ul><li>Families fill in the public form (app.libeducation.com/register.html) without logging in. Send them the link with 📋 Copy link or 📤 Send link on WhatsApp.</li><li>New forms wait here. Nothing becomes a student until you press <b>Accept</b>.</li><li>⚑ flags help you spot junk or repeats: mobile already a family, had a demo, several forms from one mobile. Use 📞 Call or 💬 WhatsApp to check with the parent first.</li><li><b>Accept</b> lets you correct the name, grade, board and preferences, then adds the student. If the mobile already belongs to a family you can add the child as a brother/sister (same parent login). It also makes the parent login (mobile) and student login (student code) unless you untick them. Then send the details with the 📤 buttons.</li><li>Subjects are not enrolled automatically: open the student and enrol them with a teacher.</li><li><b>Reject</b> (with an optional reason) or tick several and Reject / Delete. Rejected forms are cleared after 30 days.</li><li>The form allows at most 3 forms per mobile per day and 30 per day in total, and blocks bots.</li></ul>" },
   'support-inbox': { t:'Support Inbox', b:"<ul><li>Problems reported by teachers, students and parents with the Support button.</li><li>Filter by Open, In progress or Resolved. Open a ticket to reply and change its status.</li><li>The person sees your reply and the status in their own Support window.</li></ul>" },
   'announcements': { t:'Announcements', b:"<ul><li>A short notice shown above the menu bar for the people you pick: everyone, a whole role (all teachers, students, parents or admins) or one person.</li><li>It stays until they dismiss it, it expires, or you delete it.</li></ul>" },
   'chat': { t:'Chat', b:"<ul><li>New message starts a one-to-one chat with a teacher, student or parent. New group chats with several people at once.</li><li>Unread messages show as a number on the menu and the 💬 button.</li></ul>" },
@@ -23261,6 +23266,260 @@ function renderAdminSupport() {
   </div>`;
 }
 
+// ===== New registrations (Daily work): forms sent from the public register.html (SQL 67). =====
+// Nothing on the form becomes a student until an admin presses Accept. Accept creates the student (or adds them
+// to a family with the same mobile), the parent login (mobile) and the student login (student code).
+const REGISTER_URL = 'https://app.libeducation.com/register.html';
+let regReady = true, regFilter = 'New', regMsg = '', regTicked = new Set(), regRejectId = '', regAcceptId = '', regAcceptDraft = {}, regBusy = false, regSendTo = '';
+const regDone = {};   // registration id -> { message, phones, studentId, notes } (this session only)
+async function loadRegistrations() {
+  if (currentRole !== 'Admin') { data.registrations = []; return; }
+  const { data: rows, error } = await sb.from('registrations').select('*').order('created_at', { ascending: false }).limit(500);
+  if (error) { regReady = !/registrations/.test(error.message || ''); data.registrations = []; return; }
+  regReady = true;
+  data.registrations = rows || [];
+}
+function regNewCount() { return (data.registrations || []).filter(r => r.status === 'New').length; }
+function regGradeName(id) { const g = grades.find(x => String(x.id) === String(id)); return g ? g.name : ''; }
+function regBoardName(id) { const b = boards.find(x => String(x.id) === String(id)); return b ? b.name : ''; }
+function regPhones(r) { return [phoneKey(r.parent_mobile), phoneKey(r.second_mobile)].filter(Boolean); }
+// Active students whose main mobile or a parent number matches the form's numbers.
+function regFamily(r) {
+  const keys = new Set(regPhones(r));
+  if (!keys.size) return [];
+  const ids = new Set();
+  data.students.filter(s => !s.archived).forEach(s => { if (keys.has(phoneKey(s.mobileNumber))) ids.add(s.id); });
+  data.studentPhoneNumbers.filter(p => p.type === 'parent' && keys.has(phoneKey(p.number))).forEach(p => ids.add(p.studentId));
+  const kids = data.students.filter(s => ids.has(s.id) && !s.archived);
+  return kids.length > FAMILY_MAX_CHILDREN ? [] : byName(kids);   // a number shared by many students is not a family
+}
+function regFamilyLogin(kids) {
+  const ids = new Set(kids.map(s => s.id));
+  const userIds = [...new Set((data.parentStudents || []).filter(m => ids.has(m.studentId)).map(m => m.parentUserId))];
+  return userIds.length === 1 ? data.users.find(u => u.id === userIds[0]) || null : null;
+}
+function regFlags(r) {
+  const flags = [];
+  const kids = regFamily(r);
+  if (kids.length) flags.push(`Mobile already a family: ${kids.map(s => s.name).join(', ')}`);
+  const same = data.students.find(s => !s.archived && s.name.trim().toLowerCase() === (r.student_name || '').trim().toLowerCase() && kids.includes(s));
+  if (same) flags.push(`${same.name} is already a student (${same.code || 'no code'})`);
+  const keys = new Set(regPhones(r));
+  (data.wixBookings || []).filter(b => keys.has(phoneKey(b.phone))).forEach(b => flags.push(`Had a demo booking on ${dayDate((b.submittedAt || '').slice(0, 10))} (${b.status})`));
+  const n = (data.registrations || []).filter(x => x.parent_mobile === r.parent_mobile).length;
+  if (n > 1) flags.push(`${n} forms from this mobile`);
+  return flags;
+}
+function regLinkMessage() {
+  return ['Hello from LIB Education!', '', 'Please fill in this short form to register your child for classes:', REGISTER_URL, '', 'We will call you after we get it.'].join('\n');
+}
+function regSetFilter(f) { regFilter = f; regTicked = new Set(); regRejectId = ''; regAcceptId = ''; render(); }
+function regToggle(id, on) { if (on) regTicked.add(id); else regTicked.delete(id); render(); }
+function regToggleAll(on, ids) { ids.split(',').filter(Boolean).forEach(id => on ? regTicked.add(id) : regTicked.delete(id)); render(); }
+async function regReject(ids, reason) {
+  if (!ids.length) return;
+  const { error } = await sb.from('registrations').update({ status: 'Rejected', reject_reason: (reason || '').trim() || null, decided_at: new Date().toISOString(), decided_by: currentUserId }).in('id', ids);
+  if (error) { regMsg = 'Could not reject: ' + error.message; render(); return; }
+  regMsg = `${ids.length} form${ids.length === 1 ? '' : 's'} rejected. Rejected forms are cleared after 30 days.`;
+  regTicked = new Set(); regRejectId = '';
+  trackUse('registration-reject');
+  await loadRegistrations(); render();
+}
+function regRejectOne(id) { const el = document.getElementById('regRejectReason'); regReject([id], el ? el.value : ''); }
+function regRejectTicked() {
+  const ids = [...regTicked];
+  if (!ids.length) return;
+  const reason = prompt(`Reject ${ids.length} form${ids.length === 1 ? '' : 's'}? Reason (optional):`, 'Junk');
+  if (reason === null) return;
+  regReject(ids, reason);
+}
+async function regDeleteTicked() {
+  const ids = [...regTicked];
+  if (!ids.length || !confirm(`Delete ${ids.length} form${ids.length === 1 ? '' : 's'} for good? Use this for junk.`)) return;
+  const { error } = await sb.from('registrations').delete().in('id', ids);
+  if (error) { regMsg = 'Could not delete: ' + error.message; render(); return; }
+  regMsg = `${ids.length} form${ids.length === 1 ? '' : 's'} deleted.`;
+  regTicked = new Set();
+  await loadRegistrations(); render();
+}
+async function regReopen(id) {
+  const { error } = await sb.from('registrations').update({ status: 'New', reject_reason: null, decided_at: null, decided_by: null }).eq('id', id);
+  if (error) { regMsg = 'Could not reopen: ' + error.message; render(); return; }
+  await loadRegistrations(); render();
+}
+function regOpenAccept(id) {
+  const r = data.registrations.find(x => x.id === id);
+  if (!r) return;
+  const kids = regFamily(r);
+  regAcceptId = regAcceptId === id ? '' : id; regRejectId = '';
+  regAcceptDraft = { name: r.student_name || '', gradeId: r.grade_id || '', boardId: r.board_id || (kids[0] && kids[0].boardId) || '',
+    mode: r.mode_preference || '', ctype: r.class_type_preference || '', family: kids.length ? 'existing' : 'new', parentLogin: true, studentLogin: true };
+  render();
+}
+function regDraftSet(k, v) { regAcceptDraft[k] = v; }
+async function regAccept(id) {
+  const r = data.registrations.find(x => x.id === id);
+  if (!r || regBusy) return;
+  const d = regAcceptDraft, name = (d.name || '').trim();
+  if (!name || !isValidPersonName(name)) { regMsg = "Type the student's name (no numbers)."; render(); return; }
+  const kids = d.family === 'existing' ? regFamily(r) : [];
+  regBusy = true; regMsg = ''; render();
+  const notes = [];
+  const payload = { name, archived: false, parent_name: r.parent_name || null, mobile_number: r.parent_mobile || null, email: r.email || null, address: r.address || null,
+    grade_id: d.gradeId || null, board_id: d.boardId || null, academic_year: (kids[0] && kids[0].academicYear) || globalAcademicYear || null,
+    mode_preference: d.mode || null, class_type_preference: d.ctype || null };
+  const { data: row, error } = await sb.from('students').insert(payload).select().single();
+  if (error) { regBusy = false; regMsg = 'Could not create the student: ' + error.message; render(); return; }
+  const st = { id: row.id, name: row.name, archived: false, code: row.student_code || '', parentName: row.parent_name || '', mobileNumber: row.mobile_number || '', email: row.email || '', address: row.address || '', photo: '', gradeId: row.grade_id || '', boardId: row.board_id || '', academicYear: row.academic_year || '', modePreference: row.mode_preference || '', classTypePreference: row.class_type_preference || '', billSeparately: false };
+  data.students.push(st);
+  const phones = regPhones(r);
+  if (phones.length) {
+    const { data: pRows, error: pe } = await sb.from('student_phone_numbers').insert(phones.map(n => ({ student_id: row.id, phone_type: 'parent', phone_number: n }))).select();
+    if (pe) notes.push('Parent numbers not saved: ' + pe.message);
+    else (pRows || []).forEach(p => data.studentPhoneNumbers.push({ id: p.id, studentId: p.student_id, type: p.phone_type, number: p.phone_number }));
+  }
+  // Parent login: the family's own login if it has one, else the parent's mobile.
+  let parentLine = null;
+  if (d.parentLogin) {
+    let u = kids.length ? regFamilyLogin(kids) : null, isNew = false;
+    const username = phoneKey(r.parent_mobile);
+    if (!u) {
+      const taken = data.users.find(x => (x.username || '').toLowerCase() === username);
+      if (taken && taken.role === 'Parent') u = taken;
+      else if (taken) notes.push(`Parent login not made: ${username} is already a ${taken.role} login.`);
+      else {
+        const { data: res, error: le } = await callAdminFunction({ action: 'create', username, password: username, role: 'Parent' });
+        if (le) notes.push('Parent login not made: ' + le);
+        else { u = { id: res.userId, username, role: 'Parent', linkedId: '' }; data.users.push(u); isNew = true; }
+      }
+    }
+    if (u) {
+      const { data: link, error: ke } = await sb.from('parent_students').insert({ parent_user_id: u.id, student_id: row.id }).select().single();
+      if (ke) notes.push('Child not linked to the parent login: ' + ke.message);
+      else data.parentStudents.push({ id: link.id, parentUserId: link.parent_user_id, studentId: link.student_id });
+      parentLine = { username: u.username, isNew };
+    }
+  }
+  let studentLine = null;
+  if (d.studentLogin) {
+    const code = String(row.student_code || '').trim();
+    const taken = code && data.users.find(x => (x.username || '').toLowerCase() === code.toLowerCase());
+    if (!code) notes.push('Student login not made: the student has no code.');
+    else if (taken) notes.push(`Student login not made: ${code} is already a ${taken.role} login.`);
+    else {
+      const { data: res, error: le } = await callAdminFunction({ action: 'create', username: code, password: code, role: 'Student', linkedStudentId: row.id });
+      if (le) notes.push('Student login not made: ' + le);
+      else { data.users.push({ id: res.userId, username: code, role: 'Student', linkedId: row.id }); studentLine = code; }
+    }
+  }
+  const { error: ue } = await sb.from('registrations').update({ status: 'Accepted', student_id: row.id, decided_at: new Date().toISOString(), decided_by: currentUserId }).eq('id', id);
+  if (ue) notes.push('Form not marked Accepted: ' + ue.message);
+  regDone[id] = { studentId: row.id, phones, notes, message: regWelcomeMessage(r, name, parentLine, studentLine) };
+  regBusy = false; regAcceptId = '';
+  regMsg = `${name}${row.student_code ? ' (' + row.student_code + ')' : ''} added. Send the login details with the 📤 buttons on the card.`;
+  trackUse('registration-accept');
+  await loadRegistrations(); render();
+}
+function regWelcomeMessage(r, name, parentLine, studentLine) {
+  const lines = [`Dear ${r.parent_name || 'Parent'},`, '', `Welcome to LIB Education! ${name} is now registered with us. We will call you to set up the classes.`];
+  if (parentLine) lines.push('', `Your parent login (classes, attendance, homework and fees):`, `Login ID: ${parentLine.username}`, parentLine.isNew ? `Password: ${parentLine.username}` : 'Password: the one you already use.');
+  if (studentLine) lines.push('', `${name}'s own login:`, `Login ID: ${studentLine}`, `Password: ${studentLine}`);
+  if ((parentLine && parentLine.isNew) || studentLine) lines.push('', 'Please change the password after you log in (Change your password, at the bottom of the page).');
+  lines.push('', ...APP_LINK_LINES);
+  return lines.join('\n');
+}
+function regOpenStudent(id) { setTab('students'); selectStudent(id); }
+function regSendLink() {
+  const n = phoneKey(regSendTo);
+  if (!n) { regMsg = 'Type a 10-digit mobile number.'; render(); return; }
+  launchWhatsApp(n, regLinkMessage(), isMobileDevice() ? 'web' : 'app');
+}
+function regCardHtml(r) {
+  const flags = regFlags(r), kids = regFamily(r), done = regDone[r.id];
+  const st = r.student_id ? data.students.find(s => s.id === r.student_id) : null;
+  const when = r.created_at ? new Date(r.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+  const prefs = [r.mode_preference, r.class_type_preference === 'Individual' ? 'One-to-one' : r.class_type_preference].filter(Boolean).join(' · ');
+  const line = (label, v) => v ? `<div><span class="hint">${label}:</span> ${v}</div>` : '';
+  const waText = `Hello ${r.parent_name || ''}, this is LIB Education about the registration form for ${r.student_name}.`;
+  let action = '';
+  if (r.status === 'New' && regAcceptId === r.id) {
+    const d = regAcceptDraft;
+    const opt = (list, val) => list.filter(x => !x.archived || String(x.id) === String(val)).map(x => `<option value="${escAttr(x.id)}" ${String(x.id) === String(val) ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+    const sel = (key, vals, val) => `<select onchange="regDraftSet('${key}',this.value)"><option value="">—</option>${vals.map(([v, t]) => `<option value="${v}" ${v === val ? 'selected' : ''}>${t}</option>`).join('')}</select>`;
+    const login = kids.length ? regFamilyLogin(kids) : null;
+    action = `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
+      <div class="row-form"><input type="text" value="${escAttr(d.name)}" oninput="regDraftSet('name',this.value)" placeholder="Student name" style="min-width:180px">
+        <select onchange="regDraftSet('gradeId',this.value)"><option value="">Grade</option>${opt(grades, d.gradeId)}</select>
+        <select onchange="regDraftSet('boardId',this.value)"><option value="">Board</option>${opt(boards, d.boardId)}</select>
+        ${sel('mode', [['Online', 'Online'], ['Offline', 'Offline'], ['Both', 'Both']], d.mode)}
+        ${sel('ctype', [['Group', 'Group'], ['Individual', 'Individual'], ['Both', 'Both']], d.ctype)}</div>
+      ${kids.length ? `<div class="row-form" style="flex-direction:column;align-items:flex-start;gap:2px">
+        <label><input type="radio" name="regFam" ${d.family === 'existing' ? 'checked' : ''} onchange="regDraftSet('family','existing')"> Brother/sister of ${esc(kids.map(s => s.name).join(', '))}${login ? ` (uses parent login ${esc(login.username)})` : ''}</label>
+        <label><input type="radio" name="regFam" ${d.family === 'new' ? 'checked' : ''} onchange="regDraftSet('family','new')"> A new family</label></div>` : ''}
+      <div class="row-form"><label><input type="checkbox" ${d.parentLogin ? 'checked' : ''} onchange="regDraftSet('parentLogin',this.checked)"> Parent login (ID and password = parent mobile${kids.length ? ', or the family\'s login' : ''})</label>
+        <label><input type="checkbox" ${d.studentLogin ? 'checked' : ''} onchange="regDraftSet('studentLogin',this.checked)"> Student login (ID and password = student code)</label></div>
+      <div class="row-form"><button class="btn-primary" ${regBusy ? 'disabled' : ''} onclick="regAccept('${r.id}')">${regBusy ? 'Adding…' : 'Add student'}</button><button class="btn-small" onclick="regAcceptId='';render()">Cancel</button></div>
+      <div class="hint">Subjects are not added here: enrol the student with a teacher on their page afterwards.</div></div>`;
+  } else if (r.status === 'New' && regRejectId === r.id) {
+    action = `<div class="row-form" style="margin-top:10px"><input type="text" id="regRejectReason" placeholder="Reason (optional), e.g. Junk, Not reachable" style="min-width:220px"><button class="btn-small btn-primary" onclick="regRejectOne('${r.id}')">Reject</button><button class="btn-small" onclick="regRejectId='';render()">Cancel</button></div>`;
+  } else if (r.status === 'New') {
+    action = `<div class="row-form" style="margin-top:8px"><button class="btn-small btn-primary" onclick="regOpenAccept('${r.id}')">✓ Accept</button><button class="btn-small" onclick="regRejectId='${r.id}';regAcceptId='';render()">✗ Reject</button>
+      <a class="btn-small" href="tel:+91${escAttr(phoneKey(r.parent_mobile))}" style="text-decoration:none">📞 Call</a>${waButtonHtml(phoneKey(r.parent_mobile), '💬 WhatsApp', waText)}</div>`;
+  } else if (r.status === 'Accepted') {
+    action = `<div class="row-form" style="margin-top:8px">${st ? `<button class="btn-small" onclick="regOpenStudent('${st.id}')">Open ${esc(st.name)}${st.code ? ' (' + esc(st.code) + ')' : ''}</button>` : '<span class="hint">Student no longer found.</span>'}
+      ${done ? done.phones.map(n => waButtonHtml(n, '📤 ' + esc(n), done.message)).join(' ') : ''}</div>
+      ${done && done.notes.length ? `<div class="hint" style="color:var(--brick)">${done.notes.map(esc).join('<br>')}</div>` : ''}
+      ${!done && st ? '<div class="hint">To send the logins again, open the student (Login section) or the parent on the Parents page.</div>' : ''}`;
+  } else {
+    action = `<div class="row-form" style="margin-top:8px"><span class="hint">Rejected${r.reject_reason ? ': ' + esc(r.reject_reason) : ''}${r.decided_at ? ' · ' + esc(dayDate(r.decided_at.slice(0, 10))) : ''}</span><button class="btn-small" onclick="regReopen('${r.id}')">Reopen</button></div>`;
+  }
+  return `<div class="card" style="margin-bottom:10px">
+    <div style="display:flex;gap:10px;align-items:flex-start">
+      ${r.status === 'Accepted' ? '' : `<input type="checkbox" style="margin-top:6px" ${regTicked.has(r.id) ? 'checked' : ''} onchange="regToggle('${r.id}',this.checked)">`}
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:baseline"><b style="font-size:16px">${esc(r.student_name)}</b>
+          <span class="tag">${esc(regGradeName(r.grade_id) || 'Grade ?')}</span>${r.board_id ? `<span class="tag">${esc(regBoardName(r.board_id))}</span>` : ''}
+          <span class="hint">${esc(when)}</span></div>
+        ${line('Parent', `${esc(r.parent_name)} · ${esc(r.parent_mobile)}${copyBtnHtml(r.parent_mobile)}${r.second_mobile ? ' · ' + esc(r.second_mobile) + copyBtnHtml(r.second_mobile) : ''}`)}
+        ${line('Subjects', esc((r.subjects || []).join(', ')))}
+        ${line('Wants', esc(prefs))}
+        ${line('School', esc(r.school || ''))}
+        ${line('Email', esc(r.email || ''))}
+        ${line('Address', esc(r.address || ''))}
+        ${line('Heard from', esc(r.heard_from || ''))}
+        ${r.note ? `<div style="margin-top:4px;border-left:3px solid var(--line);padding-left:8px">${esc(r.note)}</div>` : ''}
+        ${flags.length ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">${flags.map(f => `<span class="tag" style="background:#fdf3dc;color:#7a5a12">⚑ ${esc(f)}</span>`).join('')}</div>` : ''}
+        ${action}
+      </div>
+    </div>
+  </div>`;
+}
+function renderRegistrations() {
+  const linkCard = `<div class="card">
+      <h2>New registrations ${helpBtn('registrations')}</h2>
+      <div class="hint">Families fill in the form without logging in. Nothing becomes a student until you press Accept.</div>
+      <div class="row-form"><input type="text" readonly value="${REGISTER_URL}" style="min-width:260px;flex:1" onclick="this.select()"><button class="btn-small" onclick="copyText('${REGISTER_URL}', this)">📋 Copy link</button><a class="btn-small" href="register.html" target="_blank" style="text-decoration:none">Open form</a></div>
+      <div class="row-form"><input type="tel" placeholder="Parent's mobile" value="${escAttr(regSendTo)}" oninput="regSendTo=this.value" style="width:160px"><button class="btn-small btn-primary" onclick="regSendLink()">📤 Send link on WhatsApp</button></div>
+    </div>`;
+  if (!regReady) return linkCard + `<div class="card"><div class="hint" style="color:var(--brick)">The registrations table is not set up yet. Run SQL 67 (67-student-registrations.sql) in Supabase → SQL Editor, then press ↻ Refresh.</div></div>`;
+  const all = data.registrations || [];
+  const counts = { New: 0, Accepted: 0, Rejected: 0 };
+  all.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
+  const list = all.filter(r => r.status === regFilter);
+  const tickable = list.filter(r => r.status !== 'Accepted').map(r => r.id);
+  const ticked = tickable.filter(id => regTicked.has(id));
+  const bulk = tickable.length ? `<div class="row-form"><label><input type="checkbox" ${ticked.length && ticked.length === tickable.length ? 'checked' : ''} onchange="regToggleAll(this.checked,'${tickable.join(',')}')"> Tick all</label>
+      ${regFilter === 'New' ? `<button class="btn-small" ${ticked.length ? '' : 'disabled'} onclick="regRejectTicked()">✗ Reject ticked (${ticked.length})</button>` : ''}
+      <button class="btn-small" ${ticked.length ? '' : 'disabled'} onclick="regDeleteTicked()" style="color:var(--brick)">🗑 Delete ticked (${ticked.length})</button></div>` : '';
+  return linkCard + `<div class="card">
+      <div class="row-form">${['New', 'Accepted', 'Rejected'].map(f => `<button class="btn-small ${regFilter === f ? 'btn-primary' : ''}" onclick="regSetFilter('${f}')">${f} (${counts[f] || 0})</button>`).join('')}
+        <button class="btn-small" style="margin-left:auto" onclick="loadRegistrations().then(()=>{regMsg='';render()})">↻ Refresh</button></div>
+      ${regMsg ? `<div class="hint" style="color:${/^Could not|not made|Type/.test(regMsg) ? 'var(--brick)' : 'var(--forest)'}">${esc(regMsg)}</div>` : ''}
+      ${bulk}
+    </div>
+    ${list.length ? list.map(regCardHtml).join('') : `<div class="card"><div class="empty">No ${regFilter.toLowerCase()} forms.</div></div>`}`;
+}
+
 function helpPanelHtml() {
   if (!helpOpenSection || !HELP[helpOpenSection]) return '';
   const h = HELP[helpOpenSection];
@@ -23289,6 +23548,7 @@ function render() {
   const tabGroups = [
     { label: 'Daily work', tabs: [
       ['log', 'Class Log'],
+      ['registrations', 'New registrations' + (regNewCount() ? ` (${regNewCount()})` : '')],
       ['chat', 'Communication' + (chatTotalUnread() ? ` (${chatTotalUnread()})` : '')],
       ['wixbookings', 'Demo Bookings' + (data.wixBookings.filter(b=>b.status==='New').length ? ` (${data.wixBookings.filter(b=>b.status==='New').length})` : '')],
       ['support', 'Support' + (data.supportTickets.filter(t=>t.status==='open').length ? ` (${data.supportTickets.filter(t=>t.status==='open').length})` : '')],
@@ -23375,6 +23635,7 @@ function render() {
   else if (currentTab === 'ai') body = renderAiAdmin();
   else if (currentTab === 'wixbookings') body = renderWixBookings();
   else if (currentTab === 'support') body = renderAdminSupport();
+  else if (currentTab === 'registrations') body = renderRegistrations();
 
   const _sy = window.scrollY;
   app.innerHTML = `
