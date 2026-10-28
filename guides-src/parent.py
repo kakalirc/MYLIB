@@ -9,12 +9,19 @@ def guide():
     common.getting_started(g, 'the admin or your child’s teacher')
 
     g.add('whatsnew', 'Start here', 'What’s new in this edition', 'The biggest additions since the last guide.', g2(
-        box('From your teachers', 'Notes, worksheets and links your child’s teachers share appear on your child’s page too.'),
-        box('Practice papers', 'Follow each board-style paper the teacher sets. MCQs are marked the moment your child submits.'),
+        box('One login per family', 'Your login ID is your 10-digit mobile number. All your children are under it.'),
+        box('One fee message', 'The WhatsApp fee message lists every child’s classes and amount, the total, and how it was worked out.'),
     ) + g2(
-        box('Teacher feedback', 'See the score, an overall comment and marks for every question once the teacher has marked it.'),
-        box('Private photos', 'Homework and answer photos are private: only your family, the teacher and the centre can open them.'),
+        box('Pay online', 'Besides UPI, pay by card, UPI or net banking with <b>Pay online (Razorpay)</b>.'),
+        box('Practice papers', 'Follow each board-style paper the teacher sets. MCQs are marked the moment your child submits.'),
     ), new=True)
+
+    g.add('login', 'Start here', 'Your parent login', 'One login for the whole family.', steps([
+        ('Get your details', 'LIB sends your login on WhatsApp. The login ID and first password are both your 10-digit mobile number.'),
+        ('Sign in', 'At <b>app.libeducation.com</b>. All your children linked to you are under this one login.'),
+        ('Change your password', 'Until you do, a red box asks you to. Tap <b>Change it now</b>, type the old password (your mobile) and a new one.'),
+    ]) + note('Why change it?', 'Anyone who knows your mobile number could sign in with the first password.', 'warn')
+        + note('A child missing?', 'Ask LIB on WhatsApp or Chat to link them to your login.', 'tip'), new=True)
 
     g.add('overview', 'Overview', 'What you see', 'One login, one or more children.', g3(
         box('Your child’s home', ['Classes remaining and attended this month', 'Pending fee requests', 'Classes expiring soon', 'Unread chats']),
@@ -47,7 +54,7 @@ def guide():
                'If one stops loading after the app has been open a few hours, tap Refresh.'))
 
     g.add('practice', 'Learning', 'Practice papers', 'Follow the board-style papers your child’s teacher sets.',
-          practice.list_screen('View', 'Open a paper to see it') + h3('Paper status') + practice.statuses(), new=True)
+          practice.list_screen('View', 'Open a paper to see it') + h3('Paper status') + practice.statuses())
 
     g.add('practice2', 'Learning', 'Practice paper results', 'See how your child did, question by question.', steps([
         ('Find the paper', 'Practice Papers on your child’s home screen lists every paper, with the ones still to do at the top.'),
@@ -56,22 +63,26 @@ def guide():
                            'every question and the model answers.'),
     ]) + note('Good to know', ['Only your child can answer the paper. Your view is read-only.',
                                'A paper marked <b>Overdue</b> has passed its due date without being submitted.',
-                               'Questions about a mark? Message the teacher on Chat.']), new=True)
+                               'Questions about a mark? Message the teacher on Chat.']))
 
     g.add('resources', 'Learning', 'From your teachers', 'Study material the teachers share.', bullets([
         'Notes, worksheets, pictures and links the teachers shared for your child’s subjects.',
         'Tap an item to open or download it, for example to print a worksheet.',
         'The card appears once a teacher shares something.',
-    ]) + note('Quick help in the app', 'Tap the small <b>?</b> next to a heading for help on that card.', 'tip'), new=True)
+    ]) + note('Quick help in the app', 'Tap the small <b>?</b> next to a heading for help on that card.', 'tip'))
 
-    g.add('fees', 'Fees', 'Fees, receipts and paying', 'Pay from your phone; the admin confirms.', steps([
-        ('See your requests', 'Fee Requests lists each request with its classes and amount.'),
-        ('Select and pay', 'Tick what you are paying for and tap <b>Pay</b>.'),
-        ('Pay by UPI', 'Copy the UPI ID and put the unique ID in the payment note.'),
-        ('Payment done', 'Tap <b>Completed</b>, then share the screenshot with LIB Admin.'),
-        ('Admin confirms', 'It’s marked Paid and a receipt is ready.'),
+    g.add('fees', 'Fees', 'Fees, receipts and paying', 'Pay from your phone; the admin confirms.', bullets([
+        'At the start of the month LIB sends one WhatsApp message for the family: each child’s subjects, classes and amount, the total, '
+        'and a line on <b>how we worked it out</b> (for example, classes per week this month).',
+        '<b>Fees due for your children</b> at the top of the page shows the total for every child.',
+    ]) + h3('Pay by UPI') + steps([
+        ('Select and pay', 'In Fee Requests, tick what you are paying for and tap <b>Pay ₹…</b>.'),
+        ('Pay by UPI', 'Copy the UPI ID (or scan the QR code on a computer) and put the <b>Unique ID</b> shown in your UPI app’s note.'),
+        ('Payment done', 'Tap <b>Payment Completed</b>, then share the screenshot with LIB Admin. Once confirmed, it’s marked Paid with a receipt.'),
+    ]) + h3('Or pay online') + bullets([
+        'Tap <b>Pay online (Razorpay)</b> for card, UPI or net banking, and type the student’s name on the payment page.',
     ]) + note('Good to know', ['Every paid payment has a printable receipt with the LIB logo.',
-                               'Pending requests don’t change the balance.', 'You can cancel an attempt before it’s confirmed.']))
+                               'Pending requests don’t change the balance.', 'You can undo an attempt before it’s confirmed.']), new=True)
 
     g.add('ai', 'Help', 'AI, chat and help', 'Answers without waiting.', g3(
         box('Ask AI', ['How is my child doing?', 'Next month’s outlook', 'Subscription advice', 'Uses only your child’s data']),
@@ -89,7 +100,7 @@ def guide():
         ['See practice paper scores', 'Practice Papers › View'],
         ['See the study plan', 'Study Plans'],
         ['Find teachers’ notes', 'From your teachers card'],
-        ['Pay fees', 'Fee Requests › Pay'],
+        ['Pay fees', 'Fee Requests › Pay, or Pay online (Razorpay)'],
         ['Print a receipt', 'Payment history › Receipt'],
         ['Switch child', 'Selector at the top'],
         ['Report a problem', 'Support button'],

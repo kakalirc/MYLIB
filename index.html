@@ -333,7 +333,7 @@ if (location.hostname !== 'app.libeducation.com') {
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-28 10:55 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-28 13:51 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -10119,7 +10119,7 @@ const SUPPORT_KB = {
 - Superadmin tools (Superadmin, superuser admins only): Academic Year, Export all data, Import backup, truncate old Audit & Login entries, clear all data and Audit Logging Controls. Each opens with the unlock password.`,
   Teacher: `My LIB app guide for Teacher:
 - Dashboard: today's classes, students needing renewal, low balances, students not seen in a while, your demo classes and student notes. A gold strip shows how many items need your action.
-- Pending Action Items (top of the menu): everything waiting for you, such as classes not marked (last 30 days), class timings to correct, Class Frequency not set, demos to mark done, homework or papers to review, students without a study plan, unread chats and availability not set. Tap an item to go there. 'Keep an eye on' lists reminders that are not counted.
+- Pending Action Items (top of the menu): everything waiting for you, such as today's classes past their time, class timings to correct, Class Frequency not set, demos to mark done, homework or papers to review, students without a study plan, unread chats and availability not set. Tap an item to go there. 'Keep an eye on' lists reminders that are not counted.
 - Star Teacher (below Pending Action Items, when the office has switched it on): a monthly points game, just for fun. Points for classes marked the same day, remarks, homework given and reviewed within 48 hours, practice papers, study plans, lesson prep, shared resources, demos, renewals and using the app. Levels Bronze 100, Silver 250, Gold 450, Platinum 700; badges stay in your trophy shelf. The +number in the menu is what you can earn right now (see Earn now). Only you see your points.
 - Demo classes: after you give a demo, press ✓ Mark done on your Dashboard and add a line on how it went. If the student joins you get a ₹100 bonus in payroll.
 - Class Schedule (Teaching): your classes by day or month. Set up a weekly schedule, add an extra class, mark a class done or remove a pending one. Classes at 00:00, 01:00 or 02:00 are placeholder times: put in the real time.
@@ -10242,6 +10242,8 @@ function supportModalHtml() {
   </div>`;
 }
 
+// The step-by-step PDF guide for each role (built from guides-src/), linked at the top of the Quick Guide.
+const HELP_GUIDE_PDF = { Admin: 'guide-admin.pdf', Teacher: 'guide-teacher.pdf', Student: 'guide-student.pdf', Parent: 'guide-parent.pdf' };
 function aiHelpPanelHtml() {
   if (!aiHelp.open) return '';
   const kb = supportKb();
@@ -10254,7 +10256,7 @@ function aiHelpPanelHtml() {
       <button class="help-close" onclick="toggleHelpAi()" style="position:static">&#x2715;</button>
     </div>
     <div style="flex:1;overflow-y:auto;max-height:55vh;border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:10px;font-size:13px;line-height:1.6">
-      ${aiHelp.messages.length === 0 ? `<div class="hint" style="margin-bottom:8px"><b>Quick Guide — ${esc(currentRole)}</b></div><ul style="margin:0;padding-left:18px">${faqLines.map(l=>`<li style="margin-bottom:4px">${esc(l)}</li>`).join('')}</ul>` :
+      ${aiHelp.messages.length === 0 ? `<div class="hint" style="margin-bottom:8px"><b>Quick Guide — ${esc(currentRole)}</b>${HELP_GUIDE_PDF[currentRole] ? ` · <a href="${HELP_GUIDE_PDF[currentRole]}" target="_blank" rel="noopener" style="color:var(--forest)">📖 Full guide (PDF)</a>` : ''}</div><ul style="margin:0;padding-left:18px">${faqLines.map(l=>`<li style="margin-bottom:4px">${esc(l)}</li>`).join('')}</ul>` :
         aiHelp.messages.map(m=>`<div style="margin-bottom:8px"><b style="color:${m.role==='user'?'var(--forest)':'var(--ink)'}">${m.role==='user'?'You':'Help Bot'}:</b> <span style="white-space:pre-wrap">${esc(m.content)}</span></div>`).join('')}
       ${aiHelp.loading ? '<div class="hint" style="text-align:center;padding:4px">Thinking…</div>' : ''}
     </div>
@@ -19542,7 +19544,7 @@ const HELP = {
   'superadmin': { t:'Superadmin tools', b:"<ul><li>Only superuser admins see this menu. Each card opens with the unlock password.</li><li><b>Academic Year</b>: set the new year (e.g. 2026-27) and move every student (except Adult) up a grade.</li><li><b>Export all data</b> downloads every table as Excel; <b>Import backup</b> loads one back.</li><li><b>Danger zone</b>: export and remove old Audit and Login entries, clear all data, and switch audit logging on or off. These cannot be undone, so export first.</li></ul>" },
   'star-teacher': { t:'Star Teacher', b:"<ul><li>A monthly game, just for fun. You earn points for good work: classes marked the same day, remarks, homework given and reviewed quickly, practice papers, study plans, lesson prep, shared resources, demos, renewals and using the app.</li><li>Points start again on the 1st of each month. Levels: Bronze 100, Silver 250, Gold 450, Platinum 700.</li><li><b>Earn now</b> shows what you can do today and how many points it gives; the number next to Star Teacher in the menu is the same total. <b>Ways to earn points</b> lists every rule.</li><li>Badges you win stay in your trophy shelf.</li><li>Only you can see your points. Other teachers never see them.</li></ul>" },
   'star-teacher-admin': { t:'Star Teacher', b:"<ul><li>A points game for teachers, no money. Tick <b>Show Star Teacher to teachers</b> to switch it on; teachers see it after they open or refresh the app.</li><li><b>Game starts on</b>: nothing before this date counts.</li><li>The leaderboard is for admins only. Tap a teacher to see where their points came from. ⬇ Excel downloads the month.</li><li>Points are worked out from the saved classes, homework, papers, plans, demos, renewals and app usage, so changing the start date recounts everything.</li></ul>" },
-  'pending-actions': { t:'Pending Action Items', b:"<ul><li>Everything waiting for you, counted on the menu and in the gold strip on your Dashboard. Tap an item to jump to it.</li><li>Counted: classes not marked (last 30 days), today's classes past their time, class timings to correct (00:00 / 01:00 / 02:00), schedule setup (Class Frequency), demos to mark done, homework and practice papers to review, students without a study plan, unread chats, notifications and announcements, and availability not set.</li><li><b>Keep an eye on</b> is a reminder list and is not counted: lesson prep, expiring classes, renewals, low balances, students not seen, late homework or papers, and your open support tickets.</li><li>You can give attendance only for the current month, so clear 'not marked' classes before the month ends.</li></ul>" },
+  'pending-actions': { t:'Pending Action Items', b:"<ul><li>Everything waiting for you, counted on the menu and in the gold strip on your Dashboard. Tap an item to jump to it.</li><li>Counted: today's classes past their time, class timings to correct (00:00 / 01:00 / 02:00), schedule setup (Class Frequency), demos to mark done, homework and practice papers to review, students without a study plan, unread chats, notifications and announcements, and availability not set.</li><li><b>Keep an eye on</b> is a reminder list and is not counted: lesson prep, expiring classes, renewals, low balances, students not seen, late homework or papers, and your open support tickets.</li><li>You can give attendance only for the current month, so mark every class before the month ends.</li></ul>" },
   'teacher-demos': { t:'My Demo Classes', b:"<ul><li>Demo classes the office booked for you.</li><li>After you give a demo, press <b>✓ Mark done</b> and add a line on how it went. Until then it shows under Pending Action Items.</li><li>If the student joins, the office marks it Converted and you get a ₹100 demo bonus in that month's payroll.</li></ul>" },
   'pay-fees': { t:'Paying fees', b:"<ul><li>Fee requests are the fees due. They are added to the classes balance only after the payment is confirmed.</li><li><b>Pay by UPI</b>: tick the requests, press Pay ₹…, pay with the UPI ID or QR code and put the Unique ID shown in your UPI app's note. Then press Payment Completed and send the screenshot to the contact number.</li><li><b>Pay online (Razorpay)</b>: opens the payment page for card, UPI or net banking. Type the student's name so we can match it.</li><li>LIB Education confirms every payment by hand, so it can take a little time to show as paid.</li></ul>" },
 };

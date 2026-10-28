@@ -9,11 +9,11 @@ def guide():
     common.getting_started(g, 'your teacher or the admin')
 
     g.add('whatsnew', 'Start here', 'What’s new in this edition', 'The biggest additions since the last guide.', g2(
-        box('From your teachers', 'Notes, worksheets, pictures and links your teachers share for your subjects, right on your home screen.'),
-        box('Practice papers', 'Board-style papers from your teacher, done section by section on your phone. MCQs are marked the moment you submit.'),
+        box('Pay online', 'Besides UPI, you can now pay fees by card, UPI or net banking with <b>Pay online (Razorpay)</b>.'),
+        box('Help for paying', 'Tap the <b>?</b> next to Fee Requests for the payment steps.'),
     ) + g2(
-        box('Photo answers', 'Write long answers on paper and send a photo, just like homework.'),
-        box('Help on every card', 'Tap the small <b>?</b> next to a heading in the app for quick help on it.'),
+        box('Practice papers', 'Board-style papers from your teacher, done section by section on your phone. MCQs are marked the moment you submit.'),
+        box('From your teachers', 'Notes, worksheets, pictures and links your teachers share for your subjects.'),
     ) + note('Where to find it', 'Everything is on your home screen. Scroll down to find each card.', 'tip'), new=True)
 
     g.add('home', 'Home', 'Your home screen', 'Top to bottom, what you will see.', table(['Card', 'What it shows'], [
@@ -75,7 +75,7 @@ def guide():
               'has been open a few hours, tap Refresh.', 'tip'))
 
     g.add('practice', 'Learn', 'Practice papers', 'Board-style papers your teacher sets, done on your phone.',
-          practice.list_screen() + h3('Paper status') + practice.statuses(), new=True)
+          practice.list_screen() + h3('Paper status') + practice.statuses())
 
     g.add('practice2', 'Learn', 'Doing a practice paper', 'Work through it section by section. Nothing is lost if you stop.',
           practice.paper_screen() + steps([
@@ -84,7 +84,7 @@ def guide():
                                        '<b>Long answers, letters and translations:</b> write on paper and tap <b>📷 Add photo of your answer</b>.'),
               ('Move on, then submit', 'Use <b>Next section →</b>; answers save automatically. On the last section tap <b>Submit paper</b>. '
                                        'The app warns you about any unanswered questions.'),
-          ]), new=True)
+          ]))
 
     g.add('practice3', 'Learn', 'Your practice paper results', 'MCQs are marked instantly; your teacher marks the rest.', bullets([
         'After you submit you can’t change your answers. Your <b>MCQ score</b> shows straight away.',
@@ -92,22 +92,25 @@ def guide():
         'Tap <b>View</b> to see the marks and comment for every question, the correct MCQ option and the <b>model answer</b>.',
     ]) + note('Tips for a good score', ['Read the passage carefully before the questions under it.',
                                          'Make photos clear and well lit, one page at a time. Tap ✕ to remove a bad photo and try again.',
-                                         'Check the due date: papers past it show <b>Overdue</b>.'], 'tip'), new=True)
+                                         'Check the due date: papers past it show <b>Overdue</b>.'], 'tip'))
 
     g.add('resources', 'Learn', 'From your teachers', 'Study material your teachers share with you.', bullets([
         'Notes, worksheets, pictures and links your teachers have shared for your subjects.',
         'Each item shows its subject and chapter. Tap it to open or download it.',
         'The card appears on your home screen once a teacher shares something.',
-    ]), new=True)
+    ]))
 
-    g.add('fees', 'Pay', 'Paying your fees', 'Pay from your own login; the admin confirms.', steps([
+    g.add('fees', 'Pay', 'Paying your fees', 'Pay by UPI or online; the admin confirms.', h3('Pay by UPI') + steps([
         ('See your requests', 'Fee Requests lists each request with its classes and amount.'),
-        ('Select and pay', 'Tick what you are paying for and tap <b>Pay</b>.'),
-        ('Pay by UPI', 'Copy the UPI ID and put the unique ID in the payment note.'),
-        ('Payment done', 'Tap <b>Completed</b>, then share the screenshot with LIB Admin.'),
+        ('Select and pay', 'Tick what you are paying for and tap <b>Pay ₹…</b>.'),
+        ('Pay by UPI', 'Copy the UPI ID (or scan the QR code on a computer) and put the <b>Unique ID</b> shown in your UPI app’s note.'),
+        ('Payment done', 'Tap <b>Payment Completed</b>, then share the screenshot with LIB Admin.'),
         ('Admin confirms', 'It’s marked Paid and the classes are added.'),
-    ]) + note('Good to know', ['Pending requests don’t count until they’re paid.', 'You can cancel an attempt before it’s confirmed.',
-                               'Payment history shows each reference and remark, with a printable receipt.']))
+    ]) + h3('Or pay online') + bullets([
+        'Tap <b>Pay online (Razorpay)</b> to pay by card, UPI or net banking.',
+        'Type the student’s name on the payment page so LIB can match your payment.',
+    ]) + note('Good to know', ['Pending requests don’t count until they’re paid.', 'You can undo an attempt before it’s confirmed.',
+                               'Payment history shows each reference and remark, with a printable receipt.']), new=True)
 
     g.add('ai', 'Help', 'Ask AI, profile and chat', 'Claude helps you understand your own progress.', g3(
         box('How am I doing?', ['A friendly summary of your month']),
