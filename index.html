@@ -333,7 +333,7 @@ if (location.hostname !== 'app.libeducation.com') {
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-28 15:00 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-28 15:20 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -5058,7 +5058,7 @@ function hwWhatsAppDraft(hw) {
   if (hw.studyPlanTopic) msg += `\n🔗 Topic: ${hw.studyPlanTopic}`;
   if (hw.dueDate) msg += `\n📅 Due: ${dayDate(hw.dueDate)}`;
   msg += `\n\n— My LIB Education`;
-  return encodeURIComponent(msg.replace(/\\n/g, '\n'));
+  return msg.replace(/\\n/g, '\n');
 }
 
 function hwReviewWhatsAppDraft(hw) {
@@ -5070,7 +5070,7 @@ function hwReviewWhatsAppDraft(hw) {
   if (hw.marks !== '' && hw.marks != null) msg += `\n⭐ Score: ${hw.marks}${hw.totalMarks !== '' && hw.totalMarks != null ? ` / ${hw.totalMarks}` : ''}`;
   if (hw.teacherFeedback) msg += `\n💬 Feedback: ${hw.teacherFeedback}`;
   msg += `\n\n— My LIB Education`;
-  return encodeURIComponent(msg.replace(/\\n/g, '\n'));
+  return msg.replace(/\\n/g, '\n');
 }
 
 // inline review state (teacher marks reviewed + adds marks/feedback)
@@ -7295,9 +7295,8 @@ function parentLoginWaHtml(u) {
   return bulkParentWaHtml({ kids, phones, username: u.username, action: 'create', resend: true, parentName: (kids.find(s => s.parentName) || {}).parentName || '' });
 }
 function bulkParentWaHtml(r) {
-  const encoded = encodeURIComponent(bulkParentMessage(r));
-  const chipStyle = 'text-decoration:none;display:inline-flex;align-items:center';
-  return r.phones.map(k => `<a href="https://wa.me/91${k}?text=${encoded}" target="_blank" class="btn-small" style="${chipStyle}">📤 ${esc(k)}</a>`).join(' ');
+  const message = bulkParentMessage(r);
+  return r.phones.map(k => waButtonHtml(k, '📤 ' + esc(k), message)).join(' ');
 }
 function bulkParentCardHtml() {
   const head = `<h2>Create all parent logins <button class="help-btn" onclick="openHelp('bulk-parents',event)">?</button></h2>
@@ -8566,8 +8565,8 @@ function bulkStudentMessage(r) {
 }
 function bulkStudentWaHtml(r) {
   if (!r.phones.length) return '<span class="hint">No phone number saved.</span>';
-  const encoded = encodeURIComponent(bulkStudentMessage(r));
-  return r.phones.map(k => `<a href="https://wa.me/91${k}?text=${encoded}" target="_blank" class="btn-small" style="text-decoration:none;display:inline-flex;align-items:center">📤 ${esc(k)}</a>`).join(' ');
+  const message = bulkStudentMessage(r);
+  return r.phones.map(k => waButtonHtml(k, '📤 ' + esc(k), message)).join(' ');
 }
 // Student's page → Login: send the login again (password assumed still = login ID).
 function studentLoginWaHtml(s, u) {
@@ -9418,26 +9417,43 @@ function familyPhoneList(studentId) {
   if (!out.length) m.forEach(s => add(s.mobileNumber, 'Main mobile · ' + s.name.split(' ')[0]));
   return out;
 }
-// Fee-message WhatsApp: phones open wa.me (the WhatsApp app takes it); computers get "📤 app" (WhatsApp Desktop,
-// no extra tab) and a small "Web" button (WhatsApp Web), so no second window is opened by itself.
-// A button inside the Message box sends the box's text as edited (data-wa-box).
-function openFeeWhatsApp(phone, button, how) {
+// Every WhatsApp button in the app: phones open wa.me (the WhatsApp app takes it); computers get "📤 …" (WhatsApp
+// Desktop, no in-between page) and a small "Web" button (WhatsApp Web), so no second window is opened by itself.
+// A button inside the fee Message box sends the box's text as edited (data-wa-box).
+function waNumber(phone) {
+  const clean = String(phone || '').replace(/\D/g, '');
+  return clean.length === 10 ? '91' + clean : clean;
+}
+function launchWhatsApp(phone, message, how) {
+  const num = waNumber(phone);
+  const text = message ? encodeURIComponent(message) : '';
+  if (how === 'app') {
+    const q = [num ? 'phone=' + num : '', text ? 'text=' + text : ''].filter(Boolean).join('&');
+    location.href = 'whatsapp://send' + (q ? '?' + q : '');
+  } else window.open('https://wa.me/' + num + (text ? '?text=' + text : ''), '_blank', 'noopener');
+}
+function waHow() { return isMobileDevice() ? 'web' : 'app'; }
+function openWhatsApp(phone, button, how) {
   const box = button && button.dataset && button.dataset.waBox ? document.getElementById('feeMessageTextarea') : null;
   const message = box ? box.value : (button && button.dataset ? (button.dataset.waText || '') : '');
-  const num = String(phone || '').replace(/\D/g, '');
-  const encoded = encodeURIComponent(message);
-  if (how === 'app') location.href = num ? `whatsapp://send?phone=${num}&text=${encoded}` : `whatsapp://send?text=${encoded}`;
-  else window.open(num ? `https://wa.me/${num}?text=${encoded}` : `https://wa.me/?text=${encoded}`, '_blank', 'noopener');
+  launchWhatsApp(phone, message, how);
   if (button && button.dataset && button.dataset.waFamily) markFeeReminderSent(button.dataset.waFamily);
+}
+// One WhatsApp button (phones) or 📤 Desktop + Web pair (computers). label is HTML; opts: title, style, data (extra attributes).
+function waButtonHtml(phone, label, message, opts) {
+  opts = opts || {};
+  const num = waNumber(phone);
+  const style = 'display:inline-flex;align-items:center' + (opts.style ? ';' + opts.style : '');
+  const small = /font-size/.test(opts.style || '') ? ' style="font-size:11px"' : '';
+  const data_ = `data-wa-text="${escAttr(message || '')}"${opts.data ? ' ' + opts.data : ''}`;
+  const title = opts.title || '';
+  if (isMobileDevice()) return `<button type="button" class="btn-small" style="${style}" title="${escAttr(title)}" ${data_} onclick="openWhatsApp('${num}',this,'web')">${label}</button>`;
+  return `<span style="display:inline-flex;gap:2px;align-items:center;margin:2px 4px 2px 0"><button type="button" class="btn-small" style="${style}" title="${escAttr('Open in WhatsApp Desktop' + (title ? ': ' + title : ''))}" ${data_} onclick="openWhatsApp('${num}',this,'app')">${label}</button><button type="button" class="btn-small"${small} title="Open in WhatsApp Web instead" ${data_} onclick="openWhatsApp('${num}',this,'web')">Web</button></span>`;
 }
 function familyWaChips(studentId, messageText, fromBox) {
   if (!messageText) return '';
-  const chipStyle = 'display:inline-flex;align-items:center';
-  const mobile = isMobileDevice();
-  const data_ = `data-wa-text="${escAttr(messageText)}" data-wa-family="${escAttr(studentId)}"${fromBox ? ' data-wa-box="1"' : ''}`;
-  const makeButton = (num, label, title) => mobile
-    ? `<button type="button" class="btn-small" style="${chipStyle}" title="${escAttr(title)}" ${data_} onclick="openFeeWhatsApp('${num}',this,'web')">📤 ${label}</button>`
-    : `<span style="display:inline-flex;gap:2px;align-items:center;margin:2px 4px 2px 0"><button type="button" class="btn-small" style="${chipStyle}" title="Open in WhatsApp Desktop: ${escAttr(title)}" ${data_} onclick="openFeeWhatsApp('${num}',this,'app')">📤 ${label}</button><button type="button" class="btn-small" title="Open in WhatsApp Web instead" ${data_} onclick="openFeeWhatsApp('${num}',this,'web')">Web</button></span>`;
+  const data_ = `data-wa-family="${escAttr(studentId)}"${fromBox ? ' data-wa-box="1"' : ''}`;
+  const makeButton = (num, label, title) => waButtonHtml(num, '📤 ' + label, messageText, { title, data: data_ });
   const phones = familyPhoneList(studentId);
   if (!phones.length) return makeButton('', 'WhatsApp', 'No number on file: pick the chat in WhatsApp');
   return phones.map(ph => {
@@ -11017,20 +11033,12 @@ async function copyFeeMessage() {
 
 // ── WhatsApp chip helper ───────────────────────────────────────────────────
 // Returns one chip per parent phone number (or a generic chip if none on file).
-// Each chip is an <a> that opens wa.me with the message pre-filled.
+// Each chip opens WhatsApp with the message pre-filled (waButtonHtml).
 function waChips(studentId, messageText) {
   if (!messageText) return '';
   const phones = phoneNumbersFor(studentId, 'parent').map(p => p.number).filter(Boolean);
-  const encoded = encodeURIComponent(messageText);
-  const chipStyle = 'text-decoration:none;display:inline-flex;align-items:center';
-  if (!phones.length) {
-    return `<a href="https://wa.me/?text=${encoded}" target="_blank" class="btn-small" style="${chipStyle}">📤 WhatsApp</a>`;
-  }
-  return phones.map(ph => {
-    const clean = ph.replace(/\D/g, '');
-    const num = clean.length === 10 ? '91' + clean : clean;
-    return `<a href="https://wa.me/${num}?text=${encoded}" target="_blank" class="btn-small" style="${chipStyle}">📤 ${esc(ph)}</a>`;
-  }).join('');
+  if (!phones.length) return waButtonHtml('', '📤 WhatsApp', messageText, { title: 'No number on file: pick the chat in WhatsApp' });
+  return phones.map(ph => waButtonHtml(ph, '📤 ' + esc(ph), messageText)).join('');
 }
 
 // ── Prospect fee quote helpers ─────────────────────────────────────────────
@@ -11066,14 +11074,10 @@ function prospectQuoteText() {
   if (feeContactMobile) msg += ` Contact: ${feeContactMobile}.`;
   return msg;
 }
-function shareProspectQuote() {
+function shareProspectQuote(how) {
   const msg = prospectQuoteText();
   saveProspectQuote(msg);
-  const clean = prospectMobile.trim().replace(/\D/g, '');
-  const num = clean.length === 10 ? '91' + clean : clean;
-  const url = num ? 'https://wa.me/' + num + '?text=' + encodeURIComponent(msg)
-                  : 'https://wa.me/?text=' + encodeURIComponent(msg);
-  window.open(url, '_blank');
+  launchWhatsApp(prospectMobile.trim(), msg, how || waHow());
 }
 function copyProspectQuote() {
   const msg = prospectQuoteText();
@@ -11122,12 +11126,8 @@ async function saveProspectQuoteEdit() {
   prospectQuoteEditing = null;
   render();
 }
-function resendProspectQuote(q) {
-  const clean = (q.mobile || '').replace(/\D/g, '');
-  const num = clean.length === 10 ? '91' + clean : clean;
-  const url = num ? 'https://wa.me/' + num + '?text=' + encodeURIComponent(q.message)
-                  : 'https://wa.me/?text=' + encodeURIComponent(q.message);
-  window.open(url, '_blank');
+function resendProspectQuote(q, how) {
+  launchWhatsApp(q.mobile || '', q.message, how || waHow());
 }
 function copyProspectQuoteLog(id) {
   const q = prospectQuotes.find(x => x.id === id);
@@ -15037,7 +15037,8 @@ function renderFees() {
           <div class="hint" style="font-size:16px;color:var(--forest)">Quote total: <b>₹${pFinal.toFixed(2)}</b></div>`;
       })()}
       <div class="row-form" style="margin-top:8px">
-        <button class="btn-primary" ${prospectCatId && Number(prospectClasses) > 0 ? '' : 'disabled'} onclick="shareProspectQuote()">📤 Share via WhatsApp</button>
+        <button class="btn-primary" ${prospectCatId && Number(prospectClasses) > 0 ? '' : 'disabled'} onclick="shareProspectQuote()" title="${isMobileDevice() ? '' : 'Open in WhatsApp Desktop'}">📤 Share via WhatsApp</button>${isMobileDevice() ? '' : `
+        <button class="btn-small" ${prospectCatId && Number(prospectClasses) > 0 ? '' : 'disabled'} onclick="shareProspectQuote('web')" title="Open in WhatsApp Web instead">Web</button>`}
         <button class="btn-small" ${prospectCatId && Number(prospectClasses) > 0 ? '' : 'disabled'} onclick="copyProspectQuote()">Copy</button>
       </div>
 
@@ -15073,7 +15074,7 @@ function renderFees() {
             <td style="white-space:nowrap">
               <button class="btn-small" onclick="startEditProspectQuote('${q.id}')">Edit</button>
               <button class="btn-small" onclick="copyProspectQuoteLog('${q.id}')">Copy</button>
-              <button class="btn-small" onclick="resendProspectQuote(${JSON.stringify(q).replace(/"/g,'&quot;')})">📤</button>
+              <button class="btn-small" title="${isMobileDevice() ? 'Send again on WhatsApp' : 'Send again in WhatsApp Desktop'}" onclick="resendProspectQuote(${JSON.stringify(q).replace(/"/g,'&quot;')})">📤</button>${isMobileDevice() ? '' : `<button class="btn-small" title="Send again in WhatsApp Web" onclick="resendProspectQuote(${JSON.stringify(q).replace(/"/g,'&quot;')},'web')">Web</button>`}
               <button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="deleteProspectQuote('${q.id}')">Delete</button>
             </td>
           </tr>`;
@@ -15143,10 +15144,7 @@ function renderWixBookings() {
     } else if (b.status === 'Scheduled') {
       const wixMsgBtns = (() => {
         if (!b.phone) return '';
-        const clean = b.phone.replace(/\D/g, '');
-        const num = clean.length === 10 ? '91' + clean : clean;
-        const enc = encodeURIComponent(wixBookingConfirmMessage(b));
-        return `<a href="https://wa.me/${num}?text=${enc}" target="_blank" class="btn-small" style="text-decoration:none;display:inline-flex;align-items:center;font-size:11px" title="Send demo confirmation on WhatsApp">📤 WA</a>`
+        return waButtonHtml(b.phone, '📤 WA', wixBookingConfirmMessage(b), { style: 'font-size:11px', title: 'Send demo confirmation on WhatsApp' })
           + ` <button class="btn-small" style="font-size:11px" title="Copy demo confirmation message" onclick="copyText(wixBookingConfirmMessage(data.wixBookings.find(x=>x.id==='${b.id}')),this)">Copy msg</button>`;
       })();
       scheduleBlock = `
@@ -15315,10 +15313,7 @@ function renderWixBookings() {
               : (['Pending', 'Done', 'Lost'].includes(d.status) ? '<button class="btn-small btn-primary" style="font-size:11px" onclick="demoLinkingId=\''+d.id+'\';demoLinkStudentId=\'\';demoLinkMsg=\'\';demoLinkSearch=\'\';render()">Link &amp; Convert</button>' : (sName!=='—'?esc(sName):'<span class="hint">—</span>'));
             const msgBtns = (() => {
               if (!d.parentMobile) return '';
-              const clean = d.parentMobile.replace(/\D/g, '');
-              const num = clean.length === 10 ? '91' + clean : clean;
-              const enc = encodeURIComponent(demoConfirmMessage(d));
-              return ` <a href="https://wa.me/${num}?text=${enc}" target="_blank" class="btn-small" style="text-decoration:none;display:inline-flex;align-items:center;font-size:11px" title="Send demo confirmation on WhatsApp">📤 WA</a>`
+              return ' ' + waButtonHtml(d.parentMobile, '📤 WA', demoConfirmMessage(d), { style: 'font-size:11px', title: 'Send demo confirmation on WhatsApp' })
                 + ` <button class="btn-small" style="font-size:11px" title="Copy demo confirmation message" onclick="copyText(demoConfirmMessage(data.demoLogs.find(x=>x.id==='${d.id}')),this)">Copy msg</button>`;
             })();
             const btn = (label, fn, style) => `<button class="btn-small" style="font-size:11px${style ? ';' + style : ''}" onclick="${fn}('${d.id}')">${label}</button>`;
@@ -16730,10 +16725,9 @@ function studentFeeCalculatorHtml(student) {
 function teacherStudentPhoneLinks(number) {
   const digits = String(number || '').replace(/\D/g, '');
   if (!digits) return '';
-  const wa = digits.length === 10 ? '91' + digits : digits;
   return `<span style="display:inline-flex;align-items:center;gap:6px;margin:2px 10px 2px 0">
     <a href="tel:${escAttr(number)}">${esc(number)}</a>
-    <a href="https://wa.me/${wa}" target="_blank" class="btn-small" style="background:#25D366;color:#fff;border-color:#25D366;text-decoration:none;font-size:11px;padding:2px 8px">WhatsApp</a>
+    ${waButtonHtml(digits, 'WhatsApp', '', { style: 'background:#25D366;color:#fff;border-color:#25D366;font-size:11px;padding:2px 8px', title: 'Open chat' })}
   </span>`;
 }
 function teacherStudentCardHtml(s, teacher) {
@@ -20391,8 +20385,8 @@ function renderTeacherHomework(teacher) {
             ${h.status==='submitted' && !review ? `<button class="btn-small" onclick="hwOpenReview('${h.id}',homeworkData.find(x=>x.id==='${h.id}'))">Mark reviewed</button>` : ''}
             ${(h.status==='assigned'||hwIsLate(h)) ? `<button class="btn-small" style="background:var(--forest);color:#fff" onclick="hwUpdateStatus('${h.id}','submitted')">✓ Mark complete</button>` : ''}
             ${(h.status==='submitted'||h.status==='reviewed') ? `<button class="btn-small" onclick="hwUpdateStatus('${h.id}','assigned')">↩ Reopen</button>` : ''}
-            ${h.status==='reviewed' ? `<a href="https://wa.me/${hwWaPhone(h.studentId)}?text=${hwReviewWhatsAppDraft(h)}" target="_blank" class="btn-small" style="background:#25D366;color:#fff;text-decoration:none">💬 WA</a>` : ''}
-            ${h.status==='assigned'||hwIsLate(h) ? `<a href="https://wa.me/${hwWaPhone(h.studentId)}?text=${hwWhatsAppDraft(h)}" target="_blank" class="btn-small" style="background:#25D366;color:#fff;text-decoration:none">💬 Remind</a>` : ''}
+            ${h.status==='reviewed' ? waButtonHtml(hwWaPhone(h.studentId), '💬 WA', hwReviewWhatsAppDraft(h), { style: 'background:#25D366;color:#fff' }) : ''}
+            ${h.status==='assigned'||hwIsLate(h) ? waButtonHtml(hwWaPhone(h.studentId), '💬 Remind', hwWhatsAppDraft(h), { style: 'background:#25D366;color:#fff' }) : ''}
             <button class="btn-small" onclick="hwStartEdit('${h.id}')">Edit</button>
             <button class="btn-small btn-danger" onclick="hwDeleteHomework('${h.id}')">Delete</button>
           </div>
