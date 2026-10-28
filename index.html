@@ -330,7 +330,7 @@ if (location.hostname !== 'app.libeducation.com') {
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-28 10:25 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-28 10:35 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1219,6 +1219,22 @@ let supportAdminFilter = 'open'; // 'open'|'in_progress'|'resolved'|'all'
 let supportAdminEdit = null; // { id, status, note, loading, error } or null
 let aiHelp = { open: false, messages: [], input: '', loading: false }; // in-app help AI
 const monthStr = todayStr.slice(0,7);
+// Give Attendance notice: gold box; from the 25th it turns red with a countdown to month end (when the month locks)
+function attendanceMonthNotice() {
+  const [y, m] = monthStr.split('-').map(Number);
+  const monthName = new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'long' }) + ' ' + y;
+  const lastDay = new Date(y, m, 0).getDate();
+  const daysLeft = lastDay - Number(todayStr.slice(8, 10)) + 1;
+  const late = Number(todayStr.slice(8, 10)) >= 25;
+  const call = `<a href="tel:9845393178" style="color:${late ? 'var(--brick)' : 'var(--forest)'};font-weight:700;white-space:nowrap">📞 98453 93178</a>`;
+  const box = late
+    ? 'background:#f8e3dd;border:1px solid var(--brick);border-left:5px solid var(--brick);color:#5a1f13'
+    : 'background:#fbf1d9;border:1px solid var(--gold);border-left:5px solid var(--gold)';
+  const first = late
+    ? `⚠️ <b>${daysLeft === 1 ? 'Today is the last day' : 'Only ' + daysLeft + ' days left'}</b> to give or fix <b>${monthName}</b> attendance. After ${lastDay} ${monthName.slice(0, 3)} it locks.`
+    : `📅 You can give, edit or delete attendance for <b>${monthName} only</b>. No future dates.`;
+  return `<div style="${box};border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:14px;line-height:1.5">${first}<br>For an earlier month, call admin: ${call}${late ? '. No future dates.' : ''}</div>`;
+}
 let teacherEarningsMonth = monthStr;
 let earningsRevealed = false;
 let earningsRevealPwd = '';
@@ -17823,7 +17839,7 @@ function renderTeacherAttendance(teacher) {
   return `
     <div class="card">
       <h2>Give Attendance <button class="help-btn" onclick="openHelp('give-attendance',event)">?</button></h2>
-      <div class="hint">You can log, edit, or delete attendance for the <b>current month only</b> (${monthStr}). For any changes to a previous month, contact admin on <b>9845393178</b>. Never for a future date.</div>
+      ${attendanceMonthNotice()}
       ${logMsg ? `<div class="hint" style="color:var(--brick)">${esc(logMsg)}</div>` : ''}
       ${roster.length===0 ? '<div class="hint">No students are mapped to you yet. Contact the admin.</div>' : `
       <div class="row-form">
