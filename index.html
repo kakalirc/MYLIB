@@ -6,7 +6,17 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>My LIB — Attendance & Payroll Register</title>
+<title>My LIB – LIB Education Parent, Student &amp; Teacher Login</title>
+<meta name="description" content="My LIB is the LIB Education app. Parents and students log in to see classes, attendance, homework and fee details; teachers log in to mark classes.">
+<link rel="canonical" href="https://app.libeducation.com/">
+<script>
+// Only app.libeducation.com should appear in Google. The same files are also served from
+// GitHub Pages, Apache, workers.dev and Netlify's own address, so those copies ask not to be listed.
+if (location.hostname !== 'app.libeducation.com') {
+  var _noindex = document.createElement('meta'); _noindex.name = 'robots'; _noindex.content = 'noindex';
+  document.head.appendChild(_noindex);
+}
+</script>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1e1f23">
 <link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
@@ -153,6 +163,7 @@
   .loading { text-align: center; padding: 40px; color: var(--muted); }
   .app-splash { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:60vh; gap:18px; }
   .app-splash-name { font-size:28px; font-weight:700; color:var(--ink); letter-spacing:-0.5px; }
+  .app-splash-sub { font-size:14px; color:var(--muted); margin-top:-10px; text-align:center; }
   .app-splash-spinner { width:36px; height:36px; border:3px solid var(--line); border-top-color:var(--forest); border-radius:50%; animation:spin 0.8s linear infinite; }
   @keyframes spin { to { transform:rotate(360deg); } }
   .hint { font-size: 12px; color: var(--muted); margin-top: -4px; margin-bottom: 12px; }
@@ -281,11 +292,11 @@
 </head>
 <body>
 <div id="cdnStatus" style="display:none; max-width:1040px; margin:16px auto; padding:14px 16px; border-radius:8px; background:#f5e2de; color:#a6432e; font-family:'Work Sans',sans-serif; font-size:14px;"></div>
-<div class="wrap" id="app"><div class="app-splash"><div class="app-splash-name">My LIB</div><div class="app-splash-spinner"></div></div></div>
+<div class="wrap" id="app"><div class="app-splash"><div class="app-splash-name">My LIB</div><div class="app-splash-sub">LIB Education · Parent, Student &amp; Teacher login</div><div class="app-splash-spinner"></div></div></div>
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-27 22:20 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-28 09:15 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';

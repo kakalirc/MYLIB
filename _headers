@@ -1,0 +1,7 @@
+# Netlify: keep the user guide PDFs out of Google search (the login page should be the result)
+/guide-parent.pdf
+  X-Robots-Tag: noindex
+/guide-student.pdf
+  X-Robots-Tag: noindex
+/guide-teacher.pdf
+  X-Robots-Tag: noindex
