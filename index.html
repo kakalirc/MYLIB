@@ -23373,9 +23373,11 @@ async function regAccept(id) {
   const st = { id: row.id, name: row.name, archived: false, code: row.student_code || '', parentName: row.parent_name || '', mobileNumber: row.mobile_number || '', email: row.email || '', address: row.address || '', photo: '', gradeId: row.grade_id || '', boardId: row.board_id || '', academicYear: row.academic_year || '', modePreference: row.mode_preference || '', classTypePreference: row.class_type_preference || '', billSeparately: false };
   data.students.push(st);
   const phones = regPhones(r);
-  if (phones.length) {
-    const { data: pRows, error: pe } = await sb.from('student_phone_numbers').insert(phones.map(n => ({ student_id: row.id, phone_type: 'parent', phone_number: n }))).select();
-    if (pe) notes.push('Parent numbers not saved: ' + pe.message);
+  const phoneRows = phones.map(n => ({ student_id: row.id, phone_type: 'parent', phone_number: n }));
+  if (phoneKey(r.student_mobile)) phoneRows.push({ student_id: row.id, phone_type: 'student', phone_number: phoneKey(r.student_mobile) });
+  if (phoneRows.length) {
+    const { data: pRows, error: pe } = await sb.from('student_phone_numbers').insert(phoneRows).select();
+    if (pe) notes.push('Phone numbers not saved: ' + pe.message);
     else (pRows || []).forEach(p => data.studentPhoneNumbers.push({ id: p.id, studentId: p.student_id, type: p.phone_type, number: p.phone_number }));
   }
   // Parent login: the family's own login if it has one, else the parent's mobile.
@@ -23481,6 +23483,7 @@ function regCardHtml(r) {
           <span class="tag">${esc(regGradeName(r.grade_id) || 'Grade ?')}</span>${r.board_id ? `<span class="tag">${esc(regBoardName(r.board_id))}</span>` : ''}
           <span class="hint">${esc(when)}</span></div>
         ${line('Parent', `${esc(r.parent_name)} · ${esc(r.parent_mobile)}${copyBtnHtml(r.parent_mobile)}${r.second_mobile ? ' · ' + esc(r.second_mobile) + copyBtnHtml(r.second_mobile) : ''}`)}
+        ${line('Student mobile', r.student_mobile ? esc(r.student_mobile) + copyBtnHtml(r.student_mobile) : '')}
         ${line('Subjects', esc((r.subjects || []).join(', ')))}
         ${line('Wants', esc(prefs))}
         ${line('School', esc(r.school || ''))}

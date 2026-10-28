@@ -58,6 +58,8 @@ if (location.hostname !== 'app.libeducation.com') {
     <select id="grade_id" required><option value="">Loading…</option></select>
     <label for="board_id">Board <span class="opt">(optional)</span></label>
     <select id="board_id"><option value="">—</option></select>
+    <label for="student_mobile">Student's own mobile <span class="opt">(optional, if they have one)</span></label>
+    <input type="tel" id="student_mobile" maxlength="14" inputmode="numeric" placeholder="10 digits">
     <label for="school">School <span class="opt">(optional)</span></label>
     <input type="text" id="school" maxlength="120">
 
@@ -163,13 +165,14 @@ el('regForm').addEventListener('submit', function (e) {
     : !parent ? "Please type the parent's name."
     : /\d/.test(parent) ? "The parent's name can't have numbers."
     : !/^[6-9]\d{9}$/.test(mobile) ? 'Please type a 10-digit mobile number.'
+    : el('student_mobile').value.trim() && !/^[6-9]\d{9}$/.test(digits(el('student_mobile').value)) ? "The student's mobile should have 10 digits."
     : !el('consent').checked ? 'Please tick the box to agree to the Terms and Privacy Policy.' : '';
   if (problem) { err.textContent = problem; return; }
   var subjects = [].map.call(document.querySelectorAll('input[name="subject"]:checked'), function (c) { return c.value; });
   if (el('subject_other').value.trim()) subjects.push(el('subject_other').value.trim());
   var btn = el('sendBtn'); btn.disabled = true; btn.textContent = 'Sending…';
   rpc('submit_registration', { p: {
-    student_name: student, grade_id: el('grade_id').value, board_id: el('board_id').value, school: el('school').value,
+    student_name: student, grade_id: el('grade_id').value, board_id: el('board_id').value, school: el('school').value, student_mobile: digits(el('student_mobile').value),
     subjects: subjects, mode_preference: picked('mode'), class_type_preference: picked('ctype'),
     parent_name: parent, parent_mobile: mobile, second_mobile: digits(el('second_mobile').value),
     email: el('email').value, address: el('address').value, heard_from: el('heard_from').value, note: el('note').value,
