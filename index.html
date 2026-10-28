@@ -335,7 +335,7 @@ if (location.hostname !== 'app.libeducation.com') {
 const APP_VERSION = '2026.10';
 // The app links every WhatsApp message gives (never the address the sender happens to be on).
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
-const BUILD_TIMESTAMP = '2026-10-28 16:45 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-28 23:30 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -8946,6 +8946,47 @@ function startBulkAcademicYearChange() {
   bulkAcademicYearConfirmPending = true;
   render();
 }
+function blankYearStudents() {
+  const skip = new Set(grades.filter(g => g.excludedFromGradeProgression).map(g => String(g.id)));
+  return data.students.filter(s => !s.archived && !(s.academicYear || '').trim() && !skip.has(String(s.gradeId)));
+}
+// admin_set_student_academic_year only fills the year (no grade change) when the student's year is blank.
+async function fillBlankStudentYears() {
+  const el = document.getElementById('bulkAcademicYearInput');
+  const val = el ? el.value.trim() : '';
+  if (!isValidAcademicYear(val)) { bulkAcademicYearMsg = 'Type the academic year first, in the form 2026-27.'; render(); return; }
+  const list = blankYearStudents();
+  if (!list.length) { bulkAcademicYearMsg = 'Every active student already has an academic year.'; render(); return; }
+  if (!confirm(`Give academic year ${val} to ${list.length} student${list.length === 1 ? '' : 's'} whose year is empty?\n\nGrades are not changed.`)) return;
+  let ok = 0, failed = 0, last = '';
+  for (const st of list) {
+    bulkAcademicYearMsg = `Working… ${ok + failed} of ${list.length}`; render();
+    if ((data.students.find(x => x.id === st.id) || {}).academicYear) continue;
+    const { data: result, error } = await sb.rpc('admin_set_student_academic_year', { p_student_id: st.id, new_year: val });
+    if (error || !result || !result.ok || result.advanced) { failed++; last = error ? error.message : (result && result.error) || 'grade moved'; }
+    else ok++;
+  }
+  await loadStudentsAndSubscriptions();
+  bulkAcademicYearMsg = `Academic year ${val} filled in for ${ok} student${ok === 1 ? '' : 's'}, no grades changed.` + (failed ? ` ${failed} could not be done (${last}).` : '');
+  render();
+}
+async function setAcademicYearOnly() {
+  const el = document.getElementById('bulkAcademicYearInput');
+  const val = el ? el.value.trim() : '';
+  if (!val) { bulkAcademicYearMsg = 'Type the academic year first, e.g. 2026-27.'; render(); return; }
+  if (!confirm(`Set the current academic year to ${val}?\n\nNo student's grade or year is changed.`)) return;
+  const payload = { global_academic_year: val, updated_at: new Date().toISOString() };
+  let error;
+  if (feeSettingsRowId) ({ error } = await sb.from('fee_settings').update(payload).eq('id', feeSettingsRowId));
+  else {
+    const res = await sb.from('fee_settings').insert(Object.assign({ rates: {}, discount_tiers: [] }, payload)).select().single();
+    error = res.error; if (!error) feeSettingsRowId = res.data.id;
+  }
+  if (error) { bulkAcademicYearMsg = 'Could not save: ' + error.message; render(); return; }
+  globalAcademicYear = val;
+  bulkAcademicYearMsg = `Current academic year set to ${val}. No grades were changed.`;
+  render();
+}
 function cancelBulkAcademicYearChange() { bulkAcademicYearConfirmPending = false; render(); }
 async function confirmBulkAcademicYearChange() {
   bulkAcademicYearConfirmPending = false;
@@ -10271,7 +10312,7 @@ const SUPPORT_KB = {
 - Class Log (Daily work): record a class for a teacher. Pick the date and teacher, then student, subject, Group/Individual, Online/Offline and Present or Absent (Absent still uses a class). The list below shows the Selected day or the Whole month.
 - Communication (Daily work): chat with teachers, students and parents, and post announcements.
 - Demo Bookings (Daily work): demo bookings from the website arrive here (New → Scheduled → Done → Converted or Lost, or Cancelled). Teachers mark their own demos Done on their Dashboard; admins can set any status, mark Lost with an optional reason, and skip straight from Pending to Converted. A converted demo gives the teacher a demo bonus. The Demo Register shows Demo results per teacher (Converted %) and why demos were lost.
-- New registrations (Daily work): forms families send from the public link app.libeducation.com/register.html (no login). Accept adds the student (or a brother/sister to a family with the same mobile) and makes the parent login (mobile) and student login (student code); Reject or Delete junk. Copy or WhatsApp the link from this page.
+- New registrations (Daily work): forms families send from the public link app.libeducation.com/register.html (no login). Accept adds the student (or a brother/sister to a family with the same mobile) and makes the parent login (mobile) and student login (student code); Reject or Archive junk (Show archived to see them again). Copy or WhatsApp the link from this page.
 - Support (Daily work): view and resolve issues raised by teachers, students or parents.
 - Rebuild Pending Classes (Daily work): rebuild the upcoming class schedule from each student's Class Frequency. Preview first. Only future Pending classes are removed; new classes get placeholder times (Group 00:00, Individual 01:00/02:00) that the teacher corrects.
 - Fees (Money): per-class rates (Fee setup), discount structure, fee calculator, students needing renewal, Razorpay payments to confirm, pending fee requests (grouped by family, Mark all paid), all subscription payments and the UPI / contact details used in fee messages.
@@ -13445,6 +13486,7 @@ function renderStudents() {
         </div>
       </div>
       ${siblingFormHtml(student)}
+      ${regFromFormHtml(student.id)}
 
       
       <div class="student-section" style="background:#e8f0fe">
@@ -15839,11 +15881,14 @@ function renderSuperadmin() {
       <h2 style="color:var(--brick)">Academic Year</h2>
       ${!dangerZoneUnlocked ? dangerZoneLockHtml('academic') : `
       <div class="hint">Current: <b>${esc(globalAcademicYear || 'Not set')}</b>. Changing this advances Grade (and Category, where applicable) for every student except those graded Adult — a once-a-year, whole-school action.</div>
-      ${bulkAcademicYearMsg ? `<div class="hint" style="color:${bulkAcademicYearMsg.startsWith('Grade update complete')?'var(--forest)':'var(--brick)'}">${esc(bulkAcademicYearMsg)}</div>` : ''}
+      ${bulkAcademicYearMsg ? `<div class="hint" style="color:${/^(Grade update complete|Current academic year set|Academic year \S+ filled)/.test(bulkAcademicYearMsg)?'var(--forest)':'var(--brick)'}">${esc(bulkAcademicYearMsg)}</div>` : ''}
       <div class="row-form">
         <input type="text" id="bulkAcademicYearInput" placeholder="e.g. 2026-27" style="width:140px">
         <button class="btn-small" style="background:var(--brick);color:#fff" onclick="startBulkAcademicYearChange()">Advance everyone</button>
+        <button class="btn-small" onclick="setAcademicYearOnly()" title="Saves the current academic year without changing any student's grade or year">Set year only (grades unchanged)</button>
+        <button class="btn-small" onclick="fillBlankStudentYears()" title="Gives this year to active students whose academic year is empty; grades are not changed">Fill blank student years (${blankYearStudents().length})</button>
       </div>
+      <div class="hint">"Set year only" just records which academic year it is now (used for new students). No student is changed. "Fill blank student years" gives the year typed above to active students whose academic year is empty; their grade is not changed, and students already with a year are left alone.</div>
       `}
     </div>
     ${bulkAcademicYearConfirmModalHtml()}
@@ -19741,7 +19786,7 @@ const HELP = {
   'expenses': { t:'Expenses', b:"<ul><li>Money the institute spends other than teacher pay: rent, electricity, internet and so on.</li><li>Add an expense with date, category, amount and an optional note. Edit or delete it from the month list.</li><li>Expenses come off fee collection in Reports → Net profit. Don't enter teacher salary here; payroll is counted separately.</li></ul>" },
   'bulk-students': { t:'Create all student logins', b:"<ul><li>Preview lists every active student who has no student login yet. Nothing is saved until you press Create.</li><li>Login ID and password are the student code (the same rule as the old SQL). When the student logs in with it, the app asks them to change the password.</li><li>Untick anyone you don't want a login for yet.</li><li>Skipped: students with no student code, or whose code is already used as another login ID.</li><li>After Create, each row has 📤 WhatsApp buttons (student mobile and parent numbers) with the message ready: app link, login ID, password. Later, open the student and use the 📤 buttons next to Login to send it again.</li></ul>" },
   'parents': { t:'Parents', b:"<ul><li>One parent login per family. Pick a parent to see or change which children are linked.</li><li><b>Create all parent logins</b> makes the missing logins in one go: login ID and first password are the parent's 10-digit mobile.</li><li>📤 WhatsApp sends the family their login details; you can resend from the parent's page.</li><li>Parents are asked to change the password after their first login.</li></ul>" },
-  'registrations': { t:'New registrations', b:"<ul><li>Families fill in the public form (app.libeducation.com/register.html) without logging in. Send them the link with 📋 Copy link or 📤 Send link on WhatsApp.</li><li>New forms wait here. Nothing becomes a student until you press <b>Accept</b>.</li><li>⚑ flags help you spot junk or repeats: mobile already a family, had a demo, several forms from one mobile. Use 📞 Call or 💬 WhatsApp to check with the parent first.</li><li><b>Accept</b> lets you correct the name, grade, board and preferences, then adds the student. If the mobile already belongs to a family you can add the child as a brother/sister (same parent login). It also makes the parent login (mobile) and student login (student code) unless you untick them. Then send the details with the 📤 buttons.</li><li>Subjects are not enrolled automatically: open the student and enrol them with a teacher.</li><li><b>Reject</b> (with an optional reason) or tick several and Reject / Delete. Rejected forms are cleared after 30 days.</li><li>The form allows at most 3 forms per mobile per day and 30 per day in total, and blocks bots.</li></ul>" },
+  'registrations': { t:'New registrations', b:"<ul><li>Families fill in the public form (app.libeducation.com/register.html) without logging in. Send them the link with 📋 Copy link or 📤 Send link on WhatsApp.</li><li>New forms wait here. Nothing becomes a student until you press <b>Accept</b>.</li><li>⚑ flags help you spot junk or repeats: mobile already a family, had a demo, several forms from one mobile. Use 📞 Call or 💬 WhatsApp to check with the parent first.</li><li><b>Accept</b> lets you correct the name, grade, board and preferences, then adds the student. If the mobile already belongs to a family you can add the child as a brother/sister (same parent login). It also makes the parent login (mobile) and student login (student code) unless you untick them. Then send the details with the 📤 buttons.</li><li>Subjects are not enrolled automatically: open the student and enrol them with a teacher.</li><li><b>Reject</b> (with an optional reason) or tick several and Reject. A rejected form can be Reopened.</li><li>🗄 <b>Archive</b> hides forms you no longer need (junk, old ones). Nothing is deleted: tick <b>Show archived</b> to see them and Unarchive.</li><li>The student's page shows what the form said that isn't on the student record (subjects wanted, school, how they heard, message).</li><li>The form allows at most 3 forms per mobile per day and 30 per day in total, and blocks bots.</li></ul>" },
   'support-inbox': { t:'Support Inbox', b:"<ul><li>Problems reported by teachers, students and parents with the Support button.</li><li>Filter by Open, In progress or Resolved. Open a ticket to reply and change its status.</li><li>The person sees your reply and the status in their own Support window.</li></ul>" },
   'announcements': { t:'Announcements', b:"<ul><li>A short notice shown above the menu bar for the people you pick: everyone, a whole role (all teachers, students, parents or admins) or one person.</li><li>It stays until they dismiss it, it expires, or you delete it.</li></ul>" },
   'chat': { t:'Chat', b:"<ul><li>New message starts a one-to-one chat with a teacher, student or parent. New group chats with several people at once.</li><li>Unread messages show as a number on the menu and the 💬 button.</li></ul>" },
@@ -23315,7 +23360,7 @@ function renderAdminSupport() {
 // Nothing on the form becomes a student until an admin presses Accept. Accept creates the student (or adds them
 // to a family with the same mobile), the parent login (mobile) and the student login (student code).
 const REGISTER_URL = 'https://app.libeducation.com/register.html';
-let regReady = true, regFilter = 'New', regMsg = '', regTicked = new Set(), regRejectId = '', regAcceptId = '', regAcceptDraft = {}, regBusy = false, regSendTo = '';
+let regReady = true, regShowArchived = false, regFilter = 'New', regMsg = '', regTicked = new Set(), regRejectId = '', regAcceptId = '', regAcceptDraft = {}, regBusy = false, regSendTo = '';
 const regDone = {};   // registration id -> { message, phones, studentId, notes } (this session only)
 async function loadRegistrations() {
   if (currentRole !== 'Admin') { data.registrations = []; return; }
@@ -23324,7 +23369,7 @@ async function loadRegistrations() {
   regReady = true;
   data.registrations = rows || [];
 }
-function regNewCount() { return (data.registrations || []).filter(r => r.status === 'New').length; }
+function regNewCount() { return (data.registrations || []).filter(r => r.status === 'New' && !r.archived).length; }
 function regGradeName(id) { const g = grades.find(x => String(x.id) === String(id)); return g ? g.name : ''; }
 function regBoardName(id) { const b = boards.find(x => String(x.id) === String(id)); return b ? b.name : ''; }
 function regPhones(r) { return [phoneKey(r.parent_mobile), phoneKey(r.second_mobile)].filter(Boolean); }
@@ -23365,7 +23410,7 @@ async function regReject(ids, reason) {
   if (!ids.length) return;
   const { error } = await sb.from('registrations').update({ status: 'Rejected', reject_reason: (reason || '').trim() || null, decided_at: new Date().toISOString(), decided_by: currentUserId }).in('id', ids);
   if (error) { regMsg = 'Could not reject: ' + error.message; render(); return; }
-  regMsg = `${ids.length} form${ids.length === 1 ? '' : 's'} rejected. Rejected forms are cleared after 30 days.`;
+  regMsg = `${ids.length} form${ids.length === 1 ? '' : 's'} rejected. You can Reopen them from the Rejected list.`;
   regTicked = new Set(); regRejectId = '';
   trackUse('registration-reject');
   await loadRegistrations(); render();
@@ -23378,15 +23423,16 @@ function regRejectTicked() {
   if (reason === null) return;
   regReject(ids, reason);
 }
-async function regDeleteTicked() {
-  const ids = [...regTicked];
-  if (!ids.length || !confirm(`Delete ${ids.length} form${ids.length === 1 ? '' : 's'} for good? Use this for junk.`)) return;
-  const { error } = await sb.from('registrations').delete().in('id', ids);
-  if (error) { regMsg = 'Could not delete: ' + error.message; render(); return; }
-  regMsg = `${ids.length} form${ids.length === 1 ? '' : 's'} deleted.`;
+// Archive (SQL 68) instead of delete: archived forms are hidden unless "Show archived" is ticked, never removed.
+async function regArchive(ids, on) {
+  if (!ids.length) return;
+  const { error } = await sb.from('registrations').update({ archived: on, archived_at: on ? new Date().toISOString() : null }).in('id', ids);
+  if (error) { regMsg = (on ? 'Could not archive: ' : 'Could not unarchive: ') + error.message + (/archived/.test(error.message) ? ' (run SQL 68 first)' : ''); render(); return; }
+  regMsg = `${ids.length} form${ids.length === 1 ? '' : 's'} ${on ? 'archived. Tick "Show archived" to see them again.' : 'unarchived.'}`;
   regTicked = new Set();
   await loadRegistrations(); render();
 }
+function regArchiveTicked() { regArchive([...regTicked], true); }
 async function regReopen(id) {
   const { error } = await sb.from('registrations').update({ status: 'New', reject_reason: null, decided_at: null, decided_by: null }).eq('id', id);
   if (error) { regMsg = 'Could not reopen: ' + error.message; render(); return; }
@@ -23398,10 +23444,30 @@ function regOpenAccept(id) {
   const kids = regFamily(r);
   regAcceptId = regAcceptId === id ? '' : id; regRejectId = '';
   regAcceptDraft = { name: r.student_name || '', gradeId: r.grade_id || '', boardId: r.board_id || (kids[0] && kids[0].boardId) || '',
-    mode: r.mode_preference || '', ctype: r.class_type_preference || '', family: kids.length ? 'existing' : 'new', parentLogin: true, studentLogin: true };
+    mode: r.mode_preference || '', ctype: r.class_type_preference || '', family: kids.length ? 'existing' : 'new', parentLogin: true, studentLogin: true,
+    academicYear: regGuessAcademicYear(kids) };
   render();
 }
 function regDraftSet(k, v) { regAcceptDraft[k] = v; }
+// Academic year for a new student: the family's, else the Superadmin current year, else the year most active students have.
+function regGuessAcademicYear(kids) {
+  if (kids[0] && kids[0].academicYear) return kids[0].academicYear;
+  if (globalAcademicYear) return globalAcademicYear;
+  const count = new Map();
+  data.students.filter(s => !s.archived && s.academicYear).forEach(s => count.set(s.academicYear, (count.get(s.academicYear) || 0) + 1));
+  const best = [...count.entries()].sort((a, b) => b[1] - a[1])[0];
+  return best ? best[0] : '';
+}
+// Student page: what the family wrote on the registration form that has no place on the student record.
+function regFromFormHtml(studentId) {
+  const r = (data.registrations || []).find(x => x.student_id === studentId);
+  if (!r) return '';
+  const rows = [['Subjects wanted', (r.subjects || []).join(', ')], ['School', r.school], ['How they heard', r.heard_from], ['Their message', r.note]].filter(x => x[1]);
+  if (!rows.length) return '';
+  return `<div style="margin:10px 0;padding:8px 12px;background:#f6f3ea;border:1px solid var(--line);border-radius:8px;font-size:13.5px">
+      <div class="hint" style="margin-bottom:4px">From the registration form (${esc(dayDate((r.created_at || '').slice(0, 10)))})</div>
+      ${rows.map(([k, v]) => `<div><span class="hint">${k}:</span> ${esc(v)}</div>`).join('')}</div>`;
+}
 async function regAccept(id) {
   const r = data.registrations.find(x => x.id === id);
   if (!r || regBusy) return;
@@ -23411,7 +23477,7 @@ async function regAccept(id) {
   regBusy = true; regMsg = ''; render();
   const notes = [];
   const payload = { name, archived: false, parent_name: r.parent_name || null, mobile_number: r.parent_mobile || null, email: r.email || null, address: r.address || null,
-    grade_id: d.gradeId || null, board_id: d.boardId || null, academic_year: (kids[0] && kids[0].academicYear) || globalAcademicYear || null,
+    grade_id: d.gradeId || null, board_id: d.boardId || null, academic_year: (d.academicYear || '').trim() || null,
     mode_preference: d.mode || null, class_type_preference: d.ctype || null };
   const { data: row, error } = await sb.from('students').insert(payload).select().single();
   if (error) { regBusy = false; regMsg = 'Could not create the student: ' + error.message; render(); return; }
@@ -23499,7 +23565,8 @@ function regCardHtml(r) {
         <select onchange="regDraftSet('gradeId',this.value)"><option value="">Grade</option>${opt(grades, d.gradeId)}</select>
         <select onchange="regDraftSet('boardId',this.value)"><option value="">Board</option>${opt(boards, d.boardId)}</select>
         ${sel('mode', [['Online', 'Online'], ['Offline', 'Offline'], ['Both', 'Both']], d.mode)}
-        ${sel('ctype', [['Group', 'Group'], ['Individual', 'Individual'], ['Both', 'Both']], d.ctype)}</div>
+        ${sel('ctype', [['Group', 'Group'], ['Individual', 'Individual'], ['Both', 'Both']], d.ctype)}
+        <input type="text" value="${escAttr(d.academicYear || '')}" oninput="regDraftSet('academicYear',this.value)" placeholder="Academic year e.g. 2026-27" title="Academic year" style="width:150px"></div>
       ${kids.length ? `<div class="row-form" style="flex-direction:column;align-items:flex-start;gap:2px">
         <label><input type="radio" name="regFam" ${d.family === 'existing' ? 'checked' : ''} onchange="regDraftSet('family','existing')"> Brother/sister of ${esc(kids.map(s => s.name).join(', '))}${login ? ` (uses parent login ${esc(login.username)})` : ''}</label>
         <label><input type="radio" name="regFam" ${d.family === 'new' ? 'checked' : ''} onchange="regDraftSet('family','new')"> A new family</label></div>` : ''}
@@ -23522,11 +23589,11 @@ function regCardHtml(r) {
   }
   return `<div class="card" style="margin-bottom:10px">
     <div style="display:flex;gap:10px;align-items:flex-start">
-      ${r.status === 'Accepted' ? '' : `<input type="checkbox" style="margin-top:6px" ${regTicked.has(r.id) ? 'checked' : ''} onchange="regToggle('${r.id}',this.checked)">`}
+      ${r.archived ? '' : `<input type="checkbox" style="margin-top:6px" ${regTicked.has(r.id) ? 'checked' : ''} onchange="regToggle('${r.id}',this.checked)">`}
       <div style="flex:1;min-width:0">
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:baseline"><b style="font-size:16px">${esc(r.student_name)}</b>
           <span class="tag">${esc(regGradeName(r.grade_id) || 'Grade ?')}</span>${r.board_id ? `<span class="tag">${esc(regBoardName(r.board_id))}</span>` : ''}
-          <span class="hint">${esc(when)}</span></div>
+          <span class="hint">${esc(when)}</span>${r.archived ? `<span class="tag cat">Archived</span><button class="btn-small" onclick="regArchive(['${r.id}'],false)">Unarchive</button>` : ''}</div>
         ${line('Parent', `${esc(r.parent_name)} · ${esc(r.parent_mobile)}${copyBtnHtml(r.parent_mobile)}${r.second_mobile ? ' · ' + esc(r.second_mobile) + copyBtnHtml(r.second_mobile) : ''}`)}
         ${line('Student mobile', r.student_mobile ? esc(r.student_mobile) + copyBtnHtml(r.student_mobile) : '')}
         ${line('Subjects', esc((r.subjects || []).join(', ')))}
@@ -23552,15 +23619,17 @@ function renderRegistrations() {
   if (!regReady) return linkCard + `<div class="card"><div class="hint" style="color:var(--brick)">The registrations table is not set up yet. Run SQL 67 (67-student-registrations.sql) in Supabase → SQL Editor, then press ↻ Refresh.</div></div>`;
   const all = data.registrations || [];
   const counts = { New: 0, Accepted: 0, Rejected: 0 };
-  all.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
-  const list = all.filter(r => r.status === regFilter);
-  const tickable = list.filter(r => r.status !== 'Accepted').map(r => r.id);
+  all.filter(r => regShowArchived || !r.archived).forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
+  const nArchived = all.filter(r => r.archived).length;
+  const list = all.filter(r => r.status === regFilter && (regShowArchived || !r.archived));
+  const tickable = list.filter(r => !r.archived).map(r => r.id);
   const ticked = tickable.filter(id => regTicked.has(id));
   const bulk = tickable.length ? `<div class="row-form"><label><input type="checkbox" ${ticked.length && ticked.length === tickable.length ? 'checked' : ''} onchange="regToggleAll(this.checked,'${tickable.join(',')}')"> Tick all</label>
       ${regFilter === 'New' ? `<button class="btn-small" ${ticked.length ? '' : 'disabled'} onclick="regRejectTicked()">✗ Reject ticked (${ticked.length})</button>` : ''}
-      <button class="btn-small" ${ticked.length ? '' : 'disabled'} onclick="regDeleteTicked()" style="color:var(--brick)">🗑 Delete ticked (${ticked.length})</button></div>` : '';
+      <button class="btn-small" ${ticked.length ? '' : 'disabled'} onclick="regArchiveTicked()">🗄 Archive ticked (${ticked.length})</button></div>` : '';
   return linkCard + `<div class="card">
       <div class="row-form">${['New', 'Accepted', 'Rejected'].map(f => `<button class="btn-small ${regFilter === f ? 'btn-primary' : ''}" onclick="regSetFilter('${f}')">${f} (${counts[f] || 0})</button>`).join('')}
+        <label class="hint" style="margin-left:8px"><input type="checkbox" ${regShowArchived ? 'checked' : ''} onchange="regShowArchived=this.checked;regTicked=new Set();render()"> Show archived (${nArchived})</label>
         <button class="btn-small" style="margin-left:auto" onclick="loadRegistrations().then(()=>{regMsg='';render()})">↻ Refresh</button></div>
       ${regMsg ? `<div class="hint" style="color:${/^Could not|not made|Type/.test(regMsg) ? 'var(--brick)' : 'var(--forest)'}">${esc(regMsg)}</div>` : ''}
       ${bulk}
