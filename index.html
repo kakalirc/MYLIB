@@ -335,7 +335,7 @@ if (location.hostname !== 'app.libeducation.com') {
 const APP_VERSION = '2026.10';
 // The app links every WhatsApp message gives (never the address the sender happens to be on).
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
-const BUILD_TIMESTAMP = '2026-10-28 23:50 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-29 00:05 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -19786,7 +19786,7 @@ const HELP = {
   'expenses': { t:'Expenses', b:"<ul><li>Money the institute spends other than teacher pay: rent, electricity, internet and so on.</li><li>Add an expense with date, category, amount and an optional note. Edit or delete it from the month list.</li><li>Expenses come off fee collection in Reports → Net profit. Don't enter teacher salary here; payroll is counted separately.</li></ul>" },
   'bulk-students': { t:'Create all student logins', b:"<ul><li>Preview lists every active student who has no student login yet. Nothing is saved until you press Create.</li><li>Login ID and password are the student code (the same rule as the old SQL). When the student logs in with it, the app asks them to change the password.</li><li>Untick anyone you don't want a login for yet.</li><li>Skipped: students with no student code, or whose code is already used as another login ID.</li><li>After Create, each row has 📤 WhatsApp buttons (student mobile and parent numbers) with the message ready: app link, login ID, password. Later, open the student and use the 📤 buttons next to Login to send it again.</li></ul>" },
   'parents': { t:'Parents', b:"<ul><li>One parent login per family. Pick a parent to see or change which children are linked.</li><li><b>Create all parent logins</b> makes the missing logins in one go: login ID and first password are the parent's 10-digit mobile.</li><li>📤 WhatsApp sends the family their login details; you can resend from the parent's page.</li><li>Parents are asked to change the password after their first login.</li></ul>" },
-  'registrations': { t:'New registrations', b:"<ul><li>Families fill in the public form (app.libeducation.com/register.html) without logging in. Send them the link with 📋 Copy link or 📤 Send link on WhatsApp.</li><li>New forms wait here. Nothing becomes a student until you press <b>Accept</b>.</li><li>⚑ flags help you spot junk or repeats: mobile already a family, had a demo, several forms from one mobile. Use 📞 Call or 💬 WhatsApp to check with the parent first.</li><li><b>Accept</b> lets you correct the name, grade, board and preferences, then adds the student. If the mobile already belongs to a family you can add the child as a brother/sister (same parent login). It also makes the parent login (mobile) and student login (student code) unless you untick them. Then send the details with the 📤 buttons.</li><li>Subjects are not enrolled automatically: open the student and enrol them with a teacher.</li><li><b>Reject</b> (with an optional reason) or tick several and Reject. A rejected form can be Reopened.</li><li>🗄 <b>Archive</b> hides forms you no longer need (junk, old ones). Nothing is deleted: tick <b>Show archived</b> to see them and Unarchive.</li><li>The student's page shows what the form said that isn't on the student record (subjects wanted, school, how they heard, message).</li><li>The form allows at most 3 forms per mobile per day and 30 per day in total, and blocks bots.</li></ul>" },
+  'registrations': { t:'New registrations', b:"<ul><li>Families fill in the public form (app.libeducation.com/register.html) without logging in. Send them the link with 📋 Copy link or 📤 Send link on WhatsApp.</li><li>New forms wait here. Nothing becomes a student until you press <b>Accept</b>.</li><li>⚑ flags help you spot junk or repeats: mobile already a family, had a demo, several forms from one mobile. Use 📞 Call or 💬 WhatsApp to check with the parent first.</li><li><b>Accept</b> lets you correct the name, grade, board and preferences, then adds the student. If the mobile already belongs to a family you can add the child as a brother/sister (same parent login). It also makes the parent login (mobile) and student login (student code) unless you untick them. Then send the details with the 📤 buttons.</li><li>Subjects are not enrolled automatically: open the student and enrol them with a teacher.</li><li><b>Reject</b> (with an optional reason) or tick several and Reject. A rejected form can be Reopened.</li><li>🗄 <b>Archive</b> hides forms you no longer need (junk, old ones). Nothing is deleted: tick <b>Show archived</b> to see them and Unarchive.</li><li>The student's page shows what the form said that isn't on the student record (subjects wanted, school, how they heard, message). <b>View original form</b> there shows the whole form exactly as the family sent it, with the date and their Terms consent.</li><li>The form allows at most 3 forms per mobile per day and 30 per day in total, and blocks bots.</li></ul>" },
   'support-inbox': { t:'Support Inbox', b:"<ul><li>Problems reported by teachers, students and parents with the Support button.</li><li>Filter by Open, In progress or Resolved. Open a ticket to reply and change its status.</li><li>The person sees your reply and the status in their own Support window.</li></ul>" },
   'announcements': { t:'Announcements', b:"<ul><li>A short notice shown above the menu bar for the people you pick: everyone, a whole role (all teachers, students, parents or admins) or one person.</li><li>It stays until they dismiss it, it expires, or you delete it.</li></ul>" },
   'chat': { t:'Chat', b:"<ul><li>New message starts a one-to-one chat with a teacher, student or parent. New group chats with several people at once.</li><li>Unread messages show as a number on the menu and the 💬 button.</li></ul>" },
@@ -23459,14 +23459,35 @@ function regGuessAcademicYear(kids) {
   return best ? best[0] : '';
 }
 // Student page: what the family wrote on the registration form that has no place on the student record.
+let regOriginalOpenFor = '';
 function regFromFormHtml(studentId) {
   const r = (data.registrations || []).find(x => x.student_id === studentId);
   if (!r) return '';
   const rows = [['Subjects wanted', (r.subjects || []).join(', ')], ['School', r.school], ['How they heard', r.heard_from], ['Their message', r.note]].filter(x => x[1]);
-  if (!rows.length) return '';
+  const open = regOriginalOpenFor === studentId;
   return `<div style="margin:10px 0;padding:8px 12px;background:#f6f3ea;border:1px solid var(--line);border-radius:8px;font-size:13.5px">
-      <div class="hint" style="margin-bottom:4px">From the registration form (${esc(dayDate((r.created_at || '').slice(0, 10)))})</div>
-      ${rows.map(([k, v]) => `<div><span class="hint">${k}:</span> ${esc(v)}</div>`).join('')}</div>`;
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px"><span class="hint">From the registration form (${esc(dayDate((r.created_at || '').slice(0, 10)))})</span>
+        <button class="btn-small" onclick="regOriginalOpenFor=regOriginalOpenFor==='${studentId}'?'':'${studentId}';render()">${open ? 'Hide original form' : 'View original form'}</button></div>
+      ${rows.map(([k, v]) => `<div><span class="hint">${k}:</span> ${esc(v)}</div>`).join('')}
+      ${open ? regOriginalFormHtml(r) : ''}</div>`;
+}
+// The form exactly as the family sent it (read-only); the student record may have been edited since.
+function regOriginalFormHtml(r) {
+  const when = v => v ? new Date(v).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+  const decidedBy = r.decided_by ? ((data.users.find(u => u.id === r.decided_by) || {}).username || '') : '';
+  const rows = [
+    ['Sent', when(r.created_at)],
+    ["Student's name", r.student_name], ['Grade', regGradeName(r.grade_id)], ['Board', regBoardName(r.board_id)], ["Student's mobile", r.student_mobile], ['School', r.school],
+    ['Subjects wanted', (r.subjects || []).join(', ')], ['Online / Offline', r.mode_preference === 'Both' ? 'Either' : r.mode_preference],
+    ['Group / Individual', r.class_type_preference === 'Both' ? 'Not sure' : r.class_type_preference],
+    ["Parent's name", r.parent_name], ['Mobile (WhatsApp)', r.parent_mobile], ['Second mobile', r.second_mobile], ['Email', r.email], ['Address or area', r.address],
+    ['How they heard', r.heard_from], ['Their message', r.note],
+    ['Consent', r.consent_at ? 'Agreed to the Terms and Privacy Policy on ' + when(r.consent_at) : ''],
+    ['Accepted', [when(r.decided_at), decidedBy ? 'by ' + decidedBy : ''].filter(Boolean).join(' ')],
+  ].filter(x => x[1]);
+  return `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line)">
+      <div class="hint" style="margin-bottom:4px">Original form as the family sent it (read-only). The student record above may have been changed since.</div>
+      <table class="no-stack" style="font-size:13px;width:auto"><tbody>${rows.map(([k, v]) => `<tr><td class="hint" style="white-space:nowrap;padding:2px 10px 2px 0;border:0">${k}</td><td style="padding:2px 0;border:0">${esc(v)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 async function regAccept(id) {
   const r = data.registrations.find(x => x.id === id);
