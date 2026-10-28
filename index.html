@@ -335,7 +335,7 @@ if (location.hostname !== 'app.libeducation.com') {
 const APP_VERSION = '2026.10';
 // The app links every WhatsApp message gives (never the address the sender happens to be on).
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
-const BUILD_TIMESTAMP = '2026-10-28 16:30 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-28 16:45 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -10298,7 +10298,7 @@ const SUPPORT_KB = {
 - Demo classes: after you give a demo, press ✓ Mark done on your Dashboard and add a line on how it went. If the student joins you get a ₹100 bonus in payroll.
 - Class Schedule (Teaching): your classes by day or month. Set up a weekly schedule, add an extra class, mark a class done or remove a pending one. Classes at 00:00, 01:00 or 02:00 are placeholder times: put in the real time.
 - Class Frequency (Teaching): how many classes each of your students has on each weekday, per subject. The office uses it for monthly fees and the schedule, so update it when a timetable changes.
-- My Students (Teaching): contact details, subjects and class balances (subscribed, used, left, next expiry) for students enrolled in your subjects. Use the search box to find one.
+- My Students (Teaching): contact details, subjects and class balances (subscribed, used, left, next expiry) for students enrolled in your subjects. Use the search box to find one. New subscriptions (last 7 days, New student or Renewal) are listed at the top; the dashboard box 'New subscriptions' opens them.
 - Study Plans (Teaching): make a topic list per student and subject, and mark each topic Not started / In progress / Done. You can export a plan as PDF. Add topics from textbook: upload a book or link one from the shared library (books for the subjects you teach), then Extract Topics; Unlink takes a book off that student only.
 - Homework (Teaching): + Assign homework to a student (title, subject, due date, study plan topic, attached file). When a student submits, review it, give marks and feedback, then Mark reviewed.
 - [qb] Question Bank (Teaching): Review Queue (check and approve questions for your subject and grade), Full Question Bank, Archived, Practice Papers and Past Papers. Pick board, subject and grade first. Old-syllabus questions stay hidden unless you tick "Old syllabus only".
@@ -16791,6 +16791,45 @@ function teacherStudentsFilter(value) {
   const none = document.getElementById('teacherStudentsNone');
   if (none) none.style.display = shown ? 'none' : '';
 }
+// New subscriptions: payments in the teacher's own subjects dated in the last NEW_SUBS_DAYS days (payment date,
+// not the time it was saved). 'New student' = first payment for that subject + type, otherwise 'Renewal'.
+// Ids the teacher has already seen in My Students are kept in this browser so the dashboard can say how many
+// are not seen yet. No amounts: teachers' rows come without money (SQL 45).
+const NEW_SUBS_DAYS = 7;
+function teacherNewSubscriptions(teacher) {
+  const from = localDateFromToday(-(NEW_SUBS_DAYS - 1));
+  return data.subscriptions.filter(p => {
+    if (p.kind !== 'Payment' || !p.date || p.date < from) return false;
+    const subj = subject(p.subjectId), st = data.students.find(x => x.id === p.studentId);
+    return subj && subj.teacherId === teacher.id && st && !st.archived;
+  }).map(p => ({ sub: p, renewal: data.subscriptions.some(q => q.id !== p.id && q.studentId === p.studentId && q.subjectId === p.subjectId
+      && q.type === p.type && (q.kind === 'Payment' || q.kind === 'TransferIn') && q.date && q.date < p.date) }))
+    .sort((a, b) => b.sub.date.localeCompare(a.sub.date));
+}
+function newSubsSeenKey(teacher) { return 'lib_newsubs_seen_' + teacher.id; }
+function newSubsSeenIds(teacher) {
+  try { return new Set(JSON.parse(localStorage.getItem(newSubsSeenKey(teacher)) || '[]')); } catch (e) { return new Set(); }
+}
+function markNewSubsSeen(teacher, rows) {
+  try { localStorage.setItem(newSubsSeenKey(teacher), JSON.stringify(rows.map(r => r.sub.id))); } catch (e) {}
+}
+function teacherNewSubsHtml(teacher) {
+  const rows = teacherNewSubscriptions(teacher);
+  const seen = newSubsSeenIds(teacher);
+  markNewSubsSeen(teacher, rows);
+  return `
+    <div class="card" id="teacherNewSubs" style="border-left:4px solid var(--forest)">
+      <h2 style="margin-top:0">🆕 New subscriptions <span class="hint" style="font-weight:400">(last ${NEW_SUBS_DAYS} days)</span></h2>
+      ${rows.length ? `<div class="hint" style="margin:0 0 8px">Students who bought classes in your subjects. <b>New student</b> = first classes in that subject, so plan their first class.</div>
+      <div class="table-scroll"><table>
+        <tr><th>Student</th><th>Subject</th><th>Type</th><th>Classes bought</th><th>Paid on</th><th>Expires</th><th>Classes left</th><th></th></tr>
+        ${rows.map(r => { const p = r.sub; return `<tr><td>${esc(studentNameWithCode(p.studentId))}${seen.has(p.id) ? '' : ' <span style="background:var(--gold);color:#fff;border-radius:8px;padding:1px 6px;font-size:11px;font-weight:700">NEW</span>'}</td>
+          <td>${esc(subjectName(p.subjectId))}</td><td>${esc(p.type)}</td><td>${p.classes}</td><td>${esc(dayDate(p.date))}</td>
+          <td>${p.expiresOn ? esc(dayDate(p.expiresOn)) : '<span class="hint">—</span>'}</td><td>${studentRemaining(p.studentId, p.subjectId, p.type)}</td>
+          <td>${r.renewal ? '<span class="hint">Renewal</span>' : '<b style="color:var(--forest)">New student</b>'}</td></tr>`; }).join('')}
+      </table></div>` : `<div class="hint">No new subscriptions in your subjects in the last ${NEW_SUBS_DAYS} days.</div>`}
+    </div>`;
+}
 function renderTeacherStudents(teacher) {
   const list = byName(studentsForTeacher(teacher.id).filter(s=>!s.archived));
   if (!list.length) return `<div class="card"><h2>My Students</h2><div class="empty">No students are enrolled in your subjects yet.</div></div>`;
@@ -16802,6 +16841,7 @@ function renderTeacherStudents(teacher) {
       <div class="hint" style="margin:0 0 8px">Contact details and class balances for students enrolled in your subjects.</div>
       <input type="search" placeholder="Search name, parent, phone or email…" value="${escAttr(teacherStudentSearch)}" oninput="teacherStudentsFilter(this.value)" style="width:100%;max-width:360px">
     </div>
+    ${teacherNewSubsHtml(teacher)}
     ${cards.join('')}
     <div id="teacherStudentsNone" class="card" style="${anyShown ? 'display:none' : ''}"><div class="empty">No student matches this search.</div></div>`;
 }
@@ -18969,11 +19009,15 @@ function renderTeacherDashboard(teacher) {
 
   const demosToday = data.demoLogs.filter(d => d.teacherId===teacher.id && d.date===todayStr && d.status==='Pending').length;
   const unreadChats = chatTotalUnread();
+  const newSubs = teacherNewSubscriptions(teacher);
+  const newSubsSeen = newSubsSeenIds(teacher);
+  const newSubsUnseen = newSubs.filter(r => !newSubsSeen.has(r.sub.id)).length;
   const cards = [
     { num: classesToday, label: `Class${classesToday===1?'':'es'} given today`, tab: 'attendance' },
     { num: earningsRevealed ? '₹'+teacherNet.toFixed(0) : '₹ ●●●●', zero: teacherNet === 0, label: `Earned this month so far`, tab: null, action: "var el=document.getElementById('earningsReveal');if(el)el.scrollIntoView({behavior:'smooth'})" },
     { num: needingRenewal, label: `Student${needingRenewal===1?'':'s'} needing renewal`, tab: null, action: "var el=document.getElementById('teacherRenewalSection');if(el)el.scrollIntoView({behavior:'smooth'})" },
     { num: unreadChats, label: `Unread chat${unreadChats===1?'':'s'}`, tab: 'chat' },
+    { num: newSubs.length, label: `New subscription${newSubs.length===1?'':'s'} (last ${NEW_SUBS_DAYS} days)` + (newSubsUnseen ? ` · <b style="color:var(--forest)">${newSubsUnseen} not seen yet</b>` : ''), tab: null, action: "setTeacherPortalTab('students');var e=document.getElementById('teacherNewSubs');if(e)e.scrollIntoView({behavior:'smooth'})" },
     ...(demosToday > 0 ? [{ num: demosToday, zero: false, label: 'Demo'+(demosToday===1?' class':' classes')+' today', tab: null, action: "var el=document.getElementById('teacherDemoSection');if(el)el.scrollIntoView({behavior:'smooth'})" }] : []),
     ...(data.demoLogs.filter(d=>d.teacherId===teacher.id).length ? [{ num: '₹'+demoBonusForTeacher(teacher.id, teacherEarningsMonth).toFixed(0), zero: demoBonusForTeacher(teacher.id, teacherEarningsMonth)===0, label: 'Demo bonus this month', tab: null, action: "var el=document.getElementById('teacherDemoSection');if(el)el.scrollIntoView({behavior:'smooth'})" }] : []),
     ...(studentsWithoutPlan > 0 ? [{ num: studentsWithoutPlan, zero: false, label: `Student${studentsWithoutPlan===1?'':'s'} without a study plan`, tab: null, action: "setTeacherPortalTab('studyplans')" }] : []),
@@ -19672,7 +19716,7 @@ const HELP = {
   'qb-archived': { t:'Archived questions', b:'<ul><li>Archived questions are not offered for new practice papers.</li><li>Papers that already use them keep them.</li><li>Restore a question to bring it back into the bank.</li></ul>' },
   'qb-papers': { t:'Practice Papers', b:'<ul><li><b>New paper</b>: pick a blueprint (e.g. CBSE 80 marks), then tick the sections you want. The paper total updates as you tick.</li><li><b>Lessons to include</b>: tick lessons for a lesson-only paper (none ticked = all). Ticking a lesson unticks Grammar, Writing, Unseen Passage and Translation; tick them back to add them, and they use all chapters.</li><li>Create and auto-fill picks approved questions spread across chapters. Use Swap or Remove on any question, or Re-run auto-fill. Your section and lesson choice is kept.</li><li>Mark ready, then Assign to students with a due date. You can change the due date or Remove a student later.</li><li><b>Marking</b>: under Needs marking, open a student, give marks for each written question and overall feedback, then Mark as reviewed. MCQs are marked automatically when the student submits, and you can change those marks too.</li><li>Download the question paper PDF, with answer key, or Word with answers.</li></ul>' },
   'qb-past': { t:'Past Papers', b:'<ul><li>The board papers and sample papers the questions were imported from.</li><li>Open a PDF to see the original paper.</li></ul>' },
-  'my-students': { t:'My Students', b:'<ul><li>Every active student enrolled in one of your subjects.</li><li>Shows contact details, subjects, and classes subscribed, used and left, with the next expiry date.</li><li>Search by student name, parent, phone or email.</li><li>Fees and payments are not shown here; ask the Admin about those.</li></ul>' },
+  'my-students': { t:'My Students', b:'<ul><li>Every active student enrolled in one of your subjects.</li><li>Shows contact details, subjects, and classes subscribed, used and left, with the next expiry date.</li><li>New subscriptions at the top: students who bought classes in your subjects in the last 7 days, marked New student or Renewal. The dashboard box shows how many you have not seen yet.</li><li>Search by student name, parent, phone or email.</li><li>Fees and payments are not shown here; ask the Admin about those.</li></ul>' },
   'study-plans': { t:'Study Plans', b:'<ul><li>A topic list per student and subject. + New plan, pick the student and subject, then + Add topic.</li><li>Set each topic to Not started, In progress or Done; the progress bar updates.</li><li>Tick several topics to change or delete them together.</li><li>Students and parents see the plan on their page. Export PDF to share it.</li><li>Topics also appear in the Homework form, so homework can be linked to a topic.</li><li><b>Add topics from textbook</b>: upload a book (PDF, TXT or a ZIP of several) or link one from the shared library, then Extract Topics. New books go into the library for every teacher of that subject, tagged with grade and board. <b>Unlink</b> takes a book off this student only; the book stays in the library.</li></ul>' },
   'hw-teacher': { t:'Homework', b:'<ul><li>+ Assign homework: pick the student and subject, add a title, due date and description, and optionally a study plan topic or an attached file.</li><li>The student uploads a photo (or marks it submitted). It then shows under Awaiting review.</li><li>Open it, give marks and feedback, then Mark reviewed. The student and parent see the feedback.</li><li>Late means the due date has passed and it is not submitted yet.</li></ul>' },
   'hw-admin': { t:'Homework (all teachers)', b:'<ul><li>Every homework set by every teacher.</li><li>Filter by teacher, student or status to follow up.</li><li>Teachers set and review homework from their own Homework tab.</li></ul>' },
