@@ -333,7 +333,7 @@ if (location.hostname !== 'app.libeducation.com') {
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-28 14:15 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-28 14:40 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -8680,6 +8680,63 @@ async function addStudent() {
   addConfirmMsg.student = `Student "${name}" added${row.student_code ? ' (' + row.student_code + ')' : ''}. Fill in their details below.`;
   render();
 }
+// "Copy to new student": a new student record with the family details copied from an existing one.
+// Copied: parent name, main mobile, parent mobiles, email, address, board, mode, class type, academic year, parent login link.
+// Not copied: grade (picked in the box), photo, student mobiles, subjects, subscriptions, fee requests, special rates.
+let siblingDraftFor = '', siblingMsg = '';
+function openSiblingForm(id) { siblingDraftFor = siblingDraftFor === id ? '' : id; siblingMsg = ''; render(); setTimeout(() => { const el = document.getElementById('siblingName'); if (el) el.focus(); }, 0); }
+async function addSibling(fromId) {
+  const src = data.students.find(x => x.id === fromId);
+  if (!src) return;
+  const nameEl = document.getElementById('siblingName'), gradeEl = document.getElementById('siblingGrade');
+  const name = nameEl ? nameEl.value.trim() : '';
+  const gradeId = gradeEl ? gradeEl.value : '';
+  if (!name) { siblingMsg = "Type the new student's name."; render(); return; }
+  if (!isValidPersonName(name)) { siblingMsg = 'Name cannot contain numbers.'; render(); return; }
+  const payload = { name, archived: false, parent_name: src.parentName || null, mobile_number: src.mobileNumber || null, email: src.email || null, address: src.address || null,
+    grade_id: gradeId || null, board_id: src.boardId || null, academic_year: src.academicYear || null, mode_preference: src.modePreference || null, class_type_preference: src.classTypePreference || null };
+  const { data: row, error } = await sb.from('students').insert(payload).select().single();
+  if (error) { siblingMsg = 'Could not add: ' + error.message; render(); return; }
+  data.students.push({ id: row.id, name: row.name, archived: false, code: row.student_code || '', parentName: row.parent_name || '', mobileNumber: row.mobile_number || '', email: row.email || '', address: row.address || '', photo: '', gradeId: row.grade_id || '', boardId: row.board_id || '', academicYear: row.academic_year || '', modePreference: row.mode_preference || '', classTypePreference: row.class_type_preference || '', billSeparately: false });
+  const problems = [];
+  const phones = phoneNumbersFor(fromId, 'parent');
+  if (phones.length) {
+    const { data: rows, error: pe } = await sb.from('student_phone_numbers').insert(phones.map(p => ({ student_id: row.id, phone_type: 'parent', phone_number: p.number }))).select();
+    if (pe) problems.push('parent mobiles (' + pe.message + ')');
+    else (rows || []).forEach(r => data.studentPhoneNumbers.push({ id: r.id, studentId: r.student_id, type: r.phone_type, number: r.phone_number }));
+  }
+  const logins = [...new Set((data.parentStudents || []).filter(m => m.studentId === fromId).map(m => m.parentUserId))];
+  if (logins.length) {
+    const { data: links, error: le } = await sb.from('parent_students').insert(logins.map(u => ({ parent_user_id: u, student_id: row.id }))).select();
+    if (le) problems.push('parent login link (' + le.message + ')');
+    else (links || []).forEach(l => data.parentStudents.push({ id: l.id, parentUserId: l.parent_user_id, studentId: l.student_id }));
+  }
+  siblingDraftFor = '';
+  selectStudent(row.id);
+  addConfirmMsg.student = `Added "${name}"${row.student_code ? ' (' + row.student_code + ')' : ''} with details copied from ${src.name}. Add their subjects below.`
+    + (problems.length ? ' Could not copy: ' + problems.join(', ') + '.' : '');
+  render();
+}
+function siblingFormHtml(student) {
+  if (siblingDraftFor !== student.id) return '';
+  const phones = phoneNumbersFor(student.id, 'parent').map(p => p.number);
+  const hasLogin = (data.parentStudents || []).some(m => m.studentId === student.id);
+  return `
+    <div class="student-section" style="background:#fff8e6">
+      <h3>📋 Copy ${esc(student.name)}'s details to a new student</h3>
+      <div class="hint">Copies parent name${student.mobileNumber ? ', main mobile' : ''}${phones.length ? ', parent mobiles (' + esc(phones.join(', ')) + ')' : ''}, email, address, board, mode, class type, academic year${hasLogin ? ' and the parent login' : ''}. Photo, subjects and subscriptions are not copied.</div>
+      ${siblingMsg ? `<div class="hint" style="color:var(--brick)">${esc(siblingMsg)}</div>` : ''}
+      <div class="row-form">
+        <label>Name <input type="text" id="siblingName" placeholder="New student's name" style="width:180px" onkeydown="if(event.key==='Enter') addSibling('${student.id}')"></label>
+        <label>Grade <select id="siblingGrade">
+          <option value="">— none —</option>
+          ${grades.filter(g => !g.archived).map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}
+        </select></label>
+        <button class="btn-primary" onclick="addSibling('${student.id}')">Add</button>
+        <button class="btn-small" onclick="openSiblingForm('${student.id}')">Cancel</button>
+      </div>
+    </div>`;
+}
 function activeStudents() { return data.students.filter(s=>!s.archived); }
 async function toggleArchiveStudent(id) {
   const s = data.students.find(x=>x.id===id);
@@ -13281,9 +13338,11 @@ function renderStudents() {
         </div>
         <div>
           <button class="btn-small" onclick="backToStudentList()">← Back to all students</button>
+          ${student.archived ? '' : `<button class="btn-small" onclick="openSiblingForm('${student.id}')" title="Create a new student record with these parent and contact details already filled in">📋 Copy to new student</button>`}
           <button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="${student.archived?`toggleArchiveStudent('${student.id}')`:`confirmArchiveStudent('${student.id}')`}">${student.archived?'Unarchive student':'Archive student'}</button>
         </div>
       </div>
+      ${siblingFormHtml(student)}
 
       
       <div class="student-section" style="background:#e8f0fe">
