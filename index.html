@@ -333,7 +333,7 @@ if (location.hostname !== 'app.libeducation.com') {
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-28 14:40 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-28 15:00 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -6894,7 +6894,7 @@ async function attemptLoginSteps(u, p) {
   currentRole = role;
   currentLinkedId = linkedId;
   currentUserId = authData.user.id;
-  pwIsDefault = role === 'Parent' && p === u;   // bulk-made parent logins start with password = login ID
+  pwIsDefault = (role === 'Parent' || role === 'Student') && p === u;   // bulk-made parent/student logins start with password = login ID
   aiUserEnabled = profile.ai_enabled !== false;
   logLoginEvent('login', currentUserId, currentUsername, role); // not awaited: the log write shouldn't hold up the login
   setLoginStep(loadingStepText(role));
@@ -8505,6 +8505,104 @@ async function createStudentLogin(studentId) {
   data.users.push({ id: result.userId, username, role: 'Student', linkedId: studentId });
   creatingLoginForStudentId = null;
   render();
+}
+
+// Students page: "Create all student logins" (replaces the hand-run SQL). One login per active student with
+// no Student login yet; login ID and first password = the student code, so the app asks them to change it
+// (pwIsDefault). Made through the create-login Edge Function, one at a time, like Create all parent logins.
+let bulkStudentRows = null, bulkStudentSkipped = [], bulkStudentAlreadyDone = 0, bulkStudentRunning = false, bulkStudentStop = false, bulkStudentMsg = '';
+function bulkStudentPlan() {
+  const rows = [], skipped = [];
+  let done = 0;
+  data.students.filter(s => !s.archived).forEach(s => {
+    if (data.users.some(u => u.role === 'Student' && u.linkedId === s.id)) { done++; return; }
+    const username = String(s.code || '').trim();
+    if (!username) { skipped.push({ s, reason: 'No student code' }); return; }
+    const taken = data.users.find(u => (u.username || '').toLowerCase() === username.toLowerCase());
+    if (taken) { skipped.push({ s, reason: `Login ID ${username} is already used by a ${taken.role} login` }); return; }
+    const phones = [...new Set([s.mobileNumber || ''].concat(phoneNumbersFor(s.id, 'parent').map(p => p.number)).map(phoneKey).filter(Boolean))];
+    rows.push({ s, username, phones, include: true, status: '' });
+  });
+  rows.sort((a, b) => a.username.localeCompare(b.username, undefined, { numeric: true }));
+  return { rows, skipped, done };
+}
+function previewBulkStudents() {
+  const p = bulkStudentPlan();
+  bulkStudentRows = p.rows; bulkStudentSkipped = p.skipped; bulkStudentAlreadyDone = p.done; bulkStudentMsg = '';
+  render();
+}
+function closeBulkStudents() { if (bulkStudentRunning) return; bulkStudentRows = null; bulkStudentSkipped = []; bulkStudentMsg = ''; render(); }
+function toggleBulkStudentRow(i, on) { if (bulkStudentRows && bulkStudentRows[i]) bulkStudentRows[i].include = on; render(); }
+function toggleAllBulkStudents(on) { (bulkStudentRows || []).forEach(r => { if (!r.status) r.include = on; }); render(); }
+function stopBulkStudents() { bulkStudentStop = true; }
+async function runBulkStudents() {
+  if (bulkStudentRunning || !bulkStudentRows) return;
+  const todo = bulkStudentRows.filter(r => r.include && !r.status);
+  if (!todo.length) return;
+  if (!confirm(`Create ${todo.length} student login${todo.length === 1 ? '' : 's'}?\n\nEach login ID and password is the student code.`)) return;
+  bulkStudentRunning = true; bulkStudentStop = false; bulkStudentMsg = '';
+  let ok = 0, failed = 0;
+  for (const r of todo) {
+    if (bulkStudentStop) break;
+    if (data.users.some(u => (u.username || '').toLowerCase() === r.username.toLowerCase())) { r.status = 'Error: login ID already exists'; failed++; render(); continue; }
+    if (data.users.some(u => u.role === 'Student' && u.linkedId === r.s.id)) { r.status = 'Error: already has a login'; failed++; render(); continue; }
+    const { data: result, error } = await callAdminFunction({ action: 'create', username: r.username, password: r.username, role: 'Student', linkedStudentId: r.s.id });
+    if (error) { r.status = 'Error: ' + error; failed++; render(); continue; }
+    data.users.push({ id: result.userId, username: r.username, role: 'Student', linkedId: r.s.id });
+    r.status = 'Created';
+    ok++;
+    render();
+  }
+  bulkStudentRunning = false;
+  bulkStudentMsg = `${ok} created${failed ? `, ${failed} with errors (see the list)` : ''}${bulkStudentStop ? ' (stopped)' : ''}. Send each student their login with the 📤 buttons below.`;
+  trackUse('bulk-student-logins');
+  render();
+}
+function bulkStudentMessage(r) {
+  const link = location.origin + location.pathname;
+  return [`Dear ${r.s.name},`, '', "Your My LIB student login is ready. You can see your classes, attendance, homework and practice papers.", '',
+    `Open: ${link}`, `Login ID: ${r.username}`, `Password: ${r.username}${r.resend ? ' (unless you have already changed it)' : ''}`, '',
+    'Please change your password after you log in (Change your password, at the bottom of the page).'].join('\n');
+}
+function bulkStudentWaHtml(r) {
+  if (!r.phones.length) return '<span class="hint">No phone number saved.</span>';
+  const encoded = encodeURIComponent(bulkStudentMessage(r));
+  return r.phones.map(k => `<a href="https://wa.me/91${k}?text=${encoded}" target="_blank" class="btn-small" style="text-decoration:none;display:inline-flex;align-items:center">📤 ${esc(k)}</a>`).join(' ');
+}
+// Student's page → Login: send the login again (password assumed still = login ID).
+function studentLoginWaHtml(s, u) {
+  const phones = [...new Set([s.mobileNumber || ''].concat(phoneNumbersFor(s.id, 'parent').map(p => p.number)).map(phoneKey).filter(Boolean))];
+  return bulkStudentWaHtml({ s, username: u.username, phones, resend: true });
+}
+function bulkStudentCardHtml() {
+  const head = `<h2>Create all student logins <button class="help-btn" onclick="openHelp('bulk-students',event)">?</button></h2>
+      <div class="hint">One login for every active student who has none yet. Login ID and password are the student code; students are asked to change the password after they log in.</div>`;
+  if (!bulkStudentRows) return `<div class="card">${head}<div class="row-form"><button class="btn-primary" onclick="previewBulkStudents()">Preview</button></div><div class="hint">Preview saves nothing.</div></div>`;
+  const pending = bulkStudentRows.filter(r => r.include && !r.status);
+  const open = bulkStudentRows.filter(r => !r.status);
+  const allOn = open.length && open.every(r => r.include);
+  const table = bulkStudentRows.length ? `<div class="table-scroll"><table>
+      <tr><th><input type="checkbox" title="Tick all" ${allOn ? 'checked' : ''} ${bulkStudentRunning || !open.length ? 'disabled' : ''} onchange="toggleAllBulkStudents(this.checked)"></th><th>Student</th><th>Login ID</th><th>Status / send</th></tr>
+      ${bulkStudentRows.map((r, i) => `<tr>
+        <td><input type="checkbox" ${r.include ? 'checked' : ''} ${r.status || bulkStudentRunning ? 'disabled' : ''} onchange="toggleBulkStudentRow(${i},this.checked)"></td>
+        <td>${esc(r.s.name)}</td>
+        <td>${esc(r.username)}</td>
+        <td>${r.status ? `<span style="color:${r.status.startsWith('Error') ? 'var(--brick)' : 'var(--forest)'}">${esc(r.status)}</span>${r.status.startsWith('Error') ? '' : '<div class="row-form" style="margin:4px 0 0">' + bulkStudentWaHtml(r) + '</div>'}` : ''}</td>
+      </tr>`).join('')}
+    </table></div>` : '<div class="hint">Nothing to do: every active student with a code already has a login.</div>';
+  const skipped = bulkStudentSkipped.length ? `<h3>Skipped (${bulkStudentSkipped.length})</h3>
+      <ul style="margin:4px 0 0 18px;font-size:13px">${bulkStudentSkipped.map(x => `<li>${esc(x.s.name)}: ${esc(x.reason)}</li>`).join('')}</ul>` : '';
+  return `<div class="card">${head}
+      <div class="hint" style="margin-top:6px"><b>${bulkStudentRows.length}</b> new login${bulkStudentRows.length === 1 ? '' : 's'} · ${bulkStudentAlreadyDone} already have one · ${bulkStudentSkipped.length} skipped</div>
+      ${bulkStudentMsg ? `<div class="hint" style="color:var(--forest)">${esc(bulkStudentMsg)}</div>` : ''}
+      <div class="row-form">
+        ${bulkStudentRunning ? `<button class="btn-small" onclick="stopBulkStudents()">Stop</button><span class="hint">Working… ${bulkStudentRows.filter(r => r.status).length} of ${bulkStudentRows.filter(r => r.include).length}</span>`
+          : `<button class="btn-primary" ${pending.length ? '' : 'disabled'} onclick="runBulkStudents()">Create ${pending.length} ${pending.length === 1 ? 'login' : 'logins'}</button>
+             <button class="btn-small" onclick="previewBulkStudents()">Preview again</button>
+             <button class="btn-small" onclick="closeBulkStudents()">Close</button>`}
+      </div>
+      ${table}${skipped}
+    </div>`;
 }
 
 // ---------- setup: teachers + subjects ----------
@@ -10163,7 +10261,7 @@ const SUPPORT_KB = {
 - Payroll (Money): each teacher's earnings for the month, demo bonuses, adjustments, mark paid and salary slips.
 - Expenses (Money): monthly overhead costs such as rent and electricity.
 - Reports & Export (Money): student report, student balances, refunds, Razorpay payments history, net profit and Excel export.
-- Students & Subscriptions (People): add or edit students, enrol them in subjects, record payments, refunds and credit transfers, see subscription history and receipts. Special fee rates sets an agreed per-class rate for one student (used instead of Fee setup). Bill separately keeps a student out of their family's combined fee message.
+- Students & Subscriptions (People): add or edit students, enrol them in subjects, record payments, refunds and credit transfers, see subscription history and receipts. Special fee rates sets an agreed per-class rate for one student (used instead of Fee setup). Bill separately keeps a student out of their family's combined fee message. Create all student logins (with no student picked) makes the missing student logins in one go (login ID and first password = student code) with 📤 WhatsApp buttons to send the details.
 - Teachers & Subjects (People): add teachers and subjects, and set which teacher teaches each subject. The Class Frequency button sets how many classes each student has on each weekday (used by Raise fee requests and Rebuild Pending Classes).
 - Parents (People): one parent login per family and which children are linked. Create all parent logins makes the missing ones (login ID and first password = parent's 10-digit mobile) with a 📤 WhatsApp button to send the details.
 - Study Plans (Teaching): read-only view of every teacher's study plans and progress, plus the Textbook library (every uploaded book; rename, retag or delete).
@@ -13173,7 +13271,7 @@ function renderStudents() {
   `;
 
   if (!selectedStudentId) {
-    return block1 + `<div class="card"><div class="empty">Choose a student above to manage their subscriptions, enrollments, and login.</div></div>`;
+    return block1 + `<div class="card"><div class="empty">Choose a student above to manage their subscriptions, enrollments, and login.</div></div>` + bulkStudentCardHtml();
   }
 
   const student = data.students.find(s=>s.id===selectedStudentId);
@@ -13274,6 +13372,7 @@ function renderStudents() {
       <span>${logins.length ? logins.map(u=>`<span class="tag">${esc(u.username)}</span>`).join(' ') : '<span class="hint">no login yet</span>'}</span>
       <button class="btn-small" onclick="startCreateStudentLogin('${student.id}')">+ Login ID</button>
     </div>
+    ${logins.filter(u => student.code && (u.username || '').toLowerCase() === String(student.code).toLowerCase()).map(u => `<div class="row-form" style="margin:6px 0 0"><span class="hint">Send login details:</span> ${studentLoginWaHtml(student, u)}</div>`).join('')}
     ${isCreatingLogin ? `
       ${loginCreateMsg ? `<div class="hint" style="color:var(--brick)">${esc(loginCreateMsg)}</div>` : ''}
       <div class="row-form" style="margin-top:8px">
@@ -19516,7 +19615,7 @@ function renderPortalShell(bodyHtml) {
       <button class="btn-logout btn-small" onclick="logout()">Log out</button>
     </div>
     <div class="tagline">${currentRole==='Student' ? 'Your attendance and subscription details.' : currentRole==='Parent' ? "Your child's attendance and subscription details." : 'Your classes for the selected month.'}</div>
-    ${pwIsDefault ? `<div class="card" style="border-color:var(--brick)"><b>Please change your password.</b> It is still the same as your login ID, so anyone who knows your number could log in. <button class="btn-small btn-primary" onclick="document.getElementById('curPass').scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('curPass').focus()">Change it now</button></div>` : ''}
+    ${pwIsDefault ? `<div class="card" style="border-color:var(--brick)"><b>Please change your password.</b> It is still the same as your login ID, so anyone who knows your login ID could log in. <button class="btn-small btn-primary" onclick="document.getElementById('curPass').scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('curPass').focus()">Change it now</button></div>` : ''}
     ${currentRole === 'Student' ? '' : aiHowAmIDoingHtml(currentLinkedId)}
     ${chatPanelOpen ? renderChat() : bodyHtml}
     ${currentRole === 'Teacher' ? '' : `
@@ -19596,6 +19695,7 @@ const HELP = {
   'demo-register': { t:'Demo Register', b:"<ul><li>Every demo a teacher gave, with its status: Pending, Done, Converted or Lost.</li><li>Teachers mark their own demos Done from their Dashboard. You can set any status, add a Lost reason, or go straight to Converted.</li><li><b>Link &amp; Convert</b> links the demo to the student who joined; the teacher gets a ₹100 demo bonus in that month's payroll.</li><li>Demo results shows each teacher's demos and Converted %, and why demos were lost.</li></ul>" },
   'class-log': { t:'Class Log', b:"<ul><li>Pick the date and the teacher whose class you are marking.</li><li>Choose student, subject, Group / Individual, Online / Offline and Present or Absent, then Log class. Absent still uses a class.</li><li>The student's classes left are shown, with a warning when they have none.</li><li>The list below shows the teacher's classes for the <b>Selected day</b> or the <b>Whole month</b> (with a month total).</li></ul>" },
   'expenses': { t:'Expenses', b:"<ul><li>Money the institute spends other than teacher pay: rent, electricity, internet and so on.</li><li>Add an expense with date, category, amount and an optional note. Edit or delete it from the month list.</li><li>Expenses come off fee collection in Reports → Net profit. Don't enter teacher salary here; payroll is counted separately.</li></ul>" },
+  'bulk-students': { t:'Create all student logins', b:"<ul><li>Preview lists every active student who has no student login yet. Nothing is saved until you press Create.</li><li>Login ID and password are the student code (the same rule as the old SQL). When the student logs in with it, the app asks them to change the password.</li><li>Untick anyone you don't want a login for yet.</li><li>Skipped: students with no student code, or whose code is already used as another login ID.</li><li>After Create, each row has 📤 WhatsApp buttons (student mobile and parent numbers) with the message ready: app link, login ID, password. Later, open the student and use the 📤 buttons next to Login to send it again.</li></ul>" },
   'parents': { t:'Parents', b:"<ul><li>One parent login per family. Pick a parent to see or change which children are linked.</li><li><b>Create all parent logins</b> makes the missing logins in one go: login ID and first password are the parent's 10-digit mobile.</li><li>📤 WhatsApp sends the family their login details; you can resend from the parent's page.</li><li>Parents are asked to change the password after their first login.</li></ul>" },
   'support-inbox': { t:'Support Inbox', b:"<ul><li>Problems reported by teachers, students and parents with the Support button.</li><li>Filter by Open, In progress or Resolved. Open a ticket to reply and change its status.</li><li>The person sees your reply and the status in their own Support window.</li></ul>" },
   'announcements': { t:'Announcements', b:"<ul><li>A short notice shown above the menu bar for the people you pick: everyone, a whole role (all teachers, students, parents or admins) or one person.</li><li>It stays until they dismiss it, it expires, or you delete it.</li></ul>" },
