@@ -143,8 +143,22 @@
   .app-usage-four-col th:nth-child(3), .app-usage-four-col td:nth-child(3) { width: 10%; text-align: right; }
   .app-usage-four-col th:nth-child(4), .app-usage-four-col td:nth-child(4) { width: 38%; white-space: nowrap; }
   table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-  table th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.3px; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-  table td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+  table th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.3px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  table td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  table td .tag, table td button, table td .btn-small, table td .date-day { white-space: nowrap; }
+  /* Phones: a table too wide for the screen shows each row as a small card (label left, value right). stackWideTables() adds .stack; .no-stack keeps a grid scrolling. */
+  @media (max-width: 600px) {
+    table.stack, table.stack tbody, table.stack tr, table.stack td, table.stack tbody th { display: block; width: 100%; }
+    table.stack thead, table.stack tr.stack-head { display: none; }
+    table.stack tr { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 10px; padding: 2px 10px; background: var(--paper); }
+    table.stack tr.total { border: 2px solid var(--ink); }
+    table.stack td { position: relative; padding: 6px 0 6px 40%; border-bottom: 1px dashed var(--line); text-align: left !important; min-height: 30px; }
+    table.stack tr.total td { border-top: none; }
+    table.stack td:last-child { border-bottom: none; }
+    table.stack td::before { content: attr(data-label); position: absolute; left: 0; top: 8px; width: 37%; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; line-height: 1.3; }
+    table.stack td[data-label=""] { padding-left: 0; }
+    table.stack td[data-label=""]::before { display: none; }
+  }
   table tr.total td { border-top: 2px solid var(--ink); font-weight: 700; border-bottom: none; }
   .cat-divider { border-right: 2px solid var(--ink); }
   .low { color: var(--brick); font-weight: 700; }
@@ -285,7 +299,7 @@
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-27 22:20 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-28 09:15 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -711,7 +725,7 @@ function appUsageHtml() {
     });
     const keys = Object.keys(by).sort(byOrder);
     const cols = shown.length + 2;
-    const who = k => `<div class="app-usage-detail-scroll"><table class="app-usage-detail-table app-usage-four-col" style="margin:0;min-width:760px">
+    const who = k => `<div class="app-usage-detail-scroll"><table class="no-stack app-usage-detail-table app-usage-four-col" style="margin:0;min-width:760px">
       <colgroup><col style="width:36%"><col style="width:16%"><col style="width:10%"><col style="width:38%"></colgroup>
       <thead><tr><th>Who</th><th>Role</th><th>Times</th><th>Last used (IST)</th></tr></thead>
       <tbody>${Object.values(by[k].users).sort((a, b) => b.n - a.n || a.label.localeCompare(b.label)).map(u => `<tr><td>${esc(u.label)}</td><td>${esc(u.role)}</td><td>${u.n}</td><td>${esc(formatTimestampIST(u.last))}</td></tr>`).join('')}</tbody>
@@ -736,7 +750,7 @@ function appUsageHtml() {
     const list = Object.values(by).sort((a, b) => b.actions - a.actions || b.total - a.total);
     const top = u => Object.entries(u.f).filter(([k]) => !k.startsWith('tab:')).sort((a, b) => b[1] - a[1]).slice(0, 3)
       .map(([k, n]) => `${esc(appUsageFeatureLabel(k))} ×${n}`).join(', ') || '<span style="color:var(--muted)">only opened screens</span>';
-    const all = u => `<div class="app-usage-detail-scroll"><table class="app-usage-detail-table" style="margin:0;min-width:650px">
+    const all = u => `<div class="app-usage-detail-scroll"><table class="no-stack app-usage-detail-table" style="margin:0;min-width:650px">
       <colgroup><col style="width:50%"><col style="width:12%"><col style="width:38%"></colgroup>
       <thead><tr><th>Feature</th><th>Times</th><th>Last used (IST)</th></tr></thead>
       <tbody>${Object.keys(u.f).sort(byOrder).map(k => `<tr><td>${esc(appUsageFeatureLabel(k))}</td><td>${u.f[k]}</td><td>${esc(formatTimestampIST(u.fLast[k]))}</td></tr>`).join('')}</tbody>
@@ -1492,6 +1506,39 @@ new MutationObserver(() => {
   dateDayHintQueued = true;
   requestAnimationFrame(() => { dateDayHintQueued = false; syncAllDateDayHints(); });
 }).observe(document.documentElement, { childList: true, subtree: true });
+// Phones (600px and less): a table wider than the screen becomes cards, one per row, each value labelled with its
+// column heading. Tables that fit stay tables. Skipped: tables with no heading row, two-row headings (grids) and .no-stack.
+const STACK_MAX_WIDTH = 600;
+function stackWideTables() {
+  if (window.innerWidth > STACK_MAX_WIDTH) return;
+  document.querySelectorAll('#app table:not(.stack):not(.no-stack)').forEach(tb => {
+    if (tb.closest('.no-stack') || !tb.offsetParent) return;
+    const box = tb.parentElement;
+    if (tb.scrollWidth <= box.clientWidth + 2) return;
+    const rows = [...tb.rows];
+    const head = rows[0];
+    if (!head || head.querySelector('td') || !head.querySelector('th')) return;
+    if (head.querySelector('[rowspan],[colspan]') || (rows[1] && !rows[1].querySelector('td'))) return;
+    const labels = [...head.cells].map(h => h.innerText.trim());
+    head.classList.add('stack-head');
+    rows.slice(1).forEach(tr => {
+      let col = 0;
+      [...tr.cells].forEach(td => {
+        const span = td.colSpan || 1;
+        td.setAttribute('data-label', span > 1 ? '' : (labels[col] || ''));
+        col += span;
+      });
+    });
+    tb.classList.add('stack');
+  });
+}
+let stackTablesQueued = false;
+new MutationObserver(() => {
+  if (stackTablesQueued) return;
+  stackTablesQueued = true;
+  requestAnimationFrame(() => { stackTablesQueued = false; stackWideTables(); });
+}).observe(document.documentElement, { childList: true, subtree: true });
+window.addEventListener('resize', () => stackWideTables());
 let teacherMobileTabMenuOpen = false;
 // Question Bank tab: only for teachers an admin has switched on (Setup → Question Bank access), and then
 // only if the database lets them read some questions (their subject at a class they teach) or they already
@@ -13617,7 +13664,7 @@ function renderLog() {
   const sumCount = st => dayEntries.filter(s=>s.status===st).reduce((a,s)=>a+(Number(s.count)||0),0);
   const dateCell = s => logMonthView ? `<td>${dayDate(s.date)}${savedAtHtml(s.createdAt, s.date)}</td>` : '';
   const entriesHtml = dayEntries.length ? `
-    <div class="table-scroll"><table>
+    <div class="table-scroll"><table${logMonthView ? ' class="no-stack"' : ''}>
       <tr>${logMonthView?'<th>Date</th>':''}<th>Student</th><th>Subject</th><th>Type</th><th>Mode</th><th>Classes</th><th>Status</th><th>Remarks</th><th></th></tr>
       ${dayEntries.map(s=>{
         if (editingSessionId === s.id) {
@@ -13950,7 +13997,7 @@ function renderReports(only) {
 
   const payrollHtml = payrollTeacherPool.length ? `
     <div class="row-form" style="margin-bottom:6px"><button class="btn-small" onclick="togglePayrollDetails()">${payrollShowDetails ? 'Hide' : 'Show'} class type &amp; category breakdown</button></div>
-    <div class="table-scroll"><table>
+    <div class="table-scroll"><table class="no-stack">
       ${payrollShowDetails ? `
       <tr><th rowspan="2" style="vertical-align:bottom">Teacher</th>
         ${categories.map(c=>`<th colspan="${TYPES.length}" style="text-align:center">${c.name}</th>`).join('')}
@@ -14062,7 +14109,7 @@ function renderReports(only) {
     ${byName(data.teachers).map(t=>`<option value="${t.id}" ${classesPerTeacherFilter===t.id?'selected':''}>${esc(teacherLabel(t))}${t.archived?' (archived)':''}</option>`).join('')}`;
 
   const teacherClassHtml = teacherClassRows.length ? `
-    <div class="table-scroll"><table>
+    <div class="table-scroll"><table class="no-stack">
       <tr><th>Teacher</th>${TYPES.map(ty=>`<th>${ty} (Present)</th>`).join('')}<th>Total Present</th><th>Total Absent</th><th>Grand Total</th><th>Students taught</th></tr>
       ${teacherClassRows.map(r=>`
         <tr><td>${esc(r.name)}</td>${TYPES.map(ty=>`<td>${r.byType[ty]}</td>`).join('')}<td><b>${r.totalPresent}</b></td><td${r.totalAbsent>0?' style="color:var(--brick)"':''}>${r.totalAbsent}</td><td>${r.grandTotal}</td><td>${r.distinctStudents}</td></tr>
@@ -14989,7 +15036,7 @@ function renderWixBookings() {
           .filter(d => (!demoLogsTeacherFilter || d.teacherId===demoLogsTeacherFilter) && (!demoLogsMonthFilter || (d.date || '').startsWith(demoLogsMonthFilter))
             && (!demoLogsStatusFilter || (demoLogsStatusFilter === 'Waiting' ? demoWaiting(d) : d.status===demoLogsStatusFilter)));
         if (!filtered.length) return '<div class="empty">No demo logs' + (demoLogsStatusFilter || demoLogsMonthFilter || demoLogsTeacherFilter ? ' match these filters.' : ' yet.') + '</div>';
-        return '<div class="table-scroll"><table><tr><th>Date</th><th>Time</th><th>Teacher</th><th>Subject</th><th>Board</th><th>Student</th><th>Parent Mobile</th><th>Notes</th><th>Linked Student</th><th>Status</th><th>Bonus</th><th></th></tr>'
+        return '<div class="table-scroll"><table><tr><th>Date · Time</th><th>Teacher</th><th>Subject</th><th>Student · Board · Mobile</th><th>Linked Student</th><th>Status</th><th>Bonus</th><th></th></tr>'
           + filtered.map(d => {
             const tName = teacherLabel(data.teachers.find(t=>t.id===d.teacherId)||{name:'?',code:''});
             const sName = d.linkedStudentId ? (data.students.find(s=>s.id===d.linkedStudentId)||{name:'?'}).name : '—';
@@ -15032,7 +15079,7 @@ function renderWixBookings() {
                 : [editBtn, btn('Delete', 'deleteDemoLog', 'color:var(--brick)')]).filter(Boolean).join(' ')
               + msgBtns;
             if (editingDemoId === d.id) {
-              return `<tr style="background:var(--soft)"><td colspan="11" style="padding:10px">
+              return `<tr style="background:var(--soft)"><td colspan="8" style="padding:10px">
                 <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
                   <b style="font-size:13px">Edit:</b>
                   <input type="date" value="${editDemoDraft.date}" onchange="editDemoDraft.date=this.value" style="padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px">
@@ -15057,10 +15104,13 @@ function renderWixBookings() {
                 </div>
               </td></tr>`;
             }
-            const lostForm = demoLostId === d.id && !demoLostOnCard ? `<tr style="background:var(--soft)"><td colspan="12" style="padding:10px">
+            const lostForm = demoLostId === d.id && !demoLostOnCard ? `<tr style="background:var(--soft)"><td colspan="8" style="padding:10px">
                 <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><b style="font-size:13px">Mark lost: ${esc(d.studentName || '')}</b>${demoLostFieldsHtml(d.id)}</div>
               </td></tr>` : '';
-            return `<tr><td>${d.date?dayDate(d.date):'—'}</td><td>${d.demoTime||'—'}</td><td>${esc(tName)}</td><td>${esc(d.subjectId?subjectName(d.subjectId):'—')}</td><td>${esc(d.board||'—')}</td><td>${esc(d.studentName||'—')}</td><td>${esc(d.parentMobile||'—')}${copyBtnHtml(d.parentMobile)}</td><td>${esc(d.notes||'—')}</td><td>${linkSection}</td><td>${statusBadge}</td><td>${d.status==='Converted'?'₹'+d.bonusAmount:'—'}</td><td>${actions}</td></tr>` + lostForm;
+            // Board, parent mobile and notes sit in grey under the student's name, and time under the date, so the register fits a laptop.
+            const sub = html => `<div class="hint" style="margin:2px 0 0">${html}</div>`;
+            const boardMobile = [d.board ? esc(d.board) : '', d.parentMobile ? `<span style="white-space:nowrap">${esc(d.parentMobile)}${copyBtnHtml(d.parentMobile)}</span>` : ''].filter(Boolean).join(' · ');
+            return `<tr><td>${d.date?dayDate(d.date):'—'}${d.demoTime ? sub(esc(d.demoTime)) : ''}</td><td>${esc(tName)}</td><td>${esc(d.subjectId?subjectName(d.subjectId):'—')}</td><td>${esc(d.studentName||'—')}${boardMobile ? sub(boardMobile) : ''}${d.notes ? `<div class="hint" style="margin:2px 0 0;font-style:italic">${esc(d.notes)}</div>` : ''}</td><td>${linkSection}</td><td>${statusBadge}</td><td>${d.status==='Converted'?'₹'+d.bonusAmount:'—'}</td><td>${actions}</td></tr>` + lostForm;
           }).join('')
           + '</table></div>';
       })()}
