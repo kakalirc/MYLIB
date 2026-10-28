@@ -310,7 +310,7 @@ if (location.hostname !== 'app.libeducation.com') {
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-28 09:25 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-28 09:45 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -17962,7 +17962,6 @@ function teacherScheduleSetupHtml(teacher) {
 // Practice paper attempts and saved Lesson prep briefs are not loaded at login, so the Dashboard and the
 // Pending Action Items page fetch them here (only when the teacher has that access).
 let teacherPendingExtra = { teacherId: '', loading: false, loaded: false, papersToReview: [], papersOverdue: [] };
-const PENDING_UNMARKED_DAYS = 30;   // "Classes not marked" looks back this many days
 const PENDING_PREP_DAYS = 7;        // a Lesson prep brief for the student from the last 7 days counts as prepared
 async function loadTeacherPendingExtras(force) {
   if (!sb || currentRole !== 'Teacher' || !currentLinkedId) return;
@@ -18009,10 +18008,8 @@ function teacherPendingItems(teacher) {
   if (teacherPendingExtra.teacherId !== tid || (!teacherPendingExtra.loaded && !teacherPendingExtra.loading)) loadTeacherPendingExtras();
   const now = new Date();
   const nowHm = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-  const fromDate = pendingDateOffset(-PENDING_UNMARKED_DAYS);
   const byDateTime = (a, b) => a.date === b.date ? (a.time || '').localeCompare(b.time || '') : a.date.localeCompare(b.date);
   const mine = scheduledClasses.filter(sc => sc.teacherId === tid);
-  const notMarked = mine.filter(sc => sc.status === 'Pending' && sc.date < todayStr && sc.date >= fromDate).sort((a, b) => -byDateTime(a, b));
   // Today's classes whose time has passed and are still Pending. Placeholder times are left to "timings to correct".
   const todayDue = mine.filter(sc => sc.status === 'Pending' && sc.date === todayStr && !isProvisionalScheduleTime(sc) && (!sc.time || sc.time.slice(0, 5) <= nowHm));
   const timings = mine.filter(sc => isProvisionalScheduleTime(sc) && sc.status !== 'Done' && sc.date >= todayStr).sort(byDateTime);
@@ -18050,7 +18047,6 @@ function teacherPendingItems(teacher) {
   const support = (data.supportTickets || []).filter(t => t.status !== 'resolved');   // loadSupportTickets only reads the teacher's own
 
   const counts = [
-    ['pendNotMarked', notMarked.length, 'class' + (notMarked.length === 1 ? '' : 'es') + ' not marked'],
     ['pendToday', todayDue.length, 'class' + (todayDue.length === 1 ? '' : 'es') + ' today not done'],
     ['pendTimings', timings.length, 'class timing' + (timings.length === 1 ? '' : 's') + ' to correct'],
     ['pendSetup', setup.length, 'schedule setup item' + (setup.length === 1 ? '' : 's')],
@@ -18064,18 +18060,10 @@ function teacherPendingItems(teacher) {
     ['pendAvailability', noAvailability ? 1 : 0, 'availability not set'],
   ].filter(c => c[1] > 0).map(([id, n, label]) => ({ id, n, label }));
   const total = counts.reduce((a, c) => a + c.n, 0);
-  return { notMarked, todayDue, timings, setup, setupReady, demos, homework, papers, noPlan, chats, notifs, announcements, noAvailability,
+  return { todayDue, timings, setup, setupReady, demos, homework, papers, noPlan, chats, notifs, announcements, noAvailability,
     prep, hwLate, papersLate, support, counts, total, extrasLoading: teacherPendingExtra.loading };
 }
 function teacherPendingGo(id) { const el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: 'smooth' }); }
-function teacherPendingGiveAttendance(scId) {
-  const sc = scheduledClasses.find(x => x.id === scId);
-  setTeacherPortalTab('attendance');
-  if (!sc) return;
-  logDraft.date = sc.date; logDraft.studentId = sc.studentId || ''; logDraft.subjectId = sc.subjectId || '';
-  if (TYPES.includes(sc.classType)) logDraft.classType = sc.classType;
-  render(); window.scrollTo(0, 0);
-}
 function teacherPendingHomework() { setTeacherPortalTab('homework'); hwFilterStatus = 'submitted'; render(); }
 function teacherPendingLateHomework() { setTeacherPortalTab('homework'); hwFilterStatus = 'late'; render(); }
 function teacherPendingPapers() {
@@ -18338,10 +18326,6 @@ function renderTeacherDashboard(teacher) {
     const scStudent = sc => esc(studentNameWithCode(sc.studentId));
     const scSubject = sc => sc.subjectId ? esc(subjectName(sc.subjectId)) : '—';
     const act = [];
-    if (p.notMarked.length) act.push(sec('pendNotMarked', '📝 Classes not marked', p.notMarked.length,
-      'Classes from the last ' + PENDING_UNMARKED_DAYS + ' days that are still Pending, so attendance was never given. Give attendance (Present or Absent) and they drop off this list. You can only give attendance for this month; for an older class, ask the office.',
-      table(['Date', 'Time', 'Student', 'Subject', 'Type', ''], p.notMarked.map(sc => '<tr>' + td(esc(dayDate(sc.date))) + td(esc(sc.time || '—')) + td(scStudent(sc)) + td(scSubject(sc)) + td(esc(sc.classType || '—'))
-        + td(isCurrentMonth(sc.date) ? '<button class="btn-small btn-primary" onclick="teacherPendingGiveAttendance(\'' + sc.id + '\')">Give attendance</button>' : '<span class="hint">Last month: ask the office</span>') + '</tr>')), 'var(--brick)'));
     if (todaySchedHtml) act.push('<div id="pendToday">' + (p.todayDue.length ? '<div class="hint" style="margin:0 0 6px 4px"><b>' + p.todayDue.length + ' class' + (p.todayDue.length === 1 ? '' : 'es') + ' today</b> already past ' + (p.todayDue.length === 1 ? 'its' : 'their') + ' time and still Pending. <a href="#" onclick="setTeacherPortalTab(\'attendance\');return false">Give attendance</a></div>' : '') + todaySchedHtml + '</div>');
     if (timingReviewHtml) act.push('<div id="pendTimings">' + timingReviewHtml + '</div>');
     const setupHtml = teacherScheduleSetupHtml(teacher);
