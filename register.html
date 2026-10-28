@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Register a new student – LIB Education</title>
+<meta name="description" content="Register your child for tuition classes at LIB Education. Takes about two minutes.">
+<link rel="canonical" href="https://app.libeducation.com/register.html">
+<script>
+// Only the app.libeducation.com copy should appear in Google.
+if (location.hostname !== 'app.libeducation.com') {
+  var _noindex = document.createElement('meta'); _noindex.name = 'robots'; _noindex.content = 'noindex';
+  document.head.appendChild(_noindex);
+}
+</script>
+<link rel="icon" href="favicon.ico">
+<link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@600;700&family=Work+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#f4f0e6; --paper:#fbf9f3; --ink:#232a24; --muted:#7c7461; --line:#ded5bd; --forest:#3c5e42; --brick:#a5432e; --gold:#c99a2e; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:'Work Sans',sans-serif; font-size:15px; line-height:1.5; padding:16px; }
+  main { max-width:640px; margin:0 auto; background:var(--paper); border:1px solid var(--line); border-radius:10px; padding:22px 20px 28px; }
+  h1, h2 { font-family:'Zilla Slab',serif; line-height:1.25; }
+  h1 { font-size:26px; margin:0 0 4px; }
+  h2 { font-size:18px; margin:22px 0 6px; padding-top:14px; border-top:1px solid var(--line); }
+  a { color:var(--forest); }
+  .logo { height:44px; display:block; margin-bottom:10px; }
+  .muted { color:var(--muted); font-size:13px; }
+  label { display:block; font-weight:600; font-size:14px; margin:12px 0 4px; }
+  label .opt { font-weight:400; color:var(--muted); font-size:12px; }
+  input[type=text], input[type=tel], input[type=email], select, textarea {
+    width:100%; padding:10px; font:inherit; border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--ink); }
+  textarea { resize:vertical; }
+  .choices { display:flex; flex-wrap:wrap; gap:6px 14px; }
+  .choices label { display:inline-flex; align-items:center; gap:6px; font-weight:400; margin:4px 0; }
+  .consent { display:flex; gap:8px; align-items:flex-start; font-weight:400; margin-top:18px; }
+  .consent input { margin-top:4px; }
+  .hp { position:absolute; left:-9999px; width:1px; height:1px; overflow:hidden; }
+  button { margin-top:18px; width:100%; padding:13px; font:inherit; font-weight:600; font-size:16px; border:0; border-radius:8px; background:var(--forest); color:#fff; cursor:pointer; }
+  button:disabled { opacity:.6; cursor:default; }
+  .error { color:var(--brick); margin-top:10px; font-weight:600; }
+  .done { text-align:center; padding:20px 0; }
+  .done h1 { color:var(--forest); }
+</style>
+</head>
+<body>
+<main>
+<img class="logo" src="logo.jpg" alt="LIB Education">
+<div id="formArea">
+  <h1>Register a new student</h1>
+  <p class="muted">Fill in this form and we will call you to set up classes. It takes about two minutes. Fields marked <b>*</b> are needed.</p>
+
+  <form id="regForm" novalidate>
+    <h2>Student</h2>
+    <label for="student_name">Student's full name *</label>
+    <input type="text" id="student_name" maxlength="80" autocomplete="off" required>
+    <label for="grade_id">Grade *</label>
+    <select id="grade_id" required><option value="">Loading…</option></select>
+    <label for="board_id">Board <span class="opt">(optional)</span></label>
+    <select id="board_id"><option value="">—</option></select>
+    <label for="student_mobile">Student's own mobile <span class="opt">(optional, if they have one)</span></label>
+    <input type="tel" id="student_mobile" maxlength="14" inputmode="numeric" placeholder="10 digits">
+    <label for="school">School <span class="opt">(optional)</span></label>
+    <input type="text" id="school" maxlength="120">
+
+    <h2>Classes wanted</h2>
+    <label>Subjects <span class="opt">(tick all you want)</span></label>
+    <div class="choices" id="subjects"><span class="muted">Loading…</span></div>
+    <label for="subject_other">Other subject <span class="opt">(optional)</span></label>
+    <input type="text" id="subject_other" maxlength="60">
+    <label>Online or at our centre?</label>
+    <div class="choices">
+      <label><input type="radio" name="mode" value="Online"> Online</label>
+      <label><input type="radio" name="mode" value="Offline"> At the centre (Offline)</label>
+      <label><input type="radio" name="mode" value="Both"> Either</label>
+    </div>
+    <label>Group or one-to-one?</label>
+    <div class="choices">
+      <label><input type="radio" name="ctype" value="Group"> Group</label>
+      <label><input type="radio" name="ctype" value="Individual"> One-to-one</label>
+      <label><input type="radio" name="ctype" value="Both"> Not sure</label>
+    </div>
+
+    <h2>Parent or guardian</h2>
+    <label for="parent_name">Parent's name *</label>
+    <input type="text" id="parent_name" maxlength="80" autocomplete="name" required>
+    <label for="parent_mobile">Mobile number (WhatsApp) *</label>
+    <input type="tel" id="parent_mobile" maxlength="14" inputmode="numeric" autocomplete="tel" placeholder="10 digits" required>
+    <label for="second_mobile">Second mobile <span class="opt">(optional)</span></label>
+    <input type="tel" id="second_mobile" maxlength="14" inputmode="numeric" placeholder="10 digits">
+    <label for="email">Email <span class="opt">(optional)</span></label>
+    <input type="email" id="email" maxlength="120" autocomplete="email">
+    <label for="address">Address or area <span class="opt">(optional)</span></label>
+    <textarea id="address" rows="2" maxlength="300" autocomplete="street-address"></textarea>
+
+    <h2>Anything else</h2>
+    <label for="heard_from">How did you hear about us? <span class="opt">(optional)</span></label>
+    <select id="heard_from">
+      <option value="">—</option>
+      <option>Friend or family</option>
+      <option>Google</option>
+      <option>Website</option>
+      <option>Instagram or Facebook</option>
+      <option>WhatsApp</option>
+      <option>School</option>
+      <option>Already had a demo class</option>
+      <option>Other</option>
+    </select>
+    <label for="note">Message for us <span class="opt">(optional: timings, needs, questions)</span></label>
+    <textarea id="note" rows="3" maxlength="500"></textarea>
+
+    <div class="hp" aria-hidden="true"><label for="website">Leave this empty</label><input type="text" id="website" tabindex="-1" autocomplete="off"></div>
+
+    <label class="consent"><input type="checkbox" id="consent"> <span>I am the parent or guardian of this student and I agree to the <a href="terms.html" target="_blank">Terms and Conditions</a> and the <a href="https://www.libeducation.com/privacypolicy" target="_blank" rel="noopener">Privacy Policy</a> of LIB Education. *</span></label>
+
+    <div class="error" id="err" role="alert"></div>
+    <button type="submit" id="sendBtn">Send</button>
+  </form>
+  <p class="muted" style="margin-top:16px">Questions? Call or WhatsApp us on <a href="tel:+919845393178">+91 98453 93178</a>.</p>
+</div>
+<div id="doneArea" class="done" hidden>
+  <h1>Thank you!</h1>
+  <p id="doneText">We have your form. We will call or WhatsApp you soon to set up classes.</p>
+  <p class="muted">Questions? Call us on <a href="tel:+919845393178">+91 98453 93178</a>.</p>
+  <p><a href="https://www.libeducation.com/">Go to the LIB Education website</a></p>
+</div>
+</main>
+<script>
+// Public form: no login. The data goes only through submit_registration (SQL 67); this page can't read anything back.
+var SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
+var SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
+var openedAt = Date.now();
+function rpc(name, body) {
+  return fetch(SUPABASE_URL + '/rest/v1/rpc/' + name, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+    body: JSON.stringify(body || {})
+  }).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.message || r.statusText); return j; }); });
+}
+function el(id) { return document.getElementById(id); }
+function addOption(sel, value, text) { var o = document.createElement('option'); o.value = value; o.textContent = text; sel.appendChild(o); }
+rpc('registration_options').then(function (o) {
+  var g = el('grade_id'); g.innerHTML = ''; addOption(g, '', 'Pick the grade');
+  (o.grades || []).forEach(function (x) { addOption(g, x.id, x.name); });
+  var b = el('board_id'); (o.boards || []).forEach(function (x) { addOption(b, x.id, x.name); });
+  var s = el('subjects'); s.innerHTML = '';
+  (o.subjects || []).forEach(function (name) {
+    var l = document.createElement('label'), c = document.createElement('input');
+    c.type = 'checkbox'; c.value = name; c.name = 'subject';
+    l.appendChild(c); l.appendChild(document.createTextNode(' ' + name)); s.appendChild(l);
+  });
+  if (!(o.subjects || []).length) s.innerHTML = '<span class="muted">Type the subject in the box below.</span>';
+}).catch(function () {
+  el('err').textContent = 'The form could not load. Please check your internet and reload the page, or call us.';
+});
+function digits(v) { var d = String(v || '').replace(/\D/g, ''); return d.length > 10 ? d.slice(-10) : d; }
+function picked(name) { var x = document.querySelector('input[name="' + name + '"]:checked'); return x ? x.value : ''; }
+el('regForm').addEventListener('submit', function (e) {
+  e.preventDefault();
+  var err = el('err'); err.textContent = '';
+  var student = el('student_name').value.trim(), parent = el('parent_name').value.trim(), mobile = digits(el('parent_mobile').value);
+  var problem = !student ? "Please type the student's name."
+    : /\d/.test(student) ? "The student's name can't have numbers."
+    : !el('grade_id').value ? 'Please pick the grade.'
+    : !parent ? "Please type the parent's name."
+    : /\d/.test(parent) ? "The parent's name can't have numbers."
+    : !/^[6-9]\d{9}$/.test(mobile) ? 'Please type a 10-digit mobile number.'
+    : el('student_mobile').value.trim() && !/^[6-9]\d{9}$/.test(digits(el('student_mobile').value)) ? "The student's mobile should have 10 digits."
+    : !el('consent').checked ? 'Please tick the box to agree to the Terms and Privacy Policy.' : '';
+  if (problem) { err.textContent = problem; return; }
+  var subjects = [].map.call(document.querySelectorAll('input[name="subject"]:checked'), function (c) { return c.value; });
+  if (el('subject_other').value.trim()) subjects.push(el('subject_other').value.trim());
+  var btn = el('sendBtn'); btn.disabled = true; btn.textContent = 'Sending…';
+  rpc('submit_registration', { p: {
+    student_name: student, grade_id: el('grade_id').value, board_id: el('board_id').value, school: el('school').value, student_mobile: digits(el('student_mobile').value),
+    subjects: subjects, mode_preference: picked('mode'), class_type_preference: picked('ctype'),
+    parent_name: parent, parent_mobile: mobile, second_mobile: digits(el('second_mobile').value),
+    email: el('email').value, address: el('address').value, heard_from: el('heard_from').value, note: el('note').value,
+    consent: el('consent').checked, website: el('website').value, elapsed_ms: Date.now() - openedAt
+  } }).then(function (r) {
+    if (!r || !r.ok) throw new Error((r && r.error) || 'Could not send the form.');
+    if (r.already) el('doneText').textContent = 'We already have a form for ' + student + ' from this number. We will call or WhatsApp you soon.';
+    el('formArea').hidden = true; el('doneArea').hidden = false; window.scrollTo(0, 0);
+  }).catch(function (x) {
+    err.textContent = x.message || 'Could not send the form. Please try again or call us.';
+    btn.disabled = false; btn.textContent = 'Send';
+  });
+});
+</script>
+</body>
+</html>
