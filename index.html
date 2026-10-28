@@ -8946,6 +8946,30 @@ function startBulkAcademicYearChange() {
   bulkAcademicYearConfirmPending = true;
   render();
 }
+function blankYearStudents() {
+  const skip = new Set(grades.filter(g => g.excludedFromGradeProgression).map(g => String(g.id)));
+  return data.students.filter(s => !s.archived && !(s.academicYear || '').trim() && !skip.has(String(s.gradeId)));
+}
+// admin_set_student_academic_year only fills the year (no grade change) when the student's year is blank.
+async function fillBlankStudentYears() {
+  const el = document.getElementById('bulkAcademicYearInput');
+  const val = el ? el.value.trim() : '';
+  if (!isValidAcademicYear(val)) { bulkAcademicYearMsg = 'Type the academic year first, in the form 2026-27.'; render(); return; }
+  const list = blankYearStudents();
+  if (!list.length) { bulkAcademicYearMsg = 'Every active student already has an academic year.'; render(); return; }
+  if (!confirm(`Give academic year ${val} to ${list.length} student${list.length === 1 ? '' : 's'} whose year is empty?\n\nGrades are not changed.`)) return;
+  let ok = 0, failed = 0, last = '';
+  for (const st of list) {
+    bulkAcademicYearMsg = `Working… ${ok + failed} of ${list.length}`; render();
+    if ((data.students.find(x => x.id === st.id) || {}).academicYear) continue;
+    const { data: result, error } = await sb.rpc('admin_set_student_academic_year', { p_student_id: st.id, new_year: val });
+    if (error || !result || !result.ok || result.advanced) { failed++; last = error ? error.message : (result && result.error) || 'grade moved'; }
+    else ok++;
+  }
+  await loadStudentsAndSubscriptions();
+  bulkAcademicYearMsg = `Academic year ${val} filled in for ${ok} student${ok === 1 ? '' : 's'}, no grades changed.` + (failed ? ` ${failed} could not be done (${last}).` : '');
+  render();
+}
 async function setAcademicYearOnly() {
   const el = document.getElementById('bulkAcademicYearInput');
   const val = el ? el.value.trim() : '';
@@ -15857,13 +15881,14 @@ function renderSuperadmin() {
       <h2 style="color:var(--brick)">Academic Year</h2>
       ${!dangerZoneUnlocked ? dangerZoneLockHtml('academic') : `
       <div class="hint">Current: <b>${esc(globalAcademicYear || 'Not set')}</b>. Changing this advances Grade (and Category, where applicable) for every student except those graded Adult — a once-a-year, whole-school action.</div>
-      ${bulkAcademicYearMsg ? `<div class="hint" style="color:${/^(Grade update complete|Current academic year set)/.test(bulkAcademicYearMsg)?'var(--forest)':'var(--brick)'}">${esc(bulkAcademicYearMsg)}</div>` : ''}
+      ${bulkAcademicYearMsg ? `<div class="hint" style="color:${/^(Grade update complete|Current academic year set|Academic year \S+ filled)/.test(bulkAcademicYearMsg)?'var(--forest)':'var(--brick)'}">${esc(bulkAcademicYearMsg)}</div>` : ''}
       <div class="row-form">
         <input type="text" id="bulkAcademicYearInput" placeholder="e.g. 2026-27" style="width:140px">
         <button class="btn-small" style="background:var(--brick);color:#fff" onclick="startBulkAcademicYearChange()">Advance everyone</button>
         <button class="btn-small" onclick="setAcademicYearOnly()" title="Saves the current academic year without changing any student's grade or year">Set year only (grades unchanged)</button>
+        <button class="btn-small" onclick="fillBlankStudentYears()" title="Gives this year to active students whose academic year is empty; grades are not changed">Fill blank student years (${blankYearStudents().length})</button>
       </div>
-      <div class="hint">"Set year only" just records which academic year it is now (used for new students). No student is changed.</div>
+      <div class="hint">"Set year only" just records which academic year it is now (used for new students). No student is changed. "Fill blank student years" gives the year typed above to active students whose academic year is empty; their grade is not changed, and students already with a year are left alone.</div>
       `}
     </div>
     ${bulkAcademicYearConfirmModalHtml()}
