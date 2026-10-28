@@ -333,7 +333,7 @@ if (location.hostname !== 'app.libeducation.com') {
 
 <script>
 const APP_VERSION = '2026.10';
-const BUILD_TIMESTAMP = '2026-10-28 13:51 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-28 14:15 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -8731,7 +8731,7 @@ async function saveStudentGradeBoard(id) {
   const boardId = boardSelect ? boardSelect.value : '';
   const modePreference = modeSelect ? modeSelect.value : '';
   const classTypePreference = classTypeSelect ? classTypeSelect.value : '';
-  const payload = { grade_id: gradeId || null, board_id: isGradeExcluded(gradeId) ? null : (boardId || null), mode_preference: modePreference || null, class_type_preference: classTypePreference || null };
+  const payload = { grade_id: gradeId || null, board_id: boardId || null, mode_preference: modePreference || null, class_type_preference: classTypePreference || null };
   const { error } = await sb.from('students').update(payload).eq('id', id);
   if (error) { academicMsg = 'Could not save: ' + error.message; render(); return; }
   const s = data.students.find(x=>x.id===id);
@@ -11323,7 +11323,7 @@ function renderContactInfoCard(studentId) {
     <div class="card">
       <h2>My Details <button class="help-btn" onclick="openHelp('my-details',event)">?</button></h2>
       ${contactSaveMsg ? `<div class="hint" style="color:${contactSaveMsg==='Saved.'?'var(--forest)':'var(--brick)'}">${esc(contactSaveMsg)}</div>` : ''}
-      <div class="hint">Grade: <b>${student.gradeId ? esc((grades.find(g=>g.id===student.gradeId)||{}).name||'—') : '—'}</b> · Board: <b>${student.boardId ? esc((boards.find(b=>b.id===student.boardId)||{}).name||'—') : (isGradeExcluded(student.gradeId)?'Not Applicable':'—')}</b> <span style="font-size:11.5px">(set by Admin)</span></div>
+      <div class="hint">Grade: <b>${student.gradeId ? esc((grades.find(g=>g.id===student.gradeId)||{}).name||'—') : '—'}</b> · Board: <b>${student.boardId ? esc((boards.find(b=>b.id===student.boardId)||{}).name||'—') : '—'}</b> <span style="font-size:11.5px">(set by Admin)</span></div>
       <div class="row-form">
         <label>Student name <input type="text" value="${escAttr(student.name)}" disabled style="width:200px;background:#f0ede4"></label>
         <label>Parent name ${parentNameLocked ? `<input type="text" value="${escAttr(student.parentName)}" disabled style="width:180px;background:#f0ede4">` : `<input type="text" oninput="contactDraft.parentName=this.value" style="width:180px">`}</label>
@@ -13305,7 +13305,7 @@ function renderStudents() {
           <option value="">— none —</option>
           ${grades.filter(g=>!g.archived || g.id===student.gradeId).map(g=>`<option value="${g.id}" ${student.gradeId===g.id?'selected':''}>${esc(g.name)}${g.archived?' (archived)':''}</option>`).join('')}
         </select></label>
-        <label>Board <select id="mgrStudentBoard_${student.id}" ${isGradeExcluded(student.gradeId)?'disabled':''}>
+        <label>Board <select id="mgrStudentBoard_${student.id}">
           <option value="">— none —</option>
           ${boards.filter(b=>!b.archived || b.id===student.boardId).map(b=>`<option value="${b.id}" ${student.boardId===b.id?'selected':''}>${esc(b.name)}${b.archived?' (archived)':''}</option>`).join('')}
         </select></label>
