@@ -23441,7 +23441,7 @@ function regCardHtml(r) {
   const flags = regFlags(r), kids = regFamily(r), done = regDone[r.id];
   const st = r.student_id ? data.students.find(s => s.id === r.student_id) : null;
   const when = r.created_at ? new Date(r.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
-  const prefs = [r.mode_preference, r.class_type_preference === 'Individual' ? 'One-to-one' : r.class_type_preference].filter(Boolean).join(' · ');
+  const prefs = [r.mode_preference, r.class_type_preference].filter(Boolean).join(' · ');
   const line = (label, v) => v ? `<div><span class="hint">${label}:</span> ${v}</div>` : '';
   const waText = `Hello ${r.parent_name || ''}, this is LIB Education about the registration form for ${r.student_name}.`;
   let action = '';
