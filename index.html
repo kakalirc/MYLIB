@@ -335,7 +335,7 @@ if (location.hostname !== 'app.libeducation.com') {
 const APP_VERSION = '2026.10';
 // The app links every WhatsApp message gives (never the address the sender happens to be on).
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
-const BUILD_TIMESTAMP = '2026-10-29 17:45 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-29 18:00 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -3112,7 +3112,8 @@ async function loadWixBookings() {
       createdAt: r.created_at || '',
       convertedStudentId: r.converted_student_id || '',
       paid: !!r.paid, paidAt: r.paid_at || '', paymentId: r.payment_id || '', paidVia: r.paid_via || '',
-      formData: r.form_data && typeof r.form_data === 'object' ? r.form_data : null
+      formData: r.form_data && typeof r.form_data === 'object' ? r.form_data : null,
+      ackSentAt: r.ack_sent_at || '', ackReady: 'ack_sent_at' in r
     }));
     wixPaidReady = rows.length ? ('paid' in rows[0]) : wixPaidReady;
   }
@@ -4386,6 +4387,37 @@ function demoConfirmMessage(d) {
   if (classLink) lines.push(`🔗 Demo Class Link: ${classLink}`);
   lines.push(`\nPlease ensure your child is ready at the scheduled time. Looking forward to seeing you! 😊\n\n${APP_LINK_LINES.join('\n')}\n\n— LIB Education`);
   return lines.join('\n');
+}
+// First WhatsApp reply to a new booking. Website link only (the parent has no app login yet).
+function wixBookingAckMessage(b) {
+  const what = [b.subject ? 'Subject: ' + b.subject : '', b.classMode || ''].filter(Boolean).join(', ');
+  // The Wix form's First/Last name is the parent who booked (the form has no child's name).
+  const name = (b.studentName || '').trim();
+  const lines = [`Dear ${name && name !== 'Unknown' ? name : 'Parent'},\n\nThank you for booking a *Demo Class* with LIB Education. 🙏`];
+  lines.push(`We have received your booking${what ? ' (' + what + ')' : ''}${b.paid ? ` and your payment of ₹${b.amount || 100}` : ''}.`);
+  lines.push(`\nOur team will call you shortly to fix a convenient day and time with a teacher.`);
+  lines.push(`\nRegards,\nLIB Education\n${APP_LINK_LINES.find(l => /Website/.test(l)) || 'https://www.libeducation.com/'}`);
+  return lines.join('\n');
+}
+// Stamp the booking when the ack button is pressed (SQL 71 ack_sent_at). Before SQL 71 the button still opens WhatsApp.
+async function markWixAckSent(id) {
+  const b = data.wixBookings.find(x => x.id === id);
+  if (!b || !b.ackReady) return;
+  const now = new Date().toISOString();
+  const { error } = await sb.from('wix_demo_bookings').update({ ack_sent_at: now }).eq('id', id);
+  if (error) { wixBookingsMsg = 'WhatsApp opened, but could not save "Ack sent": ' + error.message; render(); return; }
+  b.ackSentAt = now;
+  trackUse('wix-ack');
+  render();
+}
+function wixAckHtml(b) {
+  if (!b.phone || b.status !== 'New') return '';
+  const sent = b.ackSentAt ? new Date(b.ackSentAt).toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+  return `<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px">
+      ${sent ? `<span style="color:var(--green)">✓ Ack sent · ${esc(sent)}</span>` : (b.ackReady ? `<span style="color:var(--brick)">Not acknowledged yet</span>` : '')}
+      ${waButtonHtml(b.phone, sent ? '📤 Send ack again' : '📤 Send acknowledgement', wixBookingAckMessage(b), { style: 'font-size:11px', title: 'Thank the parent for the booking on WhatsApp', data: `data-wa-ack="${b.id}"` })}
+      <button class="btn-small" style="font-size:11px" title="Copy the acknowledgement message" onclick="copyText(wixBookingAckMessage(data.wixBookings.find(x=>x.id==='${b.id}')),this)">Copy msg</button>
+    </div>`;
 }
 function wixBookingConfirmMessage(b) {
   const teacher = b.scheduledTeacherId ? data.teachers.find(t => t.id === b.scheduledTeacherId) : null;
@@ -9494,6 +9526,7 @@ function openWhatsApp(phone, button, how) {
   const message = box ? box.value : (button && button.dataset ? (button.dataset.waText || '') : '');
   launchWhatsApp(phone, message, how);
   if (button && button.dataset && button.dataset.waFamily) markFeeReminderSent(button.dataset.waFamily);
+  if (button && button.dataset && button.dataset.waAck) markWixAckSent(button.dataset.waAck);
 }
 // One WhatsApp button (phones) or 📤 Desktop + Web pair (computers). label is HTML; opts: title, style, data (extra attributes).
 function waButtonHtml(phone, label, message, opts) {
@@ -15447,6 +15480,7 @@ function renderWixBookings() {
             ${b.email ? `<span style="color:var(--muted)">✉ ${esc(b.email)}</span>` : ''}
           </div>
           ${paidBlock}
+          ${wixAckHtml(b)}
         </div>
         ${wixBookingFormHtml(b)}
         ${wixCallsHtml(b)}
@@ -19960,7 +19994,7 @@ const HELP = {
   'class-frequency': { t:'Class Frequency', b:"<ul><li>How many classes each student has on each weekday, per subject (each class is 60 minutes).</li><li>+ New Frequency or Edit: tick the weekdays and set the classes on each day.</li><li>Raise fee requests uses it to count the month's classes, and Rebuild Pending Classes uses it to make the schedule. Saving it does not change classes already scheduled.</li><li>Pairs still Not configured are listed so you can fill them in. Teachers can set it for their own students too.</li></ul>" },
   'class-frequency-teacher': { t:'Class Frequency', b:"<ul><li>How many classes each of your students has on each weekday, per subject (each class is 60 minutes).</li><li>Tap Set or Edit, tick the weekdays and set the classes on each day, then Save.</li><li>The office uses it to work out monthly fees and to build the class schedule, so keep it up to date when a student's timetable changes.</li><li>Saving it does not change classes already scheduled. A student with no frequency shows under Pending Action Items.</li></ul>" },
   'rebuild-classes': { t:'Rebuild Pending Classes', b:"<ul><li>Makes a fresh schedule of upcoming classes from each student's Class Frequency, for all active students or one student.</li><li>Always press <b>Preview Rebuild</b> first: it shows, per student and subject, the future Pending classes it will remove and how many it will make.</li><li>Only future Pending classes are removed. Done classes, overdue Pending classes and other statuses stay as they are. Subscription limits and teacher clashes are still checked.</li><li>New classes get placeholder times (Group 00:00, Individual 01:00 or 02:00). The teacher sees them under 'class timings to correct' and puts in the real time.</li></ul>" },
-  'demo-bookings': { t:'Demo Bookings', b:"<ul><li>Demo bookings from the website. The tabs follow each booking: <b>New → Scheduled → Done → Converted</b> or <b>Lost</b> (or Cancelled).</li><li>New: call the family, then Confirm a teacher and time (or Schedule in Demo Register).</li><li>Scheduled: Mark done after the demo, Mark lost (with an optional reason), Reschedule or Cancel.</li><li>Done: Convert to Student creates the student record; Mark lost if they did not join. Lost cards have Reopen.</li><li>Calls: after phoning a parent, press <b>+ Add call note</b> (when, what happened, what they said, and an optional <b>Call again on</b> date). Every call stays on the card, newest first; notes can be edited, never deleted. Bookings with a call due today or earlier show under <b>Calls due</b> and on the dashboard.</li><li>Booking form: each card shows what the parent filled in on the website (subject, Online / Offline, requirements, message) and the Wix order number. <b>View full form</b> shows every answer on the form (new bookings only).</li><li>Paid / Not paid: payments made on Razorpay mark the booking Paid by themselves. A payment the app could not match is shown at the top so you can pick the booking.</li></ul>" },
+  'demo-bookings': { t:'Demo Bookings', b:"<ul><li>Demo bookings from the website. The tabs follow each booking: <b>New → Scheduled → Done → Converted</b> or <b>Lost</b> (or Cancelled).</li><li>New: call the family, then Confirm a teacher and time (or Schedule in Demo Register).</li><li>Scheduled: Mark done after the demo, Mark lost (with an optional reason), Reschedule or Cancel.</li><li>Done: Convert to Student creates the student record; Mark lost if they did not join. Lost cards have Reopen.</li><li>New booking: press <b>📤 Send acknowledgement</b> to thank the parent on WhatsApp (website link only). The card then shows <b>✓ Ack sent</b> with the time, so it is not sent twice.</li><li>Calls: after phoning a parent, press <b>+ Add call note</b> (when, what happened, what they said, and an optional <b>Call again on</b> date). Every call stays on the card, newest first; notes can be edited, never deleted. Bookings with a call due today or earlier show under <b>Calls due</b> and on the dashboard.</li><li>Booking form: each card shows what the parent filled in on the website (subject, Online / Offline, requirements, message) and the Wix order number. <b>View full form</b> shows every answer on the form (new bookings only).</li><li>Paid / Not paid: payments made on Razorpay mark the booking Paid by themselves. A payment the app could not match is shown at the top so you can pick the booking.</li></ul>" },
   'demo-register': { t:'Demo Register', b:"<ul><li>Every demo a teacher gave, with its status: Pending, Done, Converted or Lost.</li><li>Teachers mark their own demos Done from their Dashboard. You can set any status, add a Lost reason, or go straight to Converted.</li><li><b>Link &amp; Convert</b> links the demo to the student who joined; the teacher gets a ₹100 demo bonus in that month's payroll.</li><li>Demo results shows each teacher's demos and Converted %, and why demos were lost.</li></ul>" },
   'class-log': { t:'Class Log', b:"<ul><li>Pick the date and the teacher whose class you are marking.</li><li>Choose student, subject, Group / Individual, Online / Offline and Present or Absent, then Log class. Absent still uses a class.</li><li>The student's classes left are shown, with a warning when they have none.</li><li>The list below shows the teacher's classes for the <b>Selected day</b> or the <b>Whole month</b> (with a month total).</li></ul>" },
   'expenses': { t:'Expenses', b:"<ul><li>Money the institute spends other than teacher pay: rent, electricity, internet and so on.</li><li>Add an expense with date, category, amount and an optional note. Edit or delete it from the month list.</li><li>Expenses come off fee collection in Reports → Net profit. Don't enter teacher salary here; payroll is counted separately.</li></ul>" },
