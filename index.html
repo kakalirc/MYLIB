@@ -335,7 +335,7 @@ if (location.hostname !== 'app.libeducation.com') {
 const APP_VERSION = '2026.10';
 // The app links every WhatsApp message gives (never the address the sender happens to be on).
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
-const BUILD_TIMESTAMP = '2026-10-29 16:55 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-29 17:25 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -3105,7 +3105,8 @@ async function loadWixBookings() {
       demoLogId: r.demo_log_id || '', notes: r.notes || '',
       createdAt: r.created_at || '',
       convertedStudentId: r.converted_student_id || '',
-      paid: !!r.paid, paidAt: r.paid_at || '', paymentId: r.payment_id || '', paidVia: r.paid_via || ''
+      paid: !!r.paid, paidAt: r.paid_at || '', paymentId: r.payment_id || '', paidVia: r.paid_via || '',
+      formData: r.form_data && typeof r.form_data === 'object' ? r.form_data : null
     }));
     wixPaidReady = rows.length ? ('paid' in rows[0]) : wixPaidReady;
   }
@@ -15183,6 +15184,39 @@ function renderFees() {
   `;
 }
 
+// What the parent filled in on the Wix booking form. form_data (SQL 69) is the whole form as Wix sent it;
+// older bookings only have the few answers the Wix script copied into their own columns.
+let wixFormOpenId = '';
+const WIX_FORM_LABELS = { first_name: 'First name', last_name: 'Last name', email: 'Email', phone: 'Phone', language: 'Subject', class_mode: 'Online / Offline', option: 'Requirements', long_answer: 'Message', price: 'Amount' };
+function wixFormLabel(key) {
+  const base = String(key).replace(/_[0-9a-f]{4}$/i, '');
+  if (WIX_FORM_LABELS[base]) return WIX_FORM_LABELS[base];
+  const t = base.replace(/[_-]+/g, ' ').trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : String(key);
+}
+function wixFormValue(v) {
+  if (v === null || v === undefined) return '';
+  if (Array.isArray(v)) return v.map(wixFormValue).filter(Boolean).join(', ');
+  if (typeof v === 'object') return 'value' in v ? wixFormValue(v.value) : Object.values(v).map(wixFormValue).filter(Boolean).join(', ');
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  return String(v).trim();
+}
+function wixBookingFormHtml(b) {
+  const rows = [['Subject', b.subject], ['Online / Offline', b.classMode], ['Requirements', b.requirements], ['Their message', b.message]].filter(x => x[1]);
+  const when = b.submittedAt ? new Date(b.submittedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+  const sent = [when ? 'Booked ' + when : '', b.amount ? '₹' + b.amount : '', b.orderNumber ? 'Wix order ' + b.orderNumber : ''].filter(Boolean).join(' · ');
+  const full = b.formData ? Object.entries(b.formData).map(([k, v]) => [wixFormLabel(k), wixFormValue(v)]).filter(x => x[1]) : [];
+  const open = wixFormOpenId === b.id;
+  return `<div style="margin-top:10px;padding:8px 10px;background:#f6f3ea;border:1px solid var(--line);border-radius:6px;font-size:13px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+        <span class="hint" style="font-size:11px;font-weight:700;letter-spacing:.04em">BOOKING FORM</span>
+        ${full.length ? `<button class="btn-small" style="font-size:11px" onclick="wixFormOpenId=wixFormOpenId==='${b.id}'?'':'${b.id}';render()">${open ? 'Hide full form' : 'View full form'}</button>` : ''}
+      </div>
+      ${rows.length ? rows.map(([k, v]) => `<div><span class="hint">${k}:</span> ${esc(v)}</div>`).join('') : '<div class="hint">No form answers came from Wix for this booking.</div>'}
+      ${open ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line)"><div class="hint" style="font-size:11px;margin-bottom:4px">Every answer, as the parent sent it on the website:</div>${full.map(([k, v]) => `<div><span class="hint">${esc(k)}:</span> ${esc(v)}</div>`).join('')}</div>` : ''}
+      ${sent ? `<div class="hint" style="font-size:11px;margin-top:4px;word-break:break-all">${esc(sent)}</div>` : ''}
+    </div>`;
+}
 function renderWixBookings() {
   const filters = ['New', 'Scheduled', 'Done', 'Converted', 'Lost', 'Cancelled', 'All'];
   const newCount = data.wixBookings.filter(b => b.status === 'New').length;
@@ -15317,6 +15351,7 @@ function renderWixBookings() {
           </div>
           ${paidBlock}
         </div>
+        ${wixBookingFormHtml(b)}
         ${scheduleBlock}
         ${convertBlock}
       </div>`;
@@ -19827,7 +19862,7 @@ const HELP = {
   'class-frequency': { t:'Class Frequency', b:"<ul><li>How many classes each student has on each weekday, per subject (each class is 60 minutes).</li><li>+ New Frequency or Edit: tick the weekdays and set the classes on each day.</li><li>Raise fee requests uses it to count the month's classes, and Rebuild Pending Classes uses it to make the schedule. Saving it does not change classes already scheduled.</li><li>Pairs still Not configured are listed so you can fill them in. Teachers can set it for their own students too.</li></ul>" },
   'class-frequency-teacher': { t:'Class Frequency', b:"<ul><li>How many classes each of your students has on each weekday, per subject (each class is 60 minutes).</li><li>Tap Set or Edit, tick the weekdays and set the classes on each day, then Save.</li><li>The office uses it to work out monthly fees and to build the class schedule, so keep it up to date when a student's timetable changes.</li><li>Saving it does not change classes already scheduled. A student with no frequency shows under Pending Action Items.</li></ul>" },
   'rebuild-classes': { t:'Rebuild Pending Classes', b:"<ul><li>Makes a fresh schedule of upcoming classes from each student's Class Frequency, for all active students or one student.</li><li>Always press <b>Preview Rebuild</b> first: it shows, per student and subject, the future Pending classes it will remove and how many it will make.</li><li>Only future Pending classes are removed. Done classes, overdue Pending classes and other statuses stay as they are. Subscription limits and teacher clashes are still checked.</li><li>New classes get placeholder times (Group 00:00, Individual 01:00 or 02:00). The teacher sees them under 'class timings to correct' and puts in the real time.</li></ul>" },
-  'demo-bookings': { t:'Demo Bookings', b:"<ul><li>Demo bookings from the website. The tabs follow each booking: <b>New → Scheduled → Done → Converted</b> or <b>Lost</b> (or Cancelled).</li><li>New: call the family, then Confirm a teacher and time (or Schedule in Demo Register).</li><li>Scheduled: Mark done after the demo, Mark lost (with an optional reason), Reschedule or Cancel.</li><li>Done: Convert to Student creates the student record; Mark lost if they did not join. Lost cards have Reopen.</li><li>Paid / Not paid: payments made on Razorpay mark the booking Paid by themselves. A payment the app could not match is shown at the top so you can pick the booking.</li></ul>" },
+  'demo-bookings': { t:'Demo Bookings', b:"<ul><li>Demo bookings from the website. The tabs follow each booking: <b>New → Scheduled → Done → Converted</b> or <b>Lost</b> (or Cancelled).</li><li>New: call the family, then Confirm a teacher and time (or Schedule in Demo Register).</li><li>Scheduled: Mark done after the demo, Mark lost (with an optional reason), Reschedule or Cancel.</li><li>Done: Convert to Student creates the student record; Mark lost if they did not join. Lost cards have Reopen.</li><li>Booking form: each card shows what the parent filled in on the website (subject, Online / Offline, requirements, message) and the Wix order number. <b>View full form</b> shows every answer on the form (new bookings only).</li><li>Paid / Not paid: payments made on Razorpay mark the booking Paid by themselves. A payment the app could not match is shown at the top so you can pick the booking.</li></ul>" },
   'demo-register': { t:'Demo Register', b:"<ul><li>Every demo a teacher gave, with its status: Pending, Done, Converted or Lost.</li><li>Teachers mark their own demos Done from their Dashboard. You can set any status, add a Lost reason, or go straight to Converted.</li><li><b>Link &amp; Convert</b> links the demo to the student who joined; the teacher gets a ₹100 demo bonus in that month's payroll.</li><li>Demo results shows each teacher's demos and Converted %, and why demos were lost.</li></ul>" },
   'class-log': { t:'Class Log', b:"<ul><li>Pick the date and the teacher whose class you are marking.</li><li>Choose student, subject, Group / Individual, Online / Offline and Present or Absent, then Log class. Absent still uses a class.</li><li>The student's classes left are shown, with a warning when they have none.</li><li>The list below shows the teacher's classes for the <b>Selected day</b> or the <b>Whole month</b> (with a month total).</li></ul>" },
   'expenses': { t:'Expenses', b:"<ul><li>Money the institute spends other than teacher pay: rent, electricity, internet and so on.</li><li>Add an expense with date, category, amount and an optional note. Edit or delete it from the month list.</li><li>Expenses come off fee collection in Reports → Net profit. Don't enter teacher salary here; payroll is counted separately.</li></ul>" },
