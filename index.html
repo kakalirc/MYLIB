@@ -4023,8 +4023,8 @@ async function convertDemoLog(id) {
   // Sync linked Wix booking → Converted
   const wb = data.wixBookings.find(b => b.demoLogId === id);
   if (wb) {
-    await sb.from('wix_demo_bookings').update({ status: 'Converted' }).eq('id', wb.id);
-    wb.status = 'Converted';
+    await sb.from('wix_demo_bookings').update({ status: 'Converted', converted_student_id: dl.linkedStudentId }).eq('id', wb.id);
+    wb.status = 'Converted'; wb.convertedStudentId = dl.linkedStudentId;
   }
   demoLogMsg = 'Marked Converted — ₹100 bonus will appear in payroll.' + (wb ? ' Wix booking updated.' : ''); render();
 }
@@ -4086,8 +4086,8 @@ async function linkDemoToStudent(id) {
   // Sync linked Wix booking → Converted
   const wb = data.wixBookings.find(b => b.demoLogId === id);
   if (wb) {
-    await sb.from('wix_demo_bookings').update({ status: 'Converted' }).eq('id', wb.id);
-    wb.status = 'Converted';
+    await sb.from('wix_demo_bookings').update({ status: 'Converted', converted_student_id: demoLinkStudentId }).eq('id', wb.id);
+    wb.status = 'Converted'; wb.convertedStudentId = demoLinkStudentId;
   }
   demoLinkingId = ''; demoLinkStudentId = ''; demoLinkMsg = '';
   demoLogMsg = 'Linked student and marked Converted — ₹100 bonus will appear in payroll.' + (wb ? ' Wix booking updated.' : ''); render();
@@ -15505,9 +15505,11 @@ function wixCallsHtml(b) {
 const STU_CALL_OUTCOMES = ['Spoke', 'No answer', 'Call back later', 'Busy', 'Fee follow-up', 'Complaint / issue'];
 const STU_CALL_WHO = ['Parent', 'Student'];
 function studentCallsFor(studentId) { return wixCalls.filter(c => c.student_id === studentId); }
-// Calls made while the student was still a demo booking (Convert to Student links the booking).
+// Calls made while the student was still a demo booking: Convert to Student links the booking,
+// Demo Register "Link & Convert" links the booking's demo log (older links only have that).
 function studentDemoCallsFor(studentId) {
-  const ids = new Set(data.wixBookings.filter(b => b.convertedStudentId === studentId).map(b => b.id));
+  const linkedLogs = new Set(data.demoLogs.filter(d => d.linkedStudentId === studentId).map(d => d.id));
+  const ids = new Set(data.wixBookings.filter(b => b.convertedStudentId === studentId || (b.demoLogId && linkedLogs.has(b.demoLogId))).map(b => b.id));
   return ids.size ? wixCalls.filter(c => ids.has(c.booking_id)) : [];
 }
 // A call is due when the LATEST call for an active student says "call again on" today or earlier.
