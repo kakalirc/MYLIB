@@ -337,7 +337,7 @@ const APP_VERSION = '2026.10';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-10-29 19:00 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-29 19:15 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1330,6 +1330,12 @@ let wixCallFormId = '';            // booking whose Add call note box is open
 let wixCallEditId = '';            // call note being edited ('' = adding a new one)
 let wixCallDraft = {};
 let wixCallsOpenId = '';           // booking whose older calls are shown
+let studentCallsReady = false;     // SQL 74 run (wix_booking_calls has student_id; student calls live in wixCalls)
+let stuCallFormId = '';            // student whose Add call note box is open
+let stuCallEditId = '';            // call note being edited ('' = adding a new one)
+let stuCallDraft = {};
+let stuCallsShowAll = '';          // student whose older calls are shown
+let stuCallMsg = '';
 let rzpWaiting = [];               // razorpay_payments still unmatched / ambiguous
 // Fees page, suggest mode: recent Razorpay payments not yet used for a fee (payment_reference) nor set aside (SQL 62).
 let rzpFeePayments = [];
@@ -1968,6 +1974,7 @@ async function load() {
     (currentRole === 'Admin' || currentRole === 'Teacher') ? loadTeacherPrivateNotes() : Promise.resolve(),
     (currentRole === 'Admin' || currentRole === 'Teacher') ? loadTeacherPayrollRecords() : Promise.resolve(),
     currentRole === 'Admin' ? loadWixBookings() : Promise.resolve(),
+    currentRole === 'Admin' ? loadStudentCalls() : Promise.resolve(),
     currentRole === 'Admin' ? loadRegistrations() : Promise.resolve(),
     currentRole === 'Admin' ? loadRazorpayFeePayments() : Promise.resolve(),
     currentRole === 'Admin' ? loadProspectQuotes() : Promise.resolve(),
@@ -3125,6 +3132,10 @@ async function loadWixCalls() {
   const { data: rows, error } = await selectAllPaged('wix_booking_calls', []);
   wixCallsReady = !error;   // table missing = SQL 70 not run yet
   wixCalls = error || !rows ? [] : rows.sort((a, b) => (b.called_at || '').localeCompare(a.called_at || ''));
+}
+async function loadStudentCalls() {
+  const { error } = await sb.from('wix_booking_calls').select('student_id').limit(1);
+  studentCallsReady = !error;   // column missing = SQL 74 not run yet
 }
 async function loadRazorpayWaiting() {
   const { data: rows, error } = await sb.from('razorpay_payments')
@@ -10581,7 +10592,7 @@ const SUPPORT_KB = {
 - Payroll (Money): each teacher's earnings for the month, demo bonuses, adjustments, mark paid and salary slips.
 - Expenses (Money): monthly overhead costs such as rent and electricity.
 - Reports & Export (Money): student report, student balances, refunds, Razorpay payments history, net profit and Excel export.
-- Students & Subscriptions (People): add or edit students, enrol them in subjects, record payments, refunds and credit transfers, see subscription history and receipts. Special fee rates sets an agreed per-class rate for one student (used instead of Fee setup). Bill separately keeps a student out of their family's combined fee message. Create all student logins (with no student picked) makes the missing student logins in one go (login ID and first password = student code) with 📤 WhatsApp buttons to send the details.
+- Students & Subscriptions (People): add or edit students, enrol them in subjects, record payments, refunds and credit transfers, see subscription history and receipts. Call log keeps every phone call with the student or parent (+ Add call note, Call again on date; demo-stage calls show too). Special fee rates sets an agreed per-class rate for one student (used instead of Fee setup). Bill separately keeps a student out of their family's combined fee message. Create all student logins (with no student picked) makes the missing student logins in one go (login ID and first password = student code) with 📤 WhatsApp buttons to send the details.
 - Teachers & Subjects (People): add teachers and subjects, and set which teacher teaches each subject. The Class Frequency button sets how many classes each student has on each weekday (used by Raise fee requests and Rebuild Pending Classes).
 - Parents (People): one parent login per family and which children are linked. Create all parent logins makes the missing ones (login ID and first password = parent's 10-digit mobile) with a 📤 WhatsApp button to send the details.
 - Study Plans (Teaching): read-only view of every teacher's study plans and progress, plus the Textbook library (every uploaded book; rename, retag or delete).
@@ -13577,7 +13588,7 @@ function renderStudents() {
   `;
 
   if (!selectedStudentId) {
-    return block1 + `<div class="card"><div class="empty">Choose a student above to manage their subscriptions, enrollments, and login.</div></div>` + bulkStudentCardHtml();
+    return block1 + studentCallsDueCardHtml() + `<div class="card"><div class="empty">Choose a student above to manage their subscriptions, enrollments, and login.</div></div>` + bulkStudentCardHtml();
   }
 
   const student = data.students.find(s=>s.id===selectedStudentId);
@@ -13826,6 +13837,7 @@ function renderStudents() {
       </div>
 
       </div>
+      ${studentCallLogHtml(student)}
       <div class="student-section" style="background:#f3e8fd">
       <h3>Subject enrollment <button class="help-btn" onclick="openHelp('sub-enrollment',event)">?</button></h3>
       <div class="hint">${student.gradeId ? 'Showing subjects for this student\'s own grade by default.' : 'This student has no Grade set — showing all subjects.'}</div>
@@ -14126,6 +14138,8 @@ function renderDashboard() {
   if (regWaiting) cards.unshift({ num: regWaiting, label: `New registration${regWaiting===1?'':'s'} waiting`, tab: 'registrations' });
   const callsDue = wixCallsDueCount();
   if (callsDue) cards.push({ num: callsDue, label: `Demo booking call${callsDue===1?'':'s'} due`, action: "wixBookingsFilter='Calls due'; setTab('wixbookings')" });
+  const stuCallsDue = studentCallsDueList().length;
+  if (stuCallsDue) cards.push({ num: stuCallsDue, label: `Student call${stuCallsDue===1?'':'s'} due`, action: "selectedStudentId=''; setTab('students')" });
   const demosWaiting = data.demoLogs.filter(demoWaiting).length;
   if (demosWaiting) cards.push({ num: demosWaiting, label: `Demo${demosWaiting===1?'':'s'} waiting for a result`, action: "demoLogsStatusFilter='Waiting'; setTab('wixbookings'); setTimeout(()=>{ const el=document.getElementById('demo-register-heading'); if(el) el.scrollIntoView({behavior:'smooth'}); },150)" });
   const expiring = expiringSoon();
@@ -15485,6 +15499,111 @@ function wixCallsHtml(b) {
       ${form}
       ${list ? `<div style="margin-top:6px">${list}</div>` : ''}
       ${calls.length > 2 ? `<button class="btn-small" style="font-size:11px;margin-top:4px" onclick="wixCallsOpenId=wixCallsOpenId==='${b.id}'?'':'${b.id}';render()">${showAll ? 'Show fewer' : 'Show all ' + calls.length + ' calls'}</button>` : ''}
+    </div>`;
+}
+// ---- Call log on the student page (SQL 74) ----
+const STU_CALL_OUTCOMES = ['Spoke', 'No answer', 'Call back later', 'Busy', 'Fee follow-up', 'Complaint / issue'];
+const STU_CALL_WHO = ['Parent', 'Student'];
+function studentCallsFor(studentId) { return wixCalls.filter(c => c.student_id === studentId); }
+// Calls made while the student was still a demo booking (Convert to Student links the booking).
+function studentDemoCallsFor(studentId) {
+  const ids = new Set(data.wixBookings.filter(b => b.convertedStudentId === studentId).map(b => b.id));
+  return ids.size ? wixCalls.filter(c => ids.has(c.booking_id)) : [];
+}
+// A call is due when the LATEST call for an active student says "call again on" today or earlier.
+function studentCallDueOn(studentId) {
+  const last = studentCallsFor(studentId)[0];
+  return last && last.call_again_on && last.call_again_on <= todayStr ? last.call_again_on : '';
+}
+function studentCallsDueList() {
+  if (!studentCallsReady) return [];
+  return byName(data.students.filter(s => !s.archived && studentCallDueOn(s.id)));
+}
+function stuCallOpenForm(studentId, callId) {
+  const c = callId ? wixCalls.find(x => x.id === callId) : null;
+  stuCallFormId = studentId; stuCallEditId = callId || ''; stuCallMsg = '';
+  stuCallDraft = c
+    ? { calledAt: localDateTimeValue(new Date(c.called_at)), spokeTo: c.spoke_to, outcome: c.outcome, comment: c.comment || '', callAgainOn: c.call_again_on || '' }
+    : { calledAt: localDateTimeValue(new Date()), spokeTo: STU_CALL_WHO[0], outcome: STU_CALL_OUTCOMES[0], comment: '', callAgainOn: '' };
+  render();
+}
+function stuCallCloseForm() { stuCallFormId = ''; stuCallEditId = ''; stuCallDraft = {}; render(); }
+async function saveStudentCall() {
+  const d = stuCallDraft, studentId = stuCallFormId;
+  if (!studentId) return;
+  const when = d.calledAt ? new Date(d.calledAt) : new Date();
+  if (isNaN(when)) { stuCallMsg = 'Please pick the date and time of the call.'; render(); return; }
+  const row = { called_at: when.toISOString(), spoke_to: d.spokeTo || STU_CALL_WHO[0], outcome: d.outcome || STU_CALL_OUTCOMES[0], comment: (d.comment || '').trim() || null, call_again_on: d.callAgainOn || null };
+  const res = stuCallEditId
+    ? await sb.from('wix_booking_calls').update({ ...row, updated_at: new Date().toISOString() }).eq('id', stuCallEditId)
+    : await sb.from('wix_booking_calls').insert({ ...row, student_id: studentId });
+  if (res.error) { stuCallMsg = /student_id|spoke_to|outcome_check|booking_id/.test(res.error.message || '') ? 'Run SQL 74 (student-calls/74-student-calls.sql) in Supabase first.' : 'Could not save the call note: ' + res.error.message; render(); return; }
+  trackUse('student-call-note');
+  await loadWixCalls();
+  stuCallMsg = stuCallEditId ? 'Call note updated ✓' : 'Call note saved ✓';
+  stuCallFormId = ''; stuCallEditId = ''; stuCallDraft = {};
+  render();
+}
+function callWhenText(v) { return v ? new Date(v).toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''; }
+function studentCallLogHtml(student) {
+  if (!studentCallsReady) return `<div class="student-section" style="background:#fdf2e9">
+      <h3>📞 Call log ${helpBtn('student-calls')}</h3>
+      <div class="hint" style="color:var(--brick)">Run SQL 74 (student-calls/74-student-calls.sql) in Supabase to turn this on.</div>
+    </div>`;
+  const own = studentCallsFor(student.id).map(c => ({ ...c, demo: false }));
+  const demo = studentDemoCallsFor(student.id).map(c => ({ ...c, demo: true }));
+  const calls = own.concat(demo).sort((a, b) => (b.called_at || '').localeCompare(a.called_at || ''));
+  const who = id => id ? ((data.users.find(u => u.id === id) || {}).username || '') : '';
+  const lastOwn = own[0], due = studentCallDueOn(student.id);
+  const summary = calls.length
+    ? `📞 ${calls.length} call${calls.length === 1 ? '' : 's'} · last ${esc(dayDate(localDateTimeValue(new Date(calls[0].called_at)).slice(0, 10)))}${lastOwn && lastOwn.call_again_on ? ` · <span style="${due ? 'color:var(--brick);font-weight:600' : ''}">call again ${esc(dayDate(lastOwn.call_again_on))}${due ? ' (due)' : ''}</span>` : ''}`
+    : '📞 No calls yet';
+  const d = stuCallDraft;
+  const form = stuCallFormId !== student.id ? '' : `
+    <div style="margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:6px;background:#fff">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px;margin-bottom:6px">
+        <label style="font-size:11px" class="hint">When<input type="datetime-local" value="${escAttr(d.calledAt || '')}" onchange="stuCallDraft.calledAt=this.value" style="width:100%"></label>
+        <label style="font-size:11px" class="hint">Spoke to<select onchange="stuCallDraft.spokeTo=this.value" style="width:100%">${STU_CALL_WHO.map(o => `<option ${d.spokeTo === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label>
+        <label style="font-size:11px" class="hint">What happened<select onchange="stuCallDraft.outcome=this.value" style="width:100%">${STU_CALL_OUTCOMES.map(o => `<option ${d.outcome === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label>
+      </div>
+      <textarea rows="3" placeholder="What was said?" oninput="stuCallDraft.comment=this.value" style="width:100%;margin-bottom:6px">${esc(d.comment || '')}</textarea>
+      <label style="font-size:11px" class="hint">Call again on (optional) <input type="date" value="${escAttr(d.callAgainOn || '')}" onchange="stuCallDraft.callAgainOn=this.value"></label>
+      <div class="row-form" style="gap:6px;margin:8px 0 0">
+        <button class="btn-small btn-primary" onclick="saveStudentCall()">✓ Save</button>
+        <button class="btn-small" onclick="stuCallCloseForm()">✕ Cancel</button>
+      </div>
+    </div>`;
+  const showAll = stuCallsShowAll === student.id;
+  const shown = showAll ? calls : calls.slice(0, 3);
+  const list = shown.map(c => `
+    <div style="padding:6px 0;border-top:1px dashed var(--border)">
+      <div style="font-size:12px"><b>${esc(c.outcome)}</b>${c.spoke_to ? ' · ' + esc(c.spoke_to) : ''} · ${esc(callWhenText(c.called_at))}${who(c.called_by) ? ' · ' + esc(who(c.called_by)) : ''}
+        ${c.demo ? `<span class="tag" style="font-size:10px;margin-left:4px">Demo booking</span>` : `<button class="btn-small" style="font-size:10px;margin-left:6px" onclick="stuCallOpenForm('${student.id}','${c.id}')">Edit</button>`}</div>
+      ${c.comment ? `<div style="font-size:13px;white-space:pre-wrap">${esc(c.comment)}</div>` : ''}
+      ${c.call_again_on ? `<div style="color:var(--muted);font-size:11px">Call again on ${esc(dayDate(c.call_again_on))}</div>` : ''}
+      ${c.updated_at ? `<div style="color:var(--muted);font-size:10px">edited</div>` : ''}
+    </div>`).join('');
+  return `<div class="student-section" style="background:#fdf2e9">
+      <h3>📞 Call log ${helpBtn('student-calls')}</h3>
+      ${stuCallMsg ? `<div class="hint" style="color:${/✓/.test(stuCallMsg) ? 'var(--forest)' : 'var(--brick)'}">${esc(stuCallMsg)}</div>` : ''}
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:12px">${summary}</span>
+        ${stuCallFormId === student.id ? '' : `<button class="btn-small" onclick="stuCallOpenForm('${student.id}')">+ Add call note</button>`}
+      </div>
+      ${form}
+      ${list ? `<div style="margin-top:6px">${list}</div>` : ''}
+      ${calls.length > 3 ? `<button class="btn-small" style="font-size:11px;margin-top:4px" onclick="stuCallsShowAll=stuCallsShowAll==='${student.id}'?'':'${student.id}';render()">${showAll ? 'Show fewer' : 'Show all ' + calls.length + ' calls'}</button>` : ''}
+    </div>`;
+}
+// Students page (no student picked): who is due a call back.
+function studentCallsDueCardHtml() {
+  const due = studentCallsDueList();
+  if (!due.length) return '';
+  return `<div class="card" id="studentCallsDueCard">
+      <h2>📞 Student calls due ${helpBtn('student-calls')}</h2>
+      <div class="hint">Students whose latest call note says "Call again on" today or earlier.</div>
+      <ul class="list">${due.map(s => `<li><span>${esc(studentLabel(s))} <span class="hint" style="color:var(--brick)">call again ${esc(dayDate(studentCallDueOn(s.id)))}</span></span>
+        <button class="btn-small btn-primary" onclick="selectStudent('${s.id}')">Open →</button></li>`).join('')}</ul>
     </div>`;
 }
 // What the parent filled in on the Wix booking form. form_data (SQL 69) is the whole form as Wix sent it;
@@ -20168,6 +20287,7 @@ const HELP = {
   'payment-history': { t:'Subscription Payment History', b:'<ul><li><b>Active</b> — this payment\'s classes are being used now.</li><li><b>Expired</b> — unused classes were removed after the expiry date.</li><li>The Expires on date shows when unused classes will be lost.</li><li>Contact the Admin to correct any details.</li></ul>' },
   'raise-fees': { t:'Raise fee requests', b:"<ul><li>Makes the month's fee requests for every active student in one go: one request per student, subject and Group / Individual.</li><li><b>Preview Fee Requests</b> works any day and saves nothing. <b>Confirm</b> works only on the 1st to 7th of the month, once per month (Reset removes the run so you can do it again).</li><li>Classes come from the student's <b>Class Frequency</b> (each weekday counted in the month), minus clear teacher-leave days, against the classes they still have. Package students (30, 50, 60 or 100 classes) are asked for the same package again.</li><li>Amount = Fee setup rate (or the student's Special fee rate) × classes, with the Discount structure.</li><li>The preview is grouped by family. You can change classes or amount, or untick a row, before Confirm. Not raised shows who was left out and why.</li><li><b>Ignore classes left</b>: bills the full month without taking off the classes still left (per row, per student or whole family; Raise anyway in Not raised). The fee message then does not mention those classes. Owed classes are never ignored.</li><li>Every request keeps its working, so you can explain the amount to a parent.</li></ul>" },
   'fee-message': { t:'Fee message', b:"<ul><li>One WhatsApp message for the whole family: each child's subjects, classes and amount, the total, how it was worked out, UPI and Razorpay details and the parent's app login.</li><li>The first message starts 'Please find below the tuition fee details…'. Tick <b>Short reminder</b> for a follow-up; only the opening line changes to 'gentle reminder … still due'.</li><li>You can edit the text before sending. On a phone the WhatsApp button opens the app. On a computer use 📤 Desktop (WhatsApp app) or 📤 Web (WhatsApp Web).</li><li>Sending stamps the date, so you can see when the family was last reminded and how many times.</li></ul>" },
+  'student-calls': { t:'Call log', b:"<ul><li>After phoning a student or parent, open the student and press <b>+ Add call note</b>: when, who you spoke to (Parent / Student), what happened, what was said, and an optional <b>Call again on</b> date.</li><li>Every call stays on the student page, newest first; notes can be edited, never deleted. Only admins see the call log (teachers do not).</li><li>Calls made while the student was still a demo booking also show here, with a <b>Demo booking</b> tag (edit those on the Demo Bookings card).</li><li>When the latest call says Call again on today or earlier, the student shows under <b>Student calls due</b> on the dashboard and at the top of the Students page.</li></ul>" },
   'special-rates': { t:'Special fee rates', b:"<ul><li>An agreed per-class rate for one student, subject and Group / Individual, from a date and optionally until a date.</li><li>While it is in use it replaces the Fee setup rate everywhere: Record payment, fee requests, Calculate, Raise fee requests, Fee calculator and the student's and parent's Applicable Rates.</li><li>Leave Offline rate empty if it is the same as Online. Discount tiers still apply on top.</li><li>Requests and payments already saved are not changed. Remove puts the student back on Fee setup rates.</li></ul>" },
   'class-frequency': { t:'Class Frequency', b:"<ul><li>How many classes each student has on each weekday, per subject (each class is 60 minutes).</li><li>+ New Frequency or Edit: tick the weekdays and set the classes on each day.</li><li>Raise fee requests uses it to count the month's classes, and Rebuild Pending Classes uses it to make the schedule. Saving it does not change classes already scheduled.</li><li>Pairs still Not configured are listed so you can fill them in. Teachers can set it for their own students too.</li></ul>" },
   'class-frequency-teacher': { t:'Class Frequency', b:"<ul><li>How many classes each of your students has on each weekday, per subject (each class is 60 minutes).</li><li>Tap Set or Edit, tick the weekdays and set the classes on each day, then Save.</li><li>The office uses it to work out monthly fees and to build the class schedule, so keep it up to date when a student's timetable changes.</li><li>Saving it does not change classes already scheduled. A student with no frequency shows under Pending Action Items.</li></ul>" },
