@@ -335,7 +335,7 @@ if (location.hostname !== 'app.libeducation.com') {
 const APP_VERSION = '2026.10';
 // The app links every WhatsApp message gives (never the address the sender happens to be on).
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
-const BUILD_TIMESTAMP = '2026-10-29 17:25 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-29 17:45 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1322,6 +1322,12 @@ let wixLastCreatedStudentId = '';
 // Razorpay (SQL 61): paid columns on bookings + payments the webhook could not match to one booking.
 let wixPaidReady = false;          // SQL 61 run (bookings carry the paid column)
 let wixPaidFilter = 'All';         // All | Paid | Not paid
+let wixCalls = [];                 // call notes, newest first (SQL 70 wix_booking_calls)
+let wixCallsReady = false;         // SQL 70 run
+let wixCallFormId = '';            // booking whose Add call note box is open
+let wixCallEditId = '';            // call note being edited ('' = adding a new one)
+let wixCallDraft = {};
+let wixCallsOpenId = '';           // booking whose older calls are shown
 let rzpWaiting = [];               // razorpay_payments still unmatched / ambiguous
 // Fees page, suggest mode: recent Razorpay payments not yet used for a fee (payment_reference) nor set aside (SQL 62).
 let rzpFeePayments = [];
@@ -3110,7 +3116,12 @@ async function loadWixBookings() {
     }));
     wixPaidReady = rows.length ? ('paid' in rows[0]) : wixPaidReady;
   }
-  await loadRazorpayWaiting();
+  await Promise.all([loadRazorpayWaiting(), loadWixCalls()]);
+}
+async function loadWixCalls() {
+  const { data: rows, error } = await selectAllPaged('wix_booking_calls', []);
+  wixCallsReady = !error;   // table missing = SQL 70 not run yet
+  wixCalls = error || !rows ? [] : rows.sort((a, b) => (b.called_at || '').localeCompare(a.called_at || ''));
 }
 async function loadRazorpayWaiting() {
   const { data: rows, error } = await sb.from('razorpay_payments')
@@ -13906,6 +13917,8 @@ function renderDashboard() {
   ];
   const regWaiting = regNewCount();
   if (regWaiting) cards.unshift({ num: regWaiting, label: `New registration${regWaiting===1?'':'s'} waiting`, tab: 'registrations' });
+  const callsDue = wixCallsDueCount();
+  if (callsDue) cards.push({ num: callsDue, label: `Demo booking call${callsDue===1?'':'s'} due`, action: "wixBookingsFilter='Calls due'; setTab('wixbookings')" });
   const demosWaiting = data.demoLogs.filter(demoWaiting).length;
   if (demosWaiting) cards.push({ num: demosWaiting, label: `Demo${demosWaiting===1?'':'s'} waiting for a result`, action: "demoLogsStatusFilter='Waiting'; setTab('wixbookings'); setTimeout(()=>{ const el=document.getElementById('demo-register-heading'); if(el) el.scrollIntoView({behavior:'smooth'}); },150)" });
   const expiring = expiringSoon();
@@ -15184,6 +15197,89 @@ function renderFees() {
   `;
 }
 
+// ---- Call notes on Wix bookings (SQL 70) ----
+const WIX_CALL_OUTCOMES = ['Spoke to parent', 'No answer', 'Call back later', 'Busy', 'Not interested'];
+function wixCallsFor(bookingId) { return wixCalls.filter(c => c.booking_id === bookingId); }
+// A call is due when the LATEST call on an open booking says "call again on" today or earlier.
+function wixCallDueOn(b) {
+  if (b.status === 'Converted' || b.status === 'Cancelled') return '';
+  const last = wixCallsFor(b.id)[0];
+  return last && last.call_again_on && last.call_again_on <= todayStr ? last.call_again_on : '';
+}
+function wixCallsDueCount() { return wixCallsReady ? data.wixBookings.filter(b => wixCallDueOn(b)).length : 0; }
+function localDateTimeValue(d) {
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function wixCallOpenForm(bookingId, callId) {
+  const c = callId ? wixCalls.find(x => x.id === callId) : null;
+  wixCallFormId = bookingId; wixCallEditId = callId || '';
+  wixCallDraft = c
+    ? { calledAt: localDateTimeValue(new Date(c.called_at)), outcome: c.outcome, comment: c.comment || '', callAgainOn: c.call_again_on || '' }
+    : { calledAt: localDateTimeValue(new Date()), outcome: WIX_CALL_OUTCOMES[0], comment: '', callAgainOn: '' };
+  render();
+}
+function wixCallCloseForm() { wixCallFormId = ''; wixCallEditId = ''; wixCallDraft = {}; render(); }
+async function saveWixCall() {
+  const d = wixCallDraft, bookingId = wixCallFormId;
+  if (!bookingId) return;
+  const when = d.calledAt ? new Date(d.calledAt) : new Date();
+  if (isNaN(when)) { wixBookingsMsg = 'Please pick the date and time of the call.'; render(); return; }
+  const row = { called_at: when.toISOString(), outcome: d.outcome || WIX_CALL_OUTCOMES[0], comment: (d.comment || '').trim() || null, call_again_on: d.callAgainOn || null };
+  const res = wixCallEditId
+    ? await sb.from('wix_booking_calls').update({ ...row, updated_at: new Date().toISOString() }).eq('id', wixCallEditId)
+    : await sb.from('wix_booking_calls').insert({ ...row, booking_id: bookingId });
+  if (res.error) { wixBookingsMsg = /wix_booking_calls/.test(res.error.message || '') ? 'Run SQL 70 (demos/70-wix-booking-calls.sql) in Supabase first.' : 'Could not save the call note: ' + res.error.message; render(); return; }
+  trackUse('wix-call-note');
+  await loadWixCalls();
+  wixBookingsMsg = wixCallEditId ? 'Call note updated ✓' : 'Call note saved ✓';
+  wixCallFormId = ''; wixCallEditId = ''; wixCallDraft = {};
+  render();
+}
+function wixCallsHtml(b) {
+  if (!wixCallsReady) return '';
+  const calls = wixCallsFor(b.id);
+  const when = v => v ? new Date(v).toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+  const who = id => id ? ((data.users.find(u => u.id === id) || {}).username || '') : '';
+  const last = calls[0];
+  const due = wixCallDueOn(b);
+  const summary = calls.length
+    ? `📞 ${calls.length} call${calls.length === 1 ? '' : 's'} · last ${esc(dayDate(localDateTimeValue(new Date(last.called_at)).slice(0, 10)))}${last.call_again_on ? ` · <span style="${due ? 'color:var(--brick);font-weight:600' : ''}">call again ${esc(dayDate(last.call_again_on))}${due ? ' (due)' : ''}</span>` : ''}`
+    : '📞 No calls yet';
+  const d = wixCallDraft;
+  const form = wixCallFormId !== b.id ? '' : `
+    <div style="margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:6px;background:#fff">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+        <label style="font-size:11px" class="hint">When<input type="datetime-local" value="${escAttr(d.calledAt || '')}" onchange="wixCallDraft.calledAt=this.value" style="width:100%"></label>
+        <label style="font-size:11px" class="hint">What happened<select onchange="wixCallDraft.outcome=this.value" style="width:100%">${WIX_CALL_OUTCOMES.map(o => `<option ${d.outcome === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label>
+      </div>
+      <textarea rows="3" placeholder="What did the parent say?" oninput="wixCallDraft.comment=this.value" style="width:100%;margin-bottom:6px">${esc(d.comment || '')}</textarea>
+      <label style="font-size:11px" class="hint">Call again on (optional) <input type="date" value="${escAttr(d.callAgainOn || '')}" onchange="wixCallDraft.callAgainOn=this.value"></label>
+      <div class="row-form" style="gap:6px;margin:8px 0 0">
+        <button class="btn-small btn-primary" onclick="saveWixCall()">✓ Save</button>
+        <button class="btn-small" onclick="wixCallCloseForm()">✕ Cancel</button>
+      </div>
+    </div>`;
+  const showAll = wixCallsOpenId === b.id;
+  const shown = showAll ? calls : calls.slice(0, 2);
+  const list = shown.map(c => `
+    <div style="padding:6px 0;border-top:1px dashed var(--border)">
+      <div style="font-size:12px"><b>${esc(c.outcome)}</b> · ${esc(when(c.called_at))}${who(c.called_by) ? ' · ' + esc(who(c.called_by)) : ''}
+        <button class="btn-small" style="font-size:10px;margin-left:6px" onclick="wixCallOpenForm('${b.id}','${c.id}')">Edit</button></div>
+      ${c.comment ? `<div style="font-size:13px;white-space:pre-wrap">${esc(c.comment)}</div>` : ''}
+      ${c.call_again_on ? `<div style="color:var(--muted);font-size:11px">Call again on ${esc(dayDate(c.call_again_on))}</div>` : ''}
+      ${c.updated_at ? `<div style="color:var(--muted);font-size:10px">edited</div>` : ''}
+    </div>`).join('');
+  return `<div style="margin-top:10px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:12px">${summary}</span>
+        ${wixCallFormId === b.id ? '' : `<button class="btn-small" style="font-size:11px" onclick="wixCallOpenForm('${b.id}')">+ Add call note</button>`}
+      </div>
+      ${form}
+      ${list ? `<div style="margin-top:6px">${list}</div>` : ''}
+      ${calls.length > 2 ? `<button class="btn-small" style="font-size:11px;margin-top:4px" onclick="wixCallsOpenId=wixCallsOpenId==='${b.id}'?'':'${b.id}';render()">${showAll ? 'Show fewer' : 'Show all ' + calls.length + ' calls'}</button>` : ''}
+    </div>`;
+}
 // What the parent filled in on the Wix booking form. form_data (SQL 69) is the whole form as Wix sent it;
 // older bookings only have the few answers the Wix script copied into their own columns.
 let wixFormOpenId = '';
@@ -15212,15 +15308,16 @@ function wixBookingFormHtml(b) {
         <span class="hint" style="font-size:11px;font-weight:700;letter-spacing:.04em">BOOKING FORM</span>
         ${full.length ? `<button class="btn-small" style="font-size:11px" onclick="wixFormOpenId=wixFormOpenId==='${b.id}'?'':'${b.id}';render()">${open ? 'Hide full form' : 'View full form'}</button>` : ''}
       </div>
-      ${rows.length ? rows.map(([k, v]) => `<div><span class="hint">${k}:</span> ${esc(v)}</div>`).join('') : '<div class="hint">No form answers came from Wix for this booking.</div>'}
-      ${open ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line)"><div class="hint" style="font-size:11px;margin-bottom:4px">Every answer, as the parent sent it on the website:</div>${full.map(([k, v]) => `<div><span class="hint">${esc(k)}:</span> ${esc(v)}</div>`).join('')}</div>` : ''}
-      ${sent ? `<div class="hint" style="font-size:11px;margin-top:4px;word-break:break-all">${esc(sent)}</div>` : ''}
+      ${rows.length ? rows.map(([k, v]) => `<div><span class="hint">${k}:</span> ${esc(v)}</div>`).join('') : '<div style="color:var(--muted)">No form answers came from Wix for this booking.</div>'}
+      ${open ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line)"><div style="color:var(--muted);font-size:11px;margin-bottom:4px">Every answer, as the parent sent it on the website:</div>${full.map(([k, v]) => `<div><span class="hint">${esc(k)}:</span> ${esc(v)}</div>`).join('')}</div>` : ''}
+      ${sent ? `<div style="color:var(--muted);font-size:11px;margin-top:4px;word-break:break-all">${esc(sent)}</div>` : ''}
     </div>`;
 }
 function renderWixBookings() {
-  const filters = ['New', 'Scheduled', 'Done', 'Converted', 'Lost', 'Cancelled', 'All'];
+  const filters = ['New', 'Scheduled', 'Done', 'Converted', 'Lost', 'Cancelled', 'All'].concat(wixCallsReady ? ['Calls due'] : []);
   const newCount = data.wixBookings.filter(b => b.status === 'New').length;
-  const list = data.wixBookings.filter(b => (wixBookingsFilter === 'All' || b.status === wixBookingsFilter) && (!wixPaidReady || wixPaidFilter === 'All' || (wixPaidFilter === 'Paid') === !!b.paid));
+  const wixFilterMatch = (b, f) => f === 'All' || (f === 'Calls due' ? !!wixCallDueOn(b) : b.status === f);
+  const list = data.wixBookings.filter(b => wixFilterMatch(b, wixBookingsFilter) && (!wixPaidReady || wixPaidFilter === 'All' || (wixPaidFilter === 'Paid') === !!b.paid));
   const d = wixBookingScheduleDraft;
   const ed = wixBookingEditDraft;
   const statusColor = s => s === 'New' ? 'var(--brick)' : s === 'Scheduled' ? 'var(--accent)' : s === 'Done' ? '#6b5ca5' : s === 'Converted' ? 'var(--green)' : s === 'Lost' ? '#a0522d' : '#888';
@@ -15352,6 +15449,7 @@ function renderWixBookings() {
           ${paidBlock}
         </div>
         ${wixBookingFormHtml(b)}
+        ${wixCallsHtml(b)}
         ${scheduleBlock}
         ${convertBlock}
       </div>`;
@@ -15364,12 +15462,12 @@ function renderWixBookings() {
       ${wixBookingsMsg ? `<div style="margin-bottom:10px;font-size:13px;font-weight:500;${wixBookingsMsg.includes('✓') ? 'color:var(--green)' : 'color:var(--brick)'}">${esc(wixBookingsMsg)}</div>` : ''}
       ${wixConvertMsg && !wixConvertingId ? `<div style="margin-bottom:10px;font-size:13px;font-weight:500;${wixConvertMsg.startsWith('✓') ? 'color:var(--green)' : 'color:var(--brick)'}">${esc(wixConvertMsg)}${wixConvertMsg.startsWith('✓') && wixLastCreatedStudentId ? ` <button class="btn-small btn-primary" style="font-size:12px;margin-left:8px" onclick="setTab('students');selectStudent('${wixLastCreatedStudentId}');wixConvertMsg='';wixLastCreatedStudentId='';render()">→ Open student record</button>` : ''}</div>` : ''}
       <div class="row-form" style="gap:6px;flex-wrap:wrap;margin-bottom:14px">
-        ${filters.map(f => { const cnt = f === 'All' ? data.wixBookings.length : data.wixBookings.filter(b => b.status === f).length; return `<button class="btn-small ${wixBookingsFilter===f?'btn-primary':''}" onclick="wixBookingsFilter='${f}';wixBookingsMsg='';wixBookingActionId=null;wixBookingEditId=null;render()">${f}${cnt > 0 ? ` (${cnt})` : ''}</button>`; }).join('')}
+        ${filters.map(f => { const cnt = data.wixBookings.filter(b => wixFilterMatch(b, f)).length; return `<button class="btn-small ${wixBookingsFilter===f?'btn-primary':''}" onclick="wixBookingsFilter='${f}';wixBookingsMsg='';wixBookingActionId=null;wixBookingEditId=null;render()">${f}${cnt > 0 ? ` (${cnt})` : ''}</button>`; }).join('')}
         ${wixPaidReady ? `<select onchange="wixPaidFilter=this.value;render()" style="font-size:12px">${['All', 'Paid', 'Not paid'].map(f => `<option value="${f}" ${wixPaidFilter === f ? 'selected' : ''}>${f === 'All' ? 'Paid or not' : f}</option>`).join('')}</select>` : ''}
         <button class="btn-small" style="margin-left:auto" onclick="loadWixBookings().then(()=>{wixBookingsMsg='';render()})">↻ Refresh</button>
       </div>
       ${razorpayWaitingHtml()}
-      ${list.length === 0 ? `<div class="empty">No ${wixBookingsFilter === 'All' ? '' : wixBookingsFilter.toLowerCase() + ' '}bookings.</div>` : cards}
+      ${list.length === 0 ? `<div class="empty">${wixBookingsFilter === 'Calls due' ? 'No calls due.' : `No ${wixBookingsFilter === 'All' ? '' : wixBookingsFilter.toLowerCase() + ' '}bookings.`}</div>` : cards}
     </div>
     <div class="card">
       <h2 id="demo-register-heading">Demo Register ${helpBtn('demo-register')}</h2>
@@ -19862,7 +19960,7 @@ const HELP = {
   'class-frequency': { t:'Class Frequency', b:"<ul><li>How many classes each student has on each weekday, per subject (each class is 60 minutes).</li><li>+ New Frequency or Edit: tick the weekdays and set the classes on each day.</li><li>Raise fee requests uses it to count the month's classes, and Rebuild Pending Classes uses it to make the schedule. Saving it does not change classes already scheduled.</li><li>Pairs still Not configured are listed so you can fill them in. Teachers can set it for their own students too.</li></ul>" },
   'class-frequency-teacher': { t:'Class Frequency', b:"<ul><li>How many classes each of your students has on each weekday, per subject (each class is 60 minutes).</li><li>Tap Set or Edit, tick the weekdays and set the classes on each day, then Save.</li><li>The office uses it to work out monthly fees and to build the class schedule, so keep it up to date when a student's timetable changes.</li><li>Saving it does not change classes already scheduled. A student with no frequency shows under Pending Action Items.</li></ul>" },
   'rebuild-classes': { t:'Rebuild Pending Classes', b:"<ul><li>Makes a fresh schedule of upcoming classes from each student's Class Frequency, for all active students or one student.</li><li>Always press <b>Preview Rebuild</b> first: it shows, per student and subject, the future Pending classes it will remove and how many it will make.</li><li>Only future Pending classes are removed. Done classes, overdue Pending classes and other statuses stay as they are. Subscription limits and teacher clashes are still checked.</li><li>New classes get placeholder times (Group 00:00, Individual 01:00 or 02:00). The teacher sees them under 'class timings to correct' and puts in the real time.</li></ul>" },
-  'demo-bookings': { t:'Demo Bookings', b:"<ul><li>Demo bookings from the website. The tabs follow each booking: <b>New → Scheduled → Done → Converted</b> or <b>Lost</b> (or Cancelled).</li><li>New: call the family, then Confirm a teacher and time (or Schedule in Demo Register).</li><li>Scheduled: Mark done after the demo, Mark lost (with an optional reason), Reschedule or Cancel.</li><li>Done: Convert to Student creates the student record; Mark lost if they did not join. Lost cards have Reopen.</li><li>Booking form: each card shows what the parent filled in on the website (subject, Online / Offline, requirements, message) and the Wix order number. <b>View full form</b> shows every answer on the form (new bookings only).</li><li>Paid / Not paid: payments made on Razorpay mark the booking Paid by themselves. A payment the app could not match is shown at the top so you can pick the booking.</li></ul>" },
+  'demo-bookings': { t:'Demo Bookings', b:"<ul><li>Demo bookings from the website. The tabs follow each booking: <b>New → Scheduled → Done → Converted</b> or <b>Lost</b> (or Cancelled).</li><li>New: call the family, then Confirm a teacher and time (or Schedule in Demo Register).</li><li>Scheduled: Mark done after the demo, Mark lost (with an optional reason), Reschedule or Cancel.</li><li>Done: Convert to Student creates the student record; Mark lost if they did not join. Lost cards have Reopen.</li><li>Calls: after phoning a parent, press <b>+ Add call note</b> (when, what happened, what they said, and an optional <b>Call again on</b> date). Every call stays on the card, newest first; notes can be edited, never deleted. Bookings with a call due today or earlier show under <b>Calls due</b> and on the dashboard.</li><li>Booking form: each card shows what the parent filled in on the website (subject, Online / Offline, requirements, message) and the Wix order number. <b>View full form</b> shows every answer on the form (new bookings only).</li><li>Paid / Not paid: payments made on Razorpay mark the booking Paid by themselves. A payment the app could not match is shown at the top so you can pick the booking.</li></ul>" },
   'demo-register': { t:'Demo Register', b:"<ul><li>Every demo a teacher gave, with its status: Pending, Done, Converted or Lost.</li><li>Teachers mark their own demos Done from their Dashboard. You can set any status, add a Lost reason, or go straight to Converted.</li><li><b>Link &amp; Convert</b> links the demo to the student who joined; the teacher gets a ₹100 demo bonus in that month's payroll.</li><li>Demo results shows each teacher's demos and Converted %, and why demos were lost.</li></ul>" },
   'class-log': { t:'Class Log', b:"<ul><li>Pick the date and the teacher whose class you are marking.</li><li>Choose student, subject, Group / Individual, Online / Offline and Present or Absent, then Log class. Absent still uses a class.</li><li>The student's classes left are shown, with a warning when they have none.</li><li>The list below shows the teacher's classes for the <b>Selected day</b> or the <b>Whole month</b> (with a month total).</li></ul>" },
   'expenses': { t:'Expenses', b:"<ul><li>Money the institute spends other than teacher pay: rent, electricity, internet and so on.</li><li>Add an expense with date, category, amount and an optional note. Edit or delete it from the month list.</li><li>Expenses come off fee collection in Reports → Net profit. Don't enter teacher salary here; payroll is counted separately.</li></ul>" },
