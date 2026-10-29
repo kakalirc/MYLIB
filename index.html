@@ -335,7 +335,7 @@ if (location.hostname !== 'app.libeducation.com') {
 const APP_VERSION = '2026.10';
 // The app links every WhatsApp message gives (never the address the sender happens to be on).
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
-const BUILD_TIMESTAMP = '2026-10-29 18:30 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-29 18:45 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -4382,7 +4382,18 @@ function wixTimeFormHtml(b) {
 const MANUAL_DEMO_SOURCES = ['Phone call', 'WhatsApp', 'Walk-in', 'Referral', 'Other'];
 let manualDemoOpen = false;
 let manualDemoDraft = {};
+let manualDemoEditId = '';   // manual booking being edited on its card ('' = adding a new one)
+function manualDemoEdit(id) {
+  const b = data.wixBookings.find(x => x.id === id);
+  if (!b) return;
+  manualDemoOpen = false; manualDemoEditId = id;
+  manualDemoDraft = { name: b.studentName, phone: b.phone, email: b.email, subject: b.subject, classMode: b.classMode || 'Online', requirements: b.requirements, message: b.message, source: b.source || 'Other',
+    fee: b.paid ? 'paid' : b.amount === 0 ? 'free' : 'unpaid' };
+  render();
+}
+function manualDemoClose() { manualDemoOpen = false; manualDemoEditId = ''; manualDemoDraft = {}; render(); }
 function manualDemoStart() {
+  manualDemoEditId = '';
   manualDemoOpen = true;
   manualDemoDraft = { name: '', phone: '', email: '', subject: '', classMode: 'Online', requirements: '', message: '', source: MANUAL_DEMO_SOURCES[0], fee: 'unpaid' };
   render();
@@ -4401,6 +4412,7 @@ async function saveManualDemo() {
     amount: d.fee === 'free' ? 0 : 100, status: 'New', source: d.source || 'Other'
   };
   if (d.fee === 'paid') Object.assign(row, { paid: true, paid_at: now, paid_via: 'Manual' });
+  if (manualDemoEditId) return saveManualDemoEdit(row);
   wixBookingsMsg = 'Saving…'; render();
   const { error } = await sb.from('wix_demo_bookings').insert(row);
   if (error) { wixBookingsMsg = /source/.test(error.message || '') ? 'Run SQL 73 (demos/73-manual-demo-booking.sql) in Supabase first.' : 'Could not save: ' + error.message; render(); return; }
@@ -4411,14 +4423,38 @@ async function saveManualDemo() {
   wixBookingsMsg = 'Manual demo booking added ✓ Send the acknowledgement, then schedule it.';
   render();
 }
-function manualDemoFormHtml() {
-  if (!manualDemoOpen) return `<div style="margin:0 0 12px"><button class="btn-small btn-primary" onclick="manualDemoStart()">+ Manual Demo Booking</button> <span class="hint" style="font-size:11px">for demos booked by phone, WhatsApp, walk-in or referral</span></div>`;
+// Edit a manual booking: details, name and demo fee. Status, order ref and booked time stay as they were.
+async function saveManualDemoEdit(row) {
+  const b = data.wixBookings.find(x => x.id === manualDemoEditId);
+  if (!b) return;
+  const upd = { student_name: row.student_name, phone: row.phone, email: row.email, subject: row.subject, class_mode: row.class_mode,
+    requirements: row.requirements, message: row.message, source: row.source, amount: row.amount };
+  const fee = manualDemoDraft.fee;
+  if (fee === 'paid' && !b.paid) Object.assign(upd, { paid: true, paid_at: new Date().toISOString(), paid_via: 'Manual' });
+  if (fee !== 'paid' && b.paid) Object.assign(upd, { paid: false, paid_at: null, paid_via: null, payment_id: null });
+  wixBookingsMsg = 'Saving…'; render();
+  const { error } = await sb.from('wix_demo_bookings').update(upd).eq('id', b.id);
+  if (error) { wixBookingsMsg = 'Could not save: ' + error.message; render(); return; }
+  // Keep the linked Demo Register entry's name and mobile in step.
+  if (b.demoLogId && (upd.student_name !== b.studentName || upd.phone !== b.phone)) {
+    await sb.from('demo_logs').update({ student_name: upd.student_name, parent_mobile: upd.phone }).eq('id', b.demoLogId);
+  }
+  manualDemoEditId = ''; manualDemoDraft = {};
+  await loadWixBookings();
+  if (b.demoLogId) { const dl = data.demoLogs.find(x => x.id === b.demoLogId); if (dl) { dl.studentName = upd.student_name; dl.parentMobile = upd.phone; } }
+  wixBookingsMsg = 'Booking updated ✓';
+  render();
+}
+function manualDemoFormHtml(editId) {
+  if (editId && manualDemoEditId !== editId) return '';
+  if (!editId && manualDemoEditId) return '';
+  if (!editId && !manualDemoOpen) return `<div style="margin:0 0 12px"><button class="btn-small btn-primary" onclick="manualDemoStart()">+ Manual Demo Booking</button> <span class="hint" style="font-size:11px">for demos booked by phone, WhatsApp, walk-in or referral</span></div>`;
   const d = manualDemoDraft;
   const inp = (key, ph, type) => `<input type="${type || 'text'}" placeholder="${ph}" value="${escAttr(d[key] || '')}" oninput="manualDemoDraft.${key}=this.value" style="width:100%">`;
   const sel = (key, opts) => `<select onchange="manualDemoDraft.${key}=this.value" style="width:100%">${opts.map(([v, l]) => `<option value="${v}" ${d[key] === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
   return `
     <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin:0 0 14px;background:var(--hover,rgba(0,0,0,.04))">
-      <div style="font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--muted);margin-bottom:8px">MANUAL DEMO BOOKING</div>
+      <div style="font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--muted);margin-bottom:8px">${editId ? 'EDIT MANUAL BOOKING' : 'MANUAL DEMO BOOKING'}</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px">
         ${inp('name', "Parent's name *")}
         ${inp('phone', 'Mobile (10 digits) *', 'tel')}
@@ -4431,8 +4467,8 @@ function manualDemoFormHtml() {
       <textarea rows="2" placeholder="Requirements (grade, board, topics…)" oninput="manualDemoDraft.requirements=this.value" style="width:100%;margin-top:8px">${esc(d.requirements || '')}</textarea>
       <textarea rows="2" placeholder="Message / notes" oninput="manualDemoDraft.message=this.value" style="width:100%;margin-top:6px">${esc(d.message || '')}</textarea>
       <div class="row-form" style="gap:6px;margin:8px 0 0">
-        <button class="btn-small btn-primary" onclick="saveManualDemo()">✓ Save booking</button>
-        <button class="btn-small" onclick="manualDemoOpen=false;manualDemoDraft={};render()">✕ Cancel</button>
+        <button class="btn-small btn-primary" onclick="saveManualDemo()">✓ ${editId ? 'Save changes' : 'Save booking'}</button>
+        <button class="btn-small" onclick="manualDemoClose()">✕ Cancel</button>
       </div>
     </div>`;
 }
@@ -15610,7 +15646,7 @@ function renderWixBookings() {
           <span class="hint" style="font-size:11px">${b.submittedAt ? new Date(b.submittedAt).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—'}${showAge ? ageIndicator(b.submittedAt) : ''}</span>
         </div>
         <div style="margin-top:8px">
-          <div style="font-weight:700;font-size:15px">${esc(b.studentName)}${b.source ? ` <span class="tag" style="font-size:10px;background:#6b5ca5;color:#fff;vertical-align:middle">Manual · ${esc(b.source)}</span>` : ''}</div>
+          <div style="font-weight:700;font-size:15px">${esc(b.studentName)}${b.source ? ` <span class="tag" style="font-size:10px;background:#6b5ca5;color:#fff;vertical-align:middle">Manual · ${esc(b.source)}</span> <button class="btn-small" style="font-size:10px;vertical-align:middle" onclick="manualDemoEdit('${b.id}')">✏️ Edit</button>` : ''}</div>
           <div style="font-size:12px;margin-top:4px;display:flex;gap:14px;flex-wrap:wrap">
             ${b.phone ? `<span>📞 ${esc(b.phone)}</span>` : ''}
             ${b.email ? `<span style="color:var(--muted)">✉ ${esc(b.email)}</span>` : ''}
@@ -15618,6 +15654,7 @@ function renderWixBookings() {
           ${paidBlock}
           ${wixAckHtml(b)}
         </div>
+        ${manualDemoFormHtml(b.id)}
         ${wixBookingFormHtml(b)}
         ${wixCallsHtml(b)}
         ${scheduleBlock}
@@ -20131,7 +20168,7 @@ const HELP = {
   'class-frequency': { t:'Class Frequency', b:"<ul><li>How many classes each student has on each weekday, per subject (each class is 60 minutes).</li><li>+ New Frequency or Edit: tick the weekdays and set the classes on each day.</li><li>Raise fee requests uses it to count the month's classes, and Rebuild Pending Classes uses it to make the schedule. Saving it does not change classes already scheduled.</li><li>Pairs still Not configured are listed so you can fill them in. Teachers can set it for their own students too.</li></ul>" },
   'class-frequency-teacher': { t:'Class Frequency', b:"<ul><li>How many classes each of your students has on each weekday, per subject (each class is 60 minutes).</li><li>Tap Set or Edit, tick the weekdays and set the classes on each day, then Save.</li><li>The office uses it to work out monthly fees and to build the class schedule, so keep it up to date when a student's timetable changes.</li><li>Saving it does not change classes already scheduled. A student with no frequency shows under Pending Action Items.</li></ul>" },
   'rebuild-classes': { t:'Rebuild Pending Classes', b:"<ul><li>Makes a fresh schedule of upcoming classes from each student's Class Frequency, for all active students or one student.</li><li>Always press <b>Preview Rebuild</b> first: it shows, per student and subject, the future Pending classes it will remove and how many it will make.</li><li>Only future Pending classes are removed. Done classes, overdue Pending classes and other statuses stay as they are. Subscription limits and teacher clashes are still checked.</li><li>New classes get placeholder times (Group 00:00, Individual 01:00 or 02:00). The teacher sees them under 'class timings to correct' and puts in the real time.</li></ul>" },
-  'demo-bookings': { t:'Demo Bookings', b:"<ul><li>Demo bookings from the website. The tabs follow each booking: <b>New → Scheduled → Done → Converted</b> or <b>Lost</b> (or Cancelled).</li><li>New: call the family, then Confirm a teacher and time (or Schedule in Demo Register).</li><li>Scheduled: Mark done after the demo, Mark lost (with an optional reason), Reschedule or Cancel.</li><li>Done: Convert to Student creates the student record; Mark lost if they did not join. Lost cards have Reopen.</li><li><b>+ Manual Demo Booking</b>: for demos booked by phone, WhatsApp, walk-in or referral. Type the parent's name, mobile, subject and where it came from; it then works exactly like a Wix booking (ack, calls, schedule, Convert) and shows a purple <b>Manual</b> tag.</li><li>New booking: press <b>📤 Send acknowledgement</b> to thank the parent on WhatsApp (website link only). The card then shows <b>✓ Ack sent</b> with the time, so it is not sent twice.</li><li>Scheduled: <b>✏️ Change time</b> moves the same demo to a new date, time or teacher (the teacher gets a bell notification, a call note records the change, then send the new time on WhatsApp). <b>🔄 Reschedule</b> starts over from New.</li><li>Calls: after phoning a parent, press <b>+ Add call note</b> (when, what happened, what they said, and an optional <b>Call again on</b> date). Every call stays on the card, newest first; notes can be edited, never deleted. Bookings with a call due today or earlier show under <b>Calls due</b> and on the dashboard.</li><li>Booking form: each card shows what the parent filled in on the website (subject, Online / Offline, requirements, message) and the Wix order number. <b>View full form</b> shows every answer on the form (new bookings only).</li><li>Paid / Not paid: payments made on Razorpay mark the booking Paid by themselves. A payment the app could not match is shown at the top so you can pick the booking.</li></ul>" },
+  'demo-bookings': { t:'Demo Bookings', b:"<ul><li>Demo bookings from the website. The tabs follow each booking: <b>New → Scheduled → Done → Converted</b> or <b>Lost</b> (or Cancelled).</li><li>New: call the family, then Confirm a teacher and time (or Schedule in Demo Register).</li><li>Scheduled: Mark done after the demo, Mark lost (with an optional reason), Reschedule or Cancel.</li><li>Done: Convert to Student creates the student record; Mark lost if they did not join. Lost cards have Reopen.</li><li><b>+ Manual Demo Booking</b>: for demos booked by phone, WhatsApp, walk-in or referral. Type the parent's name, mobile, subject and where it came from; <b>✏️ Edit</b> on its card changes the name, details or demo fee (incl. Free demo); it then works exactly like a Wix booking (ack, calls, schedule, Convert) and shows a purple <b>Manual</b> tag.</li><li>New booking: press <b>📤 Send acknowledgement</b> to thank the parent on WhatsApp (website link only). The card then shows <b>✓ Ack sent</b> with the time, so it is not sent twice.</li><li>Scheduled: <b>✏️ Change time</b> moves the same demo to a new date, time or teacher (the teacher gets a bell notification, a call note records the change, then send the new time on WhatsApp). <b>🔄 Reschedule</b> starts over from New.</li><li>Calls: after phoning a parent, press <b>+ Add call note</b> (when, what happened, what they said, and an optional <b>Call again on</b> date). Every call stays on the card, newest first; notes can be edited, never deleted. Bookings with a call due today or earlier show under <b>Calls due</b> and on the dashboard.</li><li>Booking form: each card shows what the parent filled in on the website (subject, Online / Offline, requirements, message) and the Wix order number. <b>View full form</b> shows every answer on the form (new bookings only).</li><li>Paid / Not paid: payments made on Razorpay mark the booking Paid by themselves. A payment the app could not match is shown at the top so you can pick the booking.</li></ul>" },
   'demo-register': { t:'Demo Register', b:"<ul><li>Every demo a teacher gave, with its status: Pending, Done, Converted or Lost.</li><li>Teachers mark their own demos Done from their Dashboard. You can set any status, add a Lost reason, or go straight to Converted.</li><li><b>Link &amp; Convert</b> links the demo to the student who joined; the teacher gets a ₹100 demo bonus in that month's payroll.</li><li>Demo results shows each teacher's demos and Converted %, and why demos were lost.</li></ul>" },
   'class-log': { t:'Class Log', b:"<ul><li>Pick the date and the teacher whose class you are marking.</li><li>Choose student, subject, Group / Individual, Online / Offline and Present or Absent, then Log class. Absent still uses a class.</li><li>The student's classes left are shown, with a warning when they have none.</li><li>The list below shows the teacher's classes for the <b>Selected day</b> or the <b>Whole month</b> (with a month total).</li></ul>" },
   'expenses': { t:'Expenses', b:"<ul><li>Money the institute spends other than teacher pay: rent, electricity, internet and so on.</li><li>Add an expense with date, category, amount and an optional note. Edit or delete it from the month list.</li><li>Expenses come off fee collection in Reports → Net profit. Don't enter teacher salary here; payroll is counted separately.</li></ul>" },
