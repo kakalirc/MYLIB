@@ -335,7 +335,9 @@ if (location.hostname !== 'app.libeducation.com') {
 const APP_VERSION = '2026.10';
 // The app links every WhatsApp message gives (never the address the sender happens to be on).
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
-const BUILD_TIMESTAMP = '2026-10-29 18:45 IST'; // updated automatically each time a new file is generated
+// Demo messages go to families who have no app login yet, so they carry only the website link.
+const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
+const BUILD_TIMESTAMP = '2026-10-29 19:00 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -4555,7 +4557,7 @@ function demoConfirmMessage(d) {
   if (subj) lines.push(`📚 Subject: ${subj}${d.board ? ' (' + d.board + ')' : ''}`);
   if (tName) lines.push(`👨‍🏫 Teacher: ${tName}`);
   if (classLink) lines.push(`🔗 Demo Class Link: ${classLink}`);
-  lines.push(`\nPlease ensure your child is ready at the scheduled time. Looking forward to seeing you! 😊\n\n${APP_LINK_LINES.join('\n')}\n\n— LIB Education`);
+  lines.push(`\nPlease ensure your child is ready at the scheduled time. Looking forward to seeing you! 😊\n\n${WEBSITE_LINK_LINE}\n\n— LIB Education`);
   return lines.join('\n');
 }
 // First WhatsApp reply to a new booking. Website link only (the parent has no app login yet).
@@ -4566,7 +4568,7 @@ function wixBookingAckMessage(b) {
   const lines = [`Dear ${name && name !== 'Unknown' ? name : 'Parent'},\n\nThank you for booking a *Demo Class* with LIB Education. 🙏`];
   lines.push(`We have received your booking${what ? ' (' + what + ')' : ''}${b.paid ? ` and your payment of ₹${b.amount || 100}` : ''}.`);
   lines.push(`\nOur team will call you shortly to fix a convenient day and time with a teacher.`);
-  lines.push(`\nRegards,\nLIB Education\n${APP_LINK_LINES.find(l => /Website/.test(l)) || 'https://www.libeducation.com/'}`);
+  lines.push(`\nRegards,\nLIB Education\n${WEBSITE_LINK_LINE}`);
   return lines.join('\n');
 }
 // Stamp the booking when the ack button is pressed (SQL 71 ack_sent_at). Before SQL 71 the button still opens WhatsApp.
@@ -4606,13 +4608,15 @@ function wixBookingConfirmMessage(b) {
     const hr = h % 12 || 12;
     return `${hr}:${String(m).padStart(2,'0')} ${ampm}`;
   })() : '';
-  const lines = [`Dear Parent,\n\nA *Demo Class* has been confirmed for *${b.studentName || 'your child'}*.`];
+  // The name on a Wix (or manual) booking is the parent's, not the child's.
+  const pName = (b.studentName || '').trim();
+  const lines = [`Dear ${pName && pName !== 'Unknown' ? pName : 'Parent'},\n\nYour *Demo Class* with LIB Education has been confirmed.`];
   if (dateStr) lines.push(`\n📅 Date: ${dateStr}`);
   if (timeStr) lines.push(`⏰ Time: ${timeStr}`);
   if (b.subject) lines.push(`📚 Subject: ${b.subject}`);
   if (tName) lines.push(`👨‍🏫 Teacher: ${tName}`);
   if (classLink) lines.push(`🔗 Demo Class Link: ${classLink}`);
-  lines.push(`\nPlease ensure your child is ready at the scheduled time. Looking forward to seeing you! 😊\n\n${APP_LINK_LINES.join('\n')}\n\n— LIB Education`);
+  lines.push(`\nPlease ensure your child is ready at the scheduled time. Looking forward to seeing you! 😊\n\n${WEBSITE_LINK_LINE}\n\n— LIB Education`);
   return lines.join('\n');
 }
 function startEditDemo(d) {
