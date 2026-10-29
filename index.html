@@ -337,7 +337,7 @@ const APP_VERSION = '2026.10';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-10-29 19:15 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-29 19:40 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -2508,6 +2508,9 @@ async function loadFeeRates() {
     upiId = rows[0].upi_id || '';
     feeContactMobile = rows[0].fee_contact_mobile || '';
     upiQrImage = rows[0].upi_qr_image || '';
+    rzpSettingsReady = 'razorpay_in_messages' in rows[0];   // SQL 75 run
+    razorpayOn = rows[0].razorpay_in_messages !== false;
+    razorpayFeePage = (rows[0].razorpay_link || '').trim() || RAZORPAY_FEE_PAGE;
     globalAcademicYear = rows[0].global_academic_year || '';
     auditLoggingEnabled = rows[0].audit_logging_enabled !== false;
     loginAuditEnabled = rows[0].login_audit_enabled !== false;
@@ -2518,6 +2521,7 @@ async function loadFeeRates() {
     upiId = '';
     feeContactMobile = '';
     upiQrImage = '';
+    razorpayOn = true; razorpayFeePage = RAZORPAY_FEE_PAGE;
     globalAcademicYear = '';
     auditLoggingEnabled = true;
     loginAuditEnabled = true;
@@ -2526,6 +2530,8 @@ async function loadFeeRates() {
 }
 let upiId = '';
 let feeContactMobile = '';
+// Razorpay link in fee messages + parent/student "Pay online" button (fee_settings, SQL 75); on until switched off.
+let razorpayOn = true, razorpayFeePage = 'https://pages.razorpay.com/pl_P9Dy5JA4jygV77/view', rzpSettingsReady = false;
 // ---- Chat (Admin, Teacher, Student, Parent) ----
 let chatConversations = [];
 let selectedConversationId = '';
@@ -2596,7 +2602,13 @@ async function saveUpiSettings() {
   const contactInput = document.getElementById('feeContactMobileInput');
   const newUpiId = idInput ? idInput.value.trim() : '';
   const newContactMobile = contactInput ? contactInput.value.trim() : '';
+  const rzpTick = document.getElementById('razorpayOnInput'), rzpLinkInput = document.getElementById('razorpayLinkInput');
+  const newRzpOn = rzpTick ? rzpTick.checked : razorpayOn;
+  const newRzpLink = rzpLinkInput ? rzpLinkInput.value.trim() : razorpayFeePage;
+  if (newRzpOn && newRzpLink && !/^https:\/\//i.test(newRzpLink)) { upiMsg = 'The Razorpay link must start with https://'; render(); return; }
+  if (!rzpSettingsReady && (newRzpOn !== razorpayOn || (newRzpLink || RAZORPAY_FEE_PAGE) !== razorpayFeePage)) { upiMsg = 'Run SQL 75 (fee-requests/75-razorpay-link-switch.sql) in Supabase first, then reload.'; render(); return; }
   const payload = { upi_id: newUpiId || null, fee_contact_mobile: newContactMobile || null, upi_qr_image: upiQrImage || null, updated_at: new Date().toISOString() };
+  if (rzpSettingsReady) { payload.razorpay_in_messages = newRzpOn; payload.razorpay_link = newRzpLink || null; }
   if (feeSettingsRowId) {
     const { error } = await sb.from('fee_settings').update(payload).eq('id', feeSettingsRowId);
     if (error) { upiMsg = 'Could not save: ' + error.message; render(); return; }
@@ -2607,6 +2619,7 @@ async function saveUpiSettings() {
   }
   upiId = newUpiId;
   feeContactMobile = newContactMobile;
+  razorpayOn = newRzpOn; razorpayFeePage = newRzpLink || RAZORPAY_FEE_PAGE;
   upiMsg = 'Saved.';
   render();
 }
@@ -9810,9 +9823,10 @@ function familyFeeMessage(studentId, short) {
     if (kids.length > 1 && mine.length > 1) lines.push(`Subtotal for ${s.name}: ${inrText(mine.reduce((a, r) => a + (r.amountPaid || 0), 0))}`);
   });
   lines.push('', `Total due: ${inrText(total)}`, '');
-  lines.push('Payment Options');
+  if (upiId || razorpayOn) lines.push('Payment Options');
   if (upiId) lines.push(`UPI: ${upiId}`);
-  lines.push(`Online Payment: ${RAZORPAY_FEE_PAGE}`, 'While making the online payment, please enter the following details:', `Tuition Fee: ${inrText(total)}`, `Student Name: ${names.join(', ')}`, '');
+  if (razorpayOn) lines.push(`Online Payment: ${razorpayFeePage}`, 'While making the online payment, please enter the following details:', `Tuition Fee: ${inrText(total)}`, `Student Name: ${names.join(', ')}`);
+  lines.push('');
   if (feeContactMobile) lines.push(`After completing the payment, kindly share the payment confirmation screenshot at ${feeContactMobile} for our records.`, '');
   // The parent login shows every child's fees, so it is given when the family has one; else each child's login.
   const parentIds = new Set((data.parentStudents || []).filter(m => kids.some(s => s.id === m.studentId)).map(m => m.parentUserId));
@@ -15269,12 +15283,17 @@ function renderFees() {
         <label>Fee contact mobile <input type="text" id="feeContactMobileInput" value="${escAttr(feeContactMobile)}" placeholder="9876543210" style="width:160px"></label>
       </div>
       <div class="row-form">
+        <label><input type="checkbox" id="razorpayOnInput" ${razorpayOn ? 'checked' : ''}> Add Razorpay online payment link to fee messages</label>
+        <label>Razorpay link <input type="text" id="razorpayLinkInput" value="${escAttr(razorpayFeePage)}" placeholder="https://pages.razorpay.com/…" style="width:340px;max-width:100%"></label>
+      </div>
+      <div class="hint">When unticked, WhatsApp fee messages leave out the Online Payment lines and parents/students don't see the "Pay online (Razorpay)" button. Click Save fee message settings to apply.${rzpSettingsReady ? '' : ' <span style="color:var(--brick)">Needs SQL 75 first.</span>'}</div>
+      <div class="row-form">
         <label>QR code image <input type="file" accept="image/*" onchange="handleUpiQrUpload(event)"></label>
         ${upiQrImage ? `<button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="clearUpiQrImage()">Remove image</button>` : ''}
       </div>
       ${upiQrImage ? `<div style="margin-top:8px"><img src="${escAttr(upiQrImage)}" alt="UPI QR code" style="max-width:180px; border:1px solid var(--line); border-radius:8px"></div>` : '<div class="hint">No QR code uploaded yet.</div>'}
       <div class="row-form" style="margin-top:10px">
-        <button class="btn-primary" onclick="saveUpiSettings()">Save UPI settings</button>
+        <button class="btn-primary" onclick="saveUpiSettings()">Save fee message settings</button>
       </div>
     </div>
     <div class="card">
@@ -16681,7 +16700,7 @@ function renderStudentReportCards(student, viewMonth, monthSetterFn, titlePrefix
       ${payCheckoutMsg ? `<div class="hint" style="color:var(--brick)">${esc(payCheckoutMsg)}</div>` : ''}
       <div class="row-form" style="margin-top:10px">
         <button class="btn-primary" ${payCheckoutIds.length?'':'disabled'} onclick="startPayCheckout()">Pay ₹${payCheckoutTotal.toFixed(2)}</button>
-        <a href="${RAZORPAY_FEE_PAGE}" target="_blank" rel="noopener"><button class="btn-small">Pay online (Razorpay)</button></a>
+        ${razorpayOn ? `<a href="${escAttr(razorpayFeePage)}" target="_blank" rel="noopener"><button class="btn-small">Pay online (Razorpay)</button></a>` : ''}
       </div>
       <div class="hint">LIB Education confirms each payment manually. For any support issue contact LIB Support Team.</div>
     </div>
@@ -20248,7 +20267,7 @@ const HELP = {
   'issue-refund': { t:'Issue a refund', b:'<ul><li>Reduces a student\'s unused class count for a specific subject and type.</li><li>Only unused classes can be refunded — cannot refund classes already given.</li><li>The original payment record is unchanged; a Refund entry is created.</li></ul>' },
   'transfer-credits': { t:'Transfer class credits', b:"<ul><li>Moves already-purchased classes from one subject to another — no money involved.</li><li>Both subjects must be the same class type (Group or Individual).</li><li>If subjects have different teachers you'll be asked to confirm, since it changes who gets paid.</li></ul>" },
   'sub-history': { t:'Subscription history', b:'<ul><li><b>Active</b> — being drawn down now (oldest first).</li><li><b>Upcoming</b> — next in line after the active payment runs out.</li><li><b>Expired</b> — unused classes removed after the expiry date.</li><li>Click Edit to correct a date, amount, reference or expiry date.</li></ul>' },
-  'fee-msg-settings': { t:'Fee Message Settings', b:'<ul><li>Sets the UPI ID and contact number shown in every fee reminder message.</li><li>Parents send payment screenshots to the contact number.</li></ul>' },
+  'fee-msg-settings': { t:'Fee Message Settings', b:'<ul><li>Sets the UPI ID and contact number shown in every fee reminder message.</li><li>Parents send payment screenshots to the contact number.</li><li>Tick or untick <b>Add Razorpay online payment link</b> to put the Online Payment link in fee messages (and the Pay online button for parents/students) or leave it out. You can also change the link here.</li></ul>' },
   'fee-setup': { t:'Fee setup', b:'<ul><li>Per-class rates for each teacher, category, class type and mode.</li><li>Used to calculate teacher payroll in Reports.</li><li>A missing rate means those classes show as Rs 0 in payroll.</li></ul>' },
   'discount': { t:'Discount structure', b:'<ul><li>Optional discounts when a student subscribes to multiple subjects.</li><li>Used in the Fee Calculator as a reference — does not automatically apply to recorded payments.</li></ul>' },
   'fee-calc': { t:'Fee calculator', b:"<ul><li>If the student has an agreed special rate (Student page → Special fee rates), that rate is used instead of Fee setup. Discount tiers still apply.</li><li>Calculates the expected fee based on a student's enrolled subjects and class type.</li><li>Click Push fee request to send the amount straight to the student's fee requests.</li></ul>" },
