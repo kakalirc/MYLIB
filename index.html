@@ -335,7 +335,7 @@ if (location.hostname !== 'app.libeducation.com') {
 const APP_VERSION = '2026.10';
 // The app links every WhatsApp message gives (never the address the sender happens to be on).
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
-const BUILD_TIMESTAMP = '2026-10-29 00:05 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-29 15:45 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -13252,12 +13252,14 @@ function renderSetup() {
         <div class="hint">Shown to this teacher, and to their students/parents wherever it's relevant.</div>
         <div class="row-form"><input type="text" id="mgrOnlineClassLink" value="${escAttr(teacher.onlineClassLink||'')}" placeholder="https://zoom.us/j/…" style="width:100%;max-width:400px"></div>
 
-        <h3>Rates (per class, by category, class type &amp; mode)</h3>
+        <details ${teacherRatesOpen?'open':''} ontoggle="teacherRatesOpen=this.open">
+          <summary style="cursor:pointer;user-select:none"><h3 style="display:inline">Rates (per class, by category, class type &amp; mode)</h3></summary>
         ${categories.map(c=>`
           <div class="row-form">
             <span style="width:120px;font-size:13px;color:var(--muted)">${c.name}${c.archived?' <span class="hint">(archived)</span>':''}</span>
             ${TYPES.map(ty=>RATE_MODES.map(md=>`<label>${ty} ${md} <input type="number" id="mgrRate_${c.id}_${ty}_${md}" min="0" step="1" style="width:70px" value="${teacher.rates[rateKey(c.id,ty,md)]||0}"></label>`).join('')).join('')}
           </div>`).join('')}
+        </details>
         <div class="row-form">
           <button class="btn-primary" onclick="saveTeacherDetails('${teacher.id}')">Save changes</button>
         </div>
@@ -15469,6 +15471,8 @@ function renderAiAdmin() {
   `;
 }
 // Audit Log page: each section folds open on a tap, like App usage.
+// Teachers & Subjects: Rates section starts collapsed (inputs stay in the page so Save still reads them)
+let teacherRatesOpen = false;
 let auditCardOpen = false;
 let loginCardOpen = false;
 function toggleAuditCard() { auditCardOpen = !auditCardOpen; render(); }
