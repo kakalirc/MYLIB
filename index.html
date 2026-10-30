@@ -337,7 +337,7 @@ const APP_VERSION = '2026.10';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-10-30 12:55 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-30 13:10 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -4003,7 +4003,8 @@ async function addDemoLog() {
     if (wb) { wb.status = 'Scheduled'; wb.demoLogId = inserted.id; wb.scheduledTeacherId = inserted.teacher_id; wb.scheduledDate = inserted.date; wb.scheduledTime = inserted.demo_time || ''; }
     demoLogMsg = 'Demo scheduled ✓ — Wix booking marked Scheduled.';
   } else {
-    demoLogMsg = 'Demo log added.';
+    const wb = await wixLinkDemo(data.demoLogs[0], { status: 'Scheduled' });
+    demoLogMsg = 'Demo log added.' + (wb ? ' Website booking marked Scheduled.' : '');
   }
   demoLogDraft = { date: todayStr, teacherId: demoLogDraft.teacherId, gradeId: demoLogDraft.gradeId, subjectId: '', board: '', studentName: '', parentMobile: '', notes: '', demoTime: '' };
   render();
@@ -4034,19 +4035,15 @@ async function convertDemoLog(id) {
   const { error } = await sb.from('demo_logs').update(demoConvertFields(dl)).eq('id', id);
   if (error) { demoLogMsg = 'Error: ' + error.message; render(); return; }
   applyDemoConvert(dl);
-  const wb = await wixMarkConverted(wixBookingForDemo(dl), dl, true);
+  const wb = await wixLinkDemo(dl, dl.linkedStudentId ? { status: 'Converted', converted_student_id: dl.linkedStudentId } : null);
   demoLogMsg = 'Marked Converted — ₹100 bonus will appear in payroll.' + (wb ? ' Wix booking updated.' : ''); render();
 }
 async function cancelDemoLog(id) {
+  const dl = data.demoLogs.find(d => d.id === id);
+  const wb = dl ? await wixLinkDemo(dl, { status: 'Cancelled' }) : null;
   const { error } = await sb.from('demo_logs').delete().eq('id', id);
   if (error) { demoLogMsg = 'Error: ' + error.message; render(); return; }
   data.demoLogs = data.demoLogs.filter(d => d.id !== id);
-  // Sync linked Wix booking → Cancelled
-  const wb = data.wixBookings.find(b => b.demoLogId === id);
-  if (wb) {
-    await sb.from('wix_demo_bookings').update({ status: 'Cancelled' }).eq('id', wb.id);
-    wb.status = 'Cancelled';
-  }
   demoLogMsg = 'Demo log removed.' + (wb ? ' Wix booking marked Cancelled.' : ''); render();
 }
 async function createAndLinkDemo(id, nameFromDemo) {
@@ -4062,7 +4059,7 @@ async function createAndLinkDemo(id, nameFromDemo) {
   const { error: linkErr } = await sb.from('demo_logs').update({ linked_student_id: row.id, ...demoConvertFields(dl) }).eq('id', id);
   if (linkErr) { demoLinkMsg = 'Student created but link failed: ' + linkErr.message; render(); return; }
   if (dl) { dl.linkedStudentId = row.id; applyDemoConvert(dl); }
-  await wixMarkConverted(wixBookingForDemo(dl), dl, true);
+  await wixLinkDemo(dl, dl.linkedStudentId ? { status: 'Converted', converted_student_id: dl.linkedStudentId } : null);
   demoLinkingId = ''; demoLinkStudentId = ''; demoLinkMsg = '';
   wixLastCreatedStudentId = row.id;
   demoLogMsg = `✓ Student "${name}"${row.student_code ? ' (' + row.student_code + ')' : ''} created and linked. Marked Converted — bonus will appear in payroll.`; render();
@@ -4087,7 +4084,7 @@ async function linkDemoToStudent(id) {
   const { error } = await sb.from('demo_logs').update({ linked_student_id: demoLinkStudentId, ...demoConvertFields(dl) }).eq('id', id);
   if (error) { demoLinkMsg = 'Error: ' + error.message; render(); return; }
   if (dl) { dl.linkedStudentId = demoLinkStudentId; applyDemoConvert(dl); }
-  const wb = await wixMarkConverted(wixBookingForDemo(dl), dl, true);
+  const wb = await wixLinkDemo(dl, dl.linkedStudentId ? { status: 'Converted', converted_student_id: dl.linkedStudentId } : null);
   demoLinkingId = ''; demoLinkStudentId = ''; demoLinkMsg = '';
   demoLogMsg = 'Linked student and marked Converted — ₹100 bonus will appear in payroll.' + (wb ? ' Wix booking updated.' : ''); render();
 }
@@ -4112,13 +4109,28 @@ function wixBookingForDemo(dl) {
   const linked = data.wixBookings.find(b => b.demoLogId === dl.id);
   if (linked) return linked;
   const ph = phoneKey(dl.parentMobile), nm = (dl.studentName || '').trim().toLowerCase();
-  const open = data.wixBookings.filter(b => b.status !== 'Converted' && (ph ? phoneKey(b.phone) === ph : !!nm && (b.studentName || '').trim().toLowerCase() === nm));
+  const liveElsewhere = b => b.demoLogId && data.demoLogs.some(d => d.id === b.demoLogId && d.status !== 'Cancelled');
+  const open = data.wixBookings.filter(b => b.status !== 'Converted' && !liveElsewhere(b) && (ph ? phoneKey(b.phone) === ph : !!nm && (b.studentName || '').trim().toLowerCase() === nm));
   return open.length === 1 ? open[0] : null;
 }
+// The booking that follows this demo. An unlinked match is linked (after asking), so every later change in Demo Register,
+// including the teacher's own Mark done, reaches its card. extra = more booking fields to save at the same time.
+async function wixLinkDemo(dl, extra) {
+  const wb = wixBookingForDemo(dl);
+  if (!wb) return null;
+  const linked = wb.demoLogId === dl.id;
+  if (!linked && !confirm('Link this demo to the website booking for ' + (wb.studentName || 'this parent') + ' (' + (wb.phone || 'no mobile') + ', now ' + wb.status + ')?\n\nIts Demo Bookings card will then follow every change you make in Demo Register.')) return null;
+  const f = Object.assign(linked ? {} : { demo_log_id: dl.id, scheduled_teacher_id: dl.teacherId || null, scheduled_date: dl.date || null, scheduled_time: dl.demoTime || null }, extra || {});
+  if (!Object.keys(f).length) return wb;
+  const { error } = await sb.from('wix_demo_bookings').update(f).eq('id', wb.id);
+  if (error) { alert('Website booking not updated: ' + error.message); return null; }
+  const map = { status: 'status', demo_log_id: 'demoLogId', scheduled_teacher_id: 'scheduledTeacherId', scheduled_date: 'scheduledDate', scheduled_time: 'scheduledTime', converted_student_id: 'convertedStudentId' };
+  Object.keys(f).forEach(k => { if (map[k]) wb[map[k]] = f[k] == null ? '' : f[k]; });
+  return wb;
+}
 // Mark the website booking Converted (and link it to the demo) after its demo log was converted.
-async function wixMarkConverted(wb, dl, ask) {
+async function wixMarkConverted(wb, dl) {
   if (!wb || !dl || !dl.linkedStudentId) return null;
-  if (ask && wb.demoLogId !== dl.id && !confirm('Also mark the website booking for ' + (wb.studentName || 'this parent') + ' (' + (wb.phone || 'no mobile') + ', now ' + wb.status + ') as Converted?')) return null;
   const { error } = await sb.from('wix_demo_bookings').update({ status: 'Converted', converted_student_id: dl.linkedStudentId, demo_log_id: dl.id }).eq('id', wb.id);
   if (error) { alert('Website booking not updated: ' + error.message); return null; }
   wb.status = 'Converted'; wb.convertedStudentId = dl.linkedStudentId; wb.demoLogId = dl.id;
@@ -4127,17 +4139,14 @@ async function wixMarkConverted(wb, dl, ask) {
 // Card button: the demo was already converted in Demo Register but this booking was never linked to it.
 async function wixSyncConverted(bookingId, demoId) {
   const wb = data.wixBookings.find(b => b.id === bookingId), dl = data.demoLogs.find(d => d.id === demoId);
-  if (!(await wixMarkConverted(wb, dl, false))) { render(); return; }
+  if (!(await wixMarkConverted(wb, dl))) { render(); return; }
   wixBookingsFilter = 'Converted';
   wixBookingsMsg = 'Booking marked Converted ✓'; render();
 }
 // Keep the website booking's status in step with its demo log.
 async function syncWixFromDemo(demoId, status) {
-  const wb = data.wixBookings.find(b => b.demoLogId === demoId);
-  if (!wb) return null;
-  await sb.from('wix_demo_bookings').update({ status }).eq('id', wb.id);
-  wb.status = status;
-  return wb;
+  const dl = data.demoLogs.find(d => d.id === demoId);
+  return dl ? wixLinkDemo(dl, { status }) : null;
 }
 // Demo needs a result: Done with no Converted/Lost yet, or still Pending after the demo date.
 function demoWaiting(d) {
@@ -4679,14 +4688,9 @@ async function saveEditDemo(id) {
   const dl = data.demoLogs.find(d => d.id === id);
   if (dl) { Object.assign(dl, { date: updates.date, teacherId: updates.teacher_id, subjectId: updates.subject_id||'', board: updates.board||'', studentName: updates.student_name||'', parentMobile: updates.parent_mobile||'', notes: updates.notes||'', demoTime: updates.demo_time||'' }); }
   // Keep the linked website booking's date, time and teacher in step.
-  const wb = data.wixBookings.find(b => b.demoLogId === id);
-  let wbErr = null;
-  if (wb && (wb.scheduledDate !== updates.date || wb.scheduledTime !== (updates.demo_time || '') || wb.scheduledTeacherId !== updates.teacher_id)) {
-    ({ error: wbErr } = await sb.from('wix_demo_bookings').update({ scheduled_date: updates.date, scheduled_time: updates.demo_time, scheduled_teacher_id: updates.teacher_id }).eq('id', wb.id));
-    if (!wbErr) Object.assign(wb, { scheduledDate: updates.date, scheduledTime: updates.demo_time || '', scheduledTeacherId: updates.teacher_id });
-  }
+  const wb = dl ? await wixLinkDemo(dl, { scheduled_date: updates.date, scheduled_time: updates.demo_time, scheduled_teacher_id: updates.teacher_id }) : null;
   editingDemoId = ''; editDemoDraft = {};
-  demoLogMsg = 'Updated.' + (wbErr ? ' Website booking not updated: ' + wbErr.message : wb ? ' Website booking updated.' : ''); render();
+  demoLogMsg = 'Updated.' + (wb ? ' Website booking updated.' : ''); render();
 }
 // No separate timing-review table is used. Provisional times are identified by the agreed
 // placeholder convention and cease to require review when the teacher changes the time.
