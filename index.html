@@ -337,7 +337,7 @@ const APP_VERSION = '2026.10';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-10-30 11:05 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-30 12:45 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -4034,12 +4034,7 @@ async function convertDemoLog(id) {
   const { error } = await sb.from('demo_logs').update(demoConvertFields(dl)).eq('id', id);
   if (error) { demoLogMsg = 'Error: ' + error.message; render(); return; }
   applyDemoConvert(dl);
-  // Sync linked Wix booking → Converted
-  const wb = data.wixBookings.find(b => b.demoLogId === id);
-  if (wb) {
-    await sb.from('wix_demo_bookings').update({ status: 'Converted', converted_student_id: dl.linkedStudentId }).eq('id', wb.id);
-    wb.status = 'Converted'; wb.convertedStudentId = dl.linkedStudentId;
-  }
+  const wb = await wixMarkConverted(wixBookingForDemo(dl), dl, true);
   demoLogMsg = 'Marked Converted — ₹100 bonus will appear in payroll.' + (wb ? ' Wix booking updated.' : ''); render();
 }
 async function cancelDemoLog(id) {
@@ -4067,12 +4062,7 @@ async function createAndLinkDemo(id, nameFromDemo) {
   const { error: linkErr } = await sb.from('demo_logs').update({ linked_student_id: row.id, ...demoConvertFields(dl) }).eq('id', id);
   if (linkErr) { demoLinkMsg = 'Student created but link failed: ' + linkErr.message; render(); return; }
   if (dl) { dl.linkedStudentId = row.id; applyDemoConvert(dl); }
-  // Sync wix booking
-  const wb = data.wixBookings.find(b => b.demoLogId === id);
-  if (wb) {
-    await sb.from('wix_demo_bookings').update({ status: 'Converted', converted_student_id: row.id }).eq('id', wb.id);
-    wb.status = 'Converted'; wb.convertedStudentId = row.id;
-  }
+  await wixMarkConverted(wixBookingForDemo(dl), dl, true);
   demoLinkingId = ''; demoLinkStudentId = ''; demoLinkMsg = '';
   wixLastCreatedStudentId = row.id;
   demoLogMsg = `✓ Student "${name}"${row.student_code ? ' (' + row.student_code + ')' : ''} created and linked. Marked Converted — bonus will appear in payroll.`; render();
@@ -4097,12 +4087,7 @@ async function linkDemoToStudent(id) {
   const { error } = await sb.from('demo_logs').update({ linked_student_id: demoLinkStudentId, ...demoConvertFields(dl) }).eq('id', id);
   if (error) { demoLinkMsg = 'Error: ' + error.message; render(); return; }
   if (dl) { dl.linkedStudentId = demoLinkStudentId; applyDemoConvert(dl); }
-  // Sync linked Wix booking → Converted
-  const wb = data.wixBookings.find(b => b.demoLogId === id);
-  if (wb) {
-    await sb.from('wix_demo_bookings').update({ status: 'Converted', converted_student_id: demoLinkStudentId }).eq('id', wb.id);
-    wb.status = 'Converted'; wb.convertedStudentId = demoLinkStudentId;
-  }
+  const wb = await wixMarkConverted(wixBookingForDemo(dl), dl, true);
   demoLinkingId = ''; demoLinkStudentId = ''; demoLinkMsg = '';
   demoLogMsg = 'Linked student and marked Converted — ₹100 bonus will appear in payroll.' + (wb ? ' Wix booking updated.' : ''); render();
 }
@@ -4119,6 +4104,32 @@ function applyDemoConvert(dl) {
   if (!dl) return;
   if (demoOutcomeReady) { dl.doneAt = demoDoneDate(dl); dl.lostAt = ''; dl.lostReason = ''; dl.lostNote = ''; }
   dl.status = 'Converted'; dl.convertedAt = todayStr;
+}
+// Website booking for a demo log: the one linked to it, else the only booking not yet Converted with the same parent mobile
+// (or, with no mobile, the same name). Demos added straight in Demo Register are not linked to their booking.
+function wixBookingForDemo(dl) {
+  if (!dl) return null;
+  const linked = data.wixBookings.find(b => b.demoLogId === dl.id);
+  if (linked) return linked;
+  const ph = phoneKey(dl.parentMobile), nm = (dl.studentName || '').trim().toLowerCase();
+  const open = data.wixBookings.filter(b => b.status !== 'Converted' && (ph ? phoneKey(b.phone) === ph : !!nm && (b.studentName || '').trim().toLowerCase() === nm));
+  return open.length === 1 ? open[0] : null;
+}
+// Mark the website booking Converted (and link it to the demo) after its demo log was converted.
+async function wixMarkConverted(wb, dl, ask) {
+  if (!wb || !dl || !dl.linkedStudentId) return null;
+  if (ask && wb.demoLogId !== dl.id && !confirm('Also mark the website booking for ' + (wb.studentName || 'this parent') + ' (' + (wb.phone || 'no mobile') + ', now ' + wb.status + ') as Converted?')) return null;
+  const { error } = await sb.from('wix_demo_bookings').update({ status: 'Converted', converted_student_id: dl.linkedStudentId, demo_log_id: dl.id }).eq('id', wb.id);
+  if (error) { alert('Website booking not updated: ' + error.message); return null; }
+  wb.status = 'Converted'; wb.convertedStudentId = dl.linkedStudentId; wb.demoLogId = dl.id;
+  return wb;
+}
+// Card button: the demo was already converted in Demo Register but this booking was never linked to it.
+async function wixSyncConverted(bookingId, demoId) {
+  const wb = data.wixBookings.find(b => b.id === bookingId), dl = data.demoLogs.find(d => d.id === demoId);
+  if (!(await wixMarkConverted(wb, dl, false))) { render(); return; }
+  wixBookingsFilter = 'Converted';
+  wixBookingsMsg = 'Booking marked Converted ✓'; render();
 }
 // Keep the website booking's status in step with its demo log.
 async function syncWixFromDemo(demoId, status) {
@@ -16016,6 +16027,16 @@ function wixBookingFormHtml(b) {
       ${sent ? `<div style="color:var(--muted);font-size:11px;margin-top:4px;word-break:break-all">${esc(sent)}</div>` : ''}
     </div>`;
 }
+// Booking not Converted, but its demo (linked, or same parent mobile) is Converted in Demo Register.
+function wixConvertedElsewhereHtml(b) {
+  if (b.status === 'Converted') return '';
+  const ph = phoneKey(b.phone);
+  const dl = data.demoLogs.find(d => d.status === 'Converted' && d.linkedStudentId && (d.id === b.demoLogId || (ph && phoneKey(d.parentMobile) === ph)));
+  if (!dl) return '';
+  const st = data.students.find(s => s.id === dl.linkedStudentId);
+  return `<div style="margin-top:8px;padding:8px;border:1px solid var(--forest);border-radius:6px;font-size:12px;background:rgba(60,94,66,0.07)">🎓 Demo Register shows this demo Converted${st ? ' (student <b>' + esc(st.name) + '</b>)' : ''} on ${esc(dayDate(dl.convertedAt || dl.date))}, but this booking still says ${esc(b.status)}.
+    <button class="btn-small btn-primary" style="background:var(--forest);margin-left:6px;font-size:11px" onclick="wixSyncConverted('${b.id}','${dl.id}')">✓ Mark Converted here</button></div>`;
+}
 function renderWixBookings() {
   const filters = ['New', 'Scheduled', 'Done', 'Converted', 'Lost', 'Cancelled', 'All'].concat(wixCallsReady ? ['Calls due'] : []);
   const newCount = data.wixBookings.filter(b => b.status === 'New').length;
@@ -16158,6 +16179,7 @@ function renderWixBookings() {
         ${wixBookingFormHtml(b)}
         ${wixCallsHtml(b)}
         ${scheduleBlock}
+        ${wixConvertedElsewhereHtml(b)}
         ${convertBlock}
       </div>`;
   }).join('');
