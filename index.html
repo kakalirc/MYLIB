@@ -337,7 +337,7 @@ const APP_VERSION = '2026.10';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-10-30 13:10 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-30 13:20 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -3264,7 +3264,7 @@ function razorpayFeeBoxHtml() {
   const list = rzpFeeWaiting();
   const dismissedHtml = rzpFeeDismissedHtml();
   if (!list.length && !rzpFeeMsg && !dismissedHtml) return '';
-  const msgHtml = rzpFeeMsg ? `<div style="font-size:13px;font-weight:500;margin-bottom:8px;color:${rzpFeeMsg.includes('✓') ? 'var(--green)' : 'var(--brick)'}">${esc(rzpFeeMsg)}</div>` : '';
+  const msgHtml = rzpFeeMsg ? `<div style="font-size:13px;font-weight:500;margin-bottom:8px;color:${rzpFeeMsg.includes('✓') ? 'var(--forest)' : 'var(--brick)'}">${esc(rzpFeeMsg)}</div>` : '';
   if (!list.length) return `<div style="margin:10px 0">${msgHtml}${dismissedHtml}</div>`;
   const pendingFamilies = [...new Set(data.subscriptions.filter(r => r.kind === 'Request').map(r => familyKeyOf(r.studentId)))]
     .map(k => ({ k, label: rzpFeeFamilyLabel(k), total: familyPendingRequests(k).reduce((a, r) => a + (r.amountPaid || 0), 0) }))
@@ -4401,7 +4401,7 @@ async function saveWixTimeChange() {
 }
 function wixTimeFormHtml(b) {
   if (wixTimeSentId === b.id && b.phone) return `
-    <div style="margin-top:8px;padding:8px;border:1px solid var(--green);border-radius:6px;font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <div style="margin-top:8px;padding:8px;border:1px solid var(--forest);border-radius:6px;font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <span>New time saved. Tell the parent:</span>
       ${waButtonHtml(b.phone, '📤 Send new time on WhatsApp', wixBookingConfirmMessage(b), { style: 'font-size:11px', title: 'Send the demo confirmation with the new time' })}
       <button class="btn-small" style="font-size:11px" onclick="wixTimeSentId='';render()">Done</button>
@@ -4631,7 +4631,7 @@ function wixAckHtml(b) {
   if (!b.phone || b.status !== 'New') return '';
   const sent = b.ackSentAt ? new Date(b.ackSentAt).toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
   return `<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px">
-      ${sent ? `<span style="color:var(--green)">✓ Ack sent · ${esc(sent)}</span>` : (b.ackReady ? `<span style="color:var(--brick)">Not acknowledged yet</span>` : '')}
+      ${sent ? `<span style="color:var(--forest)">✓ Ack sent · ${esc(sent)}</span>` : (b.ackReady ? `<span style="color:var(--brick)">Not acknowledged yet</span>` : '')}
       ${waButtonHtml(b.phone, sent ? '📤 Send ack again' : '📤 Send acknowledgement', wixBookingAckMessage(b), { style: 'font-size:11px', title: 'Thank the parent for the booking on WhatsApp', data: `data-wa-ack="${b.id}"` })}
       <button class="btn-small" style="font-size:11px" title="Copy the acknowledgement message" onclick="copyText(wixBookingAckMessage(data.wixBookings.find(x=>x.id==='${b.id}')),this)">Copy msg</button>
     </div>`;
@@ -14562,7 +14562,7 @@ function renderDashboard() {
     <div class="card" style="margin-bottom:16px">
       <h2 style="margin-bottom:10px">Demo Funnel <span class="hint" style="font-size:12px;font-weight:400">· ${fTotal} total · ${convRate}% converted</span></h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        ${[['New',fNew,'var(--brick)'],['Scheduled',fSched,'var(--accent)'],['Done',fDone,'#6b5ca5'],['Converted',fConv,'var(--green)'],['Lost',fLost,'#a0522d'],['Cancelled',fCancelled,'#888']].map(([label,cnt,color])=>`
+        ${[['New',fNew,'var(--brick)'],['Scheduled',fSched,'var(--accent)'],['Done',fDone,'#6b5ca5'],['Converted',fConv,'var(--forest)'],['Lost',fLost,'#a0522d'],['Cancelled',fCancelled,'#888']].map(([label,cnt,color])=>`
           <div onclick="setTab('wixbookings');wixBookingsFilter='${label}';render()" style="cursor:pointer;flex:1;min-width:90px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px 12px;text-align:center;transition:border-color 0.15s" onmouseover="this.style.borderColor='${color}'" onmouseout="this.style.borderColor='var(--line)'">
             <div style="font-family:'Zilla Slab',serif;font-size:26px;font-weight:700;color:${cnt===0?'var(--muted)':color};line-height:1">${cnt}</div>
             <div style="font-size:11.5px;color:var(--muted);margin-top:4px">${label}</div>
@@ -16040,13 +16040,19 @@ function wixBookingFormHtml(b) {
 }
 // Booking not Converted, but its demo (linked, or same parent mobile) is Converted in Demo Register.
 function wixConvertedElsewhereHtml(b) {
-  if (b.status === 'Converted') return '';
-  const ph = phoneKey(b.phone);
-  const dl = data.demoLogs.find(d => d.status === 'Converted' && d.linkedStudentId && (d.id === b.demoLogId || (ph && phoneKey(d.parentMobile) === ph)));
+  if (b.status === 'Converted' && b.convertedStudentId) return '';
+  const dl = wixConvertedDemoFor(b);
   if (!dl) return '';
   const st = data.students.find(s => s.id === dl.linkedStudentId);
-  return `<div style="margin-top:8px;padding:8px;border:1px solid var(--forest);border-radius:6px;font-size:12px;background:rgba(60,94,66,0.07)">🎓 Demo Register shows this demo Converted${st ? ' (student <b>' + esc(st.name) + '</b>)' : ''} on ${esc(dayDate(dl.convertedAt || dl.date))}, but this booking still says ${esc(b.status)}.
-    <button class="btn-small btn-primary" style="background:var(--forest);margin-left:6px;font-size:11px" onclick="wixSyncConverted('${b.id}','${dl.id}')">✓ Mark Converted here</button></div>`;
+  const done = b.status === 'Converted';
+  return `<div style="margin-top:8px;padding:8px;border:1px solid var(--forest);border-radius:6px;font-size:12px;background:rgba(60,94,66,0.07)">🎓 Demo Register shows this demo Converted${st ? ' (student <b>' + esc(st.name) + '</b>)' : ''} on ${esc(dayDate(dl.convertedAt || dl.date))}, but ${done ? 'this booking is not linked to that student' : 'this booking still says ' + esc(b.status)}.
+    <button class="btn-small btn-primary" style="background:var(--forest);margin-left:6px;font-size:11px" onclick="wixSyncConverted('${b.id}','${dl.id}')">✓ ${done ? 'Link student here' : 'Mark Converted here'}</button></div>`;
+}
+// Converted demo in Demo Register for this booking: linked, same parent mobile, or same name.
+function wixConvertedDemoFor(b) {
+  const ph = phoneKey(b.phone), nm = (b.studentName || '').trim().toLowerCase();
+  return data.demoLogs.find(d => d.status === 'Converted' && d.linkedStudentId && (d.id === b.demoLogId
+    || (ph && phoneKey(d.parentMobile) === ph) || (nm && (d.studentName || '').trim().toLowerCase() === nm))) || null;
 }
 function renderWixBookings() {
   const filters = ['New', 'Scheduled', 'Done', 'Converted', 'Lost', 'Cancelled', 'All'].concat(wixCallsReady ? ['Calls due'] : []);
@@ -16055,7 +16061,7 @@ function renderWixBookings() {
   const list = data.wixBookings.filter(b => wixFilterMatch(b, wixBookingsFilter) && (!wixPaidReady || wixPaidFilter === 'All' || (wixPaidFilter === 'Paid') === !!b.paid));
   const d = wixBookingScheduleDraft;
   const ed = wixBookingEditDraft;
-  const statusColor = s => s === 'New' ? 'var(--brick)' : s === 'Scheduled' ? 'var(--accent)' : s === 'Done' ? '#6b5ca5' : s === 'Converted' ? 'var(--green)' : s === 'Lost' ? '#a0522d' : '#888';
+  const statusColor = s => s === 'New' ? 'var(--brick)' : s === 'Scheduled' ? 'var(--accent)' : s === 'Done' ? '#6b5ca5' : s === 'Converted' ? 'var(--forest)' : s === 'Lost' ? '#a0522d' : '#888';
 
   // Age indicator helper — only for active (New/Scheduled) bookings
   function ageIndicator(submittedAt) {
@@ -16146,13 +16152,15 @@ function renderWixBookings() {
     const convertedStudent = alreadyConverted ? data.students.find(s => s.id === b.convertedStudentId) : null;
     let convertBlock = '';
     if (alreadyConverted) {
-      convertBlock = `<div style="margin-top:8px;font-size:12px;color:var(--green)">🎓 Student created: <b>${esc(convertedStudent ? convertedStudent.name : b.convertedStudentId)}</b></div>`;
+      convertBlock = `<div style="margin-top:8px;font-size:12px;color:var(--forest)">🎓 Student created: <b>${esc(convertedStudent ? convertedStudent.name : b.convertedStudentId)}</b></div>`;
+    } else if (wixConvertedDemoFor(b)) {
+      convertBlock = ''; // the note above links the student who already joined; a new student would be a duplicate
     } else if (['Converted', 'Scheduled', 'Done', 'Lost'].includes(b.status)) {
       if (isConverting) {
         convertBlock = `
           <div style="background:rgba(60,94,66,0.07);border:1px solid var(--green,#3c5e42);border-radius:6px;padding:10px;margin-top:10px">
             <div style="font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--forest);margin-bottom:8px">CREATE STUDENT RECORD</div>
-            ${wixConvertMsg ? `<div style="font-size:12px;margin-bottom:8px;font-weight:500;color:${wixConvertMsg.startsWith('✓')?'var(--green)':'var(--brick)'}">${esc(wixConvertMsg)}</div>` : ''}
+            ${wixConvertMsg ? `<div style="font-size:12px;margin-bottom:8px;font-weight:500;color:${wixConvertMsg.startsWith('✓')?'var(--forest)':'var(--brick)'}">${esc(wixConvertMsg)}</div>` : ''}
             <input type="text" placeholder="Student name" value="${escAttr(wixConvertDraft.studentName||b.studentName)}"
               oninput="wixConvertDraft.studentName=this.value;wixConvertDraft.confirmed=false;wixConvertMsg=''"
               style="width:100%;margin-bottom:8px">
@@ -16168,8 +16176,8 @@ function renderWixBookings() {
     }
 
     const showAge = b.status === 'New' || b.status === 'Scheduled';
-    const paidBlock = !wixPaidReady ? '' : (b.amount === 0 && !b.paid) ? `<div style="margin-top:6px;font-size:12px;color:var(--green)">Free demo</div>` : b.paid
-      ? `<div style="margin-top:6px;font-size:12px;color:var(--green)">✓ Paid${b.paidVia ? ' · ' + esc(b.paidVia) : ''}${b.paidAt ? ' · ' + new Date(b.paidAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}${b.paymentId ? ` · <span class="hint" style="font-size:11px">${esc(b.paymentId)}</span>` : ''} <button class="btn-small" style="font-size:10px;margin-left:6px" onclick="markWixBookingPaid('${b.id}', false)">Undo</button></div>`
+    const paidBlock = !wixPaidReady ? '' : (b.amount === 0 && !b.paid) ? `<div style="margin-top:6px;font-size:12px;color:var(--forest)">Free demo</div>` : b.paid
+      ? `<div style="margin-top:6px;font-size:12px;color:var(--forest)">✓ Paid${b.paidVia ? ' · ' + esc(b.paidVia) : ''}${b.paidAt ? ' · ' + new Date(b.paidAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}${b.paymentId ? ` · <span class="hint" style="font-size:11px">${esc(b.paymentId)}</span>` : ''} <button class="btn-small" style="font-size:10px;margin-left:6px" onclick="markWixBookingPaid('${b.id}', false)">Undo</button></div>`
       : `<div style="margin-top:6px;font-size:12px;color:var(--brick)">Not paid yet <button class="btn-small" style="font-size:10px;margin-left:6px" onclick="markWixBookingPaid('${b.id}', true)">Mark paid</button></div>`;
     return `
       <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px">
@@ -16200,8 +16208,8 @@ function renderWixBookings() {
       <h2>Wix Demo Bookings ${helpBtn('demo-bookings')} ${newCount > 0 ? `<span class="tag" style="background:var(--brick);color:#fff">${newCount} new</span>` : ''}</h2>
       <p class="hint" style="margin:0 0 12px">Paid demo bookings from the LIB Education website. Call the student, then schedule a teacher and time.</p>
       ${manualDemoFormHtml()}
-      ${wixBookingsMsg ? `<div style="margin-bottom:10px;font-size:13px;font-weight:500;${wixBookingsMsg.includes('✓') ? 'color:var(--green)' : 'color:var(--brick)'}">${esc(wixBookingsMsg)}</div>` : ''}
-      ${wixConvertMsg && !wixConvertingId ? `<div style="margin-bottom:10px;font-size:13px;font-weight:500;${wixConvertMsg.startsWith('✓') ? 'color:var(--green)' : 'color:var(--brick)'}">${esc(wixConvertMsg)}${wixConvertMsg.startsWith('✓') && wixLastCreatedStudentId ? ` <button class="btn-small btn-primary" style="font-size:12px;margin-left:8px" onclick="setTab('students');selectStudent('${wixLastCreatedStudentId}');wixConvertMsg='';wixLastCreatedStudentId='';render()">→ Open student record</button>` : ''}</div>` : ''}
+      ${wixBookingsMsg ? `<div style="margin-bottom:10px;font-size:13px;font-weight:500;${wixBookingsMsg.includes('✓') ? 'color:var(--forest)' : 'color:var(--brick)'}">${esc(wixBookingsMsg)}</div>` : ''}
+      ${wixConvertMsg && !wixConvertingId ? `<div style="margin-bottom:10px;font-size:13px;font-weight:500;${wixConvertMsg.startsWith('✓') ? 'color:var(--forest)' : 'color:var(--brick)'}">${esc(wixConvertMsg)}${wixConvertMsg.startsWith('✓') && wixLastCreatedStudentId ? ` <button class="btn-small btn-primary" style="font-size:12px;margin-left:8px" onclick="setTab('students');selectStudent('${wixLastCreatedStudentId}');wixConvertMsg='';wixLastCreatedStudentId='';render()">→ Open student record</button>` : ''}</div>` : ''}
       <div class="row-form" style="gap:6px;flex-wrap:wrap;margin-bottom:14px">
         ${filters.map(f => { const cnt = data.wixBookings.filter(b => wixFilterMatch(b, f)).length; return `<button class="btn-small ${wixBookingsFilter===f?'btn-primary':''}" onclick="wixBookingsFilter='${f}';wixBookingsMsg='';wixBookingActionId=null;wixBookingEditId=null;render()">${f}${cnt > 0 ? ` (${cnt})` : ''}</button>`; }).join('')}
         ${wixPaidReady ? `<select onchange="wixPaidFilter=this.value;render()" style="font-size:12px">${['All', 'Paid', 'Not paid'].map(f => `<option value="${f}" ${wixPaidFilter === f ? 'selected' : ''}>${f === 'All' ? 'Paid or not' : f}</option>`).join('')}</select>` : ''}
@@ -16274,7 +16282,7 @@ function renderWixBookings() {
                 + '<button class="btn-small btn-primary" style="font-size:11px;background:var(--forest)" onclick="createAndLinkDemo(\''+d.id+'\',\''+d.studentName.replace(/'/g,"\\'")+'\')">'
                 + '🎓 Create Student &amp; Convert</button>'
                 + ' <button class="btn-small" style="font-size:11px" onclick="demoLinkingId=\'\';demoLinkStudentId=\'\';demoLinkSearch=\'\';render()">Cancel</button>'
-                + (demoLinkMsg ? '<div style="font-size:11px;color:'+(demoLinkMsg.startsWith('✓')?'var(--green)':'var(--brick)')+'">'+esc(demoLinkMsg)+'</div>' : '')
+                + (demoLinkMsg ? '<div style="font-size:11px;color:'+(demoLinkMsg.startsWith('✓')?'var(--forest)':'var(--brick)')+'">'+esc(demoLinkMsg)+'</div>' : '')
                 + '</div>'
               : (['Pending', 'Done', 'Lost'].includes(d.status) ? '<button class="btn-small btn-primary" style="font-size:11px" onclick="demoLinkingId=\''+d.id+'\';demoLinkStudentId=\'\';demoLinkMsg=\'\';demoLinkSearch=\'\';render()">Link &amp; Convert</button>' : (sName!=='—'?esc(sName):'<span class="hint">—</span>'));
             const msgBtns = (() => {
