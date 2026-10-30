@@ -337,7 +337,7 @@ const APP_VERSION = '2026.10';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-10-30 10:30 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-30 10:55 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -13227,6 +13227,46 @@ function exportStudentBalance() {
   XLSX.writeFile(wb, 'student-balance-report.xlsx');
 }
 
+// ---- This Centre Students: active students whose Mode is Offline (Rishin, 2026-10-30) ----
+function centreStudents() {
+  return byName(data.students.filter(s => !s.archived && s.modePreference === 'Offline'));
+}
+function centreStudentRow(s) {
+  const g = (grades || []).find(x => x.id === s.gradeId);
+  return { student: studentLabel(s), grade: g ? g.name : '', parent: s.parentName || '', mobile: s.mobileNumber || '',
+    subjects: subjectsForStudent(s.id).map(x => x.name).join(', ') };
+}
+function centreStudentsCardHtml() {
+  const rows = centreStudents().map(centreStudentRow);
+  const body = rows.length ? `
+    <input type="text" placeholder="Search by name, ID, parent, mobile or subject…" oninput="filterCentreStudents(this.value)" style="width:260px;margin-bottom:8px">
+    <div class="table-scroll"><table id="centreStudentsTable">
+      <tr><th>Student</th><th>Grade</th><th>Parent</th><th>Mobile</th><th>Subjects</th></tr>
+      ${rows.map(r => `<tr data-search="${esc([r.student, r.grade, r.parent, r.mobile, r.subjects].join(' ').toLowerCase())}"><td>${esc(r.student)}</td><td>${esc(r.grade) || '—'}</td><td>${esc(r.parent) || '—'}</td><td>${esc(r.mobile) || '—'}</td><td>${esc(r.subjects) || '—'}</td></tr>`).join('')}
+    </table></div>
+    <div class="row-form" style="margin-top:12px"><button class="btn-gold" onclick="exportCentreStudents()">Export to Excel</button></div>`
+    : '<div class="empty">No active students have Mode set to Offline.</div>';
+  return `
+    <div class="card">
+      <h2>This Centre Students</h2>
+      <div class="hint">Active students whose Mode is Offline.</div>
+      <div style="font-size:18px;font-weight:600;margin:8px 0">${rows.length} student${rows.length === 1 ? '' : 's'}</div>
+      ${body}
+    </div>`;
+}
+// Hides rows in place so the search box keeps focus (no re-render).
+function filterCentreStudents(q) {
+  q = String(q || '').trim().toLowerCase();
+  document.querySelectorAll('#centreStudentsTable tr[data-search]').forEach(tr => {
+    tr.style.display = !q || tr.dataset.search.includes(q) ? '' : 'none';
+  });
+}
+function exportCentreStudents() {
+  const rows = centreStudents().map(centreStudentRow).map(r => ({ Student: r.student, Grade: r.grade, Parent: r.parent, Mobile: r.mobile, Subjects: r.subjects }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length ? rows : [{ Student: 'None' }]), 'This Centre Students');
+  XLSX.writeFile(wb, 'this-centre-students.xlsx');
+}
 function exportStudentsByTeacher() {
   const wb = XLSX.utils.book_new();
   const teacherPool = studentsByTeacherFilter === '' ? [] : (studentsByTeacherFilter === 'ALL' ? data.teachers : data.teachers.filter(t=>t.id===studentsByTeacherFilter));
@@ -15119,6 +15159,7 @@ function renderReports(only) {
   `;
   if (only === 'payroll') return payrollCardHtml;
   return `
+    ${centreStudentsCardHtml()}
     <div class="card">
       <h2>Student report</h2>
       <div class="hint">Pick a student and a month to see their attendance record, subscription balances, and payment history in one place.</div>
