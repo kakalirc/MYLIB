@@ -75,6 +75,7 @@ def guide():
         'At the start of the month LIB sends one WhatsApp message for the family: each child’s subjects, classes and amount, the total, '
         'and a line on <b>how we worked it out</b> (for example, classes per week this month).',
         '<b>Fees due for your children</b> at the top of the page shows the total for every child.',
+        '<b>Bulk discount:</b> all your children’s classes are added up. Pay all the fees due together to keep it; if only part is paid, the discount is worked out again on the classes paid for.',
     ]) + h3('Pay by UPI') + steps([
         ('Select and pay', 'In Fee Requests, tick what you are paying for and tap <b>Pay ₹…</b>.'),
         ('Pay by UPI', 'Copy the UPI ID (or scan the QR code on a computer) and put the <b>Unique ID</b> shown in your UPI app’s note.'),

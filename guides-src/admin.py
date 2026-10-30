@@ -110,7 +110,7 @@ def guide():
         '<b>Class Frequency:</b> each saved weekday counted in the month, minus clearly cancelled teacher-leave classes.',
         '<b>Classes left:</b> paid minus used (Absent counts as used). Owed classes are shown separately.',
         '<b>Packages:</b> a last payment of 30, 50, 60 or 100 classes asks for the same package again.',
-        '<b>Amount:</b> rate × classes, with the Discount structure. Group and Individual are always separate.',
+        '<b>Amount:</b> rate × classes, less the bulk discount: the best tier reached by the request, the child’s subjects added up, or the whole family added up. Tick <b>No discount</b> on a row or family for this run only.',
     ]) + note('Keep a copy', '<b>Download Excel</b> saves the whole run.', 'tip'))
 
     g.add('feemsg', 'Money', 'Fee messages and getting paid', 'One message per family; confirm each payment.', h3('Send the message') + steps([
@@ -122,7 +122,9 @@ def guide():
         'Sending records the date, so you can see when the family was last reminded and how many times.',
         'Brothers and sisters are one family when they share a parent login or mobile. Tick <b>Bill separately</b> on a student to keep them out.',
     ]) + h3('Mark it paid') + bullets([
-        '<b>Mark paid</b> for one request, <b>Mark all paid</b> for the whole family with one date and reference.',
+        '<b>Mark paid</b> for one request, <b>Mark all paid</b> for the whole family with one date and reference. Type the <b>Amount received</b>.',
+        '<b>Part payment</b> (less than due, or only some of a family’s discounted requests): the discount is worked out again on the classes paid for, the rest becomes a new pending request, extra money goes in Remarks. You confirm first.',
+        '<b>No bulk discount</b> on a student’s page switches the discount off for the whole family.',
         '<b>Razorpay payments to confirm:</b> check the suggested family and <b>Confirm</b>; wrong family? Pick another. <b>Not a fee</b> sets it aside.',
     ]))
 
