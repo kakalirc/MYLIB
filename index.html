@@ -337,7 +337,7 @@ const APP_VERSION = '2026.10';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-10-30 12:45 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-30 12:55 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -4678,8 +4678,15 @@ async function saveEditDemo(id) {
   if (error) { demoLogMsg = 'Error: ' + error.message; render(); return; }
   const dl = data.demoLogs.find(d => d.id === id);
   if (dl) { Object.assign(dl, { date: updates.date, teacherId: updates.teacher_id, subjectId: updates.subject_id||'', board: updates.board||'', studentName: updates.student_name||'', parentMobile: updates.parent_mobile||'', notes: updates.notes||'', demoTime: updates.demo_time||'' }); }
+  // Keep the linked website booking's date, time and teacher in step.
+  const wb = data.wixBookings.find(b => b.demoLogId === id);
+  let wbErr = null;
+  if (wb && (wb.scheduledDate !== updates.date || wb.scheduledTime !== (updates.demo_time || '') || wb.scheduledTeacherId !== updates.teacher_id)) {
+    ({ error: wbErr } = await sb.from('wix_demo_bookings').update({ scheduled_date: updates.date, scheduled_time: updates.demo_time, scheduled_teacher_id: updates.teacher_id }).eq('id', wb.id));
+    if (!wbErr) Object.assign(wb, { scheduledDate: updates.date, scheduledTime: updates.demo_time || '', scheduledTeacherId: updates.teacher_id });
+  }
   editingDemoId = ''; editDemoDraft = {};
-  demoLogMsg = 'Updated.'; render();
+  demoLogMsg = 'Updated.' + (wbErr ? ' Website booking not updated: ' + wbErr.message : wb ? ' Website booking updated.' : ''); render();
 }
 // No separate timing-review table is used. Provisional times are identified by the agreed
 // placeholder convention and cease to require review when the teacher changes the time.
