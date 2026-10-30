@@ -54,8 +54,8 @@ if (location.hostname !== 'app.libeducation.com') {
     <h2>Student</h2>
     <label for="student_name">Student's full name *</label>
     <input type="text" id="student_name" maxlength="80" autocomplete="off" required>
-    <label for="grade_id">Grade *</label>
-    <select id="grade_id" required><option value="">Loading…</option></select>
+    <label for="grade_id">Grade <span class="opt">(optional)</span></label>
+    <select id="grade_id"><option value="">Loading…</option></select>
     <label for="board_id">Board <span class="opt">(optional)</span></label>
     <select id="board_id"><option value="">—</option></select>
     <label for="student_mobile">Student's own mobile <span class="opt">(optional, if they have one)</span></label>
@@ -140,8 +140,9 @@ function rpc(name, body) {
 function el(id) { return document.getElementById(id); }
 function addOption(sel, value, text) { var o = document.createElement('option'); o.value = value; o.textContent = text; sel.appendChild(o); }
 rpc('registration_options').then(function (o) {
-  var g = el('grade_id'); g.innerHTML = ''; addOption(g, '', 'Pick the grade');
+  var g = el('grade_id'); g.innerHTML = ''; addOption(g, '', '—');
   (o.grades || []).forEach(function (x) { addOption(g, x.id, x.name); });
+  addOption(g, 'NA', 'Not applicable');
   var b = el('board_id'); (o.boards || []).forEach(function (x) { addOption(b, x.id, x.name); });
   var s = el('subjects'); s.innerHTML = '';
   (o.subjects || []).forEach(function (name) {
@@ -161,7 +162,6 @@ el('regForm').addEventListener('submit', function (e) {
   var student = el('student_name').value.trim(), parent = el('parent_name').value.trim(), mobile = digits(el('parent_mobile').value);
   var problem = !student ? "Please type the student's name."
     : /\d/.test(student) ? "The student's name can't have numbers."
-    : !el('grade_id').value ? 'Please pick the grade.'
     : !parent ? "Please type the parent's name."
     : /\d/.test(parent) ? "The parent's name can't have numbers."
     : !/^[6-9]\d{9}$/.test(mobile) ? 'Please type a 10-digit mobile number.'

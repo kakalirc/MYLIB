@@ -337,7 +337,7 @@ const APP_VERSION = '2026.10';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-10-30 13:20 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-30 19:30 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -24302,7 +24302,8 @@ async function loadRegistrations() {
   data.registrations = rows || [];
 }
 function regNewCount() { return (data.registrations || []).filter(r => r.status === 'New' && !r.archived).length; }
-function regGradeName(id) { const g = grades.find(x => String(x.id) === String(id)); return g ? g.name : ''; }
+// 'NA' = the family picked "Not applicable" on the form (SQL 77).
+function regGradeName(id) { if (id === 'NA') return 'Not applicable'; const g = grades.find(x => String(x.id) === String(id)); return g ? g.name : ''; }
 function regBoardName(id) { const b = boards.find(x => String(x.id) === String(id)); return b ? b.name : ''; }
 function regPhones(r) { return [phoneKey(r.parent_mobile), phoneKey(r.second_mobile)].filter(Boolean); }
 // Active students whose main mobile or a parent number matches the form's numbers.
@@ -24375,7 +24376,7 @@ function regOpenAccept(id) {
   if (!r) return;
   const kids = regFamily(r);
   regAcceptId = regAcceptId === id ? '' : id; regRejectId = '';
-  regAcceptDraft = { name: r.student_name || '', gradeId: r.grade_id || '', boardId: r.board_id || (kids[0] && kids[0].boardId) || '',
+  regAcceptDraft = { name: r.student_name || '', gradeId: r.grade_id === 'NA' ? '' : (r.grade_id || ''), boardId: r.board_id || (kids[0] && kids[0].boardId) || '',
     mode: r.mode_preference || '', ctype: r.class_type_preference || '', family: kids.length ? 'existing' : 'new', parentLogin: true, studentLogin: true,
     academicYear: regGuessAcademicYear(kids) };
   render();
