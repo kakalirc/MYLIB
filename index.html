@@ -337,7 +337,7 @@ const APP_VERSION = '2026.10';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-10-30 10:55 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-30 11:05 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -13247,12 +13247,17 @@ function centreStudentsCardHtml() {
     <div class="row-form" style="margin-top:12px"><button class="btn-gold" onclick="exportCentreStudents()">Export to Excel</button></div>`
     : '<div class="empty">No active students have Mode set to Offline.</div>';
   return `
-    <div class="card">
+    <div class="card" id="centreStudentsCard">
       <h2>This Centre Students</h2>
       <div class="hint">Active students whose Mode is Offline.</div>
       <div style="font-size:18px;font-weight:600;margin:8px 0">${rows.length} student${rows.length === 1 ? '' : 's'}</div>
       ${body}
     </div>`;
+}
+// Admin top bar 'This Centre Students: N' → Reports & Export, scrolled to the card.
+function openCentreStudentsReport() {
+  setTab('reports');
+  setTimeout(() => { const el = document.getElementById('centreStudentsCard'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50);
 }
 // Hides rows in place so the search box keeps focus (no re-render).
 function filterCentreStudents(q) {
@@ -24668,7 +24673,10 @@ function render() {
       <div class="brand-sub">My LIB</div>
       <div class="spacer"></div>
       <div class="who">Logged in as ${esc(currentUsername)} ${isCurrentUserSuperuserAdmin() ? '<span class="tag" style="background:var(--brick);color:#fff">Superuser Admin</span>' : '<span class="tag" style="background:#2a2e33;color:#fbf9f3">Admin</span>'}</div>
-      <div class="who">Active students: <b>${data.students.filter(s=>!s.archived).length}</b></div>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <div class="who">Active students: <b>${data.students.filter(s=>!s.archived).length}</b></div>
+        <div class="who" style="cursor:pointer" title="Open the This Centre Students report" onclick="openCentreStudentsReport()">This Centre Students: <b>${centreStudents().length}</b></div>
+      </div>
       <button class="btn-small" ${isRefreshing?'disabled':''} onclick="refreshAllData()">${isRefreshing?'Refreshing…':'↻ Refresh'}</button>
       ${refreshMsg ? `<span style="font-size:12px;color:${refreshMsg.startsWith('Could not')?'#ff9d89':'var(--gold)'}">${esc(refreshMsg)}</span>` : ''}
       ${showInstallButton ? '<button class="btn-small" onclick="triggerInstall()">Install app</button>' : ''}
