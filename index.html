@@ -337,7 +337,7 @@ const APP_VERSION = '2026.10';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-10-29 19:40 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-30 10:30 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1062,6 +1062,7 @@ let demandRunLoadError = '';
 let demandSkippedRows = [];   // preview rows not raised, each with its reason
 let demandNeverPaid = 0;
 let demandShowSkipped = false;
+let demandNoDiscount = new Set();   // preview rows ticked "No discount" (this run only)
 let demandIgnoreLeft = new Set();   // 'studentId|subjectId|type' rows where admin ticked "Ignore classes left" in the preview
 // Estimated AI cost (SQL 50): $ per million tokens per model, and the ₹ per $ rate. Admin only.
 const AI_DEFAULT_PRICES = { 'claude-haiku-4-5': { in: 1, out: 5 }, 'claude-sonnet-5-5': { in: 2, out: 10 } }; // Anthropic list prices, Oct 2026
@@ -3218,15 +3219,15 @@ async function confirmRazorpayFee(paymentId, famKey, requestIds) {
   const total = reqs.reduce((a, r) => a + (r.amountPaid || 0), 0);
   const amt = Number(p.amount || 0);
   const warn = amt < total - 0.5 || amt > total * 1.05 + 1 ? `\n\n⚠ The payment is ₹${amt.toFixed(2)} but these requests total ₹${total.toFixed(2)}.` : '';
-  if (!confirm(`Mark ${reqs.length} request${reqs.length === 1 ? '' : 's'} of ${rzpFeeFamilyLabel(famKey)} paid with Razorpay ${p.id}?${warn}`)) return;
+  // Up to 5% over is Razorpay's charge, not extra money; less than due is a part payment (bulk discount worked out again).
+  const plan = settlePlan(reqs, amt >= total - 0.5 ? Math.max(amt, total) : amt);
+  if (amt <= total * 1.05 + 1) plan.leftover = 0;
+  if (plan.part && !plan.lines.some(l => l.classes > 0)) { rzpFeeMsg = `₹${amt.toFixed(2)} does not cover even one class at the full price. Nothing was saved.`; render(); return; }
+  const intro = `Mark ${reqs.length} request${reqs.length === 1 ? '' : 's'} of ${rzpFeeFamilyLabel(famKey)} paid with Razorpay ${p.id}?`;
+  if (plan.part || plan.leftover ? !settleConfirm(plan, intro) : !confirm(intro + warn)) return;
   const date = new Date(p.captured_at || Date.now()).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });   // YYYY-MM-DD, India date
-  const failed = [];
-  for (const r of reqs) {
-    const { error } = await sb.from('subscriptions').update({ kind: 'Payment', date, payment_reference: p.id, payment_remarks: 'Razorpay' }).eq('id', r.id).eq('kind', 'Request');
-    if (error) failed.push(error.message);
-  }
+  const failed = await applySettlePlan(plan, { date, reference: p.id, remarks: 'Razorpay' });
   delete rzpFeePick[paymentId];
-  await loadStudentsAndSubscriptions();   // the database sets each payment's expiry date; fetch it
   rzpFeeMsg = failed.length ? `Could not mark ${failed.length} request(s) paid: ${failed[0]}` : `Marked paid ✓ (${reqs.length} request${reqs.length === 1 ? '' : 's'}, ${p.id})`;
   render();
 }
@@ -4794,18 +4795,20 @@ async function loadStudentsAndSubscriptions() {
   // The four reads don't depend on each other, so they run at the same time instead of one after another.
   let [stRes, phRes, enRes, subRes] = await Promise.all([
     selectAllPaged('students', ['name'],
-      STUDENT_COLUMNS + ',bill_separately'),
+      STUDENT_COLUMNS + ',bill_separately,no_bulk_discount'),
     selectAllPaged('student_phone_numbers', ['created_at']),
     selectAllPaged('student_subjects', []),
     loadSubscriptionRows(),
   ]);
   // bill_separately comes with SQL 60; until it is run, read the students without it.
+  // no_bulk_discount comes with SQL 76.
+  if (stRes.error && /no_bulk_discount/.test(stRes.error.message || '')) stRes = await selectAllPaged('students', ['name'], STUDENT_COLUMNS + ',bill_separately');
   if (stRes.error && /bill_separately/.test(stRes.error.message || '')) stRes = await selectAllPaged('students', ['name'], STUDENT_COLUMNS);
   const { data: studentRows, error: stErr } = stRes;
   if (!stErr && studentRows) {
     data.students = studentRows.map(r => {
       const existing = data.students.find(s=>s.id===r.id);
-      return { id: r.id, name: r.name, archived: !!r.archived, code: r.student_code || '', parentName: r.parent_name || '', mobileNumber: r.mobile_number || '', email: r.email || '', address: r.address || '', photo: existing ? existing.photo : '', gradeId: r.grade_id || '', boardId: r.board_id || '', academicYear: r.academic_year || '', modePreference: r.mode_preference || '', classTypePreference: r.class_type_preference || '', billSeparately: !!r.bill_separately };
+      return { id: r.id, name: r.name, archived: !!r.archived, code: r.student_code || '', parentName: r.parent_name || '', mobileNumber: r.mobile_number || '', email: r.email || '', address: r.address || '', photo: existing ? existing.photo : '', gradeId: r.grade_id || '', boardId: r.board_id || '', academicYear: r.academic_year || '', modePreference: r.mode_preference || '', classTypePreference: r.class_type_preference || '', billSeparately: !!r.bill_separately, noBulkDiscount: !!r.no_bulk_discount };
     });
   }
   const { data: phoneRows, error: phErr } = phRes;
@@ -4823,6 +4826,8 @@ async function loadStudentsAndSubscriptions() {
       classes: Number(r.classes), amountPaid: Number(r.amount_paid) || 0, date: r.date, kind: r.kind,
       paymentReference: r.payment_reference || '', paymentRemarks: r.payment_remarks || '', calcNote: r.calc_note || '', requestMonth: r.request_month || '',
       reminderSentAt: r.reminder_sent_at || '', reminderCount: Number(r.reminder_count) || 0,
+      baseAmount: r.base_amount == null ? null : Number(r.base_amount), discountPercent: Number(r.discount_percent) || 0,
+      discountBasis: r.discount_basis || '', discountClasses: Number(r.discount_classes) || 0, discountGroup: r.discount_group || '',
       transferGroupId: r.transfer_group_id || '',
       expiresOn: r.expires_on || '', expiredBatchId: r.expired_batch_id || '',
       createdAt: r.created_at || ''   // teachers' list (teacher_my_subscriptions) has no saved time
@@ -9334,6 +9339,107 @@ function feeQuote(subjectId, type, mode, classes, studentId) {
   const amount = tier ? base * (1 - Number(tier.percent)/100) : base;
   return { subj, type, mode, rate, special, classes: n, tier, amount: Math.round(amount * 100) / 100 };
 }
+// ---------- bulk discount: request, child and family (SQL 76) ----------
+// A fee request gets the best tier reached by its own classes, its child's pending classes (every subject,
+// Group and Individual) or its family's pending classes. Tiers never stack. A "Bill separately" request counts
+// only its own classes; a family with "No bulk discount" gets none. Each request saves its price before the
+// discount, the % and where it came from, so messages can show it and a part payment can work it out again.
+// Requests saved before SQL 76 (no base_amount) are never re-priced and are not added up.
+function bulkTierFor(classes) {
+  const n = Number(classes) || 0;
+  const eligible = discountTiers.filter(t => n >= Number(t.minClasses));
+  return eligible.length ? eligible.reduce((best, t) => Number(t.minClasses) > Number(best.minClasses) ? t : best) : null;
+}
+function familyNoDiscount(studentId) { const ids = new Set(familyMembers(studentId).map(s => s.id).concat(studentId)); return data.students.some(s => ids.has(s.id) && s.noBulkDiscount); }
+// items: [{ key, studentId, classes, base, fixed }] priced together. fixed 'off' = no discount (preview tick),
+// 'manual' = amount typed by the admin (its classes still count; its amount is never changed).
+// Returns key → { percent, basis, classes, amount, group }.
+function bulkDiscountFor(items) {
+  const sep = id => !!(data.students.find(s => s.id === id) || {}).billSeparately;
+  const childN = new Map(), famN = new Map();
+  items.forEach(i => {
+    if (sep(i.studentId)) return;
+    childN.set(i.studentId, (childN.get(i.studentId) || 0) + Number(i.classes || 0));
+    const fk = familyKeyOf(i.studentId); famN.set(fk, (famN.get(fk) || 0) + Number(i.classes || 0));
+  });
+  const out = new Map();
+  items.forEach(i => {
+    const group = familyKeyOf(i.studentId);
+    const cands = [{ basis: 'request', classes: Number(i.classes || 0) }];
+    if (!sep(i.studentId)) {
+      cands.push({ basis: 'child', classes: childN.get(i.studentId) || 0 });
+      cands.push({ basis: 'family', classes: famN.get(group) || 0 });
+    }
+    let best = { basis: 'none', classes: Number(i.classes || 0), percent: 0 };
+    if (i.fixed === 'off') best = { basis: 'off', classes: Number(i.classes || 0), percent: 0 };
+    else if (!familyNoDiscount(i.studentId)) cands.forEach(c => { const t = bulkTierFor(c.classes); if (t && Number(t.percent) > best.percent) best = { basis: c.basis, classes: c.classes, percent: Number(t.percent) }; });
+    else best = { basis: 'none', classes: Number(i.classes || 0), percent: 0, noDiscount: true };
+    const amount = Math.round(Number(i.base || 0) * (1 - best.percent / 100) * 100) / 100;
+    out.set(i.key, Object.assign(best, { amount, group }));
+  });
+  return out;
+}
+// Rate × classes before any discount (special rate or Fee setup).
+function feeBaseFor(subjectId, type, mode, classes, studentId) {
+  const subj = subject(subjectId);
+  if (!subj || !type || !mode || !(Number(classes) > 0)) return 0;
+  return Math.round(feeRateFor(studentId, subj, type, mode).rate * Number(classes) * 100) / 100;
+}
+const DISCOUNT_BASIS_TEXT = { request: 'bulk discount', child: 'bulk discount (all subjects)', family: 'family bulk discount' };
+// "10% family bulk discount (55 classes)" for a saved request or a preview row's discount; '' when none.
+function discountLabel(d) {
+  if (!d || !(Number(d.percent) > 0)) return '';
+  return `${Number(d.percent)}% ${DISCOUNT_BASIS_TEXT[d.basis] || 'bulk discount'} (${Number(d.classes)} classes)`;
+}
+function requestDiscountOf(r) {
+  return r && r.baseAmount != null ? { percent: r.discountPercent, basis: r.discountBasis, classes: r.discountClasses, base: r.baseAmount } : null;
+}
+// Pending requests of the family that take part in the discount (saved after SQL 76).
+function familyDiscountRequests(studentId) { return familyPendingRequests(studentId).filter(r => r.baseAmount != null); }
+function requestDiscountItem(r) {
+  return { key: r.id, studentId: r.studentId, classes: r.classes, base: r.baseAmount, fixed: r.discountBasis === 'off' ? 'off' : r.discountBasis === 'manual' ? 'manual' : null };
+}
+const DISCOUNT_COLS_MSG = 'Run SQL 76 (fee-requests/76-family-bulk-discount.sql) in Supabase to save bulk discounts.';
+function isDiscountColError(e) { return !!(e && /base_amount|discount_percent|discount_basis|discount_classes|discount_group|no_bulk_discount/.test(e.message || '')); }
+function applyDiscountToLocal(s, row) {
+  s.baseAmount = row.base_amount == null ? null : Number(row.base_amount);
+  s.discountPercent = Number(row.discount_percent) || 0; s.discountBasis = row.discount_basis || '';
+  s.discountClasses = Number(row.discount_classes) || 0; s.discountGroup = row.discount_group || '';
+  if (row.amount_paid != null) s.amountPaid = Number(row.amount_paid);
+}
+// Work the family's pending requests out again and save any that changed. Returns an error text or ''.
+async function repriceFamilyRequests(studentId) {
+  const reqs = familyDiscountRequests(studentId);
+  if (!reqs.length) return '';
+  const res = bulkDiscountFor(reqs.map(requestDiscountItem));
+  for (const r of reqs) {
+    const d = res.get(r.id); if (!d) continue;
+    const manual = r.discountBasis === 'manual';
+    const patch = { discount_percent: manual ? 0 : d.percent, discount_basis: manual ? 'manual' : d.basis, discount_classes: d.classes, discount_group: d.group };
+    if (!manual) patch.amount_paid = d.amount;
+    const same = Math.abs((manual ? r.amountPaid : d.amount) - r.amountPaid) < 0.005 && Number(r.discountPercent) === patch.discount_percent && r.discountBasis === patch.discount_basis && Number(r.discountClasses) === Number(d.classes) && r.discountGroup === d.group;
+    if (same) continue;
+    const { error } = await sb.from('subscriptions').update(patch).eq('id', r.id).eq('kind', 'Request');
+    if (error) return isDiscountColError(error) ? DISCOUNT_COLS_MSG : 'Could not update the family discount: ' + error.message;
+    applyDiscountToLocal(r, Object.assign({ base_amount: r.baseAmount }, patch));
+  }
+  return '';
+}
+// The discount fields for a request saved from a form: auto-priced (amount = the quote) or typed by the admin.
+function formRequestDiscountCols(studentId, subjectId, type, mode, classes, amount) {
+  const base = feeBaseFor(subjectId, type, mode, classes, studentId);
+  if (!base) return null;
+  const q = feeQuote(subjectId, type, mode, classes, studentId);
+  const manual = !q || Math.abs(Number(amount) - q.amount) > 0.009;
+  return { base_amount: base, discount_percent: manual ? 0 : (q.tier ? Number(q.tier.percent) : 0), discount_basis: manual ? 'manual' : (q.tier ? 'request' : 'none'), discount_classes: Number(classes), discount_group: familyKeyOf(studentId) };
+}
+// Insert a subscriptions row with discount columns; without SQL 76 the row is saved without them.
+async function insertWithDiscount(row, cols) {
+  let res = await sb.from('subscriptions').insert(cols ? Object.assign({}, row, cols) : row).select().single();
+  let lost = false;
+  if (cols && res.error && isDiscountColError(res.error)) { lost = true; res = await sb.from('subscriptions').insert(row).select().single(); }
+  return Object.assign(res, { discountLost: lost });
+}
 // Online/Offline the student used most in their last 20 classes of this subject
 // and type (any type if none yet); Offline when they have no classes at all.
 function studentUsualMode(studentId, subjectId, type) {
@@ -9471,16 +9577,15 @@ async function addSubscriptionPayment() {
 // remarks typed in the form, and add no second payment (that used to give the student the classes twice).
 async function markPendingThenPay() {
   if (!subPayPendingWarning) return;
-  const { pending, date, paymentReference, paymentRemarks } = subPayPendingWarning;
-  const failed = [];
-  for (const s of pending) {
-    const { error } = await sb.from('subscriptions').update({ kind: 'Payment', date, payment_reference: paymentReference || s.paymentReference || null, payment_remarks: paymentRemarks || 'Marked paid on recording payment' }).eq('id', s.id);
-    if (error) failed.push(error.message);
-  }
+  const { pending, date, paymentReference, paymentRemarks, amountPaid } = subPayPendingWarning;
+  // The amount typed is the money received: less than due is a part payment (bulk discount worked out again).
+  const plan = settlePlan(pending, Number(amountPaid) > 0 ? Number(amountPaid) : pending.reduce((a, r) => a + (r.amountPaid || 0), 0));
+  if (plan.part && !plan.lines.some(l => l.classes > 0)) { alert(`${rupees(amountPaid)} does not cover even one class at the full price. Nothing was saved.`); return; }
+  if (!settleConfirm(plan, `Mark the pending request${pending.length === 1 ? '' : 's'} paid?`)) return;
+  const failed = await applySettlePlan(plan, { date, reference: paymentReference, remarks: paymentRemarks || 'Marked paid on recording payment' });
   subPayPendingWarning = null;
-  if (failed.length) alert('Could not mark ' + failed.length + ' request(s) paid: ' + failed[0]);
+  if (failed.length) alert('Some changes were not saved: ' + failed[0]);
   subDraft = newSubDraft();
-  await loadStudentsAndSubscriptions();   // the database sets each payment's expiry date; fetch it
   render();
 }
 function cancelPendingPayCheck() { subPayPendingWarning = null; render(); }
@@ -9604,12 +9709,16 @@ async function calculatorPushFeeRequest() {
     return;
   }
   const amount = calculatedDiscountedAmount();
-  const { data: row, error } = await sb.from('subscriptions').insert({
+  const res = await insertWithDiscount({
     student_id: calcStudentId, subject_id: calcSubjectId, type: calcType, classes, amount_paid: amount, date, kind: 'Request'
-  }).select().single();
+  }, formRequestDiscountCols(calcStudentId, calcSubjectId, calcType, calcMode, classes, amount));
+  const { data: row, error } = res;
   if (error) { calcMsg = 'Could not push fee request: ' + error.message; render(); return; }
-  data.subscriptions.push({ id: row.id, studentId: row.student_id, subjectId: row.subject_id, type: row.type, classes: Number(row.classes), amountPaid: Number(row.amount_paid), date: row.date, kind: row.kind, paymentReference: '', paymentRemarks: '' });
-  calcMsg = `Fee request for ₹${amount.toFixed(2)} pushed for ${studentName(calcStudentId)}.`;
+  const local = { id: row.id, studentId: row.student_id, subjectId: row.subject_id, type: row.type, classes: Number(row.classes), amountPaid: Number(row.amount_paid), date: row.date, kind: row.kind, paymentReference: '', paymentRemarks: '' };
+  applyDiscountToLocal(local, row);
+  data.subscriptions.push(local);
+  const discErr = res.discountLost ? DISCOUNT_COLS_MSG : await repriceFamilyRequests(local.studentId);
+  calcMsg = `Fee request for ₹${local.amountPaid.toFixed(2)} pushed for ${studentName(calcStudentId)}.` + (discErr ? ' ' + discErr : local.amountPaid < amount - 0.009 ? ` (${discountLabel(requestDiscountOf(local))})` : '');
   calcClasses = '';
   render();
 }
@@ -9790,6 +9899,20 @@ function remainingText(left) {
 }
 // One message for every pending request in the family (one request or many: same layout).
 // short = a second reminder: the same message, only the opening says "gentle reminder … still due".
+// "10% family bulk discount (55 classes), full fee ₹10,000" under a pending request's amount.
+function requestDiscountHint(r) {
+  const dl = discountLabel(requestDiscountOf(r));
+  return dl ? `<div class="hint" style="font-size:11px;color:var(--forest)">${esc(dl)}, full fee ₹${Number(r.baseAmount).toFixed(2)}</div>` : '';
+}
+// Student / parent screens: what the discount saves and the full-payment rule.
+function discountRuleHtml(saved, family) {
+  if (!saved) return '';
+  return `<div class="hint" style="color:var(--forest);margin-top:6px">Bulk discount: you save <b>₹${saved.toFixed(2)}</b>. Please pay ${family ? 'all the fees due for the family (every child)' : 'all of these'} together to keep the discount. If only part is paid, the discount is worked out again on the classes paid for.</div>`;
+}
+// Money saved by the bulk discount on these pending requests.
+function familyDiscountSaved(reqs) {
+  return Math.round(reqs.reduce((a, r) => a + (discountLabel(requestDiscountOf(r)) ? Math.max(0, r.baseAmount - r.amountPaid) : 0), 0) * 100) / 100;
+}
 function familyFeeMessage(studentId, short) {
   const reqs = familyPendingRequests(studentId);
   if (!reqs.length) return '';
@@ -9816,13 +9939,18 @@ function familyFeeMessage(studentId, short) {
       const ind = many ? '   ' : '';
       lines.push(`${ind}Classes Included: ${r.classes}`);
       if (why) lines.push(`${ind}How we worked it out: ${why}`);
+      const dl = discountLabel(requestDiscountOf(r));
+      if (dl) lines.push(`${ind}Fee: ${inrText(r.baseAmount)} less ${dl}`);
       lines.push(`${ind}Amount Payable: ${inrText(r.amountPaid)}`);
       const left = studentRemaining(s.id, r.subjectId, r.type);
       if (left < 0 || !requestIgnoredLeft(r)) lines.push(`${ind}Right now: ${remainingText(left)}`);   // owed always shows
     });
     if (kids.length > 1 && mine.length > 1) lines.push(`Subtotal for ${s.name}: ${inrText(mine.reduce((a, r) => a + (r.amountPaid || 0), 0))}`);
   });
-  lines.push('', `Total due: ${inrText(total)}`, '');
+  lines.push('', `Total due: ${inrText(total)}`);
+  const saved = familyDiscountSaved(reqs);
+  if (saved) lines.push(`Bulk discount: you save ${inrText(saved)}`, `Please pay the full ${inrText(total)} together to keep the discount. If only part is paid, the discount is worked out again on the classes paid for.`);
+  lines.push('');
   if (upiId || razorpayOn) lines.push('Payment Options');
   if (upiId) lines.push(`UPI: ${upiId}`);
   if (razorpayOn) lines.push(`Online Payment: ${razorpayFeePage}`, 'While making the online payment, please enter the following details:', `Tuition Fee: ${inrText(total)}`, `Student Name: ${names.join(', ')}`);
@@ -9848,15 +9976,35 @@ function familyFeeMessage(studentId, short) {
 let billSeparatelyMsg = '';
 async function setBillSeparately(studentId, on) {
   billSeparatelyMsg = '';
+  const before = familyMembers(studentId).map(s => s.id).filter(id => id !== studentId);
   const { error } = await sb.from('students').update({ bill_separately: !!on }).eq('id', studentId);
   if (error) billSeparatelyMsg = /bill_separately/.test(error.message || '') ? 'Run SQL 60 (fee-requests/60-bill-separately.sql) in Supabase first.' : 'Could not save: ' + error.message;
-  else { const st = data.students.find(s => s.id === studentId); if (st) st.billSeparately = !!on; }
+  else {
+    const st = data.students.find(s => s.id === studentId); if (st) st.billSeparately = !!on;
+    // The bulk discount is worked out again for this child and for the family it left or joined.
+    const e = await repriceFamilyRequests(studentId) || (before.length ? await repriceFamilyRequests(before[0]) : '');
+    if (e) billSeparatelyMsg = e;
+  }
+  render();
+}
+// "No bulk discount" (SQL 76): set for the whole family at once; no child in it gets any bulk discount.
+async function setFamilyNoDiscount(studentId, on) {
+  billSeparatelyMsg = '';
+  const ids = familyMembers(studentId).map(s => s.id).concat(studentId).filter((v, i, a) => a.indexOf(v) === i);
+  const { error } = await sb.from('students').update({ no_bulk_discount: !!on }).in('id', ids);
+  if (error) billSeparatelyMsg = isDiscountColError(error) ? DISCOUNT_COLS_MSG : 'Could not save: ' + error.message;
+  else {
+    data.students.forEach(s => { if (ids.includes(s.id)) s.noBulkDiscount = !!on; });
+    const e = await repriceFamilyRequests(studentId);
+    if (e) billSeparatelyMsg = e;
+  }
   render();
 }
 function billSeparatelyHtml(student) {
   const fam = familyMembers(student.id).filter(s => s.id !== student.id);
   return `<div class="hint" style="margin:4px 0">
     <label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" ${student.billSeparately ? 'checked' : ''} onchange="setBillSeparately('${student.id}', this.checked)"> Bill separately (not grouped with family)</label>
+    <label style="display:inline-flex;align-items:center;gap:6px;margin-left:12px"><input type="checkbox" ${familyNoDiscount(student.id) ? 'checked' : ''} onchange="setFamilyNoDiscount('${student.id}', this.checked)"> No bulk discount${fam.length && !student.billSeparately ? ' (whole family)' : ''}</label>
     ${student.billSeparately ? '' : fam.length ? ` · Family: ${esc(fam.map(s => s.name).join(', '))} (same parent login or parent mobile)` : ''}
     ${billSeparatelyMsg ? `<span style="color:var(--brick)"> ${esc(billSeparatelyMsg)}</span>` : ''}
   </div>`;
@@ -9875,6 +10023,7 @@ function markAllPaidFormHtml(studentId) {
           <ul class="hint" style="margin:0 0 8px 16px;padding:0">${reqs.map(r => `<li>${esc(studentNameWithCode(r.studentId))} · ${esc(subjectName(r.subjectId))} (${r.type}) · ${r.classes} class${Number(r.classes) === 1 ? '' : 'es'} · ₹${(r.amountPaid || 0).toFixed(2)}</li>`).join('')}</ul>
           <div class="row-form" style="margin-bottom:0">
             <label>Paid on <input type="date" id="markAllPaidDate" value="${todayStr}" style="width:140px"></label>
+            <label>Amount received ₹ <input type="number" min="0" step="1" id="markAllPaidAmount" value="${total.toFixed(2)}" style="width:110px"></label>
             <label>Reference <input type="text" id="markAllPaidReference" placeholder="Keeps each request's own if empty" style="width:200px"></label>
             <label>Remarks <input type="text" id="markAllPaidRemarks" style="width:140px"></label>
             <button class="btn-small btn-primary" onclick="confirmMarkAllPaid()">Confirm all</button>
@@ -9886,14 +10035,17 @@ async function confirmMarkAllPaid() {
   if (!markAllPaidStudentId) return;
   const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
   const date = val('markAllPaidDate') || todayStr, reference = val('markAllPaidReference'), remarks = val('markAllPaidRemarks');
-  const failed = [];
-  for (const r of familyPendingRequests(markAllPaidStudentId)) {
-    const { error } = await sb.from('subscriptions').update({ kind: 'Payment', date, payment_reference: reference || r.paymentReference || null, payment_remarks: remarks || r.paymentRemarks || null }).eq('id', r.id);
-    if (error) failed.push(error.message);
-  }
-  if (failed.length) alert('Could not mark ' + failed.length + ' request(s) paid: ' + failed[0]);
+  const reqs = familyPendingRequests(markAllPaidStudentId);
+  if (!reqs.length) { markAllPaidStudentId = null; render(); return; }
+  const amtText = val('markAllPaidAmount');
+  const received = amtText !== '' ? Number(amtText) : reqs.reduce((a, r) => a + (r.amountPaid || 0), 0);
+  if (!(received > 0)) { alert('Type the amount received.'); return; }
+  const plan = settlePlan(reqs, received);
+  if (plan.part && !plan.lines.some(l => l.classes > 0)) { alert(`${rupees(received)} does not cover even one class at the full price. Nothing was saved.`); return; }
+  if (!settleConfirm(plan, `Mark ${familyParentName(markAllPaidStudentId)}'s family paid?`)) return;
+  const failed = await applySettlePlan(plan, { date, reference, remarks });
+  if (failed.length) alert('Some changes were not saved: ' + failed[0]);
   markAllPaidStudentId = null;
-  await loadStudentsAndSubscriptions();   // the database sets each payment's expiry date; fetch it
   render();
 }
 // Fees + Reports: pending requests grouped by family, total per family (and per child when there are several).
@@ -9972,7 +10124,7 @@ function pendingFeeRequestsByFamilyHtml() {
             const isEditing = editingRequestId === r.id;
             const subjectOptions = subjectsForStudent(r.studentId).map(s => `<option value="${s.id}" ${editRequestDraft.subjectId===s.id?'selected':''}>${esc(studentLabel(s))}</option>`).join('');
             const editPanel = isEditing ? `<tr><td colspan="9"><div style="margin:8px 0;padding:12px;border:1px solid var(--forest);border-radius:8px;background:rgba(60,94,66,0.06)"><div class="hint" style="margin-bottom:8px"><b>Edit pending fee request</b> — ${esc(studentNameWithCode(r.studentId))}</div>${editRequestMsg ? `<div class="hint" style="color:var(--brick)">${esc(editRequestMsg)}</div>` : ''}<div class="row-form" style="margin-bottom:0"><select onchange="editRequestDraftSet('subjectId', this.value)">${subjectOptions}</select><select onchange="editRequestDraftSet('type', this.value)">${TYPES.map(ty=>`<option value="${ty}" ${editRequestDraft.type===ty?'selected':''}>${ty}</option>`).join('')}</select><label>Classes <input type="number" id="editReqClasses_${r.id}" value="${editRequestDraft.classes}" min="0.5" step="0.5" style="width:80px" oninput="requestQuoteInput('edit','classes',this.value)"></label><label>Amount ₹ <input type="number" id="editReqAmount_${r.id}" value="${editRequestDraft.amountPaid}" min="0" step="any" style="width:100px" oninput="requestQuoteInput('edit','amount',this.value)"></label><label>Requested date <input type="date" id="editReqDate_${r.id}" value="${editRequestDraft.date}" onchange="editRequestDraft.date=this.value"></label><button class="btn-small btn-primary" onclick="saveRequestEdit('${r.id}')">Save</button><button class="btn-small" onclick="cancelEditRequest()">Cancel</button></div><div class="hint" id="editReqQuoteHint">${feeQuoteHintHtml(editRequestDraft, 'edit')}</div></div></td></tr>` : '';
-            return `<tr><td><input type="checkbox" aria-label="Select pending request for ${esc(studentNameWithCode(r.studentId))}" ${selectedPendingRequestIds.has(r.id) ? 'checked' : ''} onchange="togglePendingRequestSelection('${r.id}',this.checked)"></td><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid || 0).toFixed(2)}</td><td>${r.date || '—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${calcNoteHtml(r)}</td><td>${markingPaidId === r.id ? '<span class="hint">Confirm below</span>' : `<button class="btn-small" onclick="startMarkPaid('${r.id}')">Mark paid</button><button class="btn-small" onclick="startEditRequest('${r.id}')">Edit</button><button class="icon-btn" title="Remove pending request" aria-label="Remove pending request" onclick="if(confirm('Remove this pending fee request? This cannot be undone.')) cancelFeeRequest('${r.id}')">✕</button>`}</td></tr>${editPanel}`;
+            return `<tr><td><input type="checkbox" aria-label="Select pending request for ${esc(studentNameWithCode(r.studentId))}" ${selectedPendingRequestIds.has(r.id) ? 'checked' : ''} onchange="togglePendingRequestSelection('${r.id}',this.checked)"></td><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid || 0).toFixed(2)}${requestDiscountHint(r)}</td><td>${r.date || '—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${calcNoteHtml(r)}</td><td>${markingPaidId === r.id ? '<span class="hint">Confirm below</span>' : `<button class="btn-small" onclick="startMarkPaid('${r.id}')">Mark paid</button><button class="btn-small" onclick="startEditRequest('${r.id}')">Edit</button><button class="icon-btn" title="Remove pending request" aria-label="Remove pending request" onclick="if(confirm('Remove this pending fee request? This cannot be undone.')) cancelFeeRequest('${r.id}')">✕</button>`}</td></tr>${editPanel}`;
           }).join('')
             + (kids.length > 1 ? `<tr><td colspan="5" class="hint" style="text-align:right">Subtotal for ${esc((data.students.find(s => s.id === kid) || {}).name || '')}</td><td><b>${mine.reduce((a, r) => a + (r.amountPaid || 0), 0).toFixed(2)}</b></td><td colspan="3"></td></tr>` : '');
         }).join('');
@@ -10024,8 +10176,18 @@ function demandPriceText(q) {
   if (!q || !q.rate) return '';
   return `${q.classes} × ${rupees(q.rate)} (${q.mode}${q.special ? ', special rate' : ''})${q.tier ? ` − ${q.tier.percent}%` : ''} = ${rupees(q.amount)}`;
 }
+// Preview / saved working with the request, child or family discount: "20 × ₹500 (Offline) = ₹10,000 − 10% family bulk discount (55 classes) = ₹9,000".
+function demandDiscountPriceText(r) {
+  const q = feeQuote(r.subj.id, r.ty, r.mode, r.classes, r.student.id);
+  if (!q || !q.rate) return '';
+  const d = r.discount, lbl = discountLabel(d);
+  const head = `${r.classes} × ${rupees(q.rate)} (${q.mode}${q.special ? ', special rate' : ''}) = ${rupees(r.base)}`;
+  if (d.basis === 'off') return head + ' (no discount, ticked by admin)';
+  if (d.noDiscount) return head + ' (family set to No bulk discount)';
+  return lbl ? `${head} − ${lbl} = ${rupees(d.amount)}` : head;
+}
 function demandRowNote(r) {
-  const price = r.amountEdited ? `${r.classes} classes, amount set by admin ${rupees(r.amount)} (${specialRateRow(r.student.id, r.subj.id, r.ty) ? 'special rate' : 'Fee setup'} ${rupees(r.quoteAmount)})` : demandPriceText(feeQuote(r.subj.id, r.ty, r.mode, r.classes, r.student.id));
+  const price = r.amountEdited ? `${r.classes} classes, amount set by admin ${rupees(r.amount)} (${specialRateRow(r.student.id, r.subj.id, r.ty) ? 'special rate' : 'Fee setup'} ${rupees(r.quoteAmount)})` : r.discount ? demandDiscountPriceText(r) : demandPriceText(feeQuote(r.subj.id, r.ty, r.mode, r.classes, r.student.id));
   const classesNote = r.classesEdited ? `${r.why} → classes changed by admin to ${r.classes}` : r.why;
   return `${r.manual ? 'Calculated ' + todayStr + ' for ' + monthLabelOf(r.month) : demandRunLabel(r.month)} · ${classesNote}. Amount: ${price}${r.leaveAdjustment ? `. Teacher-leave adjustment: −${r.leaveAdjustment} class${r.leaveAdjustment===1?'':'es'} (${r.leaveNote})` : ''}${r.reviewFlag ? `. REVIEW: ${r.reviewFlag}` : ''}`
     + (r.parentWhy && !r.classesEdited ? `\n${PARENT_WHY_PREFIX}${r.classes} classes): ${r.parentWhy}` : '');
@@ -10156,7 +10318,7 @@ function demandDataSignature() {
   });
 }
 async function previewDemand() {
-  const month = demandTargetMonth(); demandMsg = 'Loading current class frequency…'; demandShowSkipped = false; demandIgnoreLeft = new Set(); render();
+  const month = demandTargetMonth(); demandMsg = 'Loading current class frequency…'; demandShowSkipped = false; demandIgnoreLeft = new Set(); demandNoDiscount = new Set(); render();
   await Promise.all([loadClassFrequencyRows(), loadSessions(), loadScheduledClasses(), loadTeacherLeave(), loadStudentsAndSubscriptions()]);
   demandMsg = '';
   const rows = [], skipped = []; let neverPaid = 0;
@@ -10172,6 +10334,7 @@ async function previewDemand() {
       });
     });
   });
+  demandApplyDiscounts(rows);
   demandSortRows(rows);
   demandPreviewRows=rows; demandSkippedRows=skipped; demandNeverPaid=neverPaid; demandPreviewSnapshot=demandDataSignature(); render();
 }
@@ -10199,8 +10362,35 @@ function demandSetIgnoreLeft(keys, on) {
     if (res.row) demandPreviewRows.push(res.row);
     else demandSkippedRows.push({ student: src.student, subj: src.subj, ty: src.ty, month: src.month, reason: res.skip || 'No request calculated', canIgnoreLeft: true });
   });
+  demandApplyDiscounts(demandPreviewRows);
   demandSortRows(demandPreviewRows);
   render();
+}
+// Price the ticked rows together with the families' pending requests (request / child / family tier).
+// An amount typed by the admin is kept; its classes still count.
+function demandApplyDiscounts(rows) {
+  const inc = rows.filter(r => r.include);
+  const fams = new Set(inc.map(r => familyKeyOf(r.student.id)));
+  const pending = data.subscriptions.filter(r => r.kind === 'Request' && r.baseAmount != null && fams.has(familyKeyOf(r.studentId)));
+  rows.forEach(r => { r.base = feeBaseFor(r.subj.id, r.ty, r.mode, r.classes, r.student.id); r.noDiscount = demandNoDiscount.has(demandKey(r)); });
+  const items = inc.map(r => ({ key: demandKey(r), studentId: r.student.id, classes: r.classes, base: r.base, fixed: r.noDiscount ? 'off' : null })).concat(pending.map(requestDiscountItem));
+  const res = bulkDiscountFor(items);
+  rows.forEach(r => {
+    const d = res.get(demandKey(r)) || bulkDiscountFor([{ key: 'x', studentId: r.student.id, classes: r.classes, base: r.base, fixed: r.noDiscount ? 'off' : null }]).get('x');
+    r.discount = d; r.quoteAmount = d.amount;
+    if (!r.amountEdited) r.amount = d.amount;
+  });
+}
+function demandSetNoDiscount(keys, on) {
+  if (!demandPreviewRows) return;
+  keys.forEach(k => { if (on) demandNoDiscount.add(k); else demandNoDiscount.delete(k); });
+  demandApplyDiscounts(demandPreviewRows);
+  render();
+}
+function demandNoDiscountTickHtml(keys, label) {
+  if (!keys.length) return '';
+  const all = keys.every(k => demandNoDiscount.has(k));
+  return `<label class="hint" style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;cursor:pointer"><input type="checkbox" ${all ? 'checked' : ''} onchange='demandSetNoDiscount(${esc(JSON.stringify(keys))}, this.checked)'> ${label}</label>`;
 }
 function demandIgnoreTickHtml(keys, label) {
   if (!keys.length) return '';
@@ -10221,6 +10411,7 @@ function demandRowSet(i, field, val) {
     const a = Math.round((Number(val) || 0) * 100) / 100; if (a <= 0) { render(); return; }
     r.amount = a; r.amountEdited = Math.abs(a - r.quoteAmount) > 0.009;
   }
+  demandApplyDiscounts(demandPreviewRows);
   render();
 }
 async function confirmDemand() {
@@ -10265,26 +10456,38 @@ async function confirmDemand() {
       // Manual edits are retained only if the underlying rule calculation is still valid.
       checked.push({ ...r, student, subj, mode: fresh.row.mode, quoteAmount: feeQuote(subj.id,r.ty,fresh.row.mode,r.classes,student.id)?.amount || 0, why: fresh.row.why, left: fresh.row.left, owed: fresh.row.owed, expected: fresh.row.expected, leaveAdjustment: fresh.row.leaveAdjustment, leaveNote: fresh.row.leaveNote, ignoredLeft: fresh.row.ignoredLeft });
     }
+    demandApplyDiscounts(checked);   // the request / child / family discount, worked out again on fresh data
     for (const r of checked) {
       if (!Number.isFinite(Number(r.classes)) || Number(r.classes) <= 0 || Math.abs(Number(r.classes) * 2 - Math.round(Number(r.classes) * 2)) > 0.0001 || !Number.isFinite(Number(r.amount)) || Number(r.amount) <= 0) {
         await sb.from('fee_request_runs').update({status:'reset',reset_at:new Date().toISOString(),reset_by:currentUserId||null,reset_reason:'Invalid edited class count or amount before writes',updated_at:new Date().toISOString()}).eq('target_month',month+'-01');
         demandRunState = { ...demandRunState, status:'reset' }; demandConfirming=false; demandMsg='A request has an invalid class count or zero/invalid amount. Please preview again and correct it.'; render(); return;
       }
     }
-    let created = 0; const failed = [];
+    let created = 0, discountLost = false; const failed = [];
     for (const r of checked) {
       const note = demandRowNote(r);
       const row = { student_id:r.student.id, subject_id:r.subj.id, type:r.ty, classes:r.classes, amount_paid:r.amount, date:month+'-01', kind:'Request', payment_reference:'AUTO-'+month, request_month:month+'-01', calc_note:note };
-      const { data: result, error } = await sb.from('subscriptions').insert(row).select().single();
+      const d = r.discount;
+      const cols = r.base > 0 && d ? { base_amount: r.base, discount_percent: r.amountEdited ? 0 : d.percent, discount_basis: r.amountEdited ? 'manual' : d.basis, discount_classes: d.classes, discount_group: d.group } : null;
+      const res = await insertWithDiscount(row, cols);
+      const { data: result, error } = res;
+      if (res.discountLost) discountLost = true;
       if (error || !result) { failed.push(`${studentLabel(r.student)} · ${r.subj.name}: ${error ? error.message : 'not saved'}`); continue; }
-      data.subscriptions.push({ id:result.id, studentId:result.student_id, subjectId:result.subject_id, type:result.type, classes:Number(result.classes), amountPaid:Number(result.amount_paid), date:result.date, kind:result.kind, paymentReference:result.payment_reference||'', paymentRemarks:'', calcNote:result.calc_note||'', requestMonth:result.request_month||month+'-01', transferGroupId:'', expiresOn:'', expiredBatchId:'', createdAt:result.created_at||'' });
+      const local = { id:result.id, studentId:result.student_id, subjectId:result.subject_id, type:result.type, classes:Number(result.classes), amountPaid:Number(result.amount_paid), date:result.date, kind:result.kind, paymentReference:result.payment_reference||'', paymentRemarks:'', calcNote:result.calc_note||'', requestMonth:result.request_month||month+'-01', transferGroupId:'', expiresOn:'', expiredBatchId:'', createdAt:result.created_at||'' };
+      applyDiscountToLocal(local, result);
+      data.subscriptions.push(local);
       created++;
     }
+    // Older pending requests of these families may now reach a higher tier.
+    let repriceErr = '';
+    if (!discountLost) for (const sid of new Set(checked.map(r => r.student.id))) { const e = await repriceFamilyRequests(sid); if (e) { repriceErr = e; break; } }
     const { data: updatedRun, error: runUpdateError } = await sb.from('fee_request_runs').update({ request_count: created, updated_at: new Date().toISOString() }).eq('target_month', month + '-01').eq('status', 'confirmed').select().maybeSingle();
     if (!runUpdateError && updatedRun) demandRunState = updatedRun;
     demandPreviewRows = null; demandPreviewSnapshot = ''; demandSkippedRows = [];
     demandMsg = `Created ${created} fee request${created===1?'':'s'} for ${monthLabelOf(month)}.` + (failed.length ? ` ${failed.length} failed: ${failed.slice(0,3).join(' | ')}` : '');
     if (failed.length) demandMsg += ' Some requests may have been created; inspect Pending fee requests before retrying.';
+    if (discountLost) demandMsg += ' Discounts were applied to the amounts but not saved for messages: ' + DISCOUNT_COLS_MSG;
+    else if (repriceErr) demandMsg += ' ' + repriceErr;
   } catch (e) {
     demandMsg = 'Confirmation stopped safely: ' + (e && e.message ? e.message : 'unknown error');
   }
@@ -11486,15 +11689,110 @@ async function addFeeRequest() {
   }
   const insertRow = { student_id: selectedStudentId, subject_id: d.subjectId, type: d.type, classes, amount_paid: amountPaid, date, kind: 'Request' };
   const calcNote = requestCalcNote();
-  let res = await sb.from('subscriptions').insert(calcNote ? Object.assign({ calc_note: calcNote }, insertRow) : insertRow).select().single();
+  const cols = formRequestDiscountCols(selectedStudentId, d.subjectId, d.type, d.mode || studentUsualMode(selectedStudentId, d.subjectId, d.type), classes, amountPaid);
+  let res = await insertWithDiscount(calcNote ? Object.assign({ calc_note: calcNote }, insertRow) : insertRow, cols);
   let noteLost = false;
-  if (calcNote && res.error && /calc_note/.test(res.error.message || '')) { noteLost = true; res = await sb.from('subscriptions').insert(insertRow).select().single(); }   // SQL 59 not run yet
+  if (calcNote && res.error && /calc_note/.test(res.error.message || '')) { noteLost = true; res = await insertWithDiscount(insertRow, cols); }   // SQL 59 not run yet
   const { data: row, error } = res;
   if (error) { requestMsg = 'Could not add fee request: ' + error.message; render(); return; }
-  data.subscriptions.push({ id: row.id, studentId: row.student_id, subjectId: row.subject_id, type: row.type, classes: Number(row.classes), amountPaid: Number(row.amount_paid), date: row.date, kind: row.kind, paymentReference: '', paymentRemarks: '', calcNote: row.calc_note || '', createdAt: row.created_at || '' });
+  const local = { id: row.id, studentId: row.student_id, subjectId: row.subject_id, type: row.type, classes: Number(row.classes), amountPaid: Number(row.amount_paid), date: row.date, kind: row.kind, paymentReference: '', paymentRemarks: '', calcNote: row.calc_note || '', createdAt: row.created_at || '' };
+  applyDiscountToLocal(local, row);
+  data.subscriptions.push(local);
   requestDraft = { subjectId: '', type: 'Group', mode: '', classes: '', amountPaid: '', amountEdited: false, date: todayStr };
   if (noteLost) requestMsg = 'Fee request added, but the working was NOT saved: run SQL 59 (fee-requests/59-fee-request-working.sql) in Supabase.';
+  const discErr = res.discountLost ? DISCOUNT_COLS_MSG : await repriceFamilyRequests(local.studentId);   // the child / family discount
+  if (discErr) requestMsg = (requestMsg ? requestMsg + ' ' : 'Fee request added. ') + discErr;
+  else if (local.baseAmount != null && local.discountBasis !== 'manual' && Math.abs(local.amountPaid - amountPaid) > 0.009) requestMsg = `Fee request added at ₹${local.amountPaid.toFixed(2)} with the ${discountLabel(requestDiscountOf(local))}.`;
   render();
+}
+// ---------- marking fee requests paid: full or part payment (bulk discount, SQL 76) ----------
+// Paying every discounted pending request of the family in full keeps the discount. Anything less is a part
+// payment: the requests being paid are priced again on their own classes, the money buys as many whole classes
+// as it can at the slab those classes reach, the classes not paid for become a new pending request, leftover
+// money goes in Remarks, and the family's other pending requests are priced again.
+function settlePlan(reqs, received) {
+  const total = Math.round(reqs.reduce((a, r) => a + (r.amountPaid || 0), 0) * 100) / 100;
+  received = Math.round(Number(received) * 100) / 100;
+  const extraText = n => `${rupees(n)} extra paid`;
+  const plain = () => ({ part: false, total, received, lines: reqs.map(r => ({ r, classes: r.classes, amount: r.amountPaid, rest: 0, cols: null })), leftover: received > total + 0.5 ? received - total : 0 });
+  const disc = reqs.filter(r => r.baseAmount != null);
+  if (!disc.length || disc.length < reqs.length) return plain();   // requests from before SQL 76 are paid as raised
+  const group = familyDiscountRequests(reqs[0].studentId);
+  const whole = group.every(g => reqs.some(r => r.id === g.id));
+  if (whole && received >= total - 0.5) return plain();
+  // Part payment: price the paid requests on their own, cutting classes from the last one until the money covers it.
+  const perClass = r => (Number(r.baseAmount) || 0) / (Number(r.classes) || 1);
+  const counts = reqs.map(r => Math.floor(Number(r.classes)));
+  const price = () => {
+    const items = reqs.map((r, i) => ({ key: r.id, studentId: r.studentId, classes: counts[i], base: perClass(r) * counts[i], fixed: r.discountBasis === 'off' ? 'off' : null }));
+    const res = bulkDiscountFor(items.filter(x => x.classes > 0));
+    return items.map((x, i) => {
+      if (!x.classes) return { classes: 0, amount: 0, d: null };
+      // A typed (manual) amount keeps its own price per class.
+      if (reqs[i].discountBasis === 'manual') return { classes: x.classes, amount: Math.round(reqs[i].amountPaid / reqs[i].classes * x.classes * 100) / 100, d: res.get(x.key) };
+      return { classes: x.classes, amount: res.get(x.key).amount, d: res.get(x.key) };
+    });
+  };
+  let p = price(), sum = () => p.reduce((a, x) => a + x.amount, 0);
+  for (let i = counts.length - 1; i >= 0 && sum() > received + 0.005; ) {
+    if (counts[i] > 0) { counts[i]--; p = price(); } else i--;
+  }
+  const lines = reqs.map((r, i) => ({
+    r, classes: p[i].classes, amount: p[i].amount, rest: Math.round((Number(r.classes) - p[i].classes) * 2) / 2,
+    cols: p[i].d ? { base_amount: Math.round(perClass(r) * p[i].classes * 100) / 100, discount_percent: r.discountBasis === 'manual' ? 0 : p[i].d.percent, discount_basis: r.discountBasis === 'manual' ? 'manual' : p[i].d.basis, discount_classes: p[i].d.classes, discount_group: p[i].d.group } : null
+  }));
+  const leftover = Math.round((received - sum()) * 100) / 100;
+  // Nothing changes when the paid requests never needed the rest of the family for their tier.
+  if (lines.every(l => l.rest === 0 && Math.abs(l.amount - l.r.amountPaid) < 0.005)) return plain();
+  return { part: true, total, received, lines, leftover: leftover > 0.5 ? leftover : 0, extraText };
+}
+function settlePlanText(plan) {
+  const out = [];
+  plan.lines.forEach(l => {
+    const name = `${studentName(l.r.studentId)} · ${subjectName(l.r.subjectId)} (${l.r.type})`;
+    if (!l.classes) out.push(`${name}: not paid, stays pending`);
+    else out.push(`${name}: ${l.classes} class${l.classes === 1 ? '' : 'es'} ${rupees(l.amount)}${l.cols && l.cols.discount_percent ? ' with ' + discountLabel({ percent: l.cols.discount_percent, basis: l.cols.discount_basis, classes: l.cols.discount_classes }) : ''}${l.rest > 0 ? ` (${l.rest} not paid → new pending request)` : ''}`);
+  });
+  if (plan.leftover) out.push(`${rupees(plan.leftover)} extra paid → noted in Remarks`);
+  return out.join('\n');
+}
+// Save a plan: paid lines become payments, the rest of a cut request becomes a new pending request.
+// Returns a list of error texts.
+async function applySettlePlan(plan, { date, reference, remarks }) {
+  const failed = [];
+  const paid = plan.lines.filter(l => l.classes > 0);
+  const lastId = paid.length ? paid[paid.length - 1].r.id : '';
+  for (const l of plan.lines) {
+    const r = l.r;
+    if (!l.classes) continue;
+    let rem = remarks || r.paymentRemarks || '';
+    if (plan.leftover && r.id === lastId) rem = [rem, `${rupees(plan.leftover)} extra paid${plan.part ? ', not enough for one more class' : ''}`].filter(Boolean).join(' · ');
+    if (plan.part && l.rest > 0) rem = [rem, `Part payment: ${l.classes} of ${r.classes} classes paid`].filter(Boolean).join(' · ');
+    const patch = { kind: 'Payment', date, payment_reference: reference || r.paymentReference || null, payment_remarks: rem || null };
+    if (plan.part) Object.assign(patch, { classes: l.classes, amount_paid: l.amount }, l.cols || {});
+    const { error } = await sb.from('subscriptions').update(patch).eq('id', r.id).eq('kind', 'Request');
+    if (error) { failed.push(error.message); continue; }
+    if (l.rest > 0) {
+      const perClass = (Number(r.baseAmount) || 0) / (Number(r.classes) || 1);
+      const restRow = { student_id: r.studentId, subject_id: r.subjectId, type: r.type, classes: l.rest, amount_paid: Math.round(perClass * l.rest * 100) / 100, date: r.date, kind: 'Request',
+        calc_note: `Rest of a part-paid request: ${l.rest} of ${r.classes} classes not covered by the payment of ${date}.`, request_month: r.requestMonth || null };
+      const cols = { base_amount: restRow.amount_paid, discount_percent: 0, discount_basis: r.discountBasis === 'manual' ? 'manual' : 'none', discount_classes: l.rest, discount_group: familyKeyOf(r.studentId) };
+      if (r.discountBasis === 'manual') restRow.amount_paid = Math.round(r.amountPaid / r.classes * l.rest * 100) / 100;
+      const res = await insertWithDiscount(restRow, cols);
+      if (res.error) failed.push('New pending request for the rest: ' + res.error.message);
+    }
+  }
+  await loadStudentsAndSubscriptions();   // the database sets each payment's expiry date; fetch it
+  if (plan.part || plan.lines.some(l => l.r.baseAmount != null)) {
+    const e = await repriceFamilyRequests(plan.lines[0].r.studentId);
+    if (e) failed.push(e);
+  }
+  return failed;
+}
+// Ask before a part payment changes requests; a full payment needs no extra question.
+function settleConfirm(plan, intro) {
+  if (!plan.part && !plan.leftover) return true;
+  return confirm(`${intro}\n\n${plan.part ? `Part payment: ${rupees(plan.received)} received, ${rupees(plan.total)} was due. The discount is worked out again on the classes paid for:\n\n` : ''}${settlePlanText(plan)}\n\nSave this?`);
 }
 function markPaidFormHtml(r) {
   return `
@@ -11502,6 +11800,7 @@ function markPaidFormHtml(r) {
           <div class="hint" style="margin-bottom:8px"><b>Confirm payment received</b> — ${esc(studentNameWithCode(r.studentId))}, ${esc(subjectName(r.subjectId))}, ${r.type}, ${r.classes} class${r.classes===1?'':'es'}, ₹${(r.amountPaid||0).toFixed(2)}</div>
           <div class="row-form" style="margin-bottom:0">
             <label>Paid on <input type="date" id="markPaidDate_${r.id}" value="${todayStr}" style="width:140px"></label>
+            <label>Amount received ₹ <input type="number" min="0" step="1" id="markPaidAmount_${r.id}" value="${r.amountPaid||0}" style="width:100px"></label>
             <label>Reference <input type="text" id="markPaidReference_${r.id}" value="${escAttr(r.paymentReference||'')}" style="width:130px"></label>
             <label>Remarks <input type="text" id="markPaidRemarks_${r.id}" value="${escAttr(r.paymentRemarks||'')}" style="width:140px"></label>
             <button class="btn-small btn-primary" onclick="confirmMarkPaid('${r.id}')">Confirm</button>
@@ -11519,11 +11818,16 @@ async function confirmMarkPaid(id) {
   const paymentReference = refInput ? refInput.value.trim() : '';
   const paymentRemarks = remarksInput ? remarksInput.value.trim() : '';
   if (!date) return;
-  const { error } = await sb.from('subscriptions').update({ kind: 'Payment', date, payment_reference: paymentReference || null, payment_remarks: paymentRemarks || null }).eq('id', id);
-  if (error) { alert('Could not mark this request paid: ' + error.message); render(); return; }
-  const s = data.subscriptions.find(x=>x.id===id);
-  if (s) { s.kind = 'Payment'; s.date = date; s.paymentReference = paymentReference; s.paymentRemarks = paymentRemarks; }
-  await loadStudentsAndSubscriptions();   // the database sets the payment's expiry date; fetch it
+  const s = data.subscriptions.find(x=>x.id===id && x.kind==='Request');
+  if (!s) { markingPaidId = null; render(); return; }
+  const amtInput = document.getElementById('markPaidAmount_'+id);
+  const received = amtInput && amtInput.value !== '' ? Number(amtInput.value) : s.amountPaid;
+  if (!(received > 0)) { alert('Type the amount received.'); return; }
+  const plan = settlePlan([s], received);
+  if (plan.part && !plan.lines.some(l => l.classes > 0)) { alert(`${rupees(received)} does not cover even one class at the full price. Nothing was saved.`); return; }
+  if (!settleConfirm(plan, `Mark ${studentName(s.studentId)} · ${subjectName(s.subjectId)} paid?`)) return;
+  const failed = await applySettlePlan(plan, { date, reference: paymentReference, remarks: paymentRemarks });
+  if (failed.length) alert('Some changes were not saved: ' + failed[0]);
   markingPaidId = null;
   render();
 }
@@ -11589,6 +11893,8 @@ async function saveRequestEdit(id) {
   const refInput = document.getElementById('editReqReference_'+id);
   const remInput = document.getElementById('editReqRemarks_'+id);
   const patch = { subject_id: d.subjectId, type: d.type, classes: storedClasses, amount_paid: storedAmount, date };
+  // A pending request saved after SQL 76 is priced again with its family (typed amount = kept as typed).
+  if (original.kind === 'Request' && original.baseAmount != null) Object.assign(patch, formRequestDiscountCols(original.studentId, d.subjectId, d.type, d.mode || studentUsualMode(original.studentId, d.subjectId, d.type), storedClasses, storedAmount) || {});
   if (refInput) patch.payment_reference = refInput.value.trim() || null;
   if (remInput) patch.payment_remarks = remInput.value.trim() || null;
   // The expiry date is sent only when the Admin actually changed it; otherwise the database keeps / recomputes it.
@@ -11599,6 +11905,7 @@ async function saveRequestEdit(id) {
   const { error } = await sb.from('subscriptions').update(patch).eq('id', id);
   if (error) { editRequestMsg = 'Could not save: ' + error.message; render(); return; }
   original.subjectId = d.subjectId; original.type = d.type; original.classes = storedClasses; original.amountPaid = storedAmount; original.date = date;
+  if ('base_amount' in patch) applyDiscountToLocal(original, patch);
   if (refInput) original.paymentReference = refInput.value.trim();
   if (remInput) original.paymentRemarks = remInput.value.trim();
   if (expiryChanged) original.expiresOn = expInput.value || '';
@@ -11606,13 +11913,16 @@ async function saveRequestEdit(id) {
   const expiryAffected = original.kind === 'Payment' && (expiryChanged || date !== oldDate || storedClasses !== oldClasses);
   if (expiryAffected) data.subscriptions = data.subscriptions.filter(s => s.expiredBatchId !== id);
   editingRequestId = null;
+  if (original.kind === 'Request') { const e = await repriceFamilyRequests(original.studentId); if (e) alert(e); }
   render();
   if (expiryAffected) await runExpirySweep(true, true);   // re-work the Expiry entry, then reload to pick up the new expiry date
 }
 async function cancelFeeRequest(id) {
+  const gone = data.subscriptions.find(s => s.id === id);
   const { error } = await sb.from('subscriptions').delete().eq('id', id);
   if (error) { alert('Could not cancel this request: ' + error.message); render(); return; }
   data.subscriptions = data.subscriptions.filter(s=>s.id!==id);
+  if (gone) { const e = await repriceFamilyRequests(gone.studentId); if (e) alert(e); }   // the rest of the family may drop a tier
   render();
 }
 
@@ -13938,7 +14248,7 @@ function renderStudents() {
             const isEditing = editingRequestId === r.id;
             return `<tr>
               <td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td>
-              <td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td>
+              <td>${(r.amountPaid||0).toFixed(2)}${requestDiscountHint(r)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td>
               <td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${calcNoteHtml(r)}</td>
               <td>
                 ${rejectPaymentMsg[r.id] ? `<div class="hint" style="color:var(--brick)">${esc(rejectPaymentMsg[r.id])}</div>` : ''}
@@ -15203,7 +15513,7 @@ function renderFees() {
         const dMonthLabel=monthLabelOf(dMonth);
         const ord=n=>n+(n===1?'st':n===2?'nd':n===3?'rd':'th');
         return `<h2>Raise fee requests — ${dMonthLabel} ${helpBtn('raise-fees')}</h2>
-          <div class="hint" style="margin-bottom:6px">Raises one fee request per student, subject and class type (Group / Individual) for the selected month. How many classes depends on the saved class frequency, the last valid payment, current balance, and teacher-leave adjustments. Amount is from Fee setup with the Discount structure applied. Every request keeps its working, so you can answer any question about it later.</div>
+          <div class="hint" style="margin-bottom:6px">Raises one fee request per student, subject and class type (Group / Individual) for the selected month. How many classes depends on the saved class frequency, the last valid payment, current balance, and teacher-leave adjustments. Amount is from Fee setup less the bulk discount (best tier of the request, the child's subjects added up, or the whole family added up). Every request keeps its working, so you can answer any question about it later.</div>
           <details style="margin:8px 0;padding:8px 10px;border:1px solid var(--line);border-radius:8px"><summary style="cursor:pointer;font-weight:700">Rules (click to expand)</summary><div class="hint"><ul style="margin:8px 0 0 16px;padding:0">
             <li><b>Preview</b> works any day and saves nothing. <b>Confirm</b> works on the <b>1st to 7th</b> only. Can only be run <b>once per month</b>; use Reset to remove and re-run.</li>
             <li><b>Classes left</b> = paid classes (after refunds, transfers and expired classes) − classes used. <b>Absent counts like Present</b> — it uses a class.</li>
@@ -15244,9 +15554,9 @@ function renderFees() {
                 <tr><th>Raise</th><th>Student</th><th>Subject</th><th>Type</th><th>Method</th><th>Classes left</th><th>Expected classes</th><th>Requested classes</th><th>Amount (₹)</th><th>Working</th></tr>
                 ${demandPreviewRows.map((r,i)=>{ const next=demandPreviewRows[i+1], prev=demandPreviewRows[i-1], mine=demandPreviewRows.filter(x=>x.student.id===r.student.id&&x.include);
                   const fk=familyKeyOf(r.student.id), famRows=demandPreviewRows.filter(x=>familyKeyOf(x.student.id)===fk), famKids=[...new Set(famRows.map(x=>x.student.name))], multi=famKids.length>1;
-                  const famHead=multi&&(!prev||familyKeyOf(prev.student.id)!==fk)?`<tr style="background:var(--soft)"><td colspan="10"><b>Family: ${esc(familyParentName(r.student.id))}</b> · ${esc(famKids.join(', '))}${(()=>{ const ks=demandIgnorableKeys(data.students.filter(st=>familyKeyOf(st.id)===fk).map(st=>st.id)); return ks.length>1?' &nbsp; '+demandIgnoreTickHtml(ks,'Ignore classes left (whole family)'):''; })()}</td></tr>`:'';
+                  const famHead=multi&&(!prev||familyKeyOf(prev.student.id)!==fk)?`<tr style="background:var(--soft)"><td colspan="10"><b>Family: ${esc(familyParentName(r.student.id))}</b> · ${esc(famKids.join(', '))}${(()=>{ const ks=demandIgnorableKeys(data.students.filter(st=>familyKeyOf(st.id)===fk).map(st=>st.id)); return ks.length>1?' &nbsp; '+demandIgnoreTickHtml(ks,'Ignore classes left (whole family)'):''; })()} &nbsp; ${demandNoDiscountTickHtml(famRows.map(demandKey),'No discount (whole family)')}</td></tr>`:'';
                   const famFoot=multi&&(!next||familyKeyOf(next.student.id)!==fk)?`<tr><td colspan="8" style="text-align:right"><b>Family total</b></td><td><b>${famRows.filter(x=>x.include).reduce((a,x)=>a+x.amount,0).toFixed(2)}</b></td><td></td></tr>`:'';
-                  return famHead+`<tr${r.include?'':' style="opacity:0.5"'}><td><input type="checkbox" ${r.include?'checked':''} onchange="demandRowSet(${i},'include',this.checked)"></td><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(r.method)}</td><td${r.left<0?' style="color:var(--brick)"':''}>${r.left<0?`${-r.left} owed`:r.left}${r.left>0?`<div>${demandIgnoreTickHtml([demandKey(r)],'Ignore classes left')}</div>`:''}</td><td>${r.expectedDisplay===null?`<span class="hint" title="${esc(r.expectedDisplayNote)}">Review frequency</span>`:r.expectedDisplay}</td><td><input type="number" min="0.5" step="0.5" style="width:70px" value="${r.classes}" onchange="demandRowSet(${i},'classes',this.value)"></td><td><input type="number" min="1" step="1" style="width:90px" value="${r.amount}" onchange="demandRowSet(${i},'amount',this.value)"></td><td><span class="hint" style="font-size:11px;display:block;min-width:280px;white-space:normal">${esc(demandRowNote(r)).replace(/\n/g,'<br>')}</span></td></tr>`+((!next||next.student.id!==r.student.id)?(()=>{ const ks=demandIgnorableKeys([r.student.id]), tick=ks.length>1?demandIgnoreTickHtml(ks,`Ignore classes left (all subjects of ${esc(r.student.name)})`):'';
+                  return famHead+`<tr${r.include?'':' style="opacity:0.5"'}><td><input type="checkbox" ${r.include?'checked':''} onchange="demandRowSet(${i},'include',this.checked)"></td><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(r.method)}</td><td${r.left<0?' style="color:var(--brick)"':''}>${r.left<0?`${-r.left} owed`:r.left}${r.left>0?`<div>${demandIgnoreTickHtml([demandKey(r)],'Ignore classes left')}</div>`:''}</td><td>${r.expectedDisplay===null?`<span class="hint" title="${esc(r.expectedDisplayNote)}">Review frequency</span>`:r.expectedDisplay}</td><td><input type="number" min="0.5" step="0.5" style="width:70px" value="${r.classes}" onchange="demandRowSet(${i},'classes',this.value)"></td><td><input type="number" min="1" step="1" style="width:90px" value="${r.amount}" onchange="demandRowSet(${i},'amount',this.value)">${r.discount&&discountLabel(r.discount)&&!r.amountEdited?`<div class="hint" style="font-size:11px;color:var(--forest)">${esc(discountLabel(r.discount))}</div>`:''}<div>${demandNoDiscountTickHtml([demandKey(r)],'No discount')}</div></td><td><span class="hint" style="font-size:11px;display:block;min-width:280px;white-space:normal">${esc(demandRowNote(r)).replace(/\n/g,'<br>')}</span></td></tr>`+((!next||next.student.id!==r.student.id)?(()=>{ const ks=demandIgnorableKeys([r.student.id]), tick=ks.length>1?demandIgnoreTickHtml(ks,`Ignore classes left (all subjects of ${esc(r.student.name)})`):'';
                     return mine.length>1||tick?`<tr><td colspan="5">${tick}</td><td colspan="3" class="hint" style="text-align:right">${mine.length>1?`Subtotal for ${esc(r.student.name)}`:''}</td><td>${mine.length>1?`<b>${mine.reduce((a,x)=>a+x.amount,0).toFixed(2)}</b>`:''}</td><td></td></tr>`:''; })():'')+famFoot; }).join('')}
               </table></div>
               <div class="hint" style="margin-top:8px">${inc.length} request${inc.length===1?'':'s'} will be created${demandPreviewRows.length>inc.length?' · '+(demandPreviewRows.length-inc.length)+' unticked':''} · Total ₹${inc.reduce((a,r)=>a+r.amount,0).toFixed(2)}</div>
@@ -15314,7 +15624,7 @@ function renderFees() {
 
     <div class="card">
       <h2>Discount structure <button class="help-btn" onclick="openHelp('discount',event)">?</button></h2>
-      <div class="hint">Bulk-class discounts, e.g. 30 classes → 6%, 50 classes → 10%. The calculator applies whichever tier the class count reaches — discounts don't stack.</div>
+      <div class="hint">Bulk-class discounts, e.g. 30 classes → 6%, 50 classes → 10%. Discounts don't stack: one tier applies. Fee requests also add up a child's subjects and the whole family's requests and give the best tier any of these reaches (see ?).</div>
       ${discountMsg ? `<div class="hint" style="color:var(--brick)">${esc(discountMsg)}</div>` : ''}
       ${tierRowsHtml}
       <div class="row-form">
@@ -16693,10 +17003,11 @@ function renderStudentReportCards(student, viewMonth, monthSetterFn, titlePrefix
         <tr><th></th><th>Subject</th><th>Type</th><th>Classes</th><th>Amount</th><th>Requested</th><th>Status</th></tr>
         ${myPendingRequests.map(r=>`<tr>
           <td><input type="checkbox" ${payCheckoutSelected.has(r.id)?'checked':''} ${paymentInitiated(r)?'disabled title="Already initiated — contact admin to reset before paying again"':''} onchange="togglePayCheckoutSelect('${r.id}')"></td>
-          <td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td>
+          <td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid||0).toFixed(2)}${requestDiscountHint(r)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td>
           <td>${paymentInitiated(r) ? `<span class="hint">Initiated (${esc(r.paymentReference)}) <a href="#" onclick="startUndoPaymentInitiation('${r.id}'); return false;" style="color:var(--brick)">Undo</a></span>` : (r.paymentRemarks ? `<span class="hint" style="color:var(--brick)">${esc(r.paymentRemarks)}</span>` : '<span class="hint">—</span>')}</td>
         </tr>`).join('')}
       </table></div>
+      ${discountRuleHtml(familyDiscountSaved(myPendingRequests), myPendingRequests.some(r => r.discountBasis === 'family' && r.discountPercent > 0))}
       ${payCheckoutMsg ? `<div class="hint" style="color:var(--brick)">${esc(payCheckoutMsg)}</div>` : ''}
       <div class="row-form" style="margin-top:10px">
         <button class="btn-primary" ${payCheckoutIds.length?'':'disabled'} onclick="startPayCheckout()">Pay ₹${payCheckoutTotal.toFixed(2)}</button>
@@ -17264,7 +17575,7 @@ function studentFeeCalculatorHtml(student) {
     </div>
     <div class="card">
       <h2>🎁 Bulk Discount Structure</h2>
-      <div class="hint" style="margin-bottom:8px">Subscribe to more classes at once to unlock a discount. Discounts don't stack — the single highest tier you reach applies.</div>
+      <div class="hint" style="margin-bottom:8px">Subscribe to more classes at once to unlock a discount. Discounts don't stack — the single highest tier you reach applies. For fee requests, all your subjects and your brothers' and sisters' classes are added up too, when they are paid together.</div>
       ${discountHtml}
     </div>
     <div class="card">
@@ -17845,6 +18156,7 @@ function renderParentPortal() {
         ${kidsDue.map(x => `<tr><td><a href="#" onclick="setParentSelectedChild('${x.c.id}');return false">${esc(x.c.name)}</a></td><td>₹${x.amt.toFixed(2)}</td></tr>`).join('')}
         <tr><td><b>Total</b></td><td><b>₹${kidsDue.reduce((a, x) => a + x.amt, 0).toFixed(2)}</b></td></tr>
       </table></div>
+      ${discountRuleHtml(familyDiscountSaved(myChildren.flatMap(c => pendingFeeRequests(c.id))), true)}
       <div class="hint">Open each child to see the details and pay.</div>
     </div>` : '';
   if (spOpen) return switcher + spPaperHtml();
@@ -20269,12 +20581,12 @@ const HELP = {
   'sub-history': { t:'Subscription history', b:'<ul><li><b>Active</b> — being drawn down now (oldest first).</li><li><b>Upcoming</b> — next in line after the active payment runs out.</li><li><b>Expired</b> — unused classes removed after the expiry date.</li><li>Click Edit to correct a date, amount, reference or expiry date.</li></ul>' },
   'fee-msg-settings': { t:'Fee Message Settings', b:'<ul><li>Sets the UPI ID and contact number shown in every fee reminder message.</li><li>Parents send payment screenshots to the contact number.</li><li>Tick or untick <b>Add Razorpay online payment link</b> to put the Online Payment link in fee messages (and the Pay online button for parents/students) or leave it out. You can also change the link here.</li></ul>' },
   'fee-setup': { t:'Fee setup', b:'<ul><li>Per-class rates for each teacher, category, class type and mode.</li><li>Used to calculate teacher payroll in Reports.</li><li>A missing rate means those classes show as Rs 0 in payroll.</li></ul>' },
-  'discount': { t:'Discount structure', b:'<ul><li>Optional discounts when a student subscribes to multiple subjects.</li><li>Used in the Fee Calculator as a reference — does not automatically apply to recorded payments.</li></ul>' },
+  'discount': { t:'Discount structure', b:'<ul><li>Bulk-class tiers, e.g. 30+ classes 6%, 50+ 10%. Tiers never add up: the single best one applies.</li><li>Fee requests count classes three ways: the one request, all of that child\'s pending requests (every subject), and the whole family\'s pending requests. The highest tier any of them reaches is given to every request in the family.</li><li>A <b>Bill separately</b> student gets only the discount each of their own requests reaches. <b>No bulk discount</b> on a student\'s page switches it off for the whole family.</li><li>Paying everything together keeps the discount. A part payment is worked out again on the classes paid for: the money buys as many whole classes as it can at the slab they reach, the rest becomes a new pending request, and any leftover money goes in Remarks.</li><li>Record payment and the Fee calculator below work per payment.</li><li>Requests raised before SQL 76 keep the amount they were raised with.</li></ul>' },
   'fee-calc': { t:'Fee calculator', b:"<ul><li>If the student has an agreed special rate (Student page → Special fee rates), that rate is used instead of Fee setup. Discount tiers still apply.</li><li>Calculates the expected fee based on a student's enrolled subjects and class type.</li><li>Click Push fee request to send the amount straight to the student's fee requests.</li></ul>" },
   'renewal': { t:'Students needing renewal', b:'<ul><li>Active students with 0 or fewer classes remaining in any subject.</li><li>Also shows students enrolled in a subject who have never bought classes (Never subscribed).</li><li>Click Request Fees to jump to the Fee Calculator for that student.</li></ul>' },
   'bulk-parents': { t:'Create all parent logins', b:"<ul><li>Preview lists every active student's family that needs a parent login. Nothing is saved until you press Create.</li><li>Brothers and sisters with the same parent mobile or main mobile share one login with all of them linked.</li><li>Login ID and password are the parent's 10-digit mobile. When the parent logs in with it, the app asks them to change the password.</li><li>A family that already has a parent login is not given a second one; only children missing from it are linked.</li><li>Skipped: students with no phone number, or a number saved on more than 4 students.</li><li>After Create, each family's row has 📤 WhatsApp buttons with the message ready (app link, login ID, password). Later, open a parent from Manage parent logins to send it again.</li></ul>" },
   'razorpay-report': { t:'Razorpay payments', b:"<ul><li>Every payment Razorpay sent to the app in the month (India time), from 23 Oct 2026 when the webhook started.</li><li><b>Fee</b>: confirmed on the Fees page; shows the students, subjects and amounts recorded. <b>Demo</b>: linked to a website demo booking. <b>Set aside</b>: Not a fee / Not a demo. <b>Waiting</b>: still in Razorpay payments to confirm.</li><li>Fees difference = received minus recorded: Razorpay's charge added on top, or excess paid.</li><li>Refunds made in Razorpay are not shown; record them in the app as usual.</li></ul>" },
-  'pending-fees': { t:'Pending fee requests', b:"<ul><li>All fee requests across all students not yet marked Paid, grouped by family.</li><li>Brothers and sisters are one family when they share a parent login or a parent mobile number (main Mobile or any Parent number). Tick <b>Bill separately</b> on a student's page to keep them out of the family.</li><li>Message makes one WhatsApp message for the whole family with every subject and the total.</li><li>Mark paid marks one request; Mark all paid marks every request of the family with one date and reference.</li><li><b>Razorpay payments to confirm</b> (above the list): payments from the Razorpay page, each with a suggested family from the paying phone or the student name typed, and the amount. Confirm marks those requests paid with the Razorpay payment ID as reference. Wrong family? Pick another one and tick the requests it covers. Not a fee sets it aside; Show set-aside payments brings it back.</li></ul>" },
+  'pending-fees': { t:'Pending fee requests', b:"<ul><li>All fee requests across all students not yet marked Paid, grouped by family.</li><li>Brothers and sisters are one family when they share a parent login or a parent mobile number (main Mobile or any Parent number). Tick <b>Bill separately</b> on a student's page to keep them out of the family.</li><li>Message makes one WhatsApp message for the whole family with every subject and the total.</li><li>Mark paid marks one request; Mark all paid marks every request of the family with one date and reference. Type the <b>Amount received</b>: when it is less than due, or only some of a family's discounted requests are paid, it is a part payment. The discount is worked out again on the classes paid for, the money buys whole classes, the rest becomes a new pending request and leftover money goes in Remarks. You see the changes and confirm first.</li><li><b>Razorpay payments to confirm</b> (above the list): payments from the Razorpay page, each with a suggested family from the paying phone or the student name typed, and the amount. Confirm marks those requests paid with the Razorpay payment ID as reference. Wrong family? Pick another one and tick the requests it covers. Not a fee sets it aside; Show set-aside payments brings it back.</li></ul>" },
   'all-payments': { t:'All subscription payments', b:'<ul><li>Every payment recorded for the selected month, across all students.</li><li>Use the filters to narrow by teacher or subject.</li><li>Export downloads the filtered list as Excel.</li></ul>' },
   'refunds': { t:'Refunds issued', b:'<ul><li>All refunds recorded for the selected month.</li><li>Export downloads the list as Excel.</li></ul>' },
   'payroll': { t:'Teacher payroll', b:'<ul><li>Each teacher\'s earnings for the selected month — classes given multiplied by their per-class rate.</li><li>A ₹100 demo bonus is added for each demo that was Converted to a student that month.</li><li>Rates are set in the Fees tab under Fee setup.</li><li>Toggle the breakdown by category and class type with the Show/Hide button.</li><li>📄 Salary Slip opens a printable slip for one teacher. With All Teachers picked, 📄 Print all salary slips puts every teacher\'s slip in one window, one per page, so you can save them as a single PDF.</li></ul>' },
@@ -20306,8 +20618,8 @@ const HELP = {
   'ai-settings': { t:'AI Settings', b:'<ul><li>The master switch turns every AI feature on or off for everyone.</li><li>The API key is kept on the server and is never sent to teachers, students or parents.</li><li><b>Cost estimate</b>: the price per model and the ₹ per $ rate used to estimate costs in AI usage.</li><li>Each person can make up to 200 AI calls a day.</li></ul>' },
   'ai-access': { t:'AI access', b:'<ul><li>Turn AI on or off for a whole role (Teacher, Student, Parent), then for single people.</li><li>A person can use AI only when the master switch, their role and they themselves are all on. Admins always can.</li><li>When a role is off, everyone in it shows a locked Off.</li><li>People see a change after they log in again.</li></ul>' },
   'payment-history': { t:'Subscription Payment History', b:'<ul><li><b>Active</b> — this payment\'s classes are being used now.</li><li><b>Expired</b> — unused classes were removed after the expiry date.</li><li>The Expires on date shows when unused classes will be lost.</li><li>Contact the Admin to correct any details.</li></ul>' },
-  'raise-fees': { t:'Raise fee requests', b:"<ul><li>Makes the month's fee requests for every active student in one go: one request per student, subject and Group / Individual.</li><li><b>Preview Fee Requests</b> works any day and saves nothing. <b>Confirm</b> works only on the 1st to 7th of the month, once per month (Reset removes the run so you can do it again).</li><li>Classes come from the student's <b>Class Frequency</b> (each weekday counted in the month), minus clear teacher-leave days, against the classes they still have. Package students (30, 50, 60 or 100 classes) are asked for the same package again.</li><li>Amount = Fee setup rate (or the student's Special fee rate) × classes, with the Discount structure.</li><li>The preview is grouped by family. You can change classes or amount, or untick a row, before Confirm. Not raised shows who was left out and why.</li><li><b>Ignore classes left</b>: bills the full month without taking off the classes still left (per row, per student or whole family; Raise anyway in Not raised). The fee message then does not mention those classes. Owed classes are never ignored.</li><li>Every request keeps its working, so you can explain the amount to a parent.</li></ul>" },
-  'fee-message': { t:'Fee message', b:"<ul><li>One WhatsApp message for the whole family: each child's subjects, classes and amount, the total, how it was worked out, UPI and Razorpay details and the parent's app login.</li><li>The first message starts 'Please find below the tuition fee details…'. Tick <b>Short reminder</b> for a follow-up; only the opening line changes to 'gentle reminder … still due'.</li><li>You can edit the text before sending. On a phone the WhatsApp button opens the app. On a computer use 📤 Desktop (WhatsApp app) or 📤 Web (WhatsApp Web).</li><li>Sending stamps the date, so you can see when the family was last reminded and how many times.</li></ul>" },
+  'raise-fees': { t:'Raise fee requests', b:"<ul><li>Makes the month's fee requests for every active student in one go: one request per student, subject and Group / Individual.</li><li><b>Preview Fee Requests</b> works any day and saves nothing. <b>Confirm</b> works only on the 1st to 7th of the month, once per month (Reset removes the run so you can do it again).</li><li>Classes come from the student's <b>Class Frequency</b> (each weekday counted in the month), minus clear teacher-leave days, against the classes they still have. Package students (30, 50, 60 or 100 classes) are asked for the same package again.</li><li>Amount = Fee setup rate (or the student's Special fee rate) × classes, less the bulk discount: the best tier reached by the request, the child's subjects added up, or the whole family added up (family's other pending requests count too). Tick <b>No discount</b> on a row or a family for this run only.</li><li>The preview is grouped by family. You can change classes or amount, or untick a row, before Confirm. Not raised shows who was left out and why.</li><li><b>Ignore classes left</b>: bills the full month without taking off the classes still left (per row, per student or whole family; Raise anyway in Not raised). The fee message then does not mention those classes. Owed classes are never ignored.</li><li>Every request keeps its working, so you can explain the amount to a parent.</li></ul>" },
+  'fee-message': { t:'Fee message', b:"<ul><li>One WhatsApp message for the whole family: each child's subjects, classes and amount, the total, how it was worked out, any bulk discount (and what the family saves, with a line that a part payment loses it), UPI and Razorpay details and the parent's app login.</li><li>The first message starts 'Please find below the tuition fee details…'. Tick <b>Short reminder</b> for a follow-up; only the opening line changes to 'gentle reminder … still due'.</li><li>You can edit the text before sending. On a phone the WhatsApp button opens the app. On a computer use 📤 Desktop (WhatsApp app) or 📤 Web (WhatsApp Web).</li><li>Sending stamps the date, so you can see when the family was last reminded and how many times.</li></ul>" },
   'student-calls': { t:'Call log', b:"<ul><li>After phoning a student or parent, open the student and press <b>+ Add call note</b>: when, who you spoke to (Parent / Student), what happened, what was said, and an optional <b>Call again on</b> date.</li><li>Every call stays on the student page, newest first; notes can be edited, never deleted. Only admins see the call log (teachers do not).</li><li>Calls made while the student was still a demo booking also show here, with a <b>Demo booking</b> tag (edit those on the Demo Bookings card).</li><li>When the latest call says Call again on today or earlier, the student shows under <b>Student calls due</b> on the dashboard and at the top of the Students page.</li></ul>" },
   'special-rates': { t:'Special fee rates', b:"<ul><li>An agreed per-class rate for one student, subject and Group / Individual, from a date and optionally until a date.</li><li>While it is in use it replaces the Fee setup rate everywhere: Record payment, fee requests, Calculate, Raise fee requests, Fee calculator and the student's and parent's Applicable Rates.</li><li>Leave Offline rate empty if it is the same as Online. Discount tiers still apply on top.</li><li>Requests and payments already saved are not changed. Remove puts the student back on Fee setup rates.</li></ul>" },
   'class-frequency': { t:'Class Frequency', b:"<ul><li>How many classes each student has on each weekday, per subject (each class is 60 minutes).</li><li>+ New Frequency or Edit: tick the weekdays and set the classes on each day.</li><li>Raise fee requests uses it to count the month's classes, and Rebuild Pending Classes uses it to make the schedule. Saving it does not change classes already scheduled.</li><li>Pairs still Not configured are listed so you can fill them in. Teachers can set it for their own students too.</li></ul>" },
@@ -20328,7 +20640,7 @@ const HELP = {
   'star-teacher-admin': { t:'Star Teacher', b:"<ul><li>A points game for teachers, no money. Tick <b>Show Star Teacher to teachers</b> to switch it on; teachers see it after they open or refresh the app.</li><li><b>Game starts on</b>: nothing before this date counts.</li><li>The leaderboard is for admins only. Tap a teacher to see where their points came from. ⬇ Excel downloads the month.</li><li>Points are worked out from the saved classes, homework, papers, plans, demos, renewals and app usage, so changing the start date recounts everything.</li></ul>" },
   'pending-actions': { t:'Pending Action Items', b:"<ul><li>Everything waiting for you, counted on the menu and in the gold strip on your Dashboard. Tap an item to jump to it.</li><li>Counted: today's classes past their time, class timings to correct (00:00 / 01:00 / 02:00), schedule setup (Class Frequency), demos to mark done, homework and practice papers to review, students without a study plan, unread chats, notifications and announcements, and availability not set.</li><li><b>Keep an eye on</b> is a reminder list and is not counted: lesson prep, expiring classes, renewals, low balances, students not seen, late homework or papers, and your open support tickets.</li><li>You can give attendance only for the current month, so mark every class before the month ends.</li></ul>" },
   'teacher-demos': { t:'My Demo Classes', b:"<ul><li>Demo classes the office booked for you.</li><li>After you give a demo, press <b>✓ Mark done</b> and add a line on how it went. Until then it shows under Pending Action Items.</li><li>If the student joins, the office marks it Converted and you get a ₹100 demo bonus in that month's payroll.</li></ul>" },
-  'pay-fees': { t:'Paying fees', b:"<ul><li>Fee requests are the fees due. They are added to the classes balance only after the payment is confirmed.</li><li><b>Pay by UPI</b>: tick the requests, press Pay ₹…, pay with the UPI ID or QR code and put the Unique ID shown in your UPI app's note. Then press Payment Completed and send the screenshot to the contact number.</li><li><b>Pay online (Razorpay)</b>: opens the payment page for card, UPI or net banking. Type the student's name so we can match it.</li><li>LIB Education confirms every payment by hand, so it can take a little time to show as paid.</li></ul>" },
+  'pay-fees': { t:'Paying fees', b:"<ul><li>Fee requests are the fees due. They are added to the classes balance only after the payment is confirmed.</li><li><b>Pay by UPI</b>: tick the requests, press Pay ₹…, pay with the UPI ID or QR code and put the Unique ID shown in your UPI app's note. Then press Payment Completed and send the screenshot to the contact number.</li><li><b>Pay online (Razorpay)</b>: opens the payment page for card, UPI or net banking. Type the student's name so we can match it.</li><li>LIB Education confirms every payment by hand, so it can take a little time to show as paid.</li><li><b>Bulk discount</b>: all your children's classes are added up for the discount. Pay all the fees due together to keep it; if only part is paid, the discount is worked out again on the classes paid for.</li></ul>" },
 };
 
 // ════════════════════════════════════════════════════════════════
