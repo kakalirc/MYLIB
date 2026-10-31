@@ -442,6 +442,43 @@ let biometricLockActive = false;
 let biometricLockedProfile = null;
 let biometricLockedUserId = '';
 let biometricOfferShown = false;
+// Cross-tab authentication synchronisation. A logout in one tab must clear
+// every other tab's in-memory user data, including when biometric logout keeps
+// the Supabase session alive for quick login on this device.
+const AUTH_LOGOUT_SYNC_KEY = 'lib_auth_logout_sync';
+let authSyncChannel = null;
+let lastHandledLogoutEventId = '';
+function publishCrossTabLogout(userId) {
+  if (!userId) return;
+  const event = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, userId, at: Date.now() };
+  try { if (authSyncChannel) authSyncChannel.postMessage(event); } catch (e) {}
+  try { localStorage.setItem(AUTH_LOGOUT_SYNC_KEY, JSON.stringify(event)); } catch (e) {}
+}
+function handleCrossTabLogout(event) {
+  if (!event || !event.id || event.id === lastHandledLogoutEventId) return;
+  lastHandledLogoutEventId = event.id;
+  if (!event.userId) return;
+  if (isLoggedIn && currentUserId === event.userId) {
+    // Do not rebroadcast or write a second audit event. logout() applies the
+    // same secure cleanup and preserves the biometric gate when appropriate.
+    logout({ broadcast: false, logEvent: false });
+  } else if (biometricLockActive && biometricLockedUserId === event.userId) {
+    // This tab is already at the biometric gate for the same signed-out user.
+    render();
+  }
+}
+function setupCrossTabAuthSync() {
+  if (typeof BroadcastChannel !== 'undefined') {
+    try {
+      authSyncChannel = new BroadcastChannel('lib-auth-session');
+      authSyncChannel.addEventListener('message', e => handleCrossTabLogout(e.data));
+    } catch (e) { authSyncChannel = null; }
+  }
+  window.addEventListener('storage', e => {
+    if (e.key !== AUTH_LOGOUT_SYNC_KEY || !e.newValue) return;
+    try { handleCrossTabLogout(JSON.parse(e.newValue)); } catch (err) {}
+  });
+}
 let currentUsername = '';
 let currentRole = '';
 let currentLinkedId = '';
@@ -7341,7 +7378,13 @@ setInterval(() => {
   if (isLoggedIn && document.visibilityState === 'visible' && !hasUnsavedEditInProgress()) refreshAllData(true);
 }, 75000);
 
-async function logout() {
+async function logout(options = {}) {
+  const broadcast = options.broadcast !== false;
+  const shouldLogEvent = options.logEvent !== false;
+  const logoutUserId = currentUserId;
+  // Notify sibling tabs before clearing this tab's identity. BroadcastChannel
+  // is immediate; the storage event is a fallback for browsers without it.
+  if (broadcast && logoutUserId) publishCrossTabLogout(logoutUserId);
   // Only soft-logout if bio belongs to THIS user — prevents user B from
   // seeing user A's credential gate after logging in with a password.
   if (bioIsRegistered() && currentUsername === bioGetUsername()) {
@@ -7350,7 +7393,7 @@ async function logout() {
     // so renderLogin() shows the fingerprint button immediately (no page reload).
     // On the next page load, initApp() will intercept the still-valid session
     // and set biometricLockActive = true again automatically.
-    if (currentUserId) logLoginEvent('logout', currentUserId, currentUsername, currentRole);
+    if (shouldLogEvent && currentUserId) logLoginEvent('logout', currentUserId, currentUsername, currentRole);
     biometricLockActive = true;
     biometricLockedProfile = {
       username: currentUsername, role: currentRole,
@@ -7361,7 +7404,7 @@ async function logout() {
     biometricLockedUserId = currentUserId;
   } else {
     await Promise.all([
-      currentUserId ? logLoginEvent('logout', currentUserId, currentUsername, currentRole) : Promise.resolve(),
+      shouldLogEvent && currentUserId ? logLoginEvent('logout', currentUserId, currentUsername, currentRole) : Promise.resolve(),
       sb.auth.signOut(),
     ]);
   }
@@ -24867,6 +24910,7 @@ async function initApp() {
     return;
   }
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  setupCrossTabAuthSync();
 
   // Restore an existing session (e.g. after a page refresh) rather than
   // always forcing the person back to the login screen.
