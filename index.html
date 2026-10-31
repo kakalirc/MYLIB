@@ -10033,7 +10033,7 @@ function familyFeeMessage(studentId, short) {
   const logins = kids.map(s => ({ s, u: data.users.find(u => u.role === 'Student' && u.linkedId === s.id && !u.archived) })).filter(x => x.u);
   if (parentLogin || logins.length) {
     lines.push('App Login');
-    if (parentLogin) lines.push(`Parent login (shows ${kids.length > 1 ? 'all your children’s' : 'your child’s'} classes and fees): ${parentLogin.username}`);
+    if (parentLogin) lines.push(`Parent Login ID: ${parentLogin.username}`);
     logins.forEach(x => lines.push(`${kids.length > 1 ? x.s.name + ' - ' : ''}Login ID: ${x.u.username}`));
     lines.push('Password: same as the login ID, unless you have already changed it.');
     lines.push(...APP_LINK_LINES, '');
