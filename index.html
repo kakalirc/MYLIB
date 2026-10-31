@@ -9978,10 +9978,11 @@ function familyFeeMessage(studentId, short) {
   if (razorpayOn) lines.push(`Online Payment: ${razorpayFeePage}`, 'While making the online payment, please enter the following details:', `Tuition Fee: ${inrText(total)}`, `Student Name: ${names.join(', ')}`);
   lines.push('');
   if (feeContactMobile) lines.push(`After completing the payment, kindly share the payment confirmation screenshot at ${feeContactMobile} for our records.`, '');
-  // The parent login shows every child's fees, so it is given when the family has one; else each child's login.
+  // Show the parent login (if available) and each child's own student login.
+  // A parent login does not replace the student's separate login credentials.
   const parentIds = new Set((data.parentStudents || []).filter(m => kids.some(s => s.id === m.studentId)).map(m => m.parentUserId));
   const parentLogin = data.users.find(u => u.role === 'Parent' && parentIds.has(u.id) && !u.archived);
-  const logins = parentLogin ? [] : kids.map(s => ({ s, u: data.users.find(u => u.role === 'Student' && u.linkedId === s.id && !u.archived) })).filter(x => x.u);
+  const logins = kids.map(s => ({ s, u: data.users.find(u => u.role === 'Student' && u.linkedId === s.id && !u.archived) })).filter(x => x.u);
   if (parentLogin || logins.length) {
     lines.push('App Login');
     if (parentLogin) lines.push(`Parent login (shows ${kids.length > 1 ? 'all your children’s' : 'your child’s'} classes and fees): ${parentLogin.username}`);
