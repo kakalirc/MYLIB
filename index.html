@@ -1090,6 +1090,11 @@ let sCalcMode = 'Offline';
 let sCalcClasses = '';
 let sCalcStudentId = '';   // whose calculator is showing (special rates are per student)
 let demandPreviewRows = null;
+let demandTrialRows = null;
+let demandTrialSkippedRows = [];
+let demandTrialNeverPaid = 0;
+let demandTrialBusy = false;
+let demandTrialMsg = '';
 let demandSelectedMonth = ''; // Admin-selected target month for monthly fee requests
 let demandMsg = '';
 let demandConfirming = false;
@@ -10187,9 +10192,11 @@ function feeRequestSavedExpected(r) {
 }
 function feeRequestSavedReviewReasons(r, requests) {
   if (!isHistoricalFeeRequest(r)) return [];
-  const reasons = [], expected = feeRequestSavedExpected(r);
-  if (expected !== null && Number.isFinite(expected) && Math.abs(Number(r.classes) - expected) > 0.001)
-    reasons.push(`Requested ${r.classes} classes; saved frequency requires ${expected}.`);
+  const reasons = [], note = feeRequestReviewNote(r.calcNote || '');
+  // A classes-left deduction is part of the normal calculation, not a review exception.
+  // Only an explicitly recorded manual class-count override needs review here.
+  if (/classes changed by admin to/i.test(note))
+    reasons.push('Requested class count was manually changed after calculation.');
   const sameRun = (requests || data.subscriptions).filter(x => x.kind === 'Request' && x.studentId === r.studentId && isHistoricalFeeRequest(x) && feeRequestBatchKey(x) === feeRequestBatchKey(r));
   const types = new Set(sameRun.map(x => x.type));
   if (types.has('Group') && types.has('Individual')) reasons.push('Both Group and Individual requests are raised for this student in the same monthly run.');
@@ -10198,10 +10205,11 @@ function feeRequestSavedReviewReasons(r, requests) {
 function feeRequestNeedsReview(r, requests) { return feeRequestSavedReviewReasons(r, requests).length > 0; }
 function demandReviewReasons(row, rows) {
   const reasons = [];
-  if (row.expectedDisplay !== null && Number.isFinite(Number(row.expectedDisplay)) && Math.abs(Number(row.classes) - Number(row.expectedDisplay)) > 0.001)
-    reasons.push(`Requested ${row.classes} classes; saved frequency requires ${row.expectedDisplay}.`);
-  else if (row.expectedDisplay === null && row.expectedDisplayNote)
-    reasons.push(`Saved class frequency could not be verified: ${row.expectedDisplayNote}`);
+  // Do not compare requested classes with the full-month frequency: the request
+  // is normally reduced by classes already left (and may include owed classes).
+  // Only an admin override of the calculated class count requires this review.
+  if (row.classesEdited)
+    reasons.push('Requested class count was manually changed after calculation.');
   const sameStudent = (rows || []).filter(x => x.include && x.student.id === row.student.id);
   const types = new Set(sameStudent.map(x => x.ty));
   if (types.has('Group') && types.has('Individual')) reasons.push('Both Group and Individual requests are being raised for this student across subjects.');
@@ -10309,7 +10317,7 @@ async function setDemandTargetMonth(value) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value || '')) return;
   if (value === demandTargetMonth()) return;
   demandSelectedMonth = value;
-  demandPreviewRows = null; demandPreviewSnapshot = ''; demandSkippedRows = []; demandNeverPaid = 0; demandShowSkipped = false; demandMsg = 'Loading selected month status…';
+  demandPreviewRows = null; demandPreviewSnapshot = ''; demandSkippedRows = []; demandNeverPaid = 0; demandShowSkipped = false; demandTrialRows = null; demandTrialSkippedRows = []; demandTrialNeverPaid = 0; demandTrialMsg = ''; demandMsg = 'Loading selected month status…';
   render();
   await loadFeeRequestRunState(value);
   demandMsg = '';
@@ -10497,6 +10505,45 @@ async function previewDemand() {
   demandSortRows(rows);
   demandPreviewRows=rows; demandSkippedRows=skipped; demandNeverPaid=neverPaid; demandPreviewSnapshot=demandDataSignature(); render();
 }
+// Trial Run uses the same read-only calculation pipeline as Preview, but keeps
+// its results separate and deliberately does not exclude existing pending requests.
+// It never calls Preview, Confirm, reset, approval, or any database write path.
+async function trialRunDemand() {
+  if (demandTrialBusy) return;
+  const month = demandTargetMonth();
+  demandTrialBusy = true; demandTrialRows = null; demandTrialSkippedRows = []; demandTrialNeverPaid = 0;
+  demandTrialMsg = 'Running trial calculation…'; render();
+  try {
+    await Promise.all([loadClassFrequencyRows(), loadSessions(), loadScheduledClasses(), loadTeacherLeave(), loadStudentsAndSubscriptions()]);
+    const rows = [], skipped = []; let neverPaid = 0;
+    data.students.filter(s=>!s.archived).forEach(student => {
+      subjectsForStudent(student.id).forEach(subj => {
+        TYPES.forEach(ty => {
+          const skip = reason => skipped.push({student,subj,ty,month,reason});
+          const res = demandCalcFor(student,subj,ty,month);
+          if (res.neverPaid) { neverPaid++; if (demandIsLanguageGrade(student)) skip('Language-grade student has no valid prior payment; review manually.'); return; }
+          if (res.skip) { skip(res.skip); if (res.left > 0 && demandCalcFor(student,subj,ty,month,true).row) skipped[skipped.length-1].canIgnoreLeft = true; return; }
+          const existing = data.subscriptions.some(x=>x.kind==='Request'&&x.studentId===student.id&&x.subjectId===subj.id&&x.type===ty);
+          res.row.existingPendingRequest = existing;
+          rows.push(res.row);
+        });
+      });
+    });
+    // Do not inherit any temporary No-discount ticks from the editable Preview.
+    const savedNoDiscount = demandNoDiscount;
+    demandNoDiscount = new Set();
+    try { demandApplyDiscounts(rows, new Set(rows.filter(r=>r.existingPendingRequest).map(demandKey))); } finally { demandNoDiscount = savedNoDiscount; }
+    demandRefreshReviewFlags(rows);
+    demandSortRows(rows);
+    demandTrialRows = rows; demandTrialSkippedRows = skipped; demandTrialNeverPaid = neverPaid;
+    demandTrialMsg = `Trial calculation completed for ${monthLabelOf(month)}. No database records were written or changed.`;
+  } catch (e) {
+    demandTrialRows = null;
+    demandTrialMsg = 'Trial Run could not be completed: ' + (e && e.message ? e.message : String(e));
+  } finally {
+    demandTrialBusy = false; render();
+  }
+}
 function demandSortRows(rows) {
   rows.sort((a,b)=>familyParentName(a.student.id).localeCompare(familyParentName(b.student.id))||familyKeyOf(a.student.id).localeCompare(familyKeyOf(b.student.id))||studentLabel(a.student).localeCompare(studentLabel(b.student))||a.subj.name.localeCompare(b.subj.name)||a.ty.localeCompare(b.ty));
 }
@@ -10528,10 +10575,10 @@ function demandSetIgnoreLeft(keys, on) {
 }
 // Price the ticked rows together with the families' pending requests (request / child / family tier).
 // An amount typed by the admin is kept; its classes still count.
-function demandApplyDiscounts(rows) {
+function demandApplyDiscounts(rows, excludePendingKeys = new Set()) {
   const inc = rows.filter(r => r.include);
   const fams = new Set(inc.map(r => familyKeyOf(r.student.id)));
-  const pending = data.subscriptions.filter(r => r.kind === 'Request' && r.baseAmount != null && fams.has(familyKeyOf(r.studentId)));
+  const pending = data.subscriptions.filter(r => r.kind === 'Request' && r.baseAmount != null && fams.has(familyKeyOf(r.studentId)) && !excludePendingKeys.has(`${r.studentId}|${r.subjectId}|${r.type}`));
   rows.forEach(r => { r.base = feeBaseFor(r.subj.id, r.ty, r.mode, r.classes, r.student.id); r.noDiscount = demandNoDiscount.has(demandKey(r)); });
   const items = inc.map(r => ({ key: demandKey(r), studentId: r.student.id, classes: r.classes, base: r.base, fixed: r.noDiscount ? 'off' : null })).concat(pending.map(requestDiscountItem));
   const res = bulkDiscountFor(items);
@@ -15755,8 +15802,16 @@ function renderFees() {
           <div class="row-form" style="margin-top:10px;align-items:flex-end">
             <label style="display:flex;flex-direction:column;gap:5px;font-weight:700">Target Month<input type="month" value="${dMonth}" onchange="setDemandTargetMonth(this.value)" style="min-width:175px" aria-label="Target month for fee requests"></label>
             ${dRan?'': '<button class="btn-small btn-primary" onclick="previewDemand()">Preview Fee Requests</button>'}
+            <button class="btn-small btn-gold" onclick="trialRunDemand()" ${demandTrialBusy?'disabled':''}>${demandTrialBusy?'Running Trial…':'Trial Run'}</button>
+            <span class="hint">Trial Run can be repeated anytime. It recalculates all eligible students, including those with existing requests, and never saves or changes records.</span>
             <span class="hint">Preview works any day. Confirm is open from the 25th of the month before to the 7th of the selected month.</span>
           </div>
+          ${demandTrialMsg?`<div class="hint" style="margin-top:10px;color:${demandTrialMsg.startsWith('Trial Run could')?'var(--brick)':'var(--forest)'}">${esc(demandTrialMsg)}</div>`:''}
+          ${demandTrialRows!==null?(()=>{
+            const total=demandTrialRows.reduce((a,r)=>a+r.amount,0), flagged=demandTrialRows.filter(r=>r.reviewRequired).length, existing=demandTrialRows.filter(r=>r.existingPendingRequest).length;
+            const skipped=demandTrialSkippedRows.length;
+            return `<div class="card" style="margin-top:12px;border:1px dashed var(--gold)"><h3>Trial Run Results — ${esc(monthLabelOf(demandTargetMonth()))}</h3><div class="hint">Simulation only · ${demandTrialRows.length} eligible request(s) · ${skipped} not raised · ${demandTrialNeverPaid} never-paid subject/type(s) · ${flagged} requiring review · Total ${rupees(total)}${existing?` · ${existing} already have a pending request`:''}</div>${existing?'<div class="hint" style="margin-top:6px;color:var(--brick)">Existing pending requests are included for testing only. Trial Run will not create duplicates or modify them.</div>':''}${demandTrialRows.length?`<div class="table-scroll"><table><tr><th>Student</th><th>Subject</th><th>Type</th><th>Method</th><th>Classes left</th><th>Expected</th><th>Requested</th><th>Amount</th><th>Review</th><th>Existing request</th></tr>${demandTrialRows.map(r=>`<tr style="${r.reviewRequired?'background:#fff4c2;':''}"><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(r.method)}</td><td>${r.left<0?`${-r.left} owed`:r.left}</td><td>${r.expectedDisplay===null?'Review frequency':r.expectedDisplay}</td><td>${r.classes}</td><td>${rupees(r.amount)}</td><td>${r.reviewRequired?`<b style="color:#8a5b00">Review required</b><div class="hint">${r.reviewReasons.map(esc).join('<br>')}</div>`:'✓ No review required'}</td><td>${r.existingPendingRequest?'Yes — unchanged':'No'}</td></tr>`).join('')}</table></div>`:'<div class="empty">No eligible fee requests calculated.</div>'}${skipped?`<details style="margin-top:8px"><summary>Not raised (${skipped})</summary><div class="table-scroll"><table><tr><th>Student</th><th>Subject</th><th>Type</th><th>Reason</th></tr>${demandTrialSkippedRows.map(r=>`<tr><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(r.reason)}</td></tr>`).join('')}</table></div></details>`:''}<div class="hint" style="margin-top:8px;font-weight:700">Trial Run — Simulation Only. No database records have been saved, updated, or deleted.</div></div>`;
+          })():''}
           ${dRan?`
             <div class="hint" style="color:var(--forest);margin-top:8px">✓ Fee requests already raised for ${dMonthLabel}.</div>
             <div class="row-form" style="margin-top:8px"><button class="btn-gold" onclick="exportDemandRun()">Download Excel of this run</button><button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="resetDemand()">Reset — remove &amp; unlock</button></div>
@@ -20862,7 +20917,7 @@ const HELP = {
   'ai-settings': { t:'AI Settings', b:'<ul><li>The master switch turns every AI feature on or off for everyone.</li><li>The API key is kept on the server and is never sent to teachers, students or parents.</li><li><b>Cost estimate</b>: the price per model and the ₹ per $ rate used to estimate costs in AI usage.</li><li>Each person can make up to 200 AI calls a day.</li></ul>' },
   'ai-access': { t:'AI access', b:'<ul><li>Turn AI on or off for a whole role (Teacher, Student, Parent), then for single people.</li><li>A person can use AI only when the master switch, their role and they themselves are all on. Admins always can.</li><li>When a role is off, everyone in it shows a locked Off.</li><li>People see a change after they log in again.</li></ul>' },
   'payment-history': { t:'Subscription Payment History', b:'<ul><li><b>Active</b> — this payment\'s classes are being used now.</li><li><b>Expired</b> — unused classes were removed after the expiry date.</li><li>The Expires on date shows when unused classes will be lost.</li><li>Contact the Admin to correct any details.</li></ul>' },
-  'raise-fees': { t:'Raise fee requests', b:"<ul><li>Makes the month's fee requests for every active student in one go: one request per student, subject and Group / Individual.</li><li><b>Preview Fee Requests</b> works any day and saves nothing. <b>Confirm</b> works from the 25th of the month before to the 7th of the month (November's requests: 25 Oct to 7 Nov), once per month (Reset removes the run so you can do it again). Raised before the 1st, the classes still to be used this month are taken off what is left.</li><li>Classes come from the student's <b>Class Frequency</b> (each weekday counted in the month), minus clear teacher-leave days, against the classes they still have. Package students (30, 50, 60 or 100 classes) are asked for the same package again.</li><li>Amount = Fee setup rate (or the student's Special fee rate) × classes, less the bulk discount: the best tier reached by the request, the child's subjects added up, or the whole family added up (family's other pending requests count too). Tick <b>No discount</b> on a row or a family for this run only.</li><li>The preview is grouped by family. You can change classes or amount, or untick a row, before Confirm. The ticks in the headings (Raise, Ignore all, No discount (all)) do every row at once. Not raised shows who was left out and why.</li><li><b>Ignore classes left</b>: bills the full month without taking off the classes still left (per row, per student or whole family; Raise anyway in Not raised). The fee message then does not mention those classes. Owed classes are never ignored.</li><li>Every request keeps its working, so you can explain the amount to a parent.</li></ul>" },
+  'raise-fees': { t:'Raise fee requests', b:"<ul><li>Makes the month's fee requests for every active student in one go: one request per student, subject and Group / Individual.</li><li><b>Trial Run</b> can be run anytime and recalculates all eligible students, including those with existing requests. It is simulation-only and never writes to the database. <b>Preview Fee Requests</b> works any day and saves nothing. <b>Confirm</b> works from the 25th of the month before to the 7th of the month (November's requests: 25 Oct to 7 Nov), once per month (Reset removes the run so you can do it again). Raised before the 1st, the classes still to be used this month are taken off what is left.</li><li>Classes come from the student's <b>Class Frequency</b> (each weekday counted in the month), minus clear teacher-leave days, against the classes they still have. Package students (30, 50, 60 or 100 classes) are asked for the same package again.</li><li>Amount = Fee setup rate (or the student's Special fee rate) × classes, less the bulk discount: the best tier reached by the request, the child's subjects added up, or the whole family added up (family's other pending requests count too). Tick <b>No discount</b> on a row or a family for this run only.</li><li>The preview is grouped by family. You can change classes or amount, or untick a row, before Confirm. The ticks in the headings (Raise, Ignore all, No discount (all)) do every row at once. Not raised shows who was left out and why.</li><li><b>Ignore classes left</b>: bills the full month without taking off the classes still left (per row, per student or whole family; Raise anyway in Not raised). The fee message then does not mention those classes. Owed classes are never ignored.</li><li>Every request keeps its working, so you can explain the amount to a parent.</li></ul>" },
   'fee-message': { t:'Fee message', b:"<ul><li>One WhatsApp message for the whole family: each child's subjects, classes and amount, the total, how it was worked out, any bulk discount (and what the family saves, with a line that a part payment loses it), UPI and Razorpay details and the parent's app login.</li><li>The first message starts 'Please find below the tuition fee details…'. Tick <b>Short reminder</b> for a follow-up; only the opening line changes to 'gentle reminder … still due'.</li><li>You can edit the text before sending. On a phone the WhatsApp button opens the app. On a computer use 📤 Desktop (WhatsApp app) or 📤 Web (WhatsApp Web).</li><li>Sending stamps the date, so you can see when the family was last reminded and how many times.</li></ul>" },
   'student-calls': { t:'Call log', b:"<ul><li>After phoning a student or parent, open the student and press <b>+ Add call note</b>: when, who you spoke to (Parent / Student), what happened, what was said, and an optional <b>Call again on</b> date.</li><li>Every call stays on the student page, newest first; notes can be edited, never deleted. Only admins see the call log (teachers do not).</li><li>Calls made while the student was still a demo booking also show here, with a <b>Demo booking</b> tag (edit those on the Demo Bookings card).</li><li>When the latest call says Call again on today or earlier, the student shows under <b>Student calls due</b> on the dashboard and at the top of the Students page.</li></ul>" },
   'special-rates': { t:'Special fee rates', b:"<ul><li>An agreed per-class rate for one student, subject and Group / Individual, from a date and optionally until a date.</li><li>While it is in use it replaces the Fee setup rate everywhere: Record payment, fee requests, Calculate, Raise fee requests, Fee calculator and the student's and parent's Applicable Rates.</li><li>Leave Offline rate empty if it is the same as Online. Discount tiers still apply on top.</li><li>Requests and payments already saved are not changed. Remove puts the student back on Fee setup rates.</li></ul>" },
