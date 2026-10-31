@@ -337,7 +337,7 @@ const APP_VERSION = '2026.10';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-10-31 08:00 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-10-31 09:00 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -10170,8 +10170,22 @@ async function loadFeeRequestRunState(month = demandTargetMonth()) {
     return null;
   }
 }
-function demandTargetMonth() { return demandSelectedMonth || monthStr; }
-function isDemandPeriod() { const d=Number(todayStr.slice(8,10)); return demandTargetMonth() === todayStr.slice(0,7) && d>=1 && d<=7; }
+// Confirm window for a month: the 25th of the month before through the 7th of the month.
+const DEMAND_OPEN_DAY = 25, DEMAND_CLOSE_DAY = 7;
+function demandNextMonth(m) { const [y, mo] = m.split('-').map(Number); return mo === 12 ? (y + 1) + '-01' : y + '-' + String(mo + 1).padStart(2, '0'); }
+// The month Confirm is open for today: next month from the 25th, otherwise this month.
+function demandOpenMonth() { return Number(todayStr.slice(8,10)) >= DEMAND_OPEN_DAY ? demandNextMonth(monthStr) : monthStr; }
+function demandTargetMonth() { return demandSelectedMonth || demandOpenMonth(); }
+function isDemandPeriod() { const d=Number(todayStr.slice(8,10)), m=demandTargetMonth(); return (m === monthStr && d <= DEMAND_CLOSE_DAY) || (m === demandNextMonth(monthStr) && d >= DEMAND_OPEN_DAY); }
+// Raising before the month starts: classes the student is still expected to use from today to the end of this month
+// (Class Frequency weekdays, less anything already logged today), so the balance is what it will be on the 1st.
+function demandRestOfMonth(student, subj, ty, weekly) {
+  const [yr, mo] = monthStr.split('-').map(Number), last = new Date(yr, mo, 0).getDate();
+  let n = 0;
+  for (let d = Number(todayStr.slice(8,10)); d <= last; d++) n += Math.max(0, Number(weekly[new Date(yr, mo - 1, d).getDay()]) || 0);
+  const today = data.sessions.filter(x => x.studentId===student.id && x.subjectId===subj.id && x.classType===ty && x.date===todayStr).reduce((a,x)=>a+(Number(x.count)||0),0);
+  return Math.max(0, n - today);
+}
 async function setDemandTargetMonth(value) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value || '')) return;
   if (value === demandTargetMonth()) return;
@@ -10283,12 +10297,15 @@ function demandCalcFor(student, subj, ty, month, ignoreLeft) {
   const left = studentRemaining(student.id, subj.id, ty); // includes refunds/transfers/expiry and all logged usage; Request rows are excluded
   const owed = left < 0 ? -left : 0;
   const ignoredLeft = ignoreLeft && left > 0 ? left : 0;
-  const useLeft = left - ignoredLeft;
-  const ignoredText = ignoredLeft ? `; ${IGNORED_LEFT_PREFIX}${ignoredLeft} left)` : '';
   const mode = studentUsualMode(student.id, subj.id, ty);
   const languageGrade = demandIsLanguageGrade(student);
   const frequency = languageGrade ? { expected: 0, method: 'Language grade' } : demandFrequencyFor(student, subj, ty, month);
   if (!languageGrade && frequency.review) return { skip: frequency.review, review: true };
+  // Raised early (25th onward): take off this month's remaining classes from what is left; never past zero.
+  const restThisMonth = !languageGrade && month > monthStr && left > ignoredLeft ? Math.min(left - ignoredLeft, demandRestOfMonth(student, subj, ty, frequency.weekly || {})) : 0;
+  const restText = restThisMonth ? `; ${restThisMonth} of the ${left} left still to be used in ${monthLabelOf(monthStr)} (raised on ${todayStr})` : '';
+  const useLeft = left - ignoredLeft - restThisMonth;
+  const ignoredText = ignoredLeft ? `; ${IGNORED_LEFT_PREFIX}${ignoredLeft} left)` : '';
   const leave = languageGrade ? { count: 0, note: '' } : demandTeacherLeaveAdjustment(student, subj, ty, month);
   const expected = languageGrade ? 0 : Math.max(0, frequency.expected - leave.count);
   // Display expected scheduled classes for every row, including language-grade rows whose requested package follows the last payment.
@@ -10304,18 +10321,18 @@ function demandCalcFor(student, subj, ty, month, ignoreLeft) {
     why = `Language-grade rule: repeat last valid payment ${classes} classes from ${lastPay.date}; balance ${left} (${left<0?`${owed} owed`:`${left} left`}) shown separately; owed classes are not added${ignoredText}`;
     parentWhy = `same as your last payment (${classes} classes)`;
   } else if (FEE_PACKAGE_SIZES.includes(Number(lastPay.classes))) {
-    if (useLeft > expected) return { skip: `Fixed package ${lastPay.classes}: ${left} classes left, above expected usage ${expected} for ${monthLabelOf(month)}.`, left };
+    if (useLeft > expected) return { skip: `Fixed package ${lastPay.classes}: ${left} classes left${restThisMonth ? ` (${useLeft} after the rest of ${monthLabelOf(monthStr)})` : ''}, above expected usage ${expected} for ${monthLabelOf(month)}.`, left };
     method = 'Fixed package'; classes = Number(lastPay.classes);
-    why = `Fixed package: repeat ${classes} classes (last paid ${lastPay.date}); expected ${frequency.expected}, teacher-leave reduction ${leave.count}, net expected ${expected}; balance ${left<0?`${owed} owed`:`${left} left`}; owed is covered within this package${ignoredText}`;
+    why = `Fixed package: repeat ${classes} classes (last paid ${lastPay.date}); expected ${frequency.expected}, teacher-leave reduction ${leave.count}, net expected ${expected}; balance ${left<0?`${owed} owed`:`${left} left`}; owed is covered within this package${ignoredText}${restText}`;
     parentWhy = `your ${classes}-class package${owed ? ` (${owedText(owed)} will come out of it)` : ''}`;
   } else {
     method = frequency.method;
     classes = halfRound(expected - useLeft);
-    why = `${frequency.method}: ${frequency.expected} expected classes − ${leave.count} teacher-leave adjustment − balance ${left<0?`(${owed} owed)`:ignoredLeft?`0 (${left} left not counted)`:`${left} left`} = ${classes} classes${ignoredText}`;
+    why = `${frequency.method}: ${frequency.expected} expected classes − ${leave.count} teacher-leave adjustment − balance ${left<0?`(${owed} owed)`:ignoredLeft?`0 (${left} left not counted)`:restThisMonth?`${useLeft} (${left} left − ${restThisMonth} still to be used in ${monthLabelOf(monthStr)})`:`${left} left`} = ${classes} classes${ignoredText}`;
     const days = weekdayListText(frequency.weekly || {});
     const parts = [`${days ? days + ' classes' : 'classes'} in ${monthName} = ${frequency.expected}`];
     if (leave.count) parts.push(`minus ${leave.count} cancelled for teacher leave`);
-    if (owed) parts.push(`plus ${owedText(owed)}`); else if (useLeft > 0) parts.push(`minus ${useLeft} still available`);
+    if (owed) parts.push(`plus ${owedText(owed)}`); else if (useLeft > 0) parts.push(`minus ${useLeft} still available${restThisMonth ? ` after ${new Date(monthStr + '-01T00:00:00').toLocaleString('en-IN', { month: 'long' })}` : ''}`);
     parentWhy = parts.join(', ') + (parts.length > 1 ? ` = ${classes}` : '');
   }
   if (!Number.isFinite(classes) || classes <= 0) return { skip: `No positive class request calculated (balance ${left}, expected ${expected}).`, left };
@@ -10447,7 +10464,7 @@ async function confirmDemand() {
   const todo = (demandPreviewRows || []).filter(r => r.include);
   if (demandPreviewRows && demandPreviewRows.some(r => r.month !== demandTargetMonth())) { demandPreviewRows = null; demandPreviewSnapshot = ''; render(); alert('The target month changed. Please create a fresh preview.'); return; }
   if (!todo.length) { alert('There are no included requests to confirm.'); return; }
-  if (!isDemandPeriod()) { alert('Fee requests can only be confirmed from the 1st through the 7th of the month. Preview remains available any day.'); return; }
+  if (!isDemandPeriod()) { alert('Fee requests for a month can only be confirmed from the 25th of the month before through the 7th of that month. Preview remains available any day.'); return; }
   if (demandConfirming) return;
   demandConfirming = true; demandMsg = 'Rechecking current data before confirmation…'; render();
   const month = demandTargetMonth();
@@ -10833,7 +10850,7 @@ const SUPPORT_KB = {
 - Support (Daily work): view and resolve issues raised by teachers, students or parents.
 - Rebuild Pending Classes (Daily work): rebuild the upcoming class schedule from each student's Class Frequency. Preview first. Only future Pending classes are removed; new classes get placeholder times (Group 00:00, Individual 01:00/02:00) that the teacher corrects.
 - Fees (Money): per-class rates (Fee setup), discount structure, fee calculator, students needing renewal, Razorpay payments to confirm, pending fee requests (grouped by family, Mark all paid), all subscription payments and the UPI / contact details used in fee messages.
-- Raise fee requests (Fees page): makes the month's requests for every student from Class Frequency, classes left, packages and teacher leave. Preview any day; Confirm only on the 1st-7th, once a month (Reset to redo). Each request keeps its working. 'Ignore classes left' tick (per row, all subjects of a student, whole family, or Raise anyway in Not raised) bills the full month without subtracting classes left; the fee message then leaves out the classes left. Owed classes are never ignored.
+- Raise fee requests (Fees page): makes the month's requests for every student from Class Frequency, classes left, packages and teacher leave. Preview any day; Confirm from the 25th of the month before to the 7th, once a month (Reset to redo). Each request keeps its working. 'Ignore classes left' tick (per row, all subjects of a student, whole family, or Raise anyway in Not raised) bills the full month without subtracting classes left; the fee message then leaves out the classes left. Owed classes are never ignored.
 - Fee messages: Message on a pending request makes one WhatsApp message for the whole family (subjects, total, how it was worked out, UPI, Razorpay link, parent login). Tick Short reminder for a follow-up. On a computer use 📤 Desktop or 📤 Web; sending records the reminder date.
 - Payroll (Money): each teacher's earnings for the month, demo bonuses, adjustments, mark paid and salary slips.
 - Expenses (Money): monthly overhead costs such as rent and electricity.
@@ -15590,7 +15607,7 @@ function renderFees() {
         return `<h2>Raise fee requests — ${dMonthLabel} ${helpBtn('raise-fees')}</h2>
           <div class="hint" style="margin-bottom:6px">Raises one fee request per student, subject and class type (Group / Individual) for the selected month. How many classes depends on the saved class frequency, the last valid payment, current balance, and teacher-leave adjustments. Amount is from Fee setup less the bulk discount (best tier of the request, the child's subjects added up, or the whole family added up). Every request keeps its working, so you can answer any question about it later.</div>
           <details style="margin:8px 0;padding:8px 10px;border:1px solid var(--line);border-radius:8px"><summary style="cursor:pointer;font-weight:700">Rules (click to expand)</summary><div class="hint"><ul style="margin:8px 0 0 16px;padding:0">
-            <li><b>Preview</b> works any day and saves nothing. <b>Confirm</b> works on the <b>1st to 7th</b> only. Can only be run <b>once per month</b>; use Reset to remove and re-run.</li>
+            <li><b>Preview</b> works any day and saves nothing. <b>Confirm</b> works from the <b>25th of the month before to the 7th</b> of the month (e.g. November's requests: 25 Oct – 7 Nov). Raised before the 1st, the classes the student will still use this month are taken off what is left. Can only be run <b>once per month</b>; use Reset to remove and re-run.</li>
             <li><b>Classes left</b> = paid classes (after refunds, transfers and expired classes) − classes used. <b>Absent counts like Present</b> — it uses a class.</li>
             <li><b>Owed classes</b>: shown separately. Ordinary calculations account for a negative balance; fixed packages cover owed classes within the package, and language-grade requests never add owed classes.</li>
             <li><b>Package</b> — last payment was exactly <b>30, 50, 60 or 100</b> classes: asks for the same package again when the balance is at or below the target month's expected usage. Owed classes come out of the package (not added).</li>
@@ -15605,7 +15622,7 @@ function renderFees() {
           <div class="row-form" style="margin-top:10px;align-items:flex-end">
             <label style="display:flex;flex-direction:column;gap:5px;font-weight:700">Target Month<input type="month" value="${dMonth}" onchange="setDemandTargetMonth(this.value)" style="min-width:175px" aria-label="Target month for fee requests"></label>
             ${dRan?'': '<button class="btn-small btn-primary" onclick="previewDemand()">Preview Fee Requests</button>'}
-            <span class="hint">Preview works any day. Confirm is allowed only on the 1st–7th of the selected month, while that month is current.</span>
+            <span class="hint">Preview works any day. Confirm is open from the 25th of the month before to the 7th of the selected month.</span>
           </div>
           ${dRan?`
             <div class="hint" style="color:var(--forest);margin-top:8px">✓ Fee requests already raised for ${dMonthLabel}.</div>
@@ -15638,7 +15655,7 @@ function renderFees() {
               ${skippedHtml}
               ${aiDemandReviewHtml()}
               <div class="row-form" style="margin-top:8px">
-                <button class="btn-primary" ${demandConfirming||!inc.length||!dActive?'disabled':''} onclick="confirmDemand()" ${dActive?'':'title="Confirm opens on the 1st–7th of the month"'}>${demandConfirming?'Creating…':'Confirm &amp; Create'}</button>${dActive?'':'<span class="hint">Preview only — Confirm opens on the 1st–7th.</span>'}
+                <button class="btn-primary" ${demandConfirming||!inc.length||!dActive?'disabled':''} onclick="confirmDemand()" ${dActive?'':'title="Confirm opens from the 25th of the month before to the 7th"'}>${demandConfirming?'Creating…':'Confirm &amp; Create'}</button>${dActive?'':'<span class="hint">Preview only — Confirm opens from the 25th of the month before to the 7th.</span>'}
                 <button class="btn-gold" onclick="exportDemandRun()">Download Excel</button>
                 <button class="btn-small" onclick="demandPreviewRows=null;render()">Cancel</button>
               </div>`;
@@ -20712,7 +20729,7 @@ const HELP = {
   'ai-settings': { t:'AI Settings', b:'<ul><li>The master switch turns every AI feature on or off for everyone.</li><li>The API key is kept on the server and is never sent to teachers, students or parents.</li><li><b>Cost estimate</b>: the price per model and the ₹ per $ rate used to estimate costs in AI usage.</li><li>Each person can make up to 200 AI calls a day.</li></ul>' },
   'ai-access': { t:'AI access', b:'<ul><li>Turn AI on or off for a whole role (Teacher, Student, Parent), then for single people.</li><li>A person can use AI only when the master switch, their role and they themselves are all on. Admins always can.</li><li>When a role is off, everyone in it shows a locked Off.</li><li>People see a change after they log in again.</li></ul>' },
   'payment-history': { t:'Subscription Payment History', b:'<ul><li><b>Active</b> — this payment\'s classes are being used now.</li><li><b>Expired</b> — unused classes were removed after the expiry date.</li><li>The Expires on date shows when unused classes will be lost.</li><li>Contact the Admin to correct any details.</li></ul>' },
-  'raise-fees': { t:'Raise fee requests', b:"<ul><li>Makes the month's fee requests for every active student in one go: one request per student, subject and Group / Individual.</li><li><b>Preview Fee Requests</b> works any day and saves nothing. <b>Confirm</b> works only on the 1st to 7th of the month, once per month (Reset removes the run so you can do it again).</li><li>Classes come from the student's <b>Class Frequency</b> (each weekday counted in the month), minus clear teacher-leave days, against the classes they still have. Package students (30, 50, 60 or 100 classes) are asked for the same package again.</li><li>Amount = Fee setup rate (or the student's Special fee rate) × classes, less the bulk discount: the best tier reached by the request, the child's subjects added up, or the whole family added up (family's other pending requests count too). Tick <b>No discount</b> on a row or a family for this run only.</li><li>The preview is grouped by family. You can change classes or amount, or untick a row, before Confirm. The ticks in the headings (Raise, Ignore all, No discount (all)) do every row at once. Not raised shows who was left out and why.</li><li><b>Ignore classes left</b>: bills the full month without taking off the classes still left (per row, per student or whole family; Raise anyway in Not raised). The fee message then does not mention those classes. Owed classes are never ignored.</li><li>Every request keeps its working, so you can explain the amount to a parent.</li></ul>" },
+  'raise-fees': { t:'Raise fee requests', b:"<ul><li>Makes the month's fee requests for every active student in one go: one request per student, subject and Group / Individual.</li><li><b>Preview Fee Requests</b> works any day and saves nothing. <b>Confirm</b> works from the 25th of the month before to the 7th of the month (November's requests: 25 Oct to 7 Nov), once per month (Reset removes the run so you can do it again). Raised before the 1st, the classes still to be used this month are taken off what is left.</li><li>Classes come from the student's <b>Class Frequency</b> (each weekday counted in the month), minus clear teacher-leave days, against the classes they still have. Package students (30, 50, 60 or 100 classes) are asked for the same package again.</li><li>Amount = Fee setup rate (or the student's Special fee rate) × classes, less the bulk discount: the best tier reached by the request, the child's subjects added up, or the whole family added up (family's other pending requests count too). Tick <b>No discount</b> on a row or a family for this run only.</li><li>The preview is grouped by family. You can change classes or amount, or untick a row, before Confirm. The ticks in the headings (Raise, Ignore all, No discount (all)) do every row at once. Not raised shows who was left out and why.</li><li><b>Ignore classes left</b>: bills the full month without taking off the classes still left (per row, per student or whole family; Raise anyway in Not raised). The fee message then does not mention those classes. Owed classes are never ignored.</li><li>Every request keeps its working, so you can explain the amount to a parent.</li></ul>" },
   'fee-message': { t:'Fee message', b:"<ul><li>One WhatsApp message for the whole family: each child's subjects, classes and amount, the total, how it was worked out, any bulk discount (and what the family saves, with a line that a part payment loses it), UPI and Razorpay details and the parent's app login.</li><li>The first message starts 'Please find below the tuition fee details…'. Tick <b>Short reminder</b> for a follow-up; only the opening line changes to 'gentle reminder … still due'.</li><li>You can edit the text before sending. On a phone the WhatsApp button opens the app. On a computer use 📤 Desktop (WhatsApp app) or 📤 Web (WhatsApp Web).</li><li>Sending stamps the date, so you can see when the family was last reminded and how many times.</li></ul>" },
   'student-calls': { t:'Call log', b:"<ul><li>After phoning a student or parent, open the student and press <b>+ Add call note</b>: when, who you spoke to (Parent / Student), what happened, what was said, and an optional <b>Call again on</b> date.</li><li>Every call stays on the student page, newest first; notes can be edited, never deleted. Only admins see the call log (teachers do not).</li><li>Calls made while the student was still a demo booking also show here, with a <b>Demo booking</b> tag (edit those on the Demo Bookings card).</li><li>When the latest call says Call again on today or earlier, the student shows under <b>Student calls due</b> on the dashboard and at the top of the Students page.</li></ul>" },
   'special-rates': { t:'Special fee rates', b:"<ul><li>An agreed per-class rate for one student, subject and Group / Individual, from a date and optionally until a date.</li><li>While it is in use it replaces the Fee setup rate everywhere: Record payment, fee requests, Calculate, Raise fee requests, Fee calculator and the student's and parent's Applicable Rates.</li><li>Leave Offline rate empty if it is the same as Online. Discount tiers still apply on top.</li><li>Requests and payments already saved are not changed. Remove puts the student back on Fee setup rates.</li></ul>" },
