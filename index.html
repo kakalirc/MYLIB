@@ -10112,7 +10112,8 @@ async function deleteSelectedPendingRequests() {
   if (failed.length) msg += ` ${failed.length} failed: ` + failed.map(x => x.message).join('; ');
   alert(msg);
 }
-// Monthly auto-raised fee requests use historical payment data as their basis.
+// Monthly auto-raised fee requests are reviewed only when the requested class count
+// differs from the saved frequency, or both class types are raised for one student.
 // Persist approval in calc_note so no database migration is needed.
 const FEE_REVIEW_MARKER = '[LIB_FEE_REVIEW:approved]';
 function isHistoricalFeeRequest(r) { return !!(r && r.kind === 'Request' && ((r.paymentReference || '').startsWith('AUTO-') || (r.calcNote || '').startsWith('Fee request run '))); }
@@ -10123,13 +10124,60 @@ function feeRequestReviewMarker(note, approved) {
   const at = clean.lastIndexOf('\nFor parent (');
   return at >= 0 ? clean.slice(0, at) + '\n' + FEE_REVIEW_MARKER + clean.slice(at) : clean + (clean ? '\n' : '') + FEE_REVIEW_MARKER;
 }
-function feeRequestPreferenceWarning(studentId, type) {
-  const st = data.students.find(x => x.id === studentId), pref = st && st.classTypePreference;
-  return pref && pref !== 'Both' && (pref === 'Group' || pref === 'Individual') && pref !== type ? `Class-type preference is ${pref}, but this request is ${type}; verify the historical payment.` : '';
+function feeRequestBatchKey(r) {
+  if (r.requestMonth) return String(r.requestMonth).slice(0,7);
+  const ref = String(r.paymentReference || '').match(/^AUTO-(\d{4}-\d{2})$/);
+  if (ref) return ref[1];
+  return String(r.date || '').slice(0,7);
+}
+function feeRequestSavedExpected(r) {
+  const note = feeRequestReviewNote(r && r.calcNote || '');
+  let m = note.match(/net expected\s+([\d.]+)/i);
+  if (m) return Number(m[1]);
+  m = note.match(/Saved frequency:\s*([\d.]+)\s*expected classes/i);
+  if (m) {
+    const saved = Number(m[1]);
+    const leave = note.match(/expected classes\s*−\s*([\d.]+)\s*teacher-leave adjustment/i);
+    return Math.max(0, saved - (leave ? Number(leave[1]) : 0));
+  }
+  return null;
+}
+function feeRequestSavedReviewReasons(r, requests) {
+  if (!isHistoricalFeeRequest(r)) return [];
+  const reasons = [], expected = feeRequestSavedExpected(r);
+  if (expected !== null && Number.isFinite(expected) && Math.abs(Number(r.classes) - expected) > 0.001)
+    reasons.push(`Requested ${r.classes} classes; saved frequency requires ${expected}.`);
+  const sameRun = (requests || data.subscriptions).filter(x => x.kind === 'Request' && x.studentId === r.studentId && isHistoricalFeeRequest(x) && feeRequestBatchKey(x) === feeRequestBatchKey(r));
+  const types = new Set(sameRun.map(x => x.type));
+  if (types.has('Group') && types.has('Individual')) reasons.push('Both Group and Individual requests are raised for this student in the same monthly run.');
+  return reasons;
+}
+function feeRequestNeedsReview(r, requests) { return feeRequestSavedReviewReasons(r, requests).length > 0; }
+function demandReviewReasons(row, rows) {
+  const reasons = [];
+  if (row.expectedDisplay !== null && Number.isFinite(Number(row.expectedDisplay)) && Math.abs(Number(row.classes) - Number(row.expectedDisplay)) > 0.001)
+    reasons.push(`Requested ${row.classes} classes; saved frequency requires ${row.expectedDisplay}.`);
+  else if (row.expectedDisplay === null && row.expectedDisplayNote)
+    reasons.push(`Saved class frequency could not be verified: ${row.expectedDisplayNote}`);
+  const sameStudent = (rows || []).filter(x => x.include && x.student.id === row.student.id);
+  const types = new Set(sameStudent.map(x => x.ty));
+  if (types.has('Group') && types.has('Individual')) reasons.push('Both Group and Individual requests are being raised for this student across subjects.');
+  return reasons;
+}
+function demandRefreshReviewFlags(rows) {
+  (rows || []).forEach(r => {
+    const reasons = demandReviewReasons(r, rows);
+    const required = reasons.length > 0;
+    if (!required) r.reviewApproved = false;
+    else if (!r.reviewRequired) r.reviewApproved = false;
+    r.reviewRequired = required;
+    r.reviewReasons = reasons;
+    r.reviewFlag = reasons.join(' ');
+  });
 }
 async function approveHistoricalFeeRequest(id) {
   const r = data.subscriptions.find(x => x.id === id && x.kind === 'Request');
-  if (!r || !isHistoricalFeeRequest(r) || feeRequestReviewApproved(r)) return;
+  if (!r || !isHistoricalFeeRequest(r) || !feeRequestNeedsReview(r) || feeRequestReviewApproved(r)) return;
   const nextNote = feeRequestReviewMarker(r.calcNote, true);
   const { error } = await sb.from('subscriptions').update({ calc_note: nextNote || null }).eq('id', id).eq('kind', 'Request');
   if (error) { alert('Could not save the review approval: ' + error.message); return; }
@@ -10148,8 +10196,8 @@ function pendingFeeRequestsByFamilyHtml() {
   const list = [...fams.values()].map(sid => ({ sid, reqs: familyPendingRequests(sid) }))
     .sort((a, b) => studentNameWithCode(a.reqs[0].studentId).localeCompare(studentNameWithCode(b.reqs[0].studentId)));
   const grand = reqs.reduce((a, r) => a + (r.amountPaid || 0), 0);
-  const reviewReqs = reqs.filter(isHistoricalFeeRequest), needsReview = reviewReqs.filter(r => !feeRequestReviewApproved(r)).length;
-  return familySkippedHtml() + (feeReminderMsg ? `<div class="hint" style="color:var(--brick)">${esc(feeReminderMsg)}</div>` : '') + (reviewReqs.length ? `<div style="margin:8px 0;padding:9px 11px;border:1px solid #d6a72c;border-radius:7px;background:#fff4c2;color:#5b4300"><b>Historical-payment review:</b> ${needsReview} request${needsReview===1?'':'s'} need${needsReview===1?'s':''} review; approved requests remain highlighted as Reviewed – Approved.</div>` : '') + `<div class="hint" style="margin-bottom:6px">${reqs.length} request${reqs.length === 1 ? '' : 's'} from ${list.length} famil${list.length === 1 ? 'y' : 'ies'} · ₹${grand.toFixed(2)} in total. Brothers and sisters (same parent login or parent mobile) are shown together with one message.</div>
+  const reviewReqs = reqs.filter(r => feeRequestNeedsReview(r, reqs)), needsReview = reviewReqs.filter(r => !feeRequestReviewApproved(r)).length;
+  return familySkippedHtml() + (feeReminderMsg ? `<div class="hint" style="color:var(--brick)">${esc(feeReminderMsg)}</div>` : '') + (reviewReqs.length ? `<div style="margin:8px 0;padding:9px 11px;border:1px solid #d6a72c;border-radius:7px;background:#fff4c2;color:#5b4300"><b>Fee-request review:</b> ${needsReview} request${needsReview===1?'':'s'} need${needsReview===1?'s':''} review because the requested class count differs from saved frequency or both class types were raised for the student. Approved requests remain highlighted as Reviewed – Approved.</div>` : '') + `<div class="hint" style="margin-bottom:6px">${reqs.length} request${reqs.length === 1 ? '' : 's'} from ${list.length} famil${list.length === 1 ? 'y' : 'ies'} · ₹${grand.toFixed(2)} in total. Brothers and sisters (same parent login or parent mobile) are shown together with one message.</div>
     <div class="row-form" style="margin:8px 0;align-items:center">
       <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" ${allSelected ? 'checked' : ''} onchange="selectAllPendingRequests(this.checked)"> Select all pending requests</label>
       <button class="btn-small" onclick="selectAllPendingRequests(false)" ${selectedCount ? '' : 'disabled'}>Clear selection</button>
@@ -10171,9 +10219,10 @@ function pendingFeeRequestsByFamilyHtml() {
             const isEditing = editingRequestId === r.id;
             const subjectOptions = subjectsForStudent(r.studentId).map(s => `<option value="${s.id}" ${editRequestDraft.subjectId===s.id?'selected':''}>${esc(studentLabel(s))}</option>`).join('');
             const editPanel = isEditing ? `<tr><td colspan="9"><div style="margin:8px 0;padding:12px;border:1px solid var(--forest);border-radius:8px;background:rgba(60,94,66,0.06)"><div class="hint" style="margin-bottom:8px"><b>Edit pending fee request</b> — ${esc(studentNameWithCode(r.studentId))}</div>${editRequestMsg ? `<div class="hint" style="color:var(--brick)">${esc(editRequestMsg)}</div>` : ''}<div class="row-form" style="margin-bottom:0"><select onchange="editRequestDraftSet('subjectId', this.value)">${subjectOptions}</select><select onchange="editRequestDraftSet('type', this.value)">${TYPES.map(ty=>`<option value="${ty}" ${editRequestDraft.type===ty?'selected':''}>${ty}</option>`).join('')}</select><label>Classes <input type="number" id="editReqClasses_${r.id}" value="${editRequestDraft.classes}" min="0.5" step="0.5" style="width:80px" oninput="requestQuoteInput('edit','classes',this.value)"></label><label>Amount ₹ <input type="number" id="editReqAmount_${r.id}" value="${editRequestDraft.amountPaid}" min="0" step="any" style="width:100px" oninput="requestQuoteInput('edit','amount',this.value)"></label><label>Requested date <input type="date" id="editReqDate_${r.id}" value="${editRequestDraft.date}" onchange="editRequestDraft.date=this.value"></label><button class="btn-small btn-primary" onclick="saveRequestEdit('${r.id}')">Save</button><button class="btn-small" onclick="cancelEditRequest()">Cancel</button></div><div class="hint" id="editReqQuoteHint">${feeQuoteHintHtml(editRequestDraft, 'edit')}</div></div></td></tr>` : '';
-            const historical = isHistoricalFeeRequest(r), approved = historical && feeRequestReviewApproved(r), prefWarning = historical ? feeRequestPreferenceWarning(r.studentId, r.type) : '';
-            const reviewCell = historical ? `<div style="font-size:11px;font-weight:700;color:#7a5600">${approved?'✓ Reviewed – Approved':'⚠ Review Required'}</div>${prefWarning?`<div style="font-size:11px;color:#8a3b16;margin-top:3px">${esc(prefWarning)}</div>`:''}` : '';
-            return `<tr${historical?' style="background:#fff4c2"':''}><td><input type="checkbox" aria-label="Select pending request for ${esc(studentNameWithCode(r.studentId))}" ${selectedPendingRequestIds.has(r.id) ? 'checked' : ''} onchange="togglePendingRequestSelection('${r.id}',this.checked)"></td><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid || 0).toFixed(2)}${requestDiscountHint(r)}</td><td>${r.date || '—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${reviewCell}${calcNoteHtml(r)}</td><td>${markingPaidId === r.id ? '<span class="hint">Confirm below</span>' : `${historical&&!approved?`<button class="btn-small btn-primary" onclick="approveHistoricalFeeRequest('${r.id}')">Approve review</button>`:''}<button class="btn-small" onclick="startMarkPaid('${r.id}')">Mark paid</button><button class="btn-small" onclick="startEditRequest('${r.id}')">Edit</button><button class="icon-btn" title="Remove pending request" aria-label="Remove pending request" onclick="if(confirm('Remove this pending fee request? This cannot be undone.')) cancelFeeRequest('${r.id}')">✕</button>`}</td></tr>${editPanel}`;
+            const historical = isHistoricalFeeRequest(r), needsReview = historical && feeRequestNeedsReview(r, reqs), approved = needsReview && feeRequestReviewApproved(r);
+            const reasons = needsReview ? feeRequestSavedReviewReasons(r, reqs) : [];
+            const reviewCell = historical ? `<div style="font-size:11px;font-weight:700;color:${needsReview?'#7a5600':'#356447'}">${needsReview?(approved?'✓ Reviewed – Approved':'⚠ Review Required'):'✓ No review required'}</div>${reasons.map(x=>`<div style="font-size:11px;color:#8a3b16;margin-top:3px">${esc(x)}</div>`).join('')}` : '';
+            return `<tr${needsReview?' style="background:#fff4c2"':''}><td><input type="checkbox" aria-label="Select pending request for ${esc(studentNameWithCode(r.studentId))}" ${selectedPendingRequestIds.has(r.id) ? 'checked' : ''} onchange="togglePendingRequestSelection('${r.id}',this.checked)"></td><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid || 0).toFixed(2)}${requestDiscountHint(r)}</td><td>${r.date || '—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${reviewCell}${calcNoteHtml(r)}</td><td>${markingPaidId === r.id ? '<span class="hint">Confirm below</span>' : `${needsReview&&!approved?`<button class="btn-small btn-primary" onclick="approveHistoricalFeeRequest('${r.id}')">Approve review</button>`:''}<button class="btn-small" onclick="startMarkPaid('${r.id}')">Mark paid</button><button class="btn-small" onclick="startEditRequest('${r.id}')">Edit</button><button class="icon-btn" title="Remove pending request" aria-label="Remove pending request" onclick="if(confirm('Remove this pending fee request? This cannot be undone.')) cancelFeeRequest('${r.id}')">✕</button>`}</td></tr>${editPanel}`;
           }).join('')
             + (kids.length > 1 ? `<tr><td colspan="5" class="hint" style="text-align:right">Subtotal for ${esc((data.students.find(s => s.id === kid) || {}).name || '')}</td><td><b>${mine.reduce((a, r) => a + (r.amountPaid || 0), 0).toFixed(2)}</b></td><td colspan="3"></td></tr>` : '');
         }).join('');
@@ -10365,12 +10414,12 @@ function demandCalcFor(student, subj, ty, month, ignoreLeft) {
   if (!Number.isFinite(classes) || classes <= 0) return { skip: `No positive class request calculated (balance ${left}, expected ${expected}).`, left };
   const q = feeQuote(subj.id, ty, mode, classes, student.id);
   if (!q || !q.rate || !q.amount || q.amount <= 0) return { skip: `Missing or zero ${specialRateRow(student.id, subj.id, ty) ? 'special' : 'Fee Setup'} rate for ${catLabel(subj.category)}, ${ty}, ${mode}; no zero-value request created.`, review: true };
-  return { row: { student, subj, ty, month, method, why, parentWhy, left, owed, mode, classes, baseClasses: classes, amount: q.amount, quoteAmount: q.amount, include: true, reviewApproved: false, classesEdited: false, amountEdited: false, expected, expectedDisplay, expectedDisplayNote: displayFrequency.review || '', frequencyMethod: frequency.method, leaveAdjustment: leave.count, leaveNote: leave.note, reviewFlag: '', ignoredLeft } };
+  return { row: { student, subj, ty, month, method, why, parentWhy, left, owed, mode, classes, baseClasses: classes, amount: q.amount, quoteAmount: q.amount, include: true, reviewApproved: false, classesEdited: false, amountEdited: false, expected, expectedDisplay, expectedDisplayNote: displayFrequency.review || '', frequencyMethod: frequency.method, leaveAdjustment: leave.count, leaveNote: leave.note, reviewFlag: '', reviewRequired: false, reviewReasons: [], ignoredLeft } };
 }
 function demandDataSignature() {
   const stable = rows => rows.slice().sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
   return JSON.stringify({
-    students: stable(data.students.map(s=>[s.id,s.archived,s.gradeId])),
+    students: stable(data.students.map(s=>[s.id,s.archived,s.gradeId,s.classTypePreference])),
     subjects: stable(data.subjects.map(s=>[s.id,s.name,s.category,s.teacherId,s.archived])),
     grades: stable(grades.map(g=>[g.id,g.name,g.excludedFromGradeProgression])),
     categoryGrades: stable(categoryGrades.map(x=>[x.categoryId,x.gradeId])),
@@ -10401,6 +10450,7 @@ async function previewDemand() {
     });
   });
   demandApplyDiscounts(rows);
+  demandRefreshReviewFlags(rows);
   demandSortRows(rows);
   demandPreviewRows=rows; demandSkippedRows=skipped; demandNeverPaid=neverPaid; demandPreviewSnapshot=demandDataSignature(); render();
 }
@@ -10429,6 +10479,7 @@ function demandSetIgnoreLeft(keys, on) {
     else demandSkippedRows.push({ student: src.student, subj: src.subj, ty: src.ty, month: src.month, reason: res.skip || 'No request calculated', canIgnoreLeft: true });
   });
   demandApplyDiscounts(demandPreviewRows);
+  demandRefreshReviewFlags(demandPreviewRows);
   demandSortRows(demandPreviewRows);
   render();
 }
@@ -10477,6 +10528,7 @@ function demandRowSet(i, field, val) {
   else if (field === 'reviewApproved') r.reviewApproved = !!val;
   else if (field === 'classes') {
     const n = halfRound(Number(val) || 0); if (n <= 0) { render(); return; }
+    if (n !== r.classes) r.reviewApproved = false;
     r.classes = n; r.classesEdited = n !== r.baseClasses;
     const q = feeQuote(r.subj.id, r.ty, r.mode, n, r.student.id);
     r.quoteAmount = q && q.rate ? q.amount : 0;
@@ -10486,12 +10538,14 @@ function demandRowSet(i, field, val) {
     r.amount = a; r.amountEdited = Math.abs(a - r.quoteAmount) > 0.009;
   }
   demandApplyDiscounts(demandPreviewRows);
+  demandRefreshReviewFlags(demandPreviewRows);
   render();
 }
 async function confirmDemand() {
+  demandRefreshReviewFlags(demandPreviewRows || []);
   const todo = (demandPreviewRows || []).filter(r => r.include);
-  const unreviewed = todo.filter(r => !r.reviewApproved);
-  if (unreviewed.length) { alert(`Review and approve all ${unreviewed.length} included historical-payment request${unreviewed.length===1?'':'s'} before confirming. Untick any request you want to leave for later.`); return; }
+  const unreviewed = todo.filter(r => r.reviewRequired && !r.reviewApproved);
+  if (unreviewed.length) { alert(`Review and approve the ${unreviewed.length} flagged request${unreviewed.length===1?'':'s'} before confirming. Requests that match saved frequency and use only one class type for the student do not need review.`); return; }
   if (demandPreviewRows && demandPreviewRows.some(r => r.month !== demandTargetMonth())) { demandPreviewRows = null; demandPreviewSnapshot = ''; render(); alert('The target month changed. Please create a fresh preview.'); return; }
   if (!todo.length) { alert('There are no included requests to confirm.'); return; }
   if (!isDemandPeriod()) { alert('Fee requests for a month can only be confirmed from the 25th of the month before through the 7th of that month. Preview remains available any day.'); return; }
@@ -10530,7 +10584,13 @@ async function confirmDemand() {
       const fresh = demandCalcFor(student, subj, r.ty, month, demandIgnoreLeft.has(demandKey(r)));
       if (!fresh.row) { await sb.from('fee_request_runs').update({status:'reset',reset_at:new Date().toISOString(),reset_by:currentUserId||null,reset_reason:'Calculation changed before creating requests',updated_at:new Date().toISOString()}).eq('target_month',month+'-01'); demandRunState = { ...demandRunState, status:'reset' }; demandConfirming=false; demandMsg=`Cannot confirm ${studentLabel(student)} · ${subj.name} (${r.ty}): ${fresh.skip || 'calculation changed'}. Refresh the preview.`; render(); return; }
       // Manual edits are retained only if the underlying rule calculation is still valid.
-      checked.push({ ...r, student, subj, mode: fresh.row.mode, quoteAmount: feeQuote(subj.id,r.ty,fresh.row.mode,r.classes,student.id)?.amount || 0, why: fresh.row.why, left: fresh.row.left, owed: fresh.row.owed, expected: fresh.row.expected, leaveAdjustment: fresh.row.leaveAdjustment, leaveNote: fresh.row.leaveNote, ignoredLeft: fresh.row.ignoredLeft });
+      checked.push({ ...r, student, subj, mode: fresh.row.mode, expectedDisplay: fresh.row.expectedDisplay, expectedDisplayNote: fresh.row.expectedDisplayNote, quoteAmount: feeQuote(subj.id,r.ty,fresh.row.mode,r.classes,student.id)?.amount || 0, why: fresh.row.why, left: fresh.row.left, owed: fresh.row.owed, expected: fresh.row.expected, leaveAdjustment: fresh.row.leaveAdjustment, leaveNote: fresh.row.leaveNote, ignoredLeft: fresh.row.ignoredLeft });
+    }
+    demandRefreshReviewFlags(checked);
+    const newlyUnreviewed = checked.filter(r => r.reviewRequired && !r.reviewApproved);
+    if (newlyUnreviewed.length) {
+      await sb.from('fee_request_runs').update({status:'reset',reset_at:new Date().toISOString(),reset_by:currentUserId||null,reset_reason:'Review rules changed during final validation',updated_at:new Date().toISOString()}).eq('target_month',month+'-01');
+      demandRunState = { ...demandRunState, status:'reset' }; demandConfirming=false; demandPreviewRows = checked; demandPreviewSnapshot = ''; demandMsg='The final checks identified requests that now need review. Please review the highlighted rows and confirm again.'; render(); return;
     }
     demandApplyDiscounts(checked);   // the request / child / family discount, worked out again on fresh data
     for (const r of checked) {
@@ -10541,7 +10601,7 @@ async function confirmDemand() {
     }
     let created = 0, discountLost = false; const failed = [];
     for (const r of checked) {
-      const note = feeRequestReviewMarker(demandRowNote(r), true);
+      const note = feeRequestReviewMarker(demandRowNote(r), !!(r.reviewRequired && r.reviewApproved));
       const row = { student_id:r.student.id, subject_id:r.subj.id, type:r.ty, classes:r.classes, amount_paid:r.amount, date:month+'-01', kind:'Request', payment_reference:'AUTO-'+month, request_month:month+'-01', calc_note:note };
       const d = r.discount;
       const cols = r.base > 0 && d ? { base_amount: r.base, discount_percent: r.amountEdited ? 0 : d.percent, discount_basis: r.amountEdited ? 'manual' : d.basis, discount_classes: d.classes, discount_group: d.group } : null;
@@ -15664,7 +15724,7 @@ function renderFees() {
               ${demandMsg?`<span class="hint" style="color:var(--forest)">${esc(demandMsg)}</span>`:''}
             </div>
             ${demandPreviewRows!==null?(()=>{
-              const inc=demandPreviewRows.filter(r=>r.include), unreviewedCount=inc.filter(r=>!r.reviewApproved).length;
+              demandRefreshReviewFlags(demandPreviewRows); const inc=demandPreviewRows.filter(r=>r.include), reviewCount=inc.filter(r=>r.reviewRequired).length, unreviewedCount=inc.filter(r=>r.reviewRequired&&!r.reviewApproved).length;
               const skippedHtml=demandSkippedRows.length||demandNeverPaid?`
                 <div class="hint" style="margin-top:10px;cursor:pointer;user-select:none" onclick="demandShowSkipped=!demandShowSkipped;render()">${demandShowSkipped?'▼':'▶'} Not raised: ${demandSkippedRows.length}${demandNeverPaid?` · plus ${demandNeverPaid} subject/type${demandNeverPaid===1?'':'s'} never paid (see Students needing renewal)`:''}</div>
                 ${demandShowSkipped&&demandSkippedRows.length?`<div class="table-scroll"><table>
@@ -15672,16 +15732,16 @@ function renderFees() {
                   ${demandSkippedRows.map(r=>`<tr><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td><span class="hint">${esc(r.reason)}</span></td><td>${r.canIgnoreLeft?demandIgnoreTickHtml([demandKey(r)],'Raise anyway'):''}</td></tr>`).join('')}
                 </table></div>`:''}`:'';
               if(!demandPreviewRows.length) return `<div class="empty">No fee requests needed this month.</div>${skippedHtml}`;
-              return familySkippedHtml() + `<div style="margin:8px 0;padding:9px 11px;border:1px solid #d6a72c;border-radius:7px;background:#fff4c2;color:#5b4300"><b>Review required:</b> these requests are calculated using each student’s historical payment as the basis. Check the class type against the student’s current preference before confirming. Mismatches are identified on the row.</div><div class="table-scroll"><table>
+              return familySkippedHtml() + (reviewCount?`<div style="margin:8px 0;padding:9px 11px;border:1px solid #d6a72c;border-radius:7px;background:#fff4c2;color:#5b4300"><b>Review required:</b> ${reviewCount} selected request${reviewCount===1?'':'s'} need review because requested classes differ from saved frequency, or both Group and Individual types are being raised for the student.</div>`:`<div class="hint" style="margin:8px 0">✓ No review required: selected requests match saved frequency and only one class type is being raised per student.</div>`) + `<div class="table-scroll"><table>
                 <tr><th><label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="Tick or untick every row"><input type="checkbox" aria-label="Raise all rows" ${demandPreviewRows.every(r=>r.include)?'checked':''} onchange="demandSetAllInclude(this.checked)"> Raise</label></th><th>Student</th><th>Subject</th><th>Type</th><th>Method</th><th>Classes left${(()=>{ const ks=demandIgnorableKeys(demandPreviewRows.map(r=>r.student.id)).filter(k=>demandPreviewRows.some(r=>demandKey(r)===k)); return ks.length?'<div>'+demandIgnoreTickHtml(ks,'Ignore all')+'</div>':''; })()}</th><th>Expected classes</th><th>Requested classes</th><th>Amount (₹)<div>${demandNoDiscountTickHtml(demandPreviewRows.map(demandKey),'No discount (all)')}</div></th><th>Working</th></tr>
                 ${demandPreviewRows.map((r,i)=>{ const next=demandPreviewRows[i+1], prev=demandPreviewRows[i-1], mine=demandPreviewRows.filter(x=>x.student.id===r.student.id&&x.include);
                   const fk=familyKeyOf(r.student.id), famRows=demandPreviewRows.filter(x=>familyKeyOf(x.student.id)===fk), famKids=[...new Set(famRows.map(x=>x.student.name))], multi=famKids.length>1;
                   const famHead=multi&&(!prev||familyKeyOf(prev.student.id)!==fk)?`<tr style="background:var(--soft)"><td colspan="10"><b>Family: ${esc(familyParentName(r.student.id))}</b> · ${esc(famKids.join(', '))}${(()=>{ const ks=demandIgnorableKeys(data.students.filter(st=>familyKeyOf(st.id)===fk).map(st=>st.id)); return ks.length>1?' &nbsp; '+demandIgnoreTickHtml(ks,'Ignore classes left (whole family)'):''; })()} &nbsp; ${demandNoDiscountTickHtml(famRows.map(demandKey),'No discount (whole family)')}</td></tr>`:'';
                   const famFoot=multi&&(!next||familyKeyOf(next.student.id)!==fk)?`<tr><td colspan="8" style="text-align:right"><b>Family total</b></td><td><b>${famRows.filter(x=>x.include).reduce((a,x)=>a+x.amount,0).toFixed(2)}</b></td><td></td></tr>`:'';
-                  const prefWarning = feeRequestPreferenceWarning(r.student.id, r.ty); return famHead+`<tr style="background:#fff4c2;${r.include?'':'opacity:0.5;'}"><td><input type="checkbox" ${r.include?'checked':''} onchange="demandRowSet(${i},'include',this.checked)"></td><td>${esc(studentLabel(r.student))}${prefWarning?`<div style="font-size:11px;color:#8a3b16;font-weight:700">⚠ ${esc(prefWarning)}</div>`:''}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(r.method)}</td><td${r.left<0?' style="color:var(--brick)"':''}>${r.left<0?`${-r.left} owed`:r.left}${r.left>0?`<div>${demandIgnoreTickHtml([demandKey(r)],'Ignore classes left')}</div>`:''}</td><td>${r.expectedDisplay===null?`<span class="hint" title="${esc(r.expectedDisplayNote)}">Review frequency</span>`:r.expectedDisplay}</td><td><input type="number" min="0.5" step="0.5" style="width:70px" value="${r.classes}" onchange="demandRowSet(${i},'classes',this.value)"></td><td><input type="number" min="1" step="1" style="width:90px" value="${r.amount}" onchange="demandRowSet(${i},'amount',this.value)">${r.discount&&discountLabel(r.discount)&&!r.amountEdited?`<div class="hint" style="font-size:11px;color:var(--forest)">${esc(discountLabel(r.discount))}</div>`:''}<div>${demandNoDiscountTickHtml([demandKey(r)],'No discount')}</div></td><td><label style="display:flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:#5b4300"><input type="checkbox" ${r.reviewApproved?'checked':''} onchange="demandRowSet(${i},'reviewApproved',this.checked)"> ${r.reviewApproved?'Reviewed – Approved':'Review and approve'}</label><span class="hint" style="font-size:11px;display:block;min-width:280px;white-space:normal">Historical payment basis · ${esc(demandRowNote(r)).replace(/\n/g,'<br>')}</span></td></tr>`+((!next||next.student.id!==r.student.id)?(()=>{ const ks=demandIgnorableKeys([r.student.id]), tick=ks.length>1?demandIgnoreTickHtml(ks,`Ignore classes left (all subjects of ${esc(r.student.name)})`):'';
+                  const statusCell = r.reviewRequired ? `<label style="display:flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:#5b4300"><input type="checkbox" ${r.reviewApproved?'checked':''} onchange="demandRowSet(${i},'reviewApproved',this.checked)"> ${r.reviewApproved?'Reviewed – Approved':'Review and approve'}</label><div class="hint" style="font-size:11px;min-width:240px;white-space:normal;color:#8a3b16">${r.reviewReasons.map(esc).join('<br>')}</div>` : `<span style="font-size:11px;font-weight:700;color:#356447">✓ No review required</span>`; return famHead+`<tr style="${r.reviewRequired?'background:#fff4c2;':''}${r.include?'':'opacity:0.5;'}"><td><input type="checkbox" ${r.include?'checked':''} onchange="demandRowSet(${i},'include',this.checked)"></td><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(r.method)}</td><td${r.left<0?' style="color:var(--brick)"':''}>${r.left<0?`${-r.left} owed`:r.left}${r.left>0?`<div>${demandIgnoreTickHtml([demandKey(r)],'Ignore classes left')}</div>`:''}</td><td>${r.expectedDisplay===null?`<span class="hint" title="${esc(r.expectedDisplayNote)}">Review frequency</span>`:r.expectedDisplay}</td><td><input type="number" min="0.5" step="0.5" style="width:70px" value="${r.classes}" onchange="demandRowSet(${i},'classes',this.value)"></td><td><input type="number" min="1" step="1" style="width:90px" value="${r.amount}" onchange="demandRowSet(${i},'amount',this.value)">${r.discount&&discountLabel(r.discount)&&!r.amountEdited?`<div class="hint" style="font-size:11px;color:var(--forest)">${esc(discountLabel(r.discount))}</div>`:''}<div>${demandNoDiscountTickHtml([demandKey(r)],'No discount')}</div></td><td>${statusCell}<span class="hint" style="font-size:11px;display:block;min-width:280px;white-space:normal">${esc(demandRowNote(r)).replace(/\n/g,'<br>')}</span></td></tr>`+((!next||next.student.id!==r.student.id)?(()=>{ const ks=demandIgnorableKeys([r.student.id]), tick=ks.length>1?demandIgnoreTickHtml(ks,`Ignore classes left (all subjects of ${esc(r.student.name)})`):'';
                     return mine.length>1||tick?`<tr><td colspan="5">${tick}</td><td colspan="3" class="hint" style="text-align:right">${mine.length>1?`Subtotal for ${esc(r.student.name)}`:''}</td><td>${mine.length>1?`<b>${mine.reduce((a,x)=>a+x.amount,0).toFixed(2)}</b>`:''}</td><td></td></tr>`:''; })():'')+famFoot; }).join('')}
               </table></div>
-              <div class="hint" style="margin-top:8px">${inc.length} request${inc.length===1?'':'s'} selected · ${unreviewedCount} awaiting review approval${demandPreviewRows.length>inc.length?' · '+(demandPreviewRows.length-inc.length)+' unticked':''} · Total ₹${inc.reduce((a,r)=>a+r.amount,0).toFixed(2)}</div>
+              <div class="hint" style="margin-top:8px">${inc.length} request${inc.length===1?'':'s'} selected · ${unreviewedCount} awaiting review approval${reviewCount?' · '+reviewCount+' flagged':''}${demandPreviewRows.length>inc.length?' · '+(demandPreviewRows.length-inc.length)+' unticked':''} · Total ₹${inc.reduce((a,r)=>a+r.amount,0).toFixed(2)}</div>
               ${skippedHtml}
               ${aiDemandReviewHtml()}
               <div class="row-form" style="margin-top:8px">
