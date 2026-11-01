@@ -10563,14 +10563,14 @@ function exportDemandRun() {
 }
 async function resetDemand() {
   const month = demandTargetMonth(), monthDate = month + '-01';
-  await loadFeeRequestRunState(month);
+  await Promise.all([loadFeeRequestRunState(month), loadStudentsAndSubscriptions()]);
   const runRows = data.subscriptions.filter(s => s.requestMonth === monthDate || s.paymentReference === 'AUTO-' + month || (s.calcNote||'').startsWith(demandRunLabel(month)));
   if (!runRows.length) { if (demandRunState && demandRunState.status === 'confirmed' && demandRunState.target_month === monthDate) { const { data: resetRun, error } = await sb.from('fee_request_runs').update({ status:'reset', reset_at:new Date().toISOString(), reset_by:currentUserId||null, reset_reason:`Admin reset on ${todayStr}; confirmed run contained no request rows.`, updated_at:new Date().toISOString() }).eq('target_month',monthDate).eq('status','confirmed').select().maybeSingle(); if (error) { alert('Could not reset run status: '+error.message); return; } demandRunState=resetRun||{target_month:monthDate,status:'reset'}; render(); alert('Empty monthly run reset. You can preview and confirm again.'); return; } alert(`No saved auto-generated requests were found for ${monthLabelOf(month)}. Nothing to reset.`); return; }
   const paid = runRows.filter(s => s.kind === 'Payment');
-  if (paid.length) { alert(`Reset blocked: ${paid.length} request(s) from ${monthLabelOf(month)} have already been converted to Payment. Paid records and history will not be deleted or reversed.`); return; }
+  if (paid.length) { render(); alert(`Reset blocked: ${paid.length} request(s) from ${monthLabelOf(month)} have already been converted to Payment. Paid records and history will not be deleted or reversed.`); return; }
   const pending = runRows.filter(s => s.kind === 'Request');
   const other = runRows.filter(s => s.kind !== 'Request' && s.kind !== 'Payment');
-  if (other.length) { alert(`Reset blocked: the run contains ${other.length} non-pending record(s). Please review them manually.`); return; }
+  if (other.length) { render(); alert(`Reset blocked: the run contains ${other.length} non-pending record(s). Please review them manually.`); return; }
   if (!pending.length) { alert('No pending auto-generated requests remain for this month.'); return; }
   if (!confirm(`Reset ${monthLabelOf(month)}? This will delete ${pending.length} auto-generated pending request(s), preserve all paid/history records, and allow a corrected preview and rerun. Continue?`)) return;
   const deleted = [], failed = [], skipped = [];
@@ -15608,6 +15608,16 @@ function renderFees() {
       ${(()=>{
         const dMonth=demandTargetMonth(),dDay=Number(todayStr.slice(8,10));
         const dActive=isDemandPeriod(),dRan=isDemandAlreadyRun(dMonth);
+        const dMonthDate=dMonth+'-01';
+        const dRunRows=data.subscriptions.filter(s=>s.requestMonth===dMonthDate||s.paymentReference==='AUTO-'+dMonth||(s.calcNote||'').startsWith(demandRunLabel(dMonth)));
+        const dPaidRows=dRunRows.filter(s=>s.kind==='Payment');
+        const dOtherRows=dRunRows.filter(s=>s.kind!=='Request'&&s.kind!=='Payment');
+        const dResetBlocked=dPaidRows.length>0||dOtherRows.length>0;
+        const dResetReason=dPaidRows.length
+          ? `Reset is disabled because ${dPaidRows.length} generated request${dPaidRows.length===1?' has':'s have'} already been converted to Payment. Paid records and payment history are protected.`
+          : dOtherRows.length
+            ? `Reset is disabled because this run contains ${dOtherRows.length} record${dOtherRows.length===1?'':'s'} that are neither pending requests nor payments. Please review these records manually.`
+            : '';
         const dMonthLabel=monthLabelOf(dMonth);
         const ord=n=>n+(n===1?'st':n===2?'nd':n===3?'rd':'th');
         return `<h2>Raise fee requests — ${dMonthLabel} ${helpBtn('raise-fees')}</h2>
@@ -15632,7 +15642,8 @@ function renderFees() {
           </div>
           ${dRan?`
             <div class="hint" style="color:var(--forest);margin-top:8px">✓ Fee requests already raised for ${dMonthLabel}.</div>
-            <div class="row-form" style="margin-top:8px"><button class="btn-gold" onclick="exportDemandRun()">Download Excel of this run</button><button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="resetDemand()">Reset — remove &amp; unlock</button></div>
+            <div class="row-form" style="margin-top:8px;align-items:center"><button class="btn-gold" onclick="exportDemandRun()">Download Excel of this run</button><button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="resetDemand()" ${dResetBlocked?'disabled aria-describedby="demandResetDisabledReason" title="Reset is unavailable because this run contains records that must be preserved or reviewed."':''}>Reset — remove &amp; unlock</button></div>
+            ${dResetBlocked?`<div id="demandResetDisabledReason" class="hint" role="note" style="margin-top:7px;color:var(--brick)"><b>Why is Reset disabled?</b> ${esc(dResetReason)} Reset is available only when every generated record is still a pending Request.</div>`:''}
             ${demandMsg?`<div class="hint" style="color:var(--forest);margin-top:6px">${esc(demandMsg)}</div>`:''}
           `:`
             <div class="row-form" style="margin-top:8px">
