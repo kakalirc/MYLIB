@@ -18994,7 +18994,7 @@ function renderTeacherSchedule(teacher, isAdminCaller) {
       <div class="hint">Group classes may share a time with other Group classes. Individual classes cannot share a teacher time slot with any other class.</div>
     </div>
 
-    ${(()=>{
+    ${!(weeklyGeneratedView && weeklyGeneratedView.teacherId===teacher.id) ? (()=>{
       const pendingRows=scheduledClasses.filter(c=>c.teacherId===teacher.id&&c.status==='Pending'&&c.date>=todayStr&&
         (weeklyPatternDraft.studentId==='all'||c.studentId===weeklyPatternDraft.studentId)&&
         (weeklyPatternDraft.subjectId==='all'||c.subjectId===weeklyPatternDraft.subjectId)&&
@@ -19004,7 +19004,7 @@ function renderTeacherSchedule(teacher, isAdminCaller) {
         const st=data.students.find(x=>x.id===c.studentId), sub=data.subjects.find(x=>x.id===c.subjectId), editing=editingScheduleId===c.id;
         return `<tr><td>${esc(st?st.name:'?')}</td><td>${esc(sub?sub.name:'?')}</td><td>${esc(c.classType)}</td><td>${editing?`<input type="date" value="${esc(editScheduleDraft.date)}" onchange="editScheduleDraft.date=this.value">`:esc(c.date)}</td><td>${WEEKDAY_LABELS[new Date((editing?editScheduleDraft.date:c.date)+'T00:00:00').getDay()]}</td><td>${editing?`<input type="time" value="${esc(editScheduleDraft.time)}" onchange="editScheduleDraft.time=this.value">`:esc(c.time)}</td><td>${editing?`<button class="btn-small btn-primary" onclick="saveWeeklyPendingClassEdit('${c.id}')">Save</button> <button class="btn-small" onclick="cancelEditSchedule();weeklyPatternMsg='';">Cancel</button>`:`<button class="btn-small" onclick="startEditSchedule('${c.id}')">Edit date &amp; time</button>`}</td></tr>`;
       }).join('')}</tbody></table></div>`:'<div class="empty">No future Pending classes match the selected filters.</div>'}</div>`;
-    })()}
+    })() : ''}
 
     ${weeklyGeneratedView && weeklyGeneratedView.teacherId===teacher.id ? (()=>{
       const v = weeklyGeneratedView;
