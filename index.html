@@ -385,6 +385,7 @@ let frequencyStudentId = '';
 let frequencySubjectId = '';
 let frequencySearch = '';
 let frequencyFilterSubjectId = '';
+let frequencyFilterStudentId = '';
 let frequencyFilterTeacherId = '';
 let frequencyFilterStatus = 'all';
 let frequencyFilterDay = '';
@@ -13640,6 +13641,7 @@ async function loadClassFrequencyRows() {
 function setFrequencyFilter(key, value) {
   if (key === 'search') frequencySearch = value;
   if (key === 'subject') frequencyFilterSubjectId = value;
+  if (key === 'student') frequencyFilterStudentId = value;
   if (key === 'teacher') frequencyFilterTeacherId = value;
   if (key === 'status') frequencyFilterStatus = value;
   if (key === 'day') frequencyFilterDay = value;
@@ -13860,7 +13862,7 @@ function renderClassFrequencyAdmin() {
 function frequencyFilterMinWeeklyValue() { return frequencyMinWeekly.trim()==='' ? null : Math.max(0, Number(frequencyMinWeekly)||0); }
 function frequencyFilterMaxWeeklyValue() { return frequencyMaxWeekly.trim()==='' ? null : Math.max(0, Number(frequencyMaxWeekly)||0); }
 function resetFrequencyFilters() {
-  frequencySearch=''; frequencyFilterSubjectId=''; frequencyFilterTeacherId=''; frequencyFilterStatus='all'; frequencyFilterDay=''; frequencyMinWeekly=''; frequencyMaxWeekly=''; frequencyFiltersApplied=false;
+  frequencySearch=''; frequencyFilterStudentId=''; frequencyFilterSubjectId=''; frequencyFilterTeacherId=''; frequencyFilterStatus='all'; frequencyFilterDay=''; frequencyMinWeekly=''; frequencyMaxWeekly=''; frequencyFiltersApplied=false;
   render();
 }
 function startNewFrequencyAdmin() {
@@ -13871,9 +13873,8 @@ function startNewFrequencyAdmin() {
 function renderClassFrequencyTeacher(teacher) {
   frequencyFilterTeacherId = '';
   const pairs = frequencyEligiblePairs(teacher.id).map(p=>({...p,saved:frequencyRowFor(p.student.id,p.subject.id)}));
-  const q = frequencySearch.trim().toLowerCase();
   const filtered = pairs.filter(p=>{
-    if(q && ![p.student.name,p.student.code,p.student.mobileNumber,p.subject.name].some(v=>String(v||'').toLowerCase().includes(q))) return false;
+    if(frequencyFilterStudentId && p.student.id!==frequencyFilterStudentId) return false;
     if(frequencyFilterSubjectId && p.subject.id!==frequencyFilterSubjectId) return false;
     if(frequencyFilterStatus==='configured'&&!p.saved) return false;
     if(frequencyFilterStatus==='missing'&&p.saved) return false;
@@ -13888,7 +13889,7 @@ function renderClassFrequencyTeacher(teacher) {
       <h2>Class Frequency ${helpBtn('class-frequency-teacher')}</h2>
       <div class="hint">Only students and subjects assigned to you are shown. Each class is 60 minutes. Weekly frequency settings do not change scheduled classes.</div>
       <div class="row-form">
-        <input type="search" placeholder="Search my students or subjects" value="${escAttr(frequencySearch)}" oninput="frequencySearch=this.value">
+        <select aria-label="Filter by student" onchange="setFrequencyFilter('student',this.value)"><option value="">All my students</option>${byName([...new Map(pairs.map(p=>[p.student.id,p.student])).values()]).map(st=>`<option value="${st.id}" ${frequencyFilterStudentId===st.id?'selected':''}>${esc(studentLabel(st))}</option>`).join('')}</select>
         <select onchange="setFrequencyFilter('subject',this.value)"><option value="">All my subjects</option>${byName([...new Map(pairs.map(p=>[p.subject.id,p.subject])).values()]).map(s=>`<option value="${s.id}" ${frequencyFilterSubjectId===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
         <select onchange="setFrequencyFilter('status',this.value)"><option value="all" ${frequencyFilterStatus==='all'?'selected':''}>All statuses</option><option value="configured" ${frequencyFilterStatus==='configured'?'selected':''}>Configured</option><option value="missing" ${frequencyFilterStatus==='missing'?'selected':''}>Not configured</option></select>
         <select onchange="setFrequencyFilter('day',this.value)"><option value="">Any weekday</option>${FREQUENCY_DAYS.map(([key,label])=>`<option value="${key}" ${frequencyFilterDay===key?'selected':''}>${label}</option>`).join('')}</select>
