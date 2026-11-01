@@ -13605,7 +13605,7 @@ async function loadClassFrequencyRows() {
     // Expected table contract: student_subject_frequency, one row per student/subject pair,
     // with monday_count ... sunday_count integer columns and a unique (student_id, subject_id) constraint.
     const { data: rows, error } = await sb.from('student_subject_frequency')
-      .select('id,student_id,subject_id,monday_count,tuesday_count,wednesday_count,thursday_count,friday_count,saturday_count,sunday_count,created_at,updated_at');
+      .select('id,student_id,subject_id,monday_count,tuesday_count,wednesday_count,thursday_count,friday_count,saturday_count,sunday_count,weekly_times,created_at,updated_at');
     if (error) throw error;
     frequencyRows = (rows || []).map(r => ({
       ...r,
@@ -18784,41 +18784,39 @@ function weeklyPatternLoadDaysFromFrequency() {
   if (weeklyPatternDraft.studentId !== 'all' && weeklyPatternDraft.subjectId !== 'all' && weeklyPatternDraft.classType !== 'all') {
     const fr = frequencyRowFor(weeklyPatternDraft.studentId, weeklyPatternDraft.subjectId);
     if (fr) {
-      const studentId = weeklyPatternDraft.studentId;
-      const subjectId = weeklyPatternDraft.subjectId;
-      const classType = weeklyPatternDraft.classType;
-      const teacherId = currentLinkedId;
-      // student_subject_frequency stores weekday COUNTS only. Actual saved class times
-      // live on scheduled_classes, so reuse the latest known time for each weekday occurrence.
-      const savedByWeekday = new Map();
-      const matching = (scheduledClasses || []).filter(c =>
-        c.studentId === studentId && c.subjectId === subjectId && c.classType === classType &&
-        (!teacherId || c.teacherId === teacherId) && !!c.date && !!c.time
-      ).slice().sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.time).localeCompare(String(b.time)));
-      matching.forEach(c => {
-        const date = new Date(String(c.date).slice(0,10) + 'T00:00:00');
-        if (isNaN(date.getTime())) return;
-        const weekday = date.getDay();
-        if (!savedByWeekday.has(weekday)) savedByWeekday.set(weekday, new Map());
-        const byOccurrence = savedByWeekday.get(weekday);
-        const dateKey = String(c.date).slice(0,10);
-        if (!byOccurrence.has(dateKey)) byOccurrence.set(dateKey, []);
-        byOccurrence.get(dateKey).push(String(c.time).slice(0,5));
+      const savedByType = fr.weekly_times && typeof fr.weekly_times === 'object' ? fr.weekly_times : {};
+      const savedDays = Array.isArray(savedByType[weeklyPatternDraft.classType]) ? savedByType[weeklyPatternDraft.classType] : [];
+      const savedMap = new Map();
+      savedDays.forEach(item => {
+        const key = String(item.weekday) + ':' + (Number(item.occurrence) || 1);
+        savedMap.set(key, String(item.time || '').slice(0,5));
       });
       weeklyPatternDraft.days = FREQUENCY_DAYS.flatMap(([key],i) => {
         const weekday = [1,2,3,4,5,6,0][i];
         const count = Math.max(0, Number(fr[key]) || 0);
-        const dateGroups = Array.from((savedByWeekday.get(weekday) || new Map()).values());
-        const times = [];
-        for (let occurrence = 0; occurrence < count; occurrence++) {
-          const savedTime = dateGroups.map(group => group[occurrence]).find(Boolean) || '';
-          times.push({ weekday: String(weekday), time: savedTime });
-        }
-        return times;
+        return Array.from({length:count},(_,n)=>({
+          weekday:String(weekday),
+          occurrence:n+1,
+          time:savedMap.get(String(weekday)+':'+(n+1)) || ''
+        }));
       });
     }
   }
 }
+async function saveWeeklyPatternPreferences() {
+  const d = weeklyPatternDraft;
+  if (d.studentId === 'all' || d.subjectId === 'all' || d.classType === 'all') return { skipped:true };
+  const fr = frequencyRowFor(d.studentId,d.subjectId);
+  if (!fr) throw new Error('Saved Class Frequency was not found. The weekly timings cannot be saved without its frequency record.');
+  const current = fr.weekly_times && typeof fr.weekly_times === 'object' ? fr.weekly_times : {};
+  const savedDays = d.days.map((item,i)=>({weekday:String(item.weekday),occurrence:Number(item.occurrence)||d.days.slice(0,i+1).filter(x=>x.weekday===item.weekday).length,time:String(item.time||'').slice(0,5)}));
+  const weekly_times = {...current,[d.classType]:savedDays};
+  const {error}=await sb.from('student_subject_frequency').update({weekly_times,updated_at:new Date().toISOString()}).eq('student_id',d.studentId).eq('subject_id',d.subjectId);
+  if(error) throw error;
+  fr.weekly_times = weekly_times;
+  return {saved:true};
+}
+
 function weeklyPatternSet(field, val) {
   weeklyPatternDraft[field] = val;
   weeklyPatternPreview = null;
@@ -18891,6 +18889,7 @@ async function submitWeeklyPattern(teacherId) {
   if(!targets.length){weeklyPatternMsg='No matching student/subject/class-type combinations with a saved Class Frequency and subscription were found. Check the filters and Class Frequency setup.';render();return;}
   const isSingleExplicit=studentId!=='all'&&subjectId!=='all'&&classType!=='all'&&targets.length===1;
   if(isSingleExplicit&&!weeklyPatternDraft.days.length){weeklyPatternMsg='The selected student and subject have no usable Class Frequency. Set a valid Class Frequency first.';render();return;}
+  if(isSingleExplicit && weeklyPatternDraft.days.some(d=>!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(d.time||'')))){weeklyPatternMsg='Enter a valid time for every weekly occurrence before previewing. These times will be saved as the recurring weekly pattern.';render();return;}
   let previewTargets=[];
   try {
     for(const target of targets){
@@ -18909,6 +18908,16 @@ async function submitWeeklyPattern(teacherId) {
     render();return;
   }
   const confirmedTargets=weeklyPatternPreview.targets;
+  if (isSingleExplicit) {
+    try {
+      await saveWeeklyPatternPreferences();
+    } catch (e) {
+      weeklyPatternMsg = 'Could not save the weekly days and timings: ' + (e && e.message ? e.message : 'Unknown database error') + '. No generated classes were changed.';
+      weeklyPatternPreview = null;
+      render();
+      return;
+    }
+  }
   const replaceCount=confirmedTargets.reduce((sum,t)=>sum+scheduledClasses.filter(c=>c.studentId===t.studentId&&c.subjectId===t.subjectId&&c.teacherId===teacherId&&c.classType===t.classType&&c.status==='Pending'&&c.date>=startDate).length,0);
   if(!confirm(`Update the weekly pattern for ${confirmedTargets.length} combination(s)? This will replace ${replaceCount} future Pending class record(s) from ${startDate} onward. Completed and past classes will be preserved.`)) return;
   submittingWeeklyPattern=true; weeklyPatternMsg='Updating future Pending classes…'; render();
@@ -18975,9 +18984,9 @@ function renderTeacherSchedule(teacher, isAdminCaller) {
         </select></label>
         <label>Start date <input type="date" value="${weeklyPatternDraft.startDate}" onchange="weeklyPatternSet('startDate', this.value)"></label>
       </div>
-      <div class="hint">Select a student to load the saved subject and class type where there is only one choice. The saved Class Frequency is loaded automatically. Preview the revised pattern before confirming; future Pending classes from the start date are replaced, while completed and past classes are preserved. Each class is 60 minutes.</div>
+      <div class="hint">Select a student to load the saved subject and class type where there is only one choice. The saved Class Frequency and previously saved weekly timings are loaded automatically. Confirming saves the days and timings as the recurring pattern; future Pending classes from the start date are replaced, while completed and past classes are preserved. Each class is 60 minutes.</div>
       ${weeklyPatternDraft.studentId!=='all' && weeklyPatternDraft.subjectId!=='all' && weeklyPatternDraft.classType!=='all' ? (weeklyPatternDraft.days.length ? weeklyPatternDraft.days.map((d,i)=>`<div class="row-form"><label>${WEEKDAY_LABELS[Number(d.weekday)]} · occurrence ${weeklyPatternDraft.days.slice(0,i+1).filter(x=>x.weekday===d.weekday).length}<input type="time" value="${d.time}" placeholder="Optional" onchange="weeklyPatternTimeSet(${i},this.value)"></label></div>`).join('') : '<div class="hint" style="color:var(--brick)">No usable Class Frequency found. Set or correct the frequency first.</div>') : '<div class="hint">Bulk setup uses each matching student/subject frequency. Narrow all three filters to one combination to enter individual class times.</div>'}
-      ${weeklyPatternPreview ? `<div class="hint" style="border:1px solid var(--gold-dark);padding:10px;margin:8px 0"><b>Schedule preview</b><div>${weeklyPatternPreview.targets.length} combinations · ${weeklyPatternPreview.targets.reduce((sum,t)=>sum+t.pattern.length,0)} dated occurrences</div><div class="table-scroll"><table><tr><th>Student</th><th>Subject</th><th>Type</th><th>Occurrences</th><th>First date</th><th>First time</th></tr>${weeklyPatternPreview.targets.slice(0,30).map(t=>`<tr><td>${esc(t.studentName)}</td><td>${esc(t.subjectName)}</td><td>${esc(t.classType)}</td><td>${t.pattern.length}</td><td>${esc(t.pattern[0].date)}</td><td>${esc(t.pattern[0].time)}</td></tr>`).join('')}</table></div>${weeklyPatternPreview.targets.length>30?`<div>Showing first 30 combinations.</div>`:''}<div>Future Pending classes from the selected start date will be replaced by this pattern. Matching dates retain their existing times unless you enter a new time. New Group classes default to 00:00; new Individual classes alternate 01:00 / 02:00. Completed and past classes are never changed.</div></div>` : ''}
+      ${weeklyPatternPreview ? `<div class="hint" style="border:1px solid var(--gold-dark);padding:10px;margin:8px 0"><b>Schedule preview</b><div>${weeklyPatternPreview.targets.length} combinations · ${weeklyPatternPreview.targets.reduce((sum,t)=>sum+t.pattern.length,0)} dated occurrences</div><div class="table-scroll"><table><tr><th>Student</th><th>Subject</th><th>Type</th><th>Date</th><th>Weekday</th><th>Time</th></tr>${weeklyPatternPreview.targets.slice(0,30).flatMap(t=>t.pattern.slice(0,14).map(c=>`<tr><td>${esc(t.studentName)}</td><td>${esc(t.subjectName)}</td><td>${esc(t.classType)}</td><td>${esc(c.date)}</td><td>${esc(WEEKDAY_LABELS[new Date(c.date+'T00:00:00').getDay()])}</td><td>${esc(c.time)}</td></tr>`)).join('')}</table></div>${weeklyPatternPreview.targets.length>30?`<div>Showing first 30 combinations.</div>`:''}<div>The recurring weekday and time pattern is saved independently, so it will load again even if generated Pending classes are cleared. Future Pending classes from the selected start date are replaced; completed and past classes are preserved.</div></div>` : ''}
       <div class="row-form">
         <button class="btn-primary" onclick="submitWeeklyPattern('${teacher.id}')" ${submittingWeeklyPattern?'disabled':''}>${submittingWeeklyPattern?'Generating…':(weeklyPatternPreview?'Confirm & Generate':'Preview Schedule')}</button>
         ${weeklyPatternDraft.studentId!=='all' && weeklyPatternDraft.subjectId!=='all' && weeklyPatternDraft.classType!=='all' ? `<button class="btn-small" onclick="clearPendingSchedule('${weeklyPatternDraft.studentId}','${weeklyPatternDraft.subjectId}','${weeklyPatternDraft.classType}')" title="Remove all pending classes for this student/subject/type so you can set a new pattern">Clear pending &amp; start over</button>` : ''}
