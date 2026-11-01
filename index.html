@@ -394,6 +394,7 @@ let frequencyEditStudentId = '';
 let frequencyEditSubjectId = '';
 let frequencyDraft = { monday_count: 0, tuesday_count: 0, wednesday_count: 0, thursday_count: 0, friday_count: 0, saturday_count: 0, sunday_count: 0 };
 let frequencyEditorOpen = false;
+let frequencyConfirmPending = false;
 let frequencyNewPickerOpen = false;
 let frequencyFiltersApplied = false;
 let frequencyNewStudentSearch = '';
@@ -442,43 +443,6 @@ let biometricLockActive = false;
 let biometricLockedProfile = null;
 let biometricLockedUserId = '';
 let biometricOfferShown = false;
-// Cross-tab authentication synchronisation. A logout in one tab must clear
-// every other tab's in-memory user data, including when biometric logout keeps
-// the Supabase session alive for quick login on this device.
-const AUTH_LOGOUT_SYNC_KEY = 'lib_auth_logout_sync';
-let authSyncChannel = null;
-let lastHandledLogoutEventId = '';
-function publishCrossTabLogout(userId) {
-  if (!userId) return;
-  const event = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, userId, at: Date.now() };
-  try { if (authSyncChannel) authSyncChannel.postMessage(event); } catch (e) {}
-  try { localStorage.setItem(AUTH_LOGOUT_SYNC_KEY, JSON.stringify(event)); } catch (e) {}
-}
-function handleCrossTabLogout(event) {
-  if (!event || !event.id || event.id === lastHandledLogoutEventId) return;
-  lastHandledLogoutEventId = event.id;
-  if (!event.userId) return;
-  if (isLoggedIn && currentUserId === event.userId) {
-    // Do not rebroadcast or write a second audit event. logout() applies the
-    // same secure cleanup and preserves the biometric gate when appropriate.
-    logout({ broadcast: false, logEvent: false });
-  } else if (biometricLockActive && biometricLockedUserId === event.userId) {
-    // This tab is already at the biometric gate for the same signed-out user.
-    render();
-  }
-}
-function setupCrossTabAuthSync() {
-  if (typeof BroadcastChannel !== 'undefined') {
-    try {
-      authSyncChannel = new BroadcastChannel('lib-auth-session');
-      authSyncChannel.addEventListener('message', e => handleCrossTabLogout(e.data));
-    } catch (e) { authSyncChannel = null; }
-  }
-  window.addEventListener('storage', e => {
-    if (e.key !== AUTH_LOGOUT_SYNC_KEY || !e.newValue) return;
-    try { handleCrossTabLogout(JSON.parse(e.newValue)); } catch (err) {}
-  });
-}
 let currentUsername = '';
 let currentRole = '';
 let currentLinkedId = '';
@@ -1090,11 +1054,6 @@ let sCalcMode = 'Offline';
 let sCalcClasses = '';
 let sCalcStudentId = '';   // whose calculator is showing (special rates are per student)
 let demandPreviewRows = null;
-let demandTrialRows = null;
-let demandTrialSkippedRows = [];
-let demandTrialNeverPaid = 0;
-let demandTrialBusy = false;
-let demandTrialMsg = '';
 let demandSelectedMonth = ''; // Admin-selected target month for monthly fee requests
 let demandMsg = '';
 let demandConfirming = false;
@@ -7383,13 +7342,7 @@ setInterval(() => {
   if (isLoggedIn && document.visibilityState === 'visible' && !hasUnsavedEditInProgress()) refreshAllData(true);
 }, 75000);
 
-async function logout(options = {}) {
-  const broadcast = options.broadcast !== false;
-  const shouldLogEvent = options.logEvent !== false;
-  const logoutUserId = currentUserId;
-  // Notify sibling tabs before clearing this tab's identity. BroadcastChannel
-  // is immediate; the storage event is a fallback for browsers without it.
-  if (broadcast && logoutUserId) publishCrossTabLogout(logoutUserId);
+async function logout() {
   // Only soft-logout if bio belongs to THIS user — prevents user B from
   // seeing user A's credential gate after logging in with a password.
   if (bioIsRegistered() && currentUsername === bioGetUsername()) {
@@ -7398,7 +7351,7 @@ async function logout(options = {}) {
     // so renderLogin() shows the fingerprint button immediately (no page reload).
     // On the next page load, initApp() will intercept the still-valid session
     // and set biometricLockActive = true again automatically.
-    if (shouldLogEvent && currentUserId) logLoginEvent('logout', currentUserId, currentUsername, currentRole);
+    if (currentUserId) logLoginEvent('logout', currentUserId, currentUsername, currentRole);
     biometricLockActive = true;
     biometricLockedProfile = {
       username: currentUsername, role: currentRole,
@@ -7409,7 +7362,7 @@ async function logout(options = {}) {
     biometricLockedUserId = currentUserId;
   } else {
     await Promise.all([
-      shouldLogEvent && currentUserId ? logLoginEvent('logout', currentUserId, currentUsername, currentRole) : Promise.resolve(),
+      currentUserId ? logLoginEvent('logout', currentUserId, currentUsername, currentRole) : Promise.resolve(),
       sb.auth.signOut(),
     ]);
   }
@@ -9540,7 +9493,7 @@ function feeQuoteHintHtml(d, which) {
   return differs ? `${sum} — you've entered your own amount. <button type="button" class="btn-small" onclick="useQuoteAmount('${which}')">Use ₹${q.amount.toFixed(2)}</button>` : sum;
 }
 // The saved working of an auto-raised fee request (SQL 59); stays on the row after it is marked paid.
-function calcNoteHtml(r) { const note = r && feeRequestReviewNote(r.calcNote); return note ? `<div class="hint" style="font-size:11px;white-space:normal;min-width:220px;max-width:360px">🧮 ${esc(note).replace(/\n/g, '<br>')}</div>` : ''; }
+function calcNoteHtml(r) { return r && r.calcNote ? `<div class="hint" style="font-size:11px;white-space:normal;min-width:220px;max-width:360px">🧮 ${esc(r.calcNote).replace(/\n/g, '<br>')}</div>` : ''; }
 function requestFormDraft(which) { return which === 'edit' ? editRequestDraft : which === 'pay' ? subDraft : requestDraft; }
 // Typing in Classes/Amount updates the draft and the hint in place (no full
 // render, so the cursor stays in the box).
@@ -10026,14 +9979,13 @@ function familyFeeMessage(studentId, short) {
   if (razorpayOn) lines.push(`Online Payment: ${razorpayFeePage}`, 'While making the online payment, please enter the following details:', `Tuition Fee: ${inrText(total)}`, `Student Name: ${names.join(', ')}`);
   lines.push('');
   if (feeContactMobile) lines.push(`After completing the payment, kindly share the payment confirmation screenshot at ${feeContactMobile} for our records.`, '');
-  // Show the parent login (if available) and each child's own student login.
-  // A parent login does not replace the student's separate login credentials.
+  // The parent login shows every child's fees, so it is given when the family has one; else each child's login.
   const parentIds = new Set((data.parentStudents || []).filter(m => kids.some(s => s.id === m.studentId)).map(m => m.parentUserId));
   const parentLogin = data.users.find(u => u.role === 'Parent' && parentIds.has(u.id) && !u.archived);
-  const logins = kids.map(s => ({ s, u: data.users.find(u => u.role === 'Student' && u.linkedId === s.id && !u.archived) })).filter(x => x.u);
+  const logins = parentLogin ? [] : kids.map(s => ({ s, u: data.users.find(u => u.role === 'Student' && u.linkedId === s.id && !u.archived) })).filter(x => x.u);
   if (parentLogin || logins.length) {
     lines.push('App Login');
-    if (parentLogin) lines.push(`Parent Login ID: ${parentLogin.username}`);
+    if (parentLogin) lines.push(`Parent login (shows ${kids.length > 1 ? 'all your children’s' : 'your child’s'} classes and fees): ${parentLogin.username}`);
     logins.forEach(x => lines.push(`${kids.length > 1 ? x.s.name + ' - ' : ''}Login ID: ${x.u.username}`));
     lines.push('Password: same as the login ID, unless you have already changed it.');
     lines.push(...APP_LINK_LINES, '');
@@ -10160,80 +10112,6 @@ async function deleteSelectedPendingRequests() {
   if (failed.length) msg += ` ${failed.length} failed: ` + failed.map(x => x.message).join('; ');
   alert(msg);
 }
-// Monthly auto-raised fee requests are reviewed only when the requested class count
-// differs from the saved frequency, or both class types are raised for one student.
-// Persist approval in calc_note so no database migration is needed.
-const FEE_REVIEW_MARKER = '[LIB_FEE_REVIEW:approved]';
-function isHistoricalFeeRequest(r) { return !!(r && r.kind === 'Request' && ((r.paymentReference || '').startsWith('AUTO-') || (r.calcNote || '').startsWith('Fee request run '))); }
-function feeRequestReviewApproved(r) { return !!(r && (r.calcNote || '').includes(FEE_REVIEW_MARKER)); }
-function feeRequestReviewNote(note) { return String(note || '').replace(/\n?\[LIB_FEE_REVIEW:approved\]/g, '').trim(); }
-function feeRequestReviewMarker(note, approved) {
-  const clean = feeRequestReviewNote(note); if (!approved) return clean;
-  const at = clean.lastIndexOf('\nFor parent (');
-  return at >= 0 ? clean.slice(0, at) + '\n' + FEE_REVIEW_MARKER + clean.slice(at) : clean + (clean ? '\n' : '') + FEE_REVIEW_MARKER;
-}
-function feeRequestBatchKey(r) {
-  if (r.requestMonth) return String(r.requestMonth).slice(0,7);
-  const ref = String(r.paymentReference || '').match(/^AUTO-(\d{4}-\d{2})$/);
-  if (ref) return ref[1];
-  return String(r.date || '').slice(0,7);
-}
-function feeRequestSavedExpected(r) {
-  const note = feeRequestReviewNote(r && r.calcNote || '');
-  let m = note.match(/net expected\s+([\d.]+)/i);
-  if (m) return Number(m[1]);
-  m = note.match(/Saved frequency:\s*([\d.]+)\s*expected classes/i);
-  if (m) {
-    const saved = Number(m[1]);
-    const leave = note.match(/expected classes\s*−\s*([\d.]+)\s*teacher-leave adjustment/i);
-    return Math.max(0, saved - (leave ? Number(leave[1]) : 0));
-  }
-  return null;
-}
-function feeRequestSavedReviewReasons(r, requests) {
-  if (!isHistoricalFeeRequest(r)) return [];
-  const reasons = [], note = feeRequestReviewNote(r.calcNote || '');
-  // A classes-left deduction is part of the normal calculation, not a review exception.
-  // Only an explicitly recorded manual class-count override needs review here.
-  if (/classes changed by admin to/i.test(note))
-    reasons.push('Requested class count was manually changed after calculation.');
-  const sameRun = (requests || data.subscriptions).filter(x => x.kind === 'Request' && x.studentId === r.studentId && isHistoricalFeeRequest(x) && feeRequestBatchKey(x) === feeRequestBatchKey(r));
-  const types = new Set(sameRun.map(x => x.type));
-  if (types.has('Group') && types.has('Individual')) reasons.push('Both Group and Individual requests are raised for this student in the same monthly run.');
-  return reasons;
-}
-function feeRequestNeedsReview(r, requests) { return feeRequestSavedReviewReasons(r, requests).length > 0; }
-function demandReviewReasons(row, rows) {
-  const reasons = [];
-  // Do not compare requested classes with the full-month frequency: the request
-  // is normally reduced by classes already left (and may include owed classes).
-  // Only an admin override of the calculated class count requires this review.
-  if (row.classesEdited)
-    reasons.push('Requested class count was manually changed after calculation.');
-  const sameStudent = (rows || []).filter(x => x.include && x.student.id === row.student.id);
-  const types = new Set(sameStudent.map(x => x.ty));
-  if (types.has('Group') && types.has('Individual')) reasons.push('Both Group and Individual requests are being raised for this student across subjects.');
-  return reasons;
-}
-function demandRefreshReviewFlags(rows) {
-  (rows || []).forEach(r => {
-    const reasons = demandReviewReasons(r, rows);
-    const required = reasons.length > 0;
-    if (!required) r.reviewApproved = false;
-    else if (!r.reviewRequired) r.reviewApproved = false;
-    r.reviewRequired = required;
-    r.reviewReasons = reasons;
-    r.reviewFlag = reasons.join(' ');
-  });
-}
-async function approveHistoricalFeeRequest(id) {
-  const r = data.subscriptions.find(x => x.id === id && x.kind === 'Request');
-  if (!r || !isHistoricalFeeRequest(r) || !feeRequestNeedsReview(r) || feeRequestReviewApproved(r)) return;
-  const nextNote = feeRequestReviewMarker(r.calcNote, true);
-  const { error } = await sb.from('subscriptions').update({ calc_note: nextNote || null }).eq('id', id).eq('kind', 'Request');
-  if (error) { alert('Could not save the review approval: ' + error.message); return; }
-  r.calcNote = nextNote; render();
-}
 function pendingFeeRequestsByFamilyHtml() {
   const reqs = data.subscriptions.filter(s => s.kind === 'Request');
   if (!reqs.length) { selectedPendingRequestIds.clear(); return '<div class="empty">No pending fee requests.</div>'; }
@@ -10247,8 +10125,7 @@ function pendingFeeRequestsByFamilyHtml() {
   const list = [...fams.values()].map(sid => ({ sid, reqs: familyPendingRequests(sid) }))
     .sort((a, b) => studentNameWithCode(a.reqs[0].studentId).localeCompare(studentNameWithCode(b.reqs[0].studentId)));
   const grand = reqs.reduce((a, r) => a + (r.amountPaid || 0), 0);
-  const reviewReqs = reqs.filter(r => feeRequestNeedsReview(r, reqs)), needsReview = reviewReqs.filter(r => !feeRequestReviewApproved(r)).length;
-  return familySkippedHtml() + (feeReminderMsg ? `<div class="hint" style="color:var(--brick)">${esc(feeReminderMsg)}</div>` : '') + (reviewReqs.length ? `<div style="margin:8px 0;padding:9px 11px;border:1px solid #d6a72c;border-radius:7px;background:#fff4c2;color:#5b4300"><b>Fee-request review:</b> ${needsReview} request${needsReview===1?'':'s'} need${needsReview===1?'s':''} review because the requested class count differs from saved frequency or both class types were raised for the student. Approved requests remain highlighted as Reviewed – Approved.</div>` : '') + `<div class="hint" style="margin-bottom:6px">${reqs.length} request${reqs.length === 1 ? '' : 's'} from ${list.length} famil${list.length === 1 ? 'y' : 'ies'} · ₹${grand.toFixed(2)} in total. Brothers and sisters (same parent login or parent mobile) are shown together with one message.</div>
+  return familySkippedHtml() + (feeReminderMsg ? `<div class="hint" style="color:var(--brick)">${esc(feeReminderMsg)}</div>` : '') + `<div class="hint" style="margin-bottom:6px">${reqs.length} request${reqs.length === 1 ? '' : 's'} from ${list.length} famil${list.length === 1 ? 'y' : 'ies'} · ₹${grand.toFixed(2)} in total. Brothers and sisters (same parent login or parent mobile) are shown together with one message.</div>
     <div class="row-form" style="margin:8px 0;align-items:center">
       <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" ${allSelected ? 'checked' : ''} onchange="selectAllPendingRequests(this.checked)"> Select all pending requests</label>
       <button class="btn-small" onclick="selectAllPendingRequests(false)" ${selectedCount ? '' : 'disabled'}>Clear selection</button>
@@ -10270,10 +10147,7 @@ function pendingFeeRequestsByFamilyHtml() {
             const isEditing = editingRequestId === r.id;
             const subjectOptions = subjectsForStudent(r.studentId).map(s => `<option value="${s.id}" ${editRequestDraft.subjectId===s.id?'selected':''}>${esc(studentLabel(s))}</option>`).join('');
             const editPanel = isEditing ? `<tr><td colspan="9"><div style="margin:8px 0;padding:12px;border:1px solid var(--forest);border-radius:8px;background:rgba(60,94,66,0.06)"><div class="hint" style="margin-bottom:8px"><b>Edit pending fee request</b> — ${esc(studentNameWithCode(r.studentId))}</div>${editRequestMsg ? `<div class="hint" style="color:var(--brick)">${esc(editRequestMsg)}</div>` : ''}<div class="row-form" style="margin-bottom:0"><select onchange="editRequestDraftSet('subjectId', this.value)">${subjectOptions}</select><select onchange="editRequestDraftSet('type', this.value)">${TYPES.map(ty=>`<option value="${ty}" ${editRequestDraft.type===ty?'selected':''}>${ty}</option>`).join('')}</select><label>Classes <input type="number" id="editReqClasses_${r.id}" value="${editRequestDraft.classes}" min="0.5" step="0.5" style="width:80px" oninput="requestQuoteInput('edit','classes',this.value)"></label><label>Amount ₹ <input type="number" id="editReqAmount_${r.id}" value="${editRequestDraft.amountPaid}" min="0" step="any" style="width:100px" oninput="requestQuoteInput('edit','amount',this.value)"></label><label>Requested date <input type="date" id="editReqDate_${r.id}" value="${editRequestDraft.date}" onchange="editRequestDraft.date=this.value"></label><button class="btn-small btn-primary" onclick="saveRequestEdit('${r.id}')">Save</button><button class="btn-small" onclick="cancelEditRequest()">Cancel</button></div><div class="hint" id="editReqQuoteHint">${feeQuoteHintHtml(editRequestDraft, 'edit')}</div></div></td></tr>` : '';
-            const historical = isHistoricalFeeRequest(r), needsReview = historical && feeRequestNeedsReview(r, reqs), approved = needsReview && feeRequestReviewApproved(r);
-            const reasons = needsReview ? feeRequestSavedReviewReasons(r, reqs) : [];
-            const reviewCell = historical ? `<div style="font-size:11px;font-weight:700;color:${needsReview?'#7a5600':'#356447'}">${needsReview?(approved?'✓ Reviewed – Approved':'⚠ Review Required'):'✓ No review required'}</div>${reasons.map(x=>`<div style="font-size:11px;color:#8a3b16;margin-top:3px">${esc(x)}</div>`).join('')}` : '';
-            return `<tr${needsReview?' style="background:#fff4c2"':''}><td><input type="checkbox" aria-label="Select pending request for ${esc(studentNameWithCode(r.studentId))}" ${selectedPendingRequestIds.has(r.id) ? 'checked' : ''} onchange="togglePendingRequestSelection('${r.id}',this.checked)"></td><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid || 0).toFixed(2)}${requestDiscountHint(r)}</td><td>${r.date || '—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${reviewCell}${calcNoteHtml(r)}</td><td>${markingPaidId === r.id ? '<span class="hint">Confirm below</span>' : `${needsReview&&!approved?`<button class="btn-small btn-primary" onclick="approveHistoricalFeeRequest('${r.id}')">Approve review</button>`:''}<button class="btn-small" onclick="startMarkPaid('${r.id}')">Mark paid</button><button class="btn-small" onclick="startEditRequest('${r.id}')">Edit</button><button class="icon-btn" title="Remove pending request" aria-label="Remove pending request" onclick="if(confirm('Remove this pending fee request? This cannot be undone.')) cancelFeeRequest('${r.id}')">✕</button>`}</td></tr>${editPanel}`;
+            return `<tr><td><input type="checkbox" aria-label="Select pending request for ${esc(studentNameWithCode(r.studentId))}" ${selectedPendingRequestIds.has(r.id) ? 'checked' : ''} onchange="togglePendingRequestSelection('${r.id}',this.checked)"></td><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td>${(r.amountPaid || 0).toFixed(2)}${requestDiscountHint(r)}</td><td>${r.date || '—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${calcNoteHtml(r)}</td><td>${markingPaidId === r.id ? '<span class="hint">Confirm below</span>' : `<button class="btn-small" onclick="startMarkPaid('${r.id}')">Mark paid</button><button class="btn-small" onclick="startEditRequest('${r.id}')">Edit</button><button class="icon-btn" title="Remove pending request" aria-label="Remove pending request" onclick="if(confirm('Remove this pending fee request? This cannot be undone.')) cancelFeeRequest('${r.id}')">✕</button>`}</td></tr>${editPanel}`;
           }).join('')
             + (kids.length > 1 ? `<tr><td colspan="5" class="hint" style="text-align:right">Subtotal for ${esc((data.students.find(s => s.id === kid) || {}).name || '')}</td><td><b>${mine.reduce((a, r) => a + (r.amountPaid || 0), 0).toFixed(2)}</b></td><td colspan="3"></td></tr>` : '');
         }).join('');
@@ -10317,7 +10191,7 @@ async function setDemandTargetMonth(value) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value || '')) return;
   if (value === demandTargetMonth()) return;
   demandSelectedMonth = value;
-  demandPreviewRows = null; demandPreviewSnapshot = ''; demandSkippedRows = []; demandNeverPaid = 0; demandShowSkipped = false; demandTrialRows = null; demandTrialSkippedRows = []; demandTrialNeverPaid = 0; demandTrialMsg = ''; demandMsg = 'Loading selected month status…';
+  demandPreviewRows = null; demandPreviewSnapshot = ''; demandSkippedRows = []; demandNeverPaid = 0; demandShowSkipped = false; demandMsg = 'Loading selected month status…';
   render();
   await loadFeeRequestRunState(value);
   demandMsg = '';
@@ -10465,12 +10339,12 @@ function demandCalcFor(student, subj, ty, month, ignoreLeft) {
   if (!Number.isFinite(classes) || classes <= 0) return { skip: `No positive class request calculated (balance ${left}, expected ${expected}).`, left };
   const q = feeQuote(subj.id, ty, mode, classes, student.id);
   if (!q || !q.rate || !q.amount || q.amount <= 0) return { skip: `Missing or zero ${specialRateRow(student.id, subj.id, ty) ? 'special' : 'Fee Setup'} rate for ${catLabel(subj.category)}, ${ty}, ${mode}; no zero-value request created.`, review: true };
-  return { row: { student, subj, ty, month, method, why, parentWhy, left, owed, mode, classes, baseClasses: classes, amount: q.amount, quoteAmount: q.amount, include: true, reviewApproved: false, classesEdited: false, amountEdited: false, expected, expectedDisplay, expectedDisplayNote: displayFrequency.review || '', frequencyMethod: frequency.method, leaveAdjustment: leave.count, leaveNote: leave.note, reviewFlag: '', reviewRequired: false, reviewReasons: [], ignoredLeft } };
+  return { row: { student, subj, ty, month, method, why, parentWhy, left, owed, mode, classes, baseClasses: classes, amount: q.amount, quoteAmount: q.amount, include: true, classesEdited: false, amountEdited: false, expected, expectedDisplay, expectedDisplayNote: displayFrequency.review || '', frequencyMethod: frequency.method, leaveAdjustment: leave.count, leaveNote: leave.note, reviewFlag: '', ignoredLeft } };
 }
 function demandDataSignature() {
   const stable = rows => rows.slice().sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
   return JSON.stringify({
-    students: stable(data.students.map(s=>[s.id,s.archived,s.gradeId,s.classTypePreference])),
+    students: stable(data.students.map(s=>[s.id,s.archived,s.gradeId])),
     subjects: stable(data.subjects.map(s=>[s.id,s.name,s.category,s.teacherId,s.archived])),
     grades: stable(grades.map(g=>[g.id,g.name,g.excludedFromGradeProgression])),
     categoryGrades: stable(categoryGrades.map(x=>[x.categoryId,x.gradeId])),
@@ -10501,48 +10375,8 @@ async function previewDemand() {
     });
   });
   demandApplyDiscounts(rows);
-  demandRefreshReviewFlags(rows);
   demandSortRows(rows);
   demandPreviewRows=rows; demandSkippedRows=skipped; demandNeverPaid=neverPaid; demandPreviewSnapshot=demandDataSignature(); render();
-}
-// Trial Run uses the same read-only calculation pipeline as Preview, but keeps
-// its results separate and deliberately does not exclude existing pending requests.
-// It never calls Preview, Confirm, reset, approval, or any database write path.
-async function trialRunDemand() {
-  if (demandTrialBusy) return;
-  const month = demandTargetMonth();
-  demandTrialBusy = true; demandTrialRows = null; demandTrialSkippedRows = []; demandTrialNeverPaid = 0;
-  demandTrialMsg = 'Running trial calculation…'; render();
-  try {
-    await Promise.all([loadClassFrequencyRows(), loadSessions(), loadScheduledClasses(), loadTeacherLeave(), loadStudentsAndSubscriptions()]);
-    const rows = [], skipped = []; let neverPaid = 0;
-    data.students.filter(s=>!s.archived).forEach(student => {
-      subjectsForStudent(student.id).forEach(subj => {
-        TYPES.forEach(ty => {
-          const skip = reason => skipped.push({student,subj,ty,month,reason});
-          const res = demandCalcFor(student,subj,ty,month);
-          if (res.neverPaid) { neverPaid++; if (demandIsLanguageGrade(student)) skip('Language-grade student has no valid prior payment; review manually.'); return; }
-          if (res.skip) { skip(res.skip); if (res.left > 0 && demandCalcFor(student,subj,ty,month,true).row) skipped[skipped.length-1].canIgnoreLeft = true; return; }
-          const existing = data.subscriptions.some(x=>x.kind==='Request'&&x.studentId===student.id&&x.subjectId===subj.id&&x.type===ty);
-          res.row.existingPendingRequest = existing;
-          rows.push(res.row);
-        });
-      });
-    });
-    // Do not inherit any temporary No-discount ticks from the editable Preview.
-    const savedNoDiscount = demandNoDiscount;
-    demandNoDiscount = new Set();
-    try { demandApplyDiscounts(rows, new Set(rows.filter(r=>r.existingPendingRequest).map(demandKey))); } finally { demandNoDiscount = savedNoDiscount; }
-    demandRefreshReviewFlags(rows);
-    demandSortRows(rows);
-    demandTrialRows = rows; demandTrialSkippedRows = skipped; demandTrialNeverPaid = neverPaid;
-    demandTrialMsg = `Trial calculation completed for ${monthLabelOf(month)}. No database records were written or changed.`;
-  } catch (e) {
-    demandTrialRows = null;
-    demandTrialMsg = 'Trial Run could not be completed: ' + (e && e.message ? e.message : String(e));
-  } finally {
-    demandTrialBusy = false; render();
-  }
 }
 function demandSortRows(rows) {
   rows.sort((a,b)=>familyParentName(a.student.id).localeCompare(familyParentName(b.student.id))||familyKeyOf(a.student.id).localeCompare(familyKeyOf(b.student.id))||studentLabel(a.student).localeCompare(studentLabel(b.student))||a.subj.name.localeCompare(b.subj.name)||a.ty.localeCompare(b.ty));
@@ -10569,16 +10403,15 @@ function demandSetIgnoreLeft(keys, on) {
     else demandSkippedRows.push({ student: src.student, subj: src.subj, ty: src.ty, month: src.month, reason: res.skip || 'No request calculated', canIgnoreLeft: true });
   });
   demandApplyDiscounts(demandPreviewRows);
-  demandRefreshReviewFlags(demandPreviewRows);
   demandSortRows(demandPreviewRows);
   render();
 }
 // Price the ticked rows together with the families' pending requests (request / child / family tier).
 // An amount typed by the admin is kept; its classes still count.
-function demandApplyDiscounts(rows, excludePendingKeys = new Set()) {
+function demandApplyDiscounts(rows) {
   const inc = rows.filter(r => r.include);
   const fams = new Set(inc.map(r => familyKeyOf(r.student.id)));
-  const pending = data.subscriptions.filter(r => r.kind === 'Request' && r.baseAmount != null && fams.has(familyKeyOf(r.studentId)) && !excludePendingKeys.has(`${r.studentId}|${r.subjectId}|${r.type}`));
+  const pending = data.subscriptions.filter(r => r.kind === 'Request' && r.baseAmount != null && fams.has(familyKeyOf(r.studentId)));
   rows.forEach(r => { r.base = feeBaseFor(r.subj.id, r.ty, r.mode, r.classes, r.student.id); r.noDiscount = demandNoDiscount.has(demandKey(r)); });
   const items = inc.map(r => ({ key: demandKey(r), studentId: r.student.id, classes: r.classes, base: r.base, fixed: r.noDiscount ? 'off' : null })).concat(pending.map(requestDiscountItem));
   const res = bulkDiscountFor(items);
@@ -10615,10 +10448,8 @@ function demandSetAllInclude(on) {
 function demandRowSet(i, field, val) {
   const r = demandPreviewRows && demandPreviewRows[i]; if (!r) return;
   if (field === 'include') r.include = !!val;
-  else if (field === 'reviewApproved') r.reviewApproved = !!val;
   else if (field === 'classes') {
     const n = halfRound(Number(val) || 0); if (n <= 0) { render(); return; }
-    if (n !== r.classes) r.reviewApproved = false;
     r.classes = n; r.classesEdited = n !== r.baseClasses;
     const q = feeQuote(r.subj.id, r.ty, r.mode, n, r.student.id);
     r.quoteAmount = q && q.rate ? q.amount : 0;
@@ -10628,14 +10459,10 @@ function demandRowSet(i, field, val) {
     r.amount = a; r.amountEdited = Math.abs(a - r.quoteAmount) > 0.009;
   }
   demandApplyDiscounts(demandPreviewRows);
-  demandRefreshReviewFlags(demandPreviewRows);
   render();
 }
 async function confirmDemand() {
-  demandRefreshReviewFlags(demandPreviewRows || []);
   const todo = (demandPreviewRows || []).filter(r => r.include);
-  const unreviewed = todo.filter(r => r.reviewRequired && !r.reviewApproved);
-  if (unreviewed.length) { alert(`Review and approve the ${unreviewed.length} flagged request${unreviewed.length===1?'':'s'} before confirming. Requests that match saved frequency and use only one class type for the student do not need review.`); return; }
   if (demandPreviewRows && demandPreviewRows.some(r => r.month !== demandTargetMonth())) { demandPreviewRows = null; demandPreviewSnapshot = ''; render(); alert('The target month changed. Please create a fresh preview.'); return; }
   if (!todo.length) { alert('There are no included requests to confirm.'); return; }
   if (!isDemandPeriod()) { alert('Fee requests for a month can only be confirmed from the 25th of the month before through the 7th of that month. Preview remains available any day.'); return; }
@@ -10674,13 +10501,7 @@ async function confirmDemand() {
       const fresh = demandCalcFor(student, subj, r.ty, month, demandIgnoreLeft.has(demandKey(r)));
       if (!fresh.row) { await sb.from('fee_request_runs').update({status:'reset',reset_at:new Date().toISOString(),reset_by:currentUserId||null,reset_reason:'Calculation changed before creating requests',updated_at:new Date().toISOString()}).eq('target_month',month+'-01'); demandRunState = { ...demandRunState, status:'reset' }; demandConfirming=false; demandMsg=`Cannot confirm ${studentLabel(student)} · ${subj.name} (${r.ty}): ${fresh.skip || 'calculation changed'}. Refresh the preview.`; render(); return; }
       // Manual edits are retained only if the underlying rule calculation is still valid.
-      checked.push({ ...r, student, subj, mode: fresh.row.mode, expectedDisplay: fresh.row.expectedDisplay, expectedDisplayNote: fresh.row.expectedDisplayNote, quoteAmount: feeQuote(subj.id,r.ty,fresh.row.mode,r.classes,student.id)?.amount || 0, why: fresh.row.why, left: fresh.row.left, owed: fresh.row.owed, expected: fresh.row.expected, leaveAdjustment: fresh.row.leaveAdjustment, leaveNote: fresh.row.leaveNote, ignoredLeft: fresh.row.ignoredLeft });
-    }
-    demandRefreshReviewFlags(checked);
-    const newlyUnreviewed = checked.filter(r => r.reviewRequired && !r.reviewApproved);
-    if (newlyUnreviewed.length) {
-      await sb.from('fee_request_runs').update({status:'reset',reset_at:new Date().toISOString(),reset_by:currentUserId||null,reset_reason:'Review rules changed during final validation',updated_at:new Date().toISOString()}).eq('target_month',month+'-01');
-      demandRunState = { ...demandRunState, status:'reset' }; demandConfirming=false; demandPreviewRows = checked; demandPreviewSnapshot = ''; demandMsg='The final checks identified requests that now need review. Please review the highlighted rows and confirm again.'; render(); return;
+      checked.push({ ...r, student, subj, mode: fresh.row.mode, quoteAmount: feeQuote(subj.id,r.ty,fresh.row.mode,r.classes,student.id)?.amount || 0, why: fresh.row.why, left: fresh.row.left, owed: fresh.row.owed, expected: fresh.row.expected, leaveAdjustment: fresh.row.leaveAdjustment, leaveNote: fresh.row.leaveNote, ignoredLeft: fresh.row.ignoredLeft });
     }
     demandApplyDiscounts(checked);   // the request / child / family discount, worked out again on fresh data
     for (const r of checked) {
@@ -10691,7 +10512,7 @@ async function confirmDemand() {
     }
     let created = 0, discountLost = false; const failed = [];
     for (const r of checked) {
-      const note = feeRequestReviewMarker(demandRowNote(r), !!(r.reviewRequired && r.reviewApproved));
+      const note = demandRowNote(r);
       const row = { student_id:r.student.id, subject_id:r.subj.id, type:r.ty, classes:r.classes, amount_paid:r.amount, date:month+'-01', kind:'Request', payment_reference:'AUTO-'+month, request_month:month+'-01', calc_note:note };
       const d = r.discount;
       const cols = r.base > 0 && d ? { base_amount: r.base, discount_percent: r.amountEdited ? 0 : d.percent, discount_basis: r.amountEdited ? 'manual' : d.basis, discount_classes: d.classes, discount_group: d.group } : null;
@@ -13723,12 +13544,14 @@ function startFrequencyEditor(studentId, subjectId) {
   const saved = frequencyRowFor(studentId, subjectId);
   frequencyDraft = Object.fromEntries(FREQUENCY_DAYS.map(([key]) => [key, saved ? Math.max(0, Number(saved[key]) || 0) : 0]));
   frequencyEditorOpen = true;
+  frequencyConfirmPending = false;
   frequencyNewPickerOpen = false;
   frequencyMsg = '';
   render();
 }
 function closeFrequencyEditor() {
   frequencyEditorOpen = false;
+  frequencyConfirmPending = false;
   frequencyEditStudentId = '';
   frequencyEditSubjectId = '';
   frequencyMsg = '';
@@ -13742,11 +13565,14 @@ function setFrequencyDraft(key, value) {
     return;
   }
   frequencyDraft = { ...frequencyDraft, [key]: n };
+  frequencyConfirmPending = false;
   frequencyMsg = '';
   render();
 }
 async function saveClassFrequency() {
   if (!frequencyEditStudentId || !frequencyEditSubjectId) return;
+  if (!frequencyConfirmPending) { frequencyConfirmPending = true; frequencyMsg = 'Review the old and new weekly frequency below, then click Confirm Save Frequency.'; render(); return; }
+  frequencyConfirmPending = false;
   const teacher = data.subjects.find(s => s.id === frequencyEditSubjectId);
   const student = data.students.find(s => s.id === frequencyEditStudentId);
   if (!student || !teacher || !subjectsForStudent(student.id).some(s => s.id === frequencyEditSubjectId)) {
@@ -13786,6 +13612,7 @@ async function clearClassFrequency() {
   if (!frequencyEditStudentId || !frequencyEditSubjectId) return;
   // Clear means reset all weekday counts to zero while retaining the student/subject record.
   frequencyDraft = Object.fromEntries(FREQUENCY_DAYS.map(([key]) => [key, 0]));
+  frequencyConfirmPending = false;
   await saveClassFrequency();
 }
 function renderFrequencyEditor(teacherId) {
@@ -13795,6 +13622,8 @@ function renderFrequencyEditor(teacherId) {
   if (!student || !subject) return '';
   if (teacherId && subject.teacherId !== teacherId) return '';
   const total = FREQUENCY_DAYS.reduce((sum, [key]) => sum + (Number(frequencyDraft[key]) || 0), 0);
+  const savedFrequency = frequencyRowFor(student.id, subject.id);
+  const oldTotal = savedFrequency ? frequencyCountTotal(savedFrequency) : 0;
   return `
     <div class="card">
       <h2>${frequencyRowFor(student.id, subject.id) ? 'Edit' : 'Set'} Class Frequency</h2>
@@ -13811,10 +13640,11 @@ function renderFrequencyEditor(teacherId) {
           </tr>`;
         }).join('')}
       </table></div>
-      <div class="hint" style="margin-top:10px">Weekly total: <b>${total} classes</b> · <b>${total*60} minutes</b></div>
+      <div class="hint" style="margin-top:10px">Previous weekly total: <b>${oldTotal} classes</b> · New weekly total: <b>${total} classes</b> · <b>${total*60} minutes</b></div>
+      ${frequencyConfirmPending ? `<div class="hint" style="border:1px solid var(--gold-dark);padding:8px">Confirm frequency change: ${FREQUENCY_DAYS.map(([key,label])=>`${label} ${savedFrequency?Number(savedFrequency[key])||0:0} → ${Number(frequencyDraft[key])||0}`).join(' · ')}</div>` : ''}
       ${frequencyMsg ? `<div class="hint" style="color:${frequencyMsg.startsWith('Could not')?'var(--brick)':'var(--forest)'}">${esc(frequencyMsg)}</div>` : ''}
       <div class="row-form">
-        <button class="btn-primary" onclick="saveClassFrequency()">Save Frequency</button>
+        <button class="btn-primary" onclick="saveClassFrequency()">${frequencyConfirmPending?'Confirm Save Frequency':'Review Frequency Change'}</button>
         <button class="btn-small" onclick="clearClassFrequency()">Clear Frequency</button>
         <button class="btn-small" onclick="closeFrequencyEditor()">Cancel</button>
       </div>
@@ -15647,22 +15477,13 @@ function buildRebuildPreview() {
   const targets = scheduledClasses.filter(sc=>ids.has(sc.studentId) && sc.status==='Pending' && sc.date>=todayStr && eligibleKeys.has(`${sc.studentId}|${sc.subjectId}|${sc.classType}`));
   const overdue = scheduledClasses.filter(sc=>ids.has(sc.studentId) && sc.status==='Pending' && sc.date<todayStr);
   const pairs = eligible.map(p=>({...p, futurePending:targets.filter(sc=>sc.studentId===p.studentId&&sc.subjectId===p.subjectId&&sc.classType===p.type).length, overduePending:overdue.filter(sc=>sc.studentId===p.studentId&&sc.subjectId===p.subjectId&&sc.classType===p.type).length}));
-  rebuildClassesPreview = { ids:[...ids], targets:targets.map(sc=>sc.id), overdueCount:overdue.length, pairs, noFrequency:rebuildActiveStudents().filter(st=>ids.has(st.id)).filter(st=>!subjectsForStudent(st.id).some(subj=>frequencyRows.some(fr=>fr.student_id===st.id&&fr.subject_id===subj.id))).length, createdAt:new Date().toISOString() };
+  const existingRows=scheduledClasses.filter(sc=>ids.has(sc.studentId)&&['Pending','Done'].includes(sc.status)&&sc.date>=todayStr&&eligibleKeys.has(`${sc.studentId}|${sc.subjectId}|${sc.classType}`)).map(sc=>({id:sc.id,studentId:sc.studentId,subjectId:sc.subjectId,classType:sc.classType,date:sc.date,time:sc.time,teacherId:sc.teacherId,status:sc.status}));
+  rebuildClassesPreview = { ids:[...ids], targets:targets.map(sc=>sc.id), targetRows:targets.map(sc=>({id:sc.id,studentId:sc.studentId,subjectId:sc.subjectId,classType:sc.classType,date:sc.date,time:sc.time,teacherId:sc.teacherId})), existingRows, overdueCount:overdue.length, pairs, noFrequency:rebuildActiveStudents().filter(st=>ids.has(st.id)).filter(st=>!subjectsForStudent(st.id).some(subj=>frequencyRows.some(fr=>fr.student_id===st.id&&fr.subject_id===subj.id))).length, createdAt:new Date().toISOString() };
   rebuildClassesMsg = '';
   render();
 }
-function rebuildPatternFor(pair) {
-  const days = [];
-  const keys = {monday_count:1,tuesday_count:2,wednesday_count:3,thursday_count:4,friday_count:5,saturday_count:6,sunday_count:0};
-  FREQUENCY_DAYS.forEach(([key])=>{
-    const n = Math.max(0,Math.floor(Number(pair.frequency[key])||0));
-    for (let i=0;i<n;i++) {
-      // These are explicitly provisional placeholders, not real lesson times.
-      const time = pair.type === 'Group' ? '00:00' : (i % 2 === 0 ? '01:00' : '02:00');
-      days.push({weekday:keys[key],time});
-    }
-  });
-  return days;
+function rebuildPatternFor(pair, existingRows) {
+  return buildDateOccurrences(todayStr,pair.frequency,pair.type,existingRows||[],[]);
 }
 async function executeRebuildPendingClasses() {
   if (rebuildClassesBusy || !rebuildClassesPreview) return;
@@ -15670,7 +15491,10 @@ async function executeRebuildPendingClasses() {
   if (!preview.ids.length) { rebuildClassesMsg='Choose at least one active student.'; render(); return; }
   const pairCount=preview.pairs.length;
   const targetCount=preview.targets.length;
-  const msg=`This will remove ${targetCount} future Pending class records for ${preview.ids.length} active student(s), preserve ${preview.overdueCount} overdue Pending records and all Done/other-status records, then regenerate from saved Class Frequency for ${pairCount} student/subject/type combinations. Placeholder times will be identified for teacher review from the agreed time convention; no new database table is required. Continue?`;
+  // Validate all preserved-date mappings before any destructive delete occurs.
+  try { for (const pair of preview.pairs) { const prior=preview.existingRows.filter(sc=>sc.studentId===pair.studentId&&sc.subjectId===pair.subjectId&&sc.classType===pair.type); buildDateOccurrences(todayStr,pair.frequency,pair.type,prior,[]); } }
+  catch(e) { rebuildClassesMsg='Rebuild cancelled before deleting anything: '+(e.message||String(e)); render(); return; }
+  const msg=`This will remove ${targetCount} future Pending class records for ${preview.ids.length} active student(s), preserve ${preview.overdueCount} overdue Pending records and all Done/other-status records, then regenerate from saved Class Frequency for ${pairCount} student/subject/type combinations. Existing times on matching dates will be preserved. New Group times use 00:00; new Individual times alternate 01:00 / 02:00. Admin rebuild does not override a saved time with a teacher-entered time. Duplicate matching records stop the rebuild for review. Continue?`;
   if (!confirm(msg)) return;
   rebuildClassesBusy=true; rebuildClassesMsg='Removing future pending classes…'; render();
   try {
@@ -15684,7 +15508,8 @@ async function executeRebuildPendingClasses() {
     for (let i=0;i<preview.pairs.length;i++) {
       const pair=preview.pairs[i];
       // Overdue Pending records are preserved for history and excluded from quota by the updated RPC.
-      const pattern=rebuildPatternFor(pair);
+      const prior=preview.existingRows.filter(sc=>sc.studentId===pair.studentId&&sc.subjectId===pair.subjectId&&sc.classType===pair.type);
+      const pattern=rebuildPatternFor(pair,prior);
       if (!pattern.length) { skipped++; continue; }
       const {data:result,error}=await sb.rpc('schedule_weekly_pattern',{p_student_id:pair.studentId,p_teacher_id:pair.teacherId,p_subject_id:pair.subjectId,p_class_type:pair.type,p_start_date:todayStr,p_pattern:pattern});
       if (error || !result || !result.ok) { skipped++; errors.push(`${pair.studentName} / ${pair.subjectName} (${pair.type}): ${error?error.message:(result&&result.error||'schedule generation failed')}`); continue; }
@@ -15701,7 +15526,7 @@ function renderRebuildPendingClasses() {
   const students=rebuildActiveStudents();
   const preview=rebuildClassesPreview;
   const pairRows=preview&&preview.pairs.length?`<div class="table-scroll"><table><tr><th>Student</th><th>Subject</th><th>Type</th><th>Remaining</th><th>Future pending to remove</th><th>Overdue retained</th><th>Weekly frequency</th></tr>${preview.pairs.map(p=>`<tr><td>${esc(p.studentName)}</td><td>${esc(p.subjectName)}</td><td>${esc(p.type)}</td><td>${p.remaining}</td><td>${p.futurePending}</td><td>${p.overduePending}</td><td>${p.weeklyCount}/week</td></tr>`).join('')}</table></div>`:'<div class="empty">No eligible student/subject/type combinations with remaining subscription and saved Class Frequency were found.</div>';
-  return `<div class="card"><h2>Rebuild Pending Classes ${helpBtn('rebuild-classes')}</h2><div class="hint">Preview first. The rebuild removes only future-dated Pending classes for the selected active students. Overdue Pending classes, Done classes, and other statuses are preserved. New schedules use the saved Class Frequency table and existing <code>schedule_weekly_pattern</code> RPC; subscription limits and teacher conflicts remain enforced by that existing backend function.</div><div class="row-form" style="margin-top:12px"><label>Scope<select onchange="rebuildClassesScope=this.value;rebuildClassesPreview=null;render()"><option value="all" ${rebuildClassesScope==='all'?'selected':''}>All active students</option><option value="selected" ${rebuildClassesScope==='selected'?'selected':''}>One active student</option></select></label>${rebuildClassesScope==='selected'?`<label>Student<select onchange="rebuildClassesStudentId=this.value;rebuildClassesPreview=null;render()"><option value="">Select student…</option>${students.map(st=>`<option value="${st.id}" ${rebuildClassesStudentId===st.id?'selected':''}>${esc(studentLabel(st))}</option>`).join('')}</select></label>`:''}<button class="btn-primary" onclick="loadClassFrequencyRows().then(buildRebuildPreview)" ${rebuildClassesBusy?'disabled':''}>Preview Rebuild</button></div>${preview?`<div class="hint" style="margin-top:12px"><b>Preview summary:</b> ${preview.ids.length} active student(s); ${preview.targets.length} future Pending class(es) to remove; ${preview.overdueCount} overdue Pending class(es) to preserve; ${preview.pairs.length} eligible combinations. Only combinations with saved frequency and positive remaining balance are rebuilt; future Pending records outside those eligible combinations are left untouched.</div>${pairRows}<div class="hint" style="margin-top:8px;color:var(--brick)"><b>Placeholder times:</b> Batch = 00:00; Individual = 01:00 / 02:00. Generated times are provisional and should be corrected by teachers in Dashboard → Today’s Classes. Overdue Pending records are preserved for history and do not consume subscription quota.</div><button class="btn-primary" style="margin-top:12px" onclick="executeRebuildPendingClasses()" ${rebuildClassesBusy?'disabled':''}>${rebuildClassesBusy?'Working…':'Confirm Rebuild'}</button>`:''}${rebuildClassesMsg?`<div class="hint" style="white-space:pre-wrap;margin-top:12px;color:${rebuildClassesMsg.startsWith('Rebuild finished')?'var(--forest)':'var(--brick)'}">${esc(rebuildClassesMsg)}</div>`:''}</div>`;
+  return `<div class="card"><h2>Rebuild Pending Classes ${helpBtn('rebuild-classes')}</h2><div class="hint">Preview first. The rebuild removes only future-dated Pending classes for the selected active students. Overdue Pending classes, Done classes, and other statuses are preserved. New schedules use the saved Class Frequency table and existing <code>schedule_weekly_pattern</code> RPC; subscription limits and teacher conflicts remain enforced by that existing backend function.</div><div class="row-form" style="margin-top:12px"><label>Scope<select onchange="rebuildClassesScope=this.value;rebuildClassesPreview=null;render()"><option value="all" ${rebuildClassesScope==='all'?'selected':''}>All active students</option><option value="selected" ${rebuildClassesScope==='selected'?'selected':''}>One active student</option></select></label>${rebuildClassesScope==='selected'?`<label>Student<select onchange="rebuildClassesStudentId=this.value;rebuildClassesPreview=null;render()"><option value="">Select student…</option>${students.map(st=>`<option value="${st.id}" ${rebuildClassesStudentId===st.id?'selected':''}>${esc(studentLabel(st))}</option>`).join('')}</select></label>`:''}<button class="btn-primary" onclick="loadClassFrequencyRows().then(buildRebuildPreview)" ${rebuildClassesBusy?'disabled':''}>Preview Rebuild</button></div>${preview?`<div class="hint" style="margin-top:12px"><b>Preview summary:</b> ${preview.ids.length} active student(s); ${preview.targets.length} future Pending class(es) to remove; ${preview.overdueCount} overdue Pending class(es) to preserve; ${preview.pairs.length} eligible combinations. Only combinations with saved frequency and positive remaining balance are rebuilt; future Pending records outside those eligible combinations are left untouched.</div>${pairRows}<div class="hint" style="margin-top:8px;color:var(--brick)"><b>Provisional times:</b> Group = 00:00; Individual = 01:00 / 02:00. Newly generated times are provisional. Existing matching times are preserved. Overdue Pending records are preserved for history and do not consume subscription quota.</div><button class="btn-primary" style="margin-top:12px" onclick="executeRebuildPendingClasses()" ${rebuildClassesBusy?'disabled':''}>${rebuildClassesBusy?'Working…':'Confirm Rebuild'}</button>`:''}${rebuildClassesMsg?`<div class="hint" style="white-space:pre-wrap;margin-top:12px;color:${rebuildClassesMsg.startsWith('Rebuild finished')?'var(--forest)':'var(--brick)'}">${esc(rebuildClassesMsg)}</div>`:''}</div>`;
 }
 
 function renderFees() {
@@ -15802,16 +15627,8 @@ function renderFees() {
           <div class="row-form" style="margin-top:10px;align-items:flex-end">
             <label style="display:flex;flex-direction:column;gap:5px;font-weight:700">Target Month<input type="month" value="${dMonth}" onchange="setDemandTargetMonth(this.value)" style="min-width:175px" aria-label="Target month for fee requests"></label>
             ${dRan?'': '<button class="btn-small btn-primary" onclick="previewDemand()">Preview Fee Requests</button>'}
-            <button class="btn-small btn-gold" onclick="trialRunDemand()" ${demandTrialBusy?'disabled':''}>${demandTrialBusy?'Running Trial…':'Trial Run'}</button>
-            <span class="hint">Trial Run can be repeated anytime. It recalculates all eligible students, including those with existing requests, and never saves or changes records.</span>
             <span class="hint">Preview works any day. Confirm is open from the 25th of the month before to the 7th of the selected month.</span>
           </div>
-          ${demandTrialMsg?`<div class="hint" style="margin-top:10px;color:${demandTrialMsg.startsWith('Trial Run could')?'var(--brick)':'var(--forest)'}">${esc(demandTrialMsg)}</div>`:''}
-          ${demandTrialRows!==null?(()=>{
-            const total=demandTrialRows.reduce((a,r)=>a+r.amount,0), flagged=demandTrialRows.filter(r=>r.reviewRequired).length, existing=demandTrialRows.filter(r=>r.existingPendingRequest).length;
-            const skipped=demandTrialSkippedRows.length;
-            return `<div class="card" style="margin-top:12px;border:1px dashed var(--gold)"><h3>Trial Run Results — ${esc(monthLabelOf(demandTargetMonth()))}</h3><div class="hint">Simulation only · ${demandTrialRows.length} eligible request(s) · ${skipped} not raised · ${demandTrialNeverPaid} never-paid subject/type(s) · ${flagged} requiring review · Total ${rupees(total)}${existing?` · ${existing} already have a pending request`:''}</div>${existing?'<div class="hint" style="margin-top:6px;color:var(--brick)">Existing pending requests are included for testing only. Trial Run will not create duplicates or modify them.</div>':''}${demandTrialRows.length?`<div class="table-scroll"><table><tr><th>Student</th><th>Subject</th><th>Type</th><th>Method</th><th>Classes left</th><th>Expected</th><th>Requested</th><th>Amount</th><th>Review</th><th>Existing request</th></tr>${demandTrialRows.map(r=>`<tr style="${r.reviewRequired?'background:#fff4c2;':''}"><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(r.method)}</td><td>${r.left<0?`${-r.left} owed`:r.left}</td><td>${r.expectedDisplay===null?'Review frequency':r.expectedDisplay}</td><td>${r.classes}</td><td>${rupees(r.amount)}</td><td>${r.reviewRequired?`<b style="color:#8a5b00">Review required</b><div class="hint">${r.reviewReasons.map(esc).join('<br>')}</div>`:'✓ No review required'}</td><td>${r.existingPendingRequest?'Yes — unchanged':'No'}</td></tr>`).join('')}</table></div>`:'<div class="empty">No eligible fee requests calculated.</div>'}${skipped?`<details style="margin-top:8px"><summary>Not raised (${skipped})</summary><div class="table-scroll"><table><tr><th>Student</th><th>Subject</th><th>Type</th><th>Reason</th></tr>${demandTrialSkippedRows.map(r=>`<tr><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(r.reason)}</td></tr>`).join('')}</table></div></details>`:''}<div class="hint" style="margin-top:8px;font-weight:700">Trial Run — Simulation Only. No database records have been saved, updated, or deleted.</div></div>`;
-          })():''}
           ${dRan?`
             <div class="hint" style="color:var(--forest);margin-top:8px">✓ Fee requests already raised for ${dMonthLabel}.</div>
             <div class="row-form" style="margin-top:8px"><button class="btn-gold" onclick="exportDemandRun()">Download Excel of this run</button><button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="resetDemand()">Reset — remove &amp; unlock</button></div>
@@ -15822,7 +15639,7 @@ function renderFees() {
               ${demandMsg?`<span class="hint" style="color:var(--forest)">${esc(demandMsg)}</span>`:''}
             </div>
             ${demandPreviewRows!==null?(()=>{
-              demandRefreshReviewFlags(demandPreviewRows); const inc=demandPreviewRows.filter(r=>r.include), reviewCount=inc.filter(r=>r.reviewRequired).length, unreviewedCount=inc.filter(r=>r.reviewRequired&&!r.reviewApproved).length;
+              const inc=demandPreviewRows.filter(r=>r.include);
               const skippedHtml=demandSkippedRows.length||demandNeverPaid?`
                 <div class="hint" style="margin-top:10px;cursor:pointer;user-select:none" onclick="demandShowSkipped=!demandShowSkipped;render()">${demandShowSkipped?'▼':'▶'} Not raised: ${demandSkippedRows.length}${demandNeverPaid?` · plus ${demandNeverPaid} subject/type${demandNeverPaid===1?'':'s'} never paid (see Students needing renewal)`:''}</div>
                 ${demandShowSkipped&&demandSkippedRows.length?`<div class="table-scroll"><table>
@@ -15830,20 +15647,20 @@ function renderFees() {
                   ${demandSkippedRows.map(r=>`<tr><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td><span class="hint">${esc(r.reason)}</span></td><td>${r.canIgnoreLeft?demandIgnoreTickHtml([demandKey(r)],'Raise anyway'):''}</td></tr>`).join('')}
                 </table></div>`:''}`:'';
               if(!demandPreviewRows.length) return `<div class="empty">No fee requests needed this month.</div>${skippedHtml}`;
-              return familySkippedHtml() + (reviewCount?`<div style="margin:8px 0;padding:9px 11px;border:1px solid #d6a72c;border-radius:7px;background:#fff4c2;color:#5b4300"><b>Review required:</b> ${reviewCount} selected request${reviewCount===1?'':'s'} need review because requested classes differ from saved frequency, or both Group and Individual types are being raised for the student.</div>`:`<div class="hint" style="margin:8px 0">✓ No review required: selected requests match saved frequency and only one class type is being raised per student.</div>`) + `<div class="table-scroll"><table>
+              return familySkippedHtml() + `<div class="table-scroll"><table>
                 <tr><th><label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="Tick or untick every row"><input type="checkbox" aria-label="Raise all rows" ${demandPreviewRows.every(r=>r.include)?'checked':''} onchange="demandSetAllInclude(this.checked)"> Raise</label></th><th>Student</th><th>Subject</th><th>Type</th><th>Method</th><th>Classes left${(()=>{ const ks=demandIgnorableKeys(demandPreviewRows.map(r=>r.student.id)).filter(k=>demandPreviewRows.some(r=>demandKey(r)===k)); return ks.length?'<div>'+demandIgnoreTickHtml(ks,'Ignore all')+'</div>':''; })()}</th><th>Expected classes</th><th>Requested classes</th><th>Amount (₹)<div>${demandNoDiscountTickHtml(demandPreviewRows.map(demandKey),'No discount (all)')}</div></th><th>Working</th></tr>
                 ${demandPreviewRows.map((r,i)=>{ const next=demandPreviewRows[i+1], prev=demandPreviewRows[i-1], mine=demandPreviewRows.filter(x=>x.student.id===r.student.id&&x.include);
                   const fk=familyKeyOf(r.student.id), famRows=demandPreviewRows.filter(x=>familyKeyOf(x.student.id)===fk), famKids=[...new Set(famRows.map(x=>x.student.name))], multi=famKids.length>1;
                   const famHead=multi&&(!prev||familyKeyOf(prev.student.id)!==fk)?`<tr style="background:var(--soft)"><td colspan="10"><b>Family: ${esc(familyParentName(r.student.id))}</b> · ${esc(famKids.join(', '))}${(()=>{ const ks=demandIgnorableKeys(data.students.filter(st=>familyKeyOf(st.id)===fk).map(st=>st.id)); return ks.length>1?' &nbsp; '+demandIgnoreTickHtml(ks,'Ignore classes left (whole family)'):''; })()} &nbsp; ${demandNoDiscountTickHtml(famRows.map(demandKey),'No discount (whole family)')}</td></tr>`:'';
                   const famFoot=multi&&(!next||familyKeyOf(next.student.id)!==fk)?`<tr><td colspan="8" style="text-align:right"><b>Family total</b></td><td><b>${famRows.filter(x=>x.include).reduce((a,x)=>a+x.amount,0).toFixed(2)}</b></td><td></td></tr>`:'';
-                  const statusCell = r.reviewRequired ? `<label style="display:flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:#5b4300"><input type="checkbox" ${r.reviewApproved?'checked':''} onchange="demandRowSet(${i},'reviewApproved',this.checked)"> ${r.reviewApproved?'Reviewed – Approved':'Review and approve'}</label><div class="hint" style="font-size:11px;min-width:240px;white-space:normal;color:#8a3b16">${r.reviewReasons.map(esc).join('<br>')}</div>` : `<span style="font-size:11px;font-weight:700;color:#356447">✓ No review required</span>`; return famHead+`<tr style="${r.reviewRequired?'background:#fff4c2;':''}${r.include?'':'opacity:0.5;'}"><td><input type="checkbox" ${r.include?'checked':''} onchange="demandRowSet(${i},'include',this.checked)"></td><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(r.method)}</td><td${r.left<0?' style="color:var(--brick)"':''}>${r.left<0?`${-r.left} owed`:r.left}${r.left>0?`<div>${demandIgnoreTickHtml([demandKey(r)],'Ignore classes left')}</div>`:''}</td><td>${r.expectedDisplay===null?`<span class="hint" title="${esc(r.expectedDisplayNote)}">Review frequency</span>`:r.expectedDisplay}</td><td><input type="number" min="0.5" step="0.5" style="width:70px" value="${r.classes}" onchange="demandRowSet(${i},'classes',this.value)"></td><td><input type="number" min="1" step="1" style="width:90px" value="${r.amount}" onchange="demandRowSet(${i},'amount',this.value)">${r.discount&&discountLabel(r.discount)&&!r.amountEdited?`<div class="hint" style="font-size:11px;color:var(--forest)">${esc(discountLabel(r.discount))}</div>`:''}<div>${demandNoDiscountTickHtml([demandKey(r)],'No discount')}</div></td><td>${statusCell}<span class="hint" style="font-size:11px;display:block;min-width:280px;white-space:normal">${esc(demandRowNote(r)).replace(/\n/g,'<br>')}</span></td></tr>`+((!next||next.student.id!==r.student.id)?(()=>{ const ks=demandIgnorableKeys([r.student.id]), tick=ks.length>1?demandIgnoreTickHtml(ks,`Ignore classes left (all subjects of ${esc(r.student.name)})`):'';
+                  return famHead+`<tr${r.include?'':' style="opacity:0.5"'}><td><input type="checkbox" ${r.include?'checked':''} onchange="demandRowSet(${i},'include',this.checked)"></td><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(r.method)}</td><td${r.left<0?' style="color:var(--brick)"':''}>${r.left<0?`${-r.left} owed`:r.left}${r.left>0?`<div>${demandIgnoreTickHtml([demandKey(r)],'Ignore classes left')}</div>`:''}</td><td>${r.expectedDisplay===null?`<span class="hint" title="${esc(r.expectedDisplayNote)}">Review frequency</span>`:r.expectedDisplay}</td><td><input type="number" min="0.5" step="0.5" style="width:70px" value="${r.classes}" onchange="demandRowSet(${i},'classes',this.value)"></td><td><input type="number" min="1" step="1" style="width:90px" value="${r.amount}" onchange="demandRowSet(${i},'amount',this.value)">${r.discount&&discountLabel(r.discount)&&!r.amountEdited?`<div class="hint" style="font-size:11px;color:var(--forest)">${esc(discountLabel(r.discount))}</div>`:''}<div>${demandNoDiscountTickHtml([demandKey(r)],'No discount')}</div></td><td><span class="hint" style="font-size:11px;display:block;min-width:280px;white-space:normal">${esc(demandRowNote(r)).replace(/\n/g,'<br>')}</span></td></tr>`+((!next||next.student.id!==r.student.id)?(()=>{ const ks=demandIgnorableKeys([r.student.id]), tick=ks.length>1?demandIgnoreTickHtml(ks,`Ignore classes left (all subjects of ${esc(r.student.name)})`):'';
                     return mine.length>1||tick?`<tr><td colspan="5">${tick}</td><td colspan="3" class="hint" style="text-align:right">${mine.length>1?`Subtotal for ${esc(r.student.name)}`:''}</td><td>${mine.length>1?`<b>${mine.reduce((a,x)=>a+x.amount,0).toFixed(2)}</b>`:''}</td><td></td></tr>`:''; })():'')+famFoot; }).join('')}
               </table></div>
-              <div class="hint" style="margin-top:8px">${inc.length} request${inc.length===1?'':'s'} selected · ${unreviewedCount} awaiting review approval${reviewCount?' · '+reviewCount+' flagged':''}${demandPreviewRows.length>inc.length?' · '+(demandPreviewRows.length-inc.length)+' unticked':''} · Total ₹${inc.reduce((a,r)=>a+r.amount,0).toFixed(2)}</div>
+              <div class="hint" style="margin-top:8px">${inc.length} request${inc.length===1?'':'s'} will be created${demandPreviewRows.length>inc.length?' · '+(demandPreviewRows.length-inc.length)+' unticked':''} · Total ₹${inc.reduce((a,r)=>a+r.amount,0).toFixed(2)}</div>
               ${skippedHtml}
               ${aiDemandReviewHtml()}
               <div class="row-form" style="margin-top:8px">
-                <button class="btn-primary" ${demandConfirming||!inc.length||unreviewedCount>0||!dActive?'disabled':''} onclick="confirmDemand()" ${dActive?'':'title="Confirm opens from the 25th of the month before to the 7th"'}>${demandConfirming?'Creating…':'Confirm &amp; Create'}</button>${dActive?'':'<span class="hint">Preview only — Confirm opens from the 25th of the month before to the 7th.</span>'}
+                <button class="btn-primary" ${demandConfirming||!inc.length||!dActive?'disabled':''} onclick="confirmDemand()" ${dActive?'':'title="Confirm opens from the 25th of the month before to the 7th"'}>${demandConfirming?'Creating…':'Confirm &amp; Create'}</button>${dActive?'':'<span class="hint">Preview only — Confirm opens from the 25th of the month before to the 7th.</span>'}
                 <button class="btn-gold" onclick="exportDemandRun()">Download Excel</button>
                 <button class="btn-small" onclick="demandPreviewRows=null;render()">Cancel</button>
               </div>`;
@@ -18533,7 +18350,7 @@ function cancelEditSchedule() { editingScheduleId = ''; render(); }
 async function saveEditSchedule(id) {
   const { data: result, error } = await sb.rpc('reschedule_scheduled_class', { p_schedule_id: id, p_date: editScheduleDraft.date, p_time: editScheduleDraft.time });
   if (error) { scheduleMsg = 'Could not save: ' + error.message; render(); return; }
-  if (!result || !result.ok) { scheduleMsg = 'Could not save: ' + (result ? result.error : 'unknown error'); render(); return; }
+  if (!result || !result.ok) { scheduleMsg = 'Could not save: ' + (result ? (result.message || result.error) : 'unknown error'); render(); return; }
   const s = scheduledClasses.find(x=>x.id===id);
   if (s) { s.date = editScheduleDraft.date; s.time = editScheduleDraft.time; }
   editingScheduleId = '';
@@ -18562,7 +18379,7 @@ async function saveTeacherDashboardClassTime(id, newTime) {
     p_schedule_id: id, p_date: entry.date, p_time: newTime
   });
   if (error || !result || !result.ok) {
-    const reason = error ? error.message : (result && result.error ? result.error : 'unknown error');
+    const reason = error ? error.message : (result && (result.message || result.error) ? (result.message || result.error) : 'unknown error');
     teacherDashboardTimeState[id] = { kind: 'error', message: 'Could not save: ' + reason };
     teacherDashboardTimeEditId = id;
     render();
@@ -18828,10 +18645,9 @@ function groupScheduleBySlot(list) {
   return groups;
 }
 const WEEKDAY_LABELS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-let weeklyPatternDraft = { studentId: '', subjectId: '', classType: '', startDate: todayStr, days: [{ weekday: '', time: '' }] };
+let weeklyPatternDraft = { studentId: '', subjectId: '', classType: '', startDate: todayStr, days: [] };
 let weeklyPatternMsg = '';
-// Retain the last generated student/subject context so the resulting classes remain visible
-// below the weekly form even after the input form is reset.
+let weeklyPatternPreview = null;
 let weeklyGeneratedView = null;
 function teacherScheduleFilterStudentSet(studentId, teacherId) {
   teacherScheduleFilterStudent = studentId;
@@ -18843,66 +18659,77 @@ async function clearPendingSchedule(studentId, subjectId, classType) {
   const toClear = scheduledClasses.filter(c=>c.studentId===studentId && c.subjectId===subjectId && c.classType===classType && c.status==='Pending');
   if (!toClear.length) { weeklyPatternMsg = 'No pending classes to clear.'; render(); return; }
   if (!confirm(`Remove ${toClear.length} pending class${toClear.length===1?'':'es'} for this student/subject/type?`)) return;
-  for (const sc of toClear) {
-    const { error } = await sb.from('scheduled_classes').delete().eq('id', sc.id);
-    if (!error) scheduledClasses.splice(scheduledClasses.findIndex(x=>x.id===sc.id), 1);
-  }
-  weeklyPatternMsg = `Removed ${toClear.length} pending class${toClear.length===1?'':'es'}. Set a new pattern and click Generate.`;
-  render();
+  for (const sc of toClear) { const { error } = await sb.from('scheduled_classes').delete().eq('id', sc.id); if (!error) scheduledClasses.splice(scheduledClasses.findIndex(x=>x.id===sc.id), 1); }
+  weeklyPatternMsg = `Removed ${toClear.length} pending class${toClear.length===1?'':'es'}.`; render();
 }
 let submittingWeeklyPattern = false;
 function weeklyPatternSet(field, val) {
   weeklyPatternDraft[field] = val;
-  if (field === 'studentId') { weeklyPatternDraft.subjectId = ''; weeklyPatternDraft.classType = ''; }
-  if (field === 'subjectId') weeklyPatternDraft.classType = '';
-  weeklyPatternMsg = '';
-  render();
+  weeklyPatternPreview = null;
+  if (field === 'studentId') { weeklyPatternDraft.subjectId = ''; weeklyPatternDraft.classType = ''; weeklyPatternDraft.days = []; }
+  if (field === 'subjectId') { weeklyPatternDraft.classType = ''; weeklyPatternDraft.days = []; }
+  if (field === 'classType') {
+    const fr = frequencyRowFor(weeklyPatternDraft.studentId, weeklyPatternDraft.subjectId);
+    if (fr) weeklyPatternDraft.days = FREQUENCY_DAYS.flatMap(([key],i)=>Array.from({length:Math.max(0,Number(fr[key])||0)},(_,n)=>({weekday:String([1,2,3,4,5,6,0][i]),time:''})));
+    else weeklyPatternDraft.days = [];
+  }
+  weeklyPatternPreview = null; weeklyPatternMsg = ''; render();
 }
-function addPatternDayRow() { weeklyPatternDraft.days.push({ weekday: '', time: '' }); render(); }
-function removePatternDayRow(idx) { weeklyPatternDraft.days.splice(idx,1); render(); }
+function weeklyPatternTimeSet(idx, value) { if (weeklyPatternDraft.days[idx]) weeklyPatternDraft.days[idx].time = value; weeklyPatternPreview = null; }
+function buildDateOccurrences(startDate, frequency, classType, existingRows, timeRows) {
+  const dayMap = {monday_count:1,tuesday_count:2,wednesday_count:3,thursday_count:4,friday_count:5,saturday_count:6,sunday_count:0};
+  const rowsByDate = new Map();
+  (existingRows||[]).forEach(r=>{ const a=rowsByDate.get(r.date)||[]; a.push(r); rowsByDate.set(r.date,a); });
+  const out=[]; const start=new Date(startDate+'T00:00:00');
+  for (let offset=0; offset<365; offset++) {
+    const d=new Date(start); d.setDate(start.getDate()+offset);
+    const iso=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
+    const dow=d.getDay(); const key=Object.keys(dayMap).find(k=>dayMap[k]===dow); const count=Math.max(0,Math.floor(Number(frequency[key])||0));
+    if (!count) continue;
+    const existing=(rowsByDate.get(iso)||[]).slice().sort((a,b)=>(a.time||'').localeCompare(b.time||''));
+    if (existing.length>count) throw new Error(`More existing matching classes than the saved weekly frequency on ${iso}. Resolve the duplicate schedule records before rebuilding.`);
+    const weekdayRows=(timeRows||[]).filter(x=>Number(x.weekday)===dow);
+    for(let n=0;n<count;n++) {
+      const preserved=existing[n];
+      const entered=weekdayRows[n] && String(weekdayRows[n].time||'').trim();
+      const fallback=classType==='Group'?'00:00':(n%2===0?'01:00':'02:00');
+      // An explicitly entered time always wins. Blank means preserve an existing
+      // matching class time; only a genuinely new occurrence receives a placeholder.
+      const chosenTime=entered || (preserved ? (preserved.time||'').slice(0,5) : fallback);
+      out.push({date:iso,time:chosenTime,existing_id:preserved?preserved.id:null,time_override:!!entered});
+    }
+  }
+  return out;
+}
 async function submitWeeklyPattern(teacherId) {
   if (submittingWeeklyPattern) return;
-  weeklyPatternMsg = '';
-  const { studentId, subjectId, classType, startDate, days } = weeklyPatternDraft;
-  if (!studentId || !subjectId || !classType || !startDate) { weeklyPatternMsg = 'Fill in every field first.'; render(); return; }
-  if (days.some(d=>d.weekday==='' || d.weekday===null || d.weekday===undefined)) { weeklyPatternMsg = 'Pick a day of the week for every row.'; render(); return; }
-  if (days.some(d=>!d.time)) { weeklyPatternMsg = 'Set a time for every day picked.'; render(); return; }
-  const pattern = days.map(d=>({ weekday: Number(d.weekday), time: d.time }));
-  submittingWeeklyPattern = true;
-  const { data: result, error } = await sb.rpc('schedule_weekly_pattern', {
-    p_student_id: studentId, p_teacher_id: teacherId, p_subject_id: subjectId,
-    p_class_type: classType, p_start_date: startDate, p_pattern: pattern
-  });
-  submittingWeeklyPattern = false;
-  if (error) { weeklyPatternMsg = 'Could not generate schedule: ' + error.message; render(); return; }
-  if (!result || !result.ok) {
-    if (result && result.error === 'over_limit') {
-      // Quota includes Done and today/future Pending records only. Overdue Pending records are historical display-only.
-      const mine = scheduledClasses.filter(c => c.studentId === studentId && c.subjectId === subjectId && c.classType === classType && (c.status === 'Pending' || c.status === 'Done'));
-      const done = mine.filter(c => c.status === 'Done').length;
-      const upcoming = mine.filter(c => c.status === 'Pending' && c.date >= todayStr).length;
-      weeklyPatternMsg = `Already scheduled ${result.already_scheduled} of ${result.subscribed} subscribed classes — nothing left to generate.`;
-      if (done + upcoming === Number(result.already_scheduled)) {
-        weeklyPatternMsg += ` Counted: ${done} done and ${upcoming} today/upcoming Pending. Overdue Pending classes are excluded from this limit.`;
-        if (upcoming > 0) weeklyPatternMsg += ` To plan a different pattern, remove the upcoming ones with ✕ in Class Schedule first.`;
-      }
-    }
-    else if (result && result.error === 'not_subscribed') weeklyPatternMsg = 'This student has no subscription for that subject/type.';
-    else weeklyPatternMsg = 'Could not generate schedule: ' + (result ? result.error : 'unknown error');
-    render(); return;
-  }
-  await loadScheduledClasses();
-  // Save the target scope before clearing the form. The generated list below is restricted
-  // to this teacher + student + subject + class type, never the teacher's full schedule.
-  weeklyGeneratedView = { teacherId, studentId, subjectId, classType, startDate };
-  const parts = [`Generated ${result.generated} classes.`];
-  if (result.warnings && result.warnings.length) parts.push(`${result.warnings.length} joined an existing group slot.`);
-  if (result.conflicts && result.conflicts.length) parts.push(`${result.conflicts.length} skipped due to a conflicting Individual student — schedule those manually as extras.`);
-  if (result.on_leave_skips && result.on_leave_skips.length) parts.push(`${result.on_leave_skips.length} skipped because you're on leave that day.`);
-  if (result.remaining_unfilled > 0) parts.push(`${result.remaining_unfilled} still unscheduled — ran out of room within a year, or hit repeated conflicts.`);
-  weeklyPatternMsg = parts.join(' ');
-  weeklyPatternDraft = { studentId: '', subjectId: '', classType: '', startDate: todayStr, days: [{ weekday: '', time: '' }] };
-  render();
+  const {studentId,subjectId,classType,startDate}=weeklyPatternDraft;
+  if(!studentId||!subjectId||!classType||!startDate){weeklyPatternMsg='Select student, subject, class type and start date.';render();return;}
+  const fr=frequencyRowFor(studentId,subjectId); const weeklyTotal=fr?frequencyCountTotal(fr):0;
+  if(!fr||weeklyTotal<=0){weeklyPatternMsg='Class Frequency is missing or has no weekly classes. Set a valid Class Frequency first.';render();return;}
+  const owner=data.subjects.find(x=>x.id===subjectId);
+  if(!owner||owner.teacherId!==teacherId|| (currentRole==='Teacher'&&teacherId!==currentLinkedId)){weeklyPatternMsg='You can only generate schedules for your assigned students and subjects.';render();return;}
+  let pattern;
+  try {
+    const existing=scheduledClasses.filter(c=>c.studentId===studentId&&c.subjectId===subjectId&&c.teacherId===teacherId&&c.classType===classType&&['Pending','Done'].includes(c.status)&&c.date>=startDate);
+    pattern=buildDateOccurrences(startDate,fr,classType,existing,weeklyPatternDraft.days);
+  } catch(e){weeklyPatternMsg=e.message||String(e);render();return;}
+  if(!pattern.length){weeklyPatternMsg='The saved frequency does not include any class days.';render();return;}
+  if(!weeklyPatternPreview || JSON.stringify(weeklyPatternPreview.pattern)!==JSON.stringify(pattern)){ weeklyPatternPreview={pattern,studentId,subjectId,classType,startDate}; weeklyPatternMsg=`Preview refreshed: ${pattern.length} occurrences. Review the updated dates and times, then confirm generation.`; render(); return; }
+  pattern=weeklyPatternPreview.pattern;
+  // Blank inputs are a UI state; the database always receives a valid provisional time.
+  submittingWeeklyPattern=true; render();
+  const {data:result,error}=await sb.rpc('schedule_weekly_pattern',{p_student_id:studentId,p_teacher_id:teacherId,p_subject_id:subjectId,p_class_type:classType,p_start_date:startDate,p_pattern:pattern});
+  submittingWeeklyPattern=false;
+  if(error||!result||!result.ok){weeklyPatternMsg='Could not generate schedule: '+(error?error.message:(result&&result.error||'unknown error'));render();return;}
+  await loadScheduledClasses(); weeklyGeneratedView={teacherId,studentId,subjectId,classType,startDate};
+  const parts=[`Generated ${result.generated} classes.`];
+  if(result.updated)parts.push(`Updated ${result.updated} existing Pending class time(s) to the times you entered.`);
+  if(result.warnings&&result.warnings.length)parts.push(`${result.warnings.length} joined an existing Group slot.`);
+  if(result.conflicts&&result.conflicts.length)parts.push(`${result.conflicts.length} skipped because the selected time conflicts with an Individual class.`);
+  if(result.on_leave_skips&&result.on_leave_skips.length)parts.push(`${result.on_leave_skips.length} skipped because the teacher is on leave.`);
+  if(result.remaining_unfilled>0)parts.push(`${result.remaining_unfilled} remain unscheduled because of subscription limits, leave or conflicts.`);
+  weeklyPatternMsg=parts.join(' '); weeklyPatternPreview=null; render();
 }
 function renderTeacherSchedule(teacher, isAdminCaller) {
   const myStudents = byName(data.students.filter(s=>!s.archived && subjectsForStudentAndTeacher(s.id, teacher.id).length));
@@ -18931,22 +18758,14 @@ function renderTeacherSchedule(teacher, isAdminCaller) {
         </select>
         <label>Start date <input type="date" value="${weeklyPatternDraft.startDate}" onchange="weeklyPatternSet('startDate', this.value)"></label>
       </div>
-      <div class="hint">Each day below repeats weekly from the start date, until the subscribed count is filled. Every class is 60 minutes.</div>
-      ${weeklyPatternDraft.days.map((d,i)=>`
-        <div class="row-form">
-          <select onchange="weeklyPatternDraft.days[${i}].weekday=this.value">
-            <option value="" ${d.weekday===''?'selected':''}>Pick a day…</option>
-            ${WEEKDAY_LABELS.map((lbl,wi)=>`<option value="${wi}" ${String(d.weekday)===String(wi)?'selected':''}>${lbl}</option>`).join('')}
-          </select>
-          <input type="time" value="${d.time}" onchange="weeklyPatternDraft.days[${i}].time=this.value">
-          ${weeklyPatternDraft.days.length>1?`<button class="icon-btn" onclick="removePatternDayRow(${i})">✕</button>`:''}
-        </div>`).join('')}
+      <div class="hint">Weekday rows are generated automatically from the saved Class Frequency. Enter a time where known; leave it blank to use a provisional time. Each class is 60 minutes.</div>
+      ${weeklyPatternDraft.classType ? (weeklyPatternDraft.days.length ? weeklyPatternDraft.days.map((d,i)=>`<div class="row-form"><label>${WEEKDAY_LABELS[Number(d.weekday)]} · occurrence ${weeklyPatternDraft.days.slice(0,i+1).filter(x=>x.weekday===d.weekday).length}<input type="time" value="${d.time}" placeholder="Optional" onchange="weeklyPatternTimeSet(${i},this.value)"></label></div>`).join('') : '<div class="hint" style="color:var(--brick)">No usable Class Frequency found. Set or correct the frequency first.</div>') : '<div class="hint">Select a class type to load the saved weekday distribution.</div>'}
+      ${weeklyPatternPreview ? `<div class="hint" style="border:1px solid var(--gold-dark);padding:10px;margin:8px 0"><b>Schedule preview</b><div>${weeklyPatternPreview.pattern.length} occurrences · first ${Math.min(12,weeklyPatternPreview.pattern.length)} shown</div><div class="table-scroll"><table><tr><th>Date</th><th>Day</th><th>Time</th></tr>${weeklyPatternPreview.pattern.slice(0,12).map(x=>`<tr><td>${esc(x.date)}</td><td>${esc(WEEKDAY_LABELS[new Date(x.date+'T00:00:00').getDay()])}</td><td>${esc(x.time)}</td></tr>`).join('')}</table></div><div>Entered times override the time on an existing Pending class for that date. Blank inputs preserve an existing time; otherwise Group defaults to 00:00 and Individual alternates 01:00 / 02:00. Completed classes are never changed.</div></div>` : ''}
       <div class="row-form">
-        <button class="btn-small" onclick="addPatternDayRow()">+ Add another day</button>
-        <button class="btn-primary" onclick="submitWeeklyPattern('${teacher.id}')">Generate schedule</button>
+        <button class="btn-primary" onclick="submitWeeklyPattern('${teacher.id}')" ${!weeklyPatternDraft.days.length||submittingWeeklyPattern?'disabled':''}>${submittingWeeklyPattern?'Generating…':(weeklyPatternPreview?'Confirm & Generate':'Preview Schedule')}</button>
         ${weeklyPatternDraft.studentId && weeklyPatternDraft.subjectId && weeklyPatternDraft.classType ? `<button class="btn-small" onclick="clearPendingSchedule('${weeklyPatternDraft.studentId}','${weeklyPatternDraft.subjectId}','${weeklyPatternDraft.classType}')" title="Remove all pending classes for this student/subject/type so you can set a new pattern">Clear pending &amp; start over</button>` : ''}
       </div>
-      <div class="hint">Individual-subscription students can't share a slot with anyone else — group freely otherwise, by simply letting two or more students land on the same date and time.</div>
+      <div class="hint">Group classes may share a time with other Group classes. Individual classes cannot share a teacher time slot with any other class.</div>
     </div>
 
     ${weeklyGeneratedView && weeklyGeneratedView.teacherId===teacher.id ? (()=>{
@@ -19358,6 +19177,7 @@ function openScheduleSetupFrequency(studentId, subjectId) {
   frequencyEditSubjectId = subjectId;
   frequencyDraft = Object.fromEntries(FREQUENCY_DAYS.map(([key]) => [key, (frequencyRowFor(studentId, subjectId) ? Math.max(0, Number(frequencyRowFor(studentId, subjectId)[key]) || 0) : 0)]));
   frequencyEditorOpen = true;
+  frequencyConfirmPending = false;
   frequencyNewPickerOpen = false;
   frequencyMsg = '';
   teacherPortalTab = 'frequency';
@@ -20917,7 +20737,7 @@ const HELP = {
   'ai-settings': { t:'AI Settings', b:'<ul><li>The master switch turns every AI feature on or off for everyone.</li><li>The API key is kept on the server and is never sent to teachers, students or parents.</li><li><b>Cost estimate</b>: the price per model and the ₹ per $ rate used to estimate costs in AI usage.</li><li>Each person can make up to 200 AI calls a day.</li></ul>' },
   'ai-access': { t:'AI access', b:'<ul><li>Turn AI on or off for a whole role (Teacher, Student, Parent), then for single people.</li><li>A person can use AI only when the master switch, their role and they themselves are all on. Admins always can.</li><li>When a role is off, everyone in it shows a locked Off.</li><li>People see a change after they log in again.</li></ul>' },
   'payment-history': { t:'Subscription Payment History', b:'<ul><li><b>Active</b> — this payment\'s classes are being used now.</li><li><b>Expired</b> — unused classes were removed after the expiry date.</li><li>The Expires on date shows when unused classes will be lost.</li><li>Contact the Admin to correct any details.</li></ul>' },
-  'raise-fees': { t:'Raise fee requests', b:"<ul><li>Makes the month's fee requests for every active student in one go: one request per student, subject and Group / Individual.</li><li><b>Trial Run</b> can be run anytime and recalculates all eligible students, including those with existing requests. It is simulation-only and never writes to the database. <b>Preview Fee Requests</b> works any day and saves nothing. <b>Confirm</b> works from the 25th of the month before to the 7th of the month (November's requests: 25 Oct to 7 Nov), once per month (Reset removes the run so you can do it again). Raised before the 1st, the classes still to be used this month are taken off what is left.</li><li>Classes come from the student's <b>Class Frequency</b> (each weekday counted in the month), minus clear teacher-leave days, against the classes they still have. Package students (30, 50, 60 or 100 classes) are asked for the same package again.</li><li>Amount = Fee setup rate (or the student's Special fee rate) × classes, less the bulk discount: the best tier reached by the request, the child's subjects added up, or the whole family added up (family's other pending requests count too). Tick <b>No discount</b> on a row or a family for this run only.</li><li>The preview is grouped by family. You can change classes or amount, or untick a row, before Confirm. The ticks in the headings (Raise, Ignore all, No discount (all)) do every row at once. Not raised shows who was left out and why.</li><li><b>Ignore classes left</b>: bills the full month without taking off the classes still left (per row, per student or whole family; Raise anyway in Not raised). The fee message then does not mention those classes. Owed classes are never ignored.</li><li>Every request keeps its working, so you can explain the amount to a parent.</li></ul>" },
+  'raise-fees': { t:'Raise fee requests', b:"<ul><li>Makes the month's fee requests for every active student in one go: one request per student, subject and Group / Individual.</li><li><b>Preview Fee Requests</b> works any day and saves nothing. <b>Confirm</b> works from the 25th of the month before to the 7th of the month (November's requests: 25 Oct to 7 Nov), once per month (Reset removes the run so you can do it again). Raised before the 1st, the classes still to be used this month are taken off what is left.</li><li>Classes come from the student's <b>Class Frequency</b> (each weekday counted in the month), minus clear teacher-leave days, against the classes they still have. Package students (30, 50, 60 or 100 classes) are asked for the same package again.</li><li>Amount = Fee setup rate (or the student's Special fee rate) × classes, less the bulk discount: the best tier reached by the request, the child's subjects added up, or the whole family added up (family's other pending requests count too). Tick <b>No discount</b> on a row or a family for this run only.</li><li>The preview is grouped by family. You can change classes or amount, or untick a row, before Confirm. The ticks in the headings (Raise, Ignore all, No discount (all)) do every row at once. Not raised shows who was left out and why.</li><li><b>Ignore classes left</b>: bills the full month without taking off the classes still left (per row, per student or whole family; Raise anyway in Not raised). The fee message then does not mention those classes. Owed classes are never ignored.</li><li>Every request keeps its working, so you can explain the amount to a parent.</li></ul>" },
   'fee-message': { t:'Fee message', b:"<ul><li>One WhatsApp message for the whole family: each child's subjects, classes and amount, the total, how it was worked out, any bulk discount (and what the family saves, with a line that a part payment loses it), UPI and Razorpay details and the parent's app login.</li><li>The first message starts 'Please find below the tuition fee details…'. Tick <b>Short reminder</b> for a follow-up; only the opening line changes to 'gentle reminder … still due'.</li><li>You can edit the text before sending. On a phone the WhatsApp button opens the app. On a computer use 📤 Desktop (WhatsApp app) or 📤 Web (WhatsApp Web).</li><li>Sending stamps the date, so you can see when the family was last reminded and how many times.</li></ul>" },
   'student-calls': { t:'Call log', b:"<ul><li>After phoning a student or parent, open the student and press <b>+ Add call note</b>: when, who you spoke to (Parent / Student), what happened, what was said, and an optional <b>Call again on</b> date.</li><li>Every call stays on the student page, newest first; notes can be edited, never deleted. Only admins see the call log (teachers do not).</li><li>Calls made while the student was still a demo booking also show here, with a <b>Demo booking</b> tag (edit those on the Demo Bookings card).</li><li>When the latest call says Call again on today or earlier, the student shows under <b>Student calls due</b> on the dashboard and at the top of the Students page.</li></ul>" },
   'special-rates': { t:'Special fee rates', b:"<ul><li>An agreed per-class rate for one student, subject and Group / Individual, from a date and optionally until a date.</li><li>While it is in use it replaces the Fee setup rate everywhere: Record payment, fee requests, Calculate, Raise fee requests, Fee calculator and the student's and parent's Applicable Rates.</li><li>Leave Offline rate empty if it is the same as Online. Discount tiers still apply on top.</li><li>Requests and payments already saved are not changed. Remove puts the student back on Fee setup rates.</li></ul>" },
@@ -24965,7 +24785,6 @@ async function initApp() {
     return;
   }
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  setupCrossTabAuthSync();
 
   // Restore an existing session (e.g. after a page refresh) rather than
   // always forcing the person back to the login screen.
