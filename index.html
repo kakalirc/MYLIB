@@ -4069,7 +4069,7 @@ async function createAndLinkDemo(id, nameFromDemo) {
   await wixLinkDemo(dl, dl.linkedStudentId ? { status: 'Converted', converted_student_id: dl.linkedStudentId } : null);
   demoLinkingId = ''; wixCardLinkingDemoId = ''; demoLinkStudentId = ''; demoLinkMsg = '';
   wixLastCreatedStudentId = row.id;
-  demoLogMsg = `✓ Student "${name}"${row.student_code ? ' (' + row.student_code + ')' : ''} created and linked. Marked Converted — bonus will appear in payroll.`; render();
+  demoLogMsg = `✓ Student "${name}"${(row.student_code || row.code) ? ' (' + (row.student_code || row.code) + ')' : ''} created and linked. Marked Converted — bonus will appear in payroll.`; render();
 }
 // Search box only refills the dropdown; a full render() per keystroke lost focus and dropped letters.
 function demoLinkOptionsHtml() {
@@ -9052,7 +9052,7 @@ async function addStudent() {
   input.value = '';
   // Open the new student's maintenance screen straight away so details can be filled in.
   selectStudent(row.id);
-  addConfirmMsg.student = `Student "${name}" added${row.student_code ? ' (' + row.student_code + ')' : ''}. Fill in their details below.`;
+  addConfirmMsg.student = `Student "${name}" added${(row.student_code || row.code) ? ' (' + (row.student_code || row.code) + ')' : ''}. Fill in their details below.`;
   render();
 }
 // "Copy to new student": a new student record with the family details copied from an existing one.
@@ -9088,7 +9088,7 @@ async function addSibling(fromId) {
   }
   siblingDraftFor = '';
   selectStudent(row.id);
-  addConfirmMsg.student = `Added "${name}"${row.student_code ? ' (' + row.student_code + ')' : ''} with details copied from ${src.name}. Add their subjects below.`
+  addConfirmMsg.student = `Added "${name}"${(row.student_code || row.code) ? ' (' + (row.student_code || row.code) + ')' : ''} with details copied from ${src.name}. Add their subjects below.`
     + (problems.length ? ' Could not copy: ' + problems.join(', ') + '.' : '');
   render();
 }
@@ -24569,10 +24569,52 @@ function regOpenAccept(id) {
   regAcceptId = regAcceptId === id ? '' : id; regRejectId = '';
   regAcceptDraft = { name: r.student_name || '', gradeId: r.grade_id === 'NA' ? '' : (r.grade_id || ''), boardId: r.board_id || (kids[0] && kids[0].boardId) || '',
     mode: r.mode_preference || '', ctype: r.class_type_preference || '', family: kids.length ? 'existing' : 'new', parentLogin: true, studentLogin: true,
-    academicYear: regGuessAcademicYear(kids) };
+    existingStudentId: '', academicYear: regGuessAcademicYear(kids) };
   render();
 }
 function regDraftSet(k, v) { regAcceptDraft[k] = v; }
+function regExistingStudentCandidates(r) {
+  const name = (r.student_name || '').trim().toLocaleLowerCase();
+  const studentMobile = phoneKey(r.student_mobile);
+  const familyIds = new Set(regFamily(r).map(s => s.id));
+  return byName(data.students.filter(s => {
+    if (s.archived || (s.name || '').trim().toLocaleLowerCase() !== name) return false;
+    const studentPhones = data.studentPhoneNumbers.filter(p => p.studentId === s.id && p.type === 'student').map(p => phoneKey(p.number));
+    const mobileMatch = !!studentMobile && (phoneKey(s.mobileNumber) === studentMobile || studentPhones.includes(studentMobile));
+    // Parent mobile identifies a family, not a child. It is only a child-match signal when the name also matches.
+    return mobileMatch || (!studentMobile && familyIds.has(s.id));
+  }));
+}
+function regDemoCandidates(r, studentId) {
+  const name = (r.student_name || '').trim().toLocaleLowerCase();
+  const phones = new Set([r.parent_mobile, r.second_mobile].map(phoneKey).filter(Boolean));
+  const studentMobile = phoneKey(r.student_mobile);
+  return (data.demoLogs || []).filter(d => {
+    if (d.status === 'Cancelled' || (d.studentName || '').trim().toLocaleLowerCase() !== name) return false;
+    if (d.linkedStudentId && d.linkedStudentId !== studentId) return false;
+    const parentMatch = !!phoneKey(d.parentMobile) && phones.has(phoneKey(d.parentMobile));
+    const studentMatch = !!studentMobile && (phoneKey(d.studentMobile) === studentMobile);
+    return parentMatch || studentMatch;
+  }).sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+async function regLinkDemo(registrationId, demoId) {
+  const r = (data.registrations || []).find(x => x.id === registrationId);
+  const d = (data.demoLogs || []).find(x => x.id === demoId);
+  if (!r || r.status !== 'Accepted' || !r.student_id) { regMsg = 'Accept the registration first.'; render(); return; }
+  if (!d) { regMsg = 'Demo record not found. Refresh and try again.'; render(); return; }
+  if (d.linkedStudentId && d.linkedStudentId !== r.student_id) { regMsg = 'This demo is already linked to another student. It has not been changed.'; render(); return; }
+  if (d.linkedStudentId === r.student_id) { regMsg = 'This demo is already linked to this student.'; render(); return; }
+  const student = data.students.find(x => x.id === r.student_id);
+  if (!confirm(`Link the ${d.date || 'undated'} demo for ${d.studentName} to ${student ? student.name : 'this student'}?
+
+This only links the records. It does NOT mark the demo Converted and does NOT trigger the ₹100 bonus. You can link multiple demos to the same student.`)) return;
+  const { data: linked, error } = await sb.from('demo_logs').update({ linked_student_id: r.student_id }).eq('id', demoId).is('linked_student_id', null).select('id').maybeSingle();
+  if (error) { regMsg = 'Could not link demo: ' + error.message; render(); return; }
+  if (!linked) { regMsg = 'This demo was linked or changed elsewhere. Refresh before trying again.'; render(); return; }
+  d.linkedStudentId = r.student_id;
+  regMsg = 'Demo linked. Its status is unchanged; use Link & Convert in Demo Register only when conversion is confirmed.';
+  render();
+}
 // Academic year for a new student: the family's, else the Superadmin current year, else the year most active students have.
 function regGuessAcademicYear(kids) {
   if (kids[0] && kids[0].academicYear) return kids[0].academicYear;
@@ -24619,65 +24661,108 @@ async function regAccept(id) {
   const d = regAcceptDraft, name = (d.name || '').trim();
   if (!name || !isValidPersonName(name)) { regMsg = "Type the student's name (no numbers)."; render(); return; }
   const kids = d.family === 'existing' ? regFamily(r) : [];
+  const selectedExisting = d.existingStudentId ? data.students.find(s => s.id === d.existingStudentId && !s.archived) : null;
+  if (d.existingStudentId && !selectedExisting) { regMsg = 'The selected existing student is no longer available. Refresh and select again.'; render(); return; }
+  if (selectedExisting && (selectedExisting.name || '').trim().toLocaleLowerCase() !== name.toLocaleLowerCase()) {
+    regMsg = 'The selected existing student name does not match the registration name. Check the selection.'; render(); return;
+  }
   regBusy = true; regMsg = ''; render();
   const notes = [];
-  const payload = { name, archived: false, parent_name: r.parent_name || null, mobile_number: r.parent_mobile || null, email: r.email || null, address: r.address || null,
-    grade_id: d.gradeId || null, board_id: d.boardId || null, academic_year: (d.academicYear || '').trim() || null,
-    mode_preference: d.mode || null, class_type_preference: d.ctype || null };
-  const { data: row, error } = await sb.from('students').insert(payload).select().single();
-  if (error) { regBusy = false; regMsg = 'Could not create the student: ' + error.message; render(); return; }
-  const st = { id: row.id, name: row.name, archived: false, code: row.student_code || '', parentName: row.parent_name || '', mobileNumber: row.mobile_number || '', email: row.email || '', address: row.address || '', photo: '', gradeId: row.grade_id || '', boardId: row.board_id || '', academicYear: row.academic_year || '', modePreference: row.mode_preference || '', classTypePreference: row.class_type_preference || '', billSeparately: false };
-  data.students.push(st);
+  let row = null, isNewStudent = false;
+  if (r.student_id) {
+    // Retry-safe recovery: if a prior attempt created the student but did not finish onboarding, reuse this link.
+    row = data.students.find(s => s.id === r.student_id) || null;
+    if (!row) {
+      const { data: fetched, error: fe } = await sb.from('students').select('*').eq('id', r.student_id).maybeSingle();
+      if (fe || !fetched) { regBusy = false; regMsg = 'This registration already has a student link, but that student could not be loaded. Please investigate before retrying.'; render(); return; }
+      row = fetched;
+      data.students.push({ id: row.id, name: row.name, archived: !!row.archived, code: row.student_code || '', parentName: row.parent_name || '', mobileNumber: row.mobile_number || '', email: row.email || '', address: row.address || '', photo: row.photo_url || '', gradeId: row.grade_id || '', boardId: row.board_id || '', academicYear: row.academic_year || '', modePreference: row.mode_preference || '', classTypePreference: row.class_type_preference || '', billSeparately: !!row.bill_separately });
+    }
+  } else if (selectedExisting) {
+    row = selectedExisting;
+  } else {
+    const payload = { name, archived: false, parent_name: r.parent_name || null, mobile_number: r.parent_mobile || null, email: r.email || null, address: r.address || null,
+      grade_id: d.gradeId || null, board_id: d.boardId || null, academic_year: (d.academicYear || '').trim() || null,
+      mode_preference: d.mode || null, class_type_preference: d.ctype || null };
+    const { data: created, error } = await sb.from('students').insert(payload).select().single();
+    if (error) { regBusy = false; regMsg = 'Could not create the student: ' + error.message; render(); return; }
+    row = created; isNewStudent = true;
+    data.students.push({ id: row.id, name: row.name, archived: false, code: row.student_code || '', parentName: row.parent_name || '', mobileNumber: row.mobile_number || '', email: row.email || '', address: row.address || '', photo: '', gradeId: row.grade_id || '', boardId: row.board_id || '', academicYear: row.academic_year || '', modePreference: row.mode_preference || '', classTypePreference: row.class_type_preference || '', billSeparately: false });
+  }
+  const studentId = row.id;
+  // Persist the registration-to-student link before creating logins or phone links. If a later step fails,
+  // a retry resumes with this same student instead of inserting a duplicate.
+  if (r.student_id !== studentId) {
+    const { data: savedLink, error: linkErr } = await sb.from('registrations').update({ student_id: studentId }).eq('id', id).is('student_id', null).select('student_id').maybeSingle();
+    if (linkErr) { regBusy = false; regMsg = `Student ${row.name} exists, but its registration link could not be saved: ${linkErr.message}. Do not create another student; refresh and investigate before retrying.`; render(); return; }
+    if (!savedLink) {
+      const { data: currentReg, error: readErr } = await sb.from('registrations').select('student_id').eq('id', id).maybeSingle();
+      if (readErr || !currentReg || currentReg.student_id !== studentId) { regBusy = false; regMsg = 'This registration was linked to a different student while you were working. No further changes were made; refresh and review it.'; render(); return; }
+    }
+    r.student_id = studentId;
+  }
   const phones = regPhones(r);
-  const phoneRows = phones.map(n => ({ student_id: row.id, phone_type: 'parent', phone_number: n }));
-  if (phoneKey(r.student_mobile)) phoneRows.push({ student_id: row.id, phone_type: 'student', phone_number: phoneKey(r.student_mobile) });
+  const existingPhoneKeys = new Set(data.studentPhoneNumbers.filter(p => p.studentId === studentId).map(p => p.type + ':' + phoneKey(p.number)));
+  const phoneRows = [];
+  phones.forEach(n => { if (!existingPhoneKeys.has('parent:' + n)) phoneRows.push({ student_id: studentId, phone_type: 'parent', phone_number: n }); });
+  const studentPhone = phoneKey(r.student_mobile);
+  if (studentPhone && !existingPhoneKeys.has('student:' + studentPhone)) phoneRows.push({ student_id: studentId, phone_type: 'student', phone_number: studentPhone });
   if (phoneRows.length) {
     const { data: pRows, error: pe } = await sb.from('student_phone_numbers').insert(phoneRows).select();
     if (pe) notes.push('Phone numbers not saved: ' + pe.message);
     else (pRows || []).forEach(p => data.studentPhoneNumbers.push({ id: p.id, studentId: p.student_id, type: p.phone_type, number: p.phone_number }));
   }
-  // Parent login: the family's own login if it has one, else the parent's mobile.
+  // Parent login: reuse the family's login for siblings; do not create a duplicate parent_students link.
   let parentLine = null;
   if (d.parentLogin) {
-    let u = kids.length ? regFamilyLogin(kids) : null, isNew = false;
+    const loginKids = kids.length ? kids : (data.students.some(x => x.id === studentId) ? [data.students.find(x => x.id === studentId)] : []);
+    let u = loginKids.length ? regFamilyLogin(loginKids) : null, isNew = false;
     const username = phoneKey(r.parent_mobile);
     if (!u) {
       const taken = data.users.find(x => (x.username || '').toLowerCase() === username);
       if (taken && taken.role === 'Parent') u = taken;
       else if (taken) notes.push(`Parent login not made: ${username} is already a ${taken.role} login.`);
-      else {
+      else if (username) {
         const { data: res, error: le } = await callAdminFunction({ action: 'create', username, password: username, role: 'Parent' });
         if (le) notes.push('Parent login not made: ' + le);
         else { u = { id: res.userId, username, role: 'Parent', linkedId: '' }; data.users.push(u); isNew = true; }
-      }
+      } else notes.push('Parent login not made: no valid parent mobile number.');
     }
     if (u) {
-      const { data: link, error: ke } = await sb.from('parent_students').insert({ parent_user_id: u.id, student_id: row.id }).select().single();
-      if (ke) notes.push('Child not linked to the parent login: ' + ke.message);
-      else data.parentStudents.push({ id: link.id, parentUserId: link.parent_user_id, studentId: link.student_id });
+      const alreadyLinked = (data.parentStudents || []).some(m => m.parentUserId === u.id && m.studentId === studentId);
+      if (!alreadyLinked) {
+        const { data: link, error: ke } = await sb.from('parent_students').insert({ parent_user_id: u.id, student_id: studentId }).select().single();
+        if (ke) notes.push('Child not linked to the parent login: ' + ke.message);
+        else data.parentStudents.push({ id: link.id, parentUserId: link.parent_user_id, studentId: link.student_id });
+      }
       parentLine = { username: u.username, isNew };
     }
   }
   let studentLine = null;
   if (d.studentLogin) {
-    const code = String(row.student_code || '').trim();
+    const code = String(row.student_code || row.code || '').trim();
+    const linkedLogin = data.users.find(x => x.role === 'Student' && x.linkedId === studentId);
     const taken = code && data.users.find(x => (x.username || '').toLowerCase() === code.toLowerCase());
-    if (!code) notes.push('Student login not made: the student has no code.');
+    if (linkedLogin) studentLine = linkedLogin.username;
+    else if (!code) notes.push('Student login not made: the student has no code.');
     else if (taken) notes.push(`Student login not made: ${code} is already a ${taken.role} login.`);
     else {
-      const { data: res, error: le } = await callAdminFunction({ action: 'create', username: code, password: code, role: 'Student', linkedStudentId: row.id });
+      const { data: res, error: le } = await callAdminFunction({ action: 'create', username: code, password: code, role: 'Student', linkedStudentId: studentId });
       if (le) notes.push('Student login not made: ' + le);
-      else { data.users.push({ id: res.userId, username: code, role: 'Student', linkedId: row.id }); studentLine = code; }
+      else { data.users.push({ id: res.userId, username: code, role: 'Student', linkedId: studentId }); studentLine = code; }
     }
   }
-  const { error: ue } = await sb.from('registrations').update({ status: 'Accepted', student_id: row.id, decided_at: new Date().toISOString(), decided_by: currentUserId }).eq('id', id);
-  if (ue) notes.push('Form not marked Accepted: ' + ue.message);
-  regDone[id] = { studentId: row.id, phones, notes, message: regWelcomeMessage(r, name, parentLine, studentLine) };
+  const { error: ue } = await sb.from('registrations').update({ status: 'Accepted', decided_at: new Date().toISOString(), decided_by: currentUserId }).eq('id', id);
+  if (ue) {
+    regBusy = false; regMsg = `Student ${row.name} is available${isNewStudent ? ' (newly created)' : ' (existing record reused)'}, but the registration could not be marked Accepted: ${ue.message}. Do not create another student; refresh and retry after checking the registration.`; render(); return;
+  }
+  regDone[id] = { studentId, phones, notes, message: regWelcomeMessage(r, row.name, parentLine, studentLine) };
   regBusy = false; regAcceptId = '';
-  regMsg = `${name}${row.student_code ? ' (' + row.student_code + ')' : ''} added. Send the login details with the 📤 buttons on the card.`;
+  regMsg = `${row.name}${(row.student_code || row.code) ? ' (' + (row.student_code || row.code) + ')' : ''} ${isNewStudent ? 'created' : 'linked to the existing student record'}. Registration accepted. Demo records, if any, remain separate until you explicitly link them.`;
   trackUse('registration-accept');
   await loadRegistrations(); render();
 }
+
 function regWelcomeMessage(r, name, parentLine, studentLine) {
   const lines = [`Dear ${r.parent_name || 'Parent'},`, '', `Welcome to LIB Education! ${name} is now registered with us. We will call you to set up the classes.`];
   if (parentLine) lines.push('', `Your parent login (classes, attendance, homework and fees):`, `Login ID: ${parentLine.username}`, parentLine.isNew ? `Password: ${parentLine.username}` : 'Password: the one you already use.');
@@ -24712,8 +24797,12 @@ function regCardHtml(r) {
         ${sel('mode', [['Online', 'Online'], ['Offline', 'Offline'], ['Both', 'Both']], d.mode)}
         ${sel('ctype', [['Group', 'Group'], ['Individual', 'Individual'], ['Both', 'Both']], d.ctype)}
         <input type="text" value="${escAttr(d.academicYear || '')}" oninput="regDraftSet('academicYear',this.value)" placeholder="Academic year e.g. 2026-27" title="Academic year" style="width:150px"></div>
+      ${regExistingStudentCandidates(r).length ? `<div style="margin:8px 0;padding:8px;background:#fff8e6;border:1px solid var(--line);border-radius:6px">
+        <b style="font-size:12px">Possible existing student match</b><div class="hint" style="font-size:11px">Confirm the identity before reusing a record. Parent mobile alone is not treated as a child match.</div>
+        <select onchange="regDraftSet('existingStudentId',this.value)" style="margin-top:5px;max-width:100%"><option value="">Create a new student record</option>${regExistingStudentCandidates(r).map(s=>`<option value="${escAttr(s.id)}" ${d.existingStudentId===s.id?'selected':''}>Reuse ${esc(s.name)}${s.code?' ('+esc(s.code)+')':''}</option>`).join('')}</select>
+      </div>` : ''}
       ${kids.length ? `<div class="row-form" style="flex-direction:column;align-items:flex-start;gap:2px">
-        <label><input type="radio" name="regFam" ${d.family === 'existing' ? 'checked' : ''} onchange="regDraftSet('family','existing')"> Brother/sister of ${esc(kids.map(s => s.name).join(', '))}${login ? ` (uses parent login ${esc(login.username)})` : ''}</label>
+        <label><input type="radio" name="regFam" ${d.family === 'existing' ? 'checked' : ''} onchange="regDraftSet('family','existing')"> Link to existing family: ${esc(kids.map(s => s.name).join(', '))}${login ? ` (uses parent login ${esc(login.username)})` : ''}</label>
         <label><input type="radio" name="regFam" ${d.family === 'new' ? 'checked' : ''} onchange="regDraftSet('family','new')"> A new family</label></div>` : ''}
       <div class="row-form"><label><input type="checkbox" ${d.parentLogin ? 'checked' : ''} onchange="regDraftSet('parentLogin',this.checked)"> Parent login (ID and password = parent mobile${kids.length ? ', or the family\'s login' : ''})</label>
         <label><input type="checkbox" ${d.studentLogin ? 'checked' : ''} onchange="regDraftSet('studentLogin',this.checked)"> Student login (ID and password = student code)</label></div>
@@ -24725,8 +24814,11 @@ function regCardHtml(r) {
     action = `<div class="row-form" style="margin-top:8px"><button class="btn-small btn-primary" onclick="regOpenAccept('${r.id}')">✓ Accept</button><button class="btn-small" onclick="regRejectId='${r.id}';regAcceptId='';render()">✗ Reject</button>
       <a class="btn-small" href="tel:+91${escAttr(phoneKey(r.parent_mobile))}" style="text-decoration:none">📞 Call</a>${waButtonHtml(phoneKey(r.parent_mobile), '💬 WhatsApp', waText)}</div>`;
   } else if (r.status === 'Accepted') {
+    const demos = st ? regDemoCandidates(r, st.id) : [];
+    const demoBlock = demos.length ? `<div style="margin-top:8px;padding:8px;background:#f6f3ea;border:1px solid var(--line);border-radius:6px"><b style="font-size:12px">Possible demo records (${demos.length})</b><div class="hint" style="font-size:11px">Name and contact details suggest a match. Confirm each link individually. Linking does not convert the demo or trigger a bonus.</div>${demos.map(dl=>`<div class="row-form" style="margin-top:5px"><span style="font-size:12px">${esc(dayDate(dl.date))} · ${esc(dl.studentName)} · ${esc(dl.status)}${dl.linkedStudentId===st.id?' · Already linked': ''}</span>${dl.linkedStudentId===st.id?'<span class="hint">Linked</span>':`<button class="btn-small" onclick="regLinkDemo('${r.id}','${dl.id}')">Link this demo</button>`}</div>`).join('')}</div>` : (st ? '<div class="hint" style="margin-top:6px">No matching demo record found. This registration can proceed as a direct admission.</div>' : '');
     action = `<div class="row-form" style="margin-top:8px">${st ? `<button class="btn-small" onclick="regOpenStudent('${st.id}')">Open ${esc(st.name)}${st.code ? ' (' + esc(st.code) + ')' : ''}</button>` : '<span class="hint">Student no longer found.</span>'}
       ${done ? done.phones.map(n => waButtonHtml(n, '📤 ' + esc(n), done.message)).join(' ') : ''}</div>
+      ${demoBlock}
       ${done && done.notes.length ? `<div class="hint" style="color:var(--brick)">${done.notes.map(esc).join('<br>')}</div>` : ''}
       ${!done && st ? '<div class="hint">To send the logins again, open the student (Login section) or the parent on the Parents page.</div>' : ''}`;
   } else {
