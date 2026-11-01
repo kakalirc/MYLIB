@@ -443,6 +443,21 @@ let biometricLockActive = false;
 let biometricLockedProfile = null;
 let biometricLockedUserId = '';
 let biometricOfferShown = false;
+// Cross-tab logout coordination. The signal contains no credentials or personal data.
+const LIB_CROSS_TAB_LOGOUT_KEY = 'lib_cross_tab_logout';
+function signalOtherTabsLogout() {
+  try { localStorage.setItem(LIB_CROSS_TAB_LOGOUT_KEY, JSON.stringify({ at: Date.now(), userId: currentUserId || '' })); } catch(e) {}
+}
+window.addEventListener('storage', (event) => {
+  if (event.key !== LIB_CROSS_TAB_LOGOUT_KEY || !event.newValue) return;
+  let signal = null;
+  try { signal = JSON.parse(event.newValue); } catch(e) { return; }
+  if (!signal || !signal.at || !isLoggedIn || (signal.userId && currentUserId && signal.userId !== currentUserId)) return;
+  // Lock this tab before reload. initApp will keep it on the login screen even
+  // when biometric logout intentionally retains the shared Supabase session.
+  try { sessionStorage.setItem('lib_tab_logged_out', '1'); } catch(e) {}
+  location.reload();
+});
 let currentUsername = '';
 let currentRole = '';
 let currentLinkedId = '';
@@ -7066,6 +7081,7 @@ async function loginWithBiometric() {
   // Biometric passed — restore the held session
   const profile = biometricLockedProfile;
   const userId = biometricLockedUserId;
+  try { sessionStorage.removeItem('lib_tab_logged_out'); } catch(e) {}
   biometricLockActive = false;
   biometricLockedProfile = null;
   biometricLockedUserId = '';
@@ -7140,6 +7156,7 @@ async function attemptLogin() {
   try { await attemptLoginSteps(u, p); } finally { loginStep = ''; }
 }
 async function attemptLoginSteps(u, p) {
+  try { sessionStorage.removeItem('lib_tab_logged_out'); } catch(e) {}
   loginError = '';
   const oldErr = document.querySelector('.login-card .login-error');
   if (oldErr) oldErr.remove();
@@ -7348,6 +7365,9 @@ setInterval(() => {
 }, 75000);
 
 async function logout() {
+  // Notify every other open tab, regardless of role or logout method.
+  signalOtherTabsLogout();
+  try { sessionStorage.removeItem('lib_tab_logged_out'); } catch(e) {}
   // Only soft-logout if bio belongs to THIS user — prevents user B from
   // seeing user A's credential gate after logging in with a password.
   if (bioIsRegistered() && currentUsername === bioGetUsername()) {
@@ -25147,10 +25167,21 @@ async function initApp() {
   }
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  // Restore an existing session (e.g. after a page refresh) rather than
-  // always forcing the person back to the login screen.
+  // Restore an existing session (e.g. after a page refresh) unless this tab
+  // was explicitly logged out from another tab. A tab-local lock is necessary
+  // because biometric logout intentionally retains the shared Supabase session.
+  let tabWasLoggedOut = false;
+  try { tabWasLoggedOut = sessionStorage.getItem('lib_tab_logged_out') === '1'; } catch(e) {}
   const { data: { session } } = await sb.auth.getSession();
-  if (session) {
+  if (session && tabWasLoggedOut) {
+    const { data: lockedProfile, error: lockedProfileError } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
+    if (!lockedProfileError && lockedProfile && bioIsRegistered() && (lockedProfile.username || '') === bioGetUsername()) {
+      biometricLockActive = true;
+      biometricLockedProfile = lockedProfile;
+      biometricLockedUserId = session.user.id;
+    }
+    // Otherwise stay on the login screen; password login will clear the tab lock.
+  } else if (session) {
     const { data: profile, error: profErr } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
     if (!profErr && profile) {
       if (bioIsRegistered() && (profile.username || '') === bioGetUsername()) {
@@ -25185,6 +25216,7 @@ async function initApp() {
   }
 
   if (!isLoggedIn) {
+    if (!session) { try { sessionStorage.removeItem('lib_tab_logged_out'); } catch(e) {} }
     // Nobody is logged in (or the fingerprint gate is up): show the login screen straight away. Loading data here
     // only fetched empty lists (RLS) and kept the login screen waiting; login loads everything with a real session.
     loaded = true;
