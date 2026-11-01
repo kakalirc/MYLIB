@@ -18783,7 +18783,40 @@ function weeklyPatternLoadDaysFromFrequency() {
   weeklyPatternDraft.days = [];
   if (weeklyPatternDraft.studentId !== 'all' && weeklyPatternDraft.subjectId !== 'all' && weeklyPatternDraft.classType !== 'all') {
     const fr = frequencyRowFor(weeklyPatternDraft.studentId, weeklyPatternDraft.subjectId);
-    if (fr) weeklyPatternDraft.days = FREQUENCY_DAYS.flatMap(([key],i)=>Array.from({length:Math.max(0,Number(fr[key])||0)},(_,n)=>({weekday:String([1,2,3,4,5,6,0][i]),time:''})));
+    if (fr) {
+      const studentId = weeklyPatternDraft.studentId;
+      const subjectId = weeklyPatternDraft.subjectId;
+      const classType = weeklyPatternDraft.classType;
+      const teacherId = currentLinkedId;
+      // student_subject_frequency stores weekday COUNTS only. Actual saved class times
+      // live on scheduled_classes, so reuse the latest known time for each weekday occurrence.
+      const savedByWeekday = new Map();
+      const matching = (scheduledClasses || []).filter(c =>
+        c.studentId === studentId && c.subjectId === subjectId && c.classType === classType &&
+        (!teacherId || c.teacherId === teacherId) && !!c.date && !!c.time
+      ).slice().sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.time).localeCompare(String(b.time)));
+      matching.forEach(c => {
+        const date = new Date(String(c.date).slice(0,10) + 'T00:00:00');
+        if (isNaN(date.getTime())) return;
+        const weekday = date.getDay();
+        if (!savedByWeekday.has(weekday)) savedByWeekday.set(weekday, new Map());
+        const byOccurrence = savedByWeekday.get(weekday);
+        const dateKey = String(c.date).slice(0,10);
+        if (!byOccurrence.has(dateKey)) byOccurrence.set(dateKey, []);
+        byOccurrence.get(dateKey).push(String(c.time).slice(0,5));
+      });
+      weeklyPatternDraft.days = FREQUENCY_DAYS.flatMap(([key],i) => {
+        const weekday = [1,2,3,4,5,6,0][i];
+        const count = Math.max(0, Number(fr[key]) || 0);
+        const dateGroups = Array.from((savedByWeekday.get(weekday) || new Map()).values());
+        const times = [];
+        for (let occurrence = 0; occurrence < count; occurrence++) {
+          const savedTime = dateGroups.map(group => group[occurrence]).find(Boolean) || '';
+          times.push({ weekday: String(weekday), time: savedTime });
+        }
+        return times;
+      });
+    }
   }
 }
 function weeklyPatternSet(field, val) {
@@ -19393,7 +19426,7 @@ async function openScheduleSetupSchedule(studentId, subjectId, classType) {
   teacherPortalTab = 'schedule';
   teacherMobileTabMenuOpen = false;
   render();
-  await loadClassFrequencyRows();
+  await Promise.all([loadClassFrequencyRows(), loadScheduledClasses()]);
   weeklyPatternLoadDaysFromFrequency();
   weeklyPatternMsg = frequencyLoadError ? 'Could not load the saved Class Frequency. Refresh and try again.' : '';
   render();
