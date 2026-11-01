@@ -18871,9 +18871,9 @@ function buildDateOccurrences(startDate, frequency, classType, existingRows, tim
     for(let n=0;n<count;n++) {
       const preserved=existing[n];
       const entered=weekdayRows[n] && String(weekdayRows[n].time||'').trim();
+      // Prefer the teacher-entered/saved weekly time. If unavailable, preserve
+      // an existing matching class time; otherwise retain the established placeholder.
       const fallback=classType==='Group'?'00:00':(n%2===0?'01:00':'02:00');
-      // An explicitly entered time always wins. Blank means preserve an existing
-      // matching class time; only a genuinely new occurrence receives a placeholder.
       const chosenTime=entered || (preserved ? (preserved.time||'').slice(0,5) : fallback);
       out.push({date:iso,time:chosenTime,existing_id:preserved?preserved.id:null,time_override:!!entered});
     }
@@ -18889,12 +18889,23 @@ async function submitWeeklyPattern(teacherId) {
   if(!targets.length){weeklyPatternMsg='No matching student/subject/class-type combinations with a saved Class Frequency and subscription were found. Check the filters and Class Frequency setup.';render();return;}
   const isSingleExplicit=studentId!=='all'&&subjectId!=='all'&&classType!=='all'&&targets.length===1;
   if(isSingleExplicit&&!weeklyPatternDraft.days.length){weeklyPatternMsg='The selected student and subject have no usable Class Frequency. Set a valid Class Frequency first.';render();return;}
-  if(isSingleExplicit && weeklyPatternDraft.days.some(d=>!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(d.time||'')))){weeklyPatternMsg='Enter a valid time for every weekly occurrence before previewing. These times will be saved as the recurring weekly pattern.';render();return;}
   let previewTargets=[];
   try {
     for(const target of targets){
       const existing=scheduledClasses.filter(c=>c.studentId===target.studentId&&c.subjectId===target.subjectId&&c.teacherId===teacherId&&c.classType===target.classType&&c.status==='Pending'&&c.date>=startDate);
-      const times=isSingleExplicit?weeklyPatternDraft.days:[];
+      // For a single explicit selection, use the times entered on this screen.
+      // For All Students / All Subjects / All Types, load each target's own saved weekly pattern.
+      let times=weeklyPatternDraft.days;
+      if(!isSingleExplicit){
+        const savedByType=target.frequency.weekly_times&&typeof target.frequency.weekly_times==='object'?target.frequency.weekly_times:{};
+        const savedDays=Array.isArray(savedByType[target.classType])?savedByType[target.classType]:[];
+        const savedMap=new Map(savedDays.map(item=>[String(item.weekday)+':'+(Number(item.occurrence)||1),String(item.time||'').slice(0,5)]));
+        times=FREQUENCY_DAYS.flatMap(([key],i)=>{
+          const weekday=[1,2,3,4,5,6,0][i];
+          const count=Math.max(0,Number(target.frequency[key])||0);
+          return Array.from({length:count},(_,n)=>({weekday:String(weekday),occurrence:n+1,time:savedMap.get(String(weekday)+':'+(n+1))||''}));
+        });
+      }
       const pattern=buildDateOccurrences(startDate,target.frequency,target.classType,existing,times);
       if(pattern.length) previewTargets.push({...target,pattern});
     }
