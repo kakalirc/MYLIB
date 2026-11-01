@@ -15597,8 +15597,29 @@ function buildRebuildPreview() {
   rebuildClassesMsg = '';
   render();
 }
+function rebuildTimeRowsFor(pair) {
+  const savedByType = pair.frequency && pair.frequency.weekly_times &&
+    typeof pair.frequency.weekly_times === 'object' ? pair.frequency.weekly_times : {};
+  const savedDays = Array.isArray(savedByType[pair.type]) ? savedByType[pair.type] : [];
+  const savedMap = new Map(savedDays.map(item => [
+    String(item.weekday) + ':' + (Number(item.occurrence) || 1),
+    String(item.time || '').slice(0,5)
+  ]));
+  return FREQUENCY_DAYS.flatMap(([key], i) => {
+    const weekday = [1,2,3,4,5,6,0][i];
+    const count = Math.max(0, Number(pair.frequency[key]) || 0);
+    return Array.from({length:count}, (_, n) => ({
+      weekday:String(weekday),
+      occurrence:n+1,
+      time:savedMap.get(String(weekday)+':'+(n+1)) || ''
+    }));
+  });
+}
 function rebuildPatternFor(pair, existingRows) {
-  return buildDateOccurrences(todayStr,pair.frequency,pair.type,existingRows||[],[]);
+  // Match Teacher → Set up weekly schedule:
+  // saved weekly timing wins, then an existing matching class time,
+  // then the established placeholder for genuinely new occurrences.
+  return buildDateOccurrences(todayStr,pair.frequency,pair.type,existingRows||[],rebuildTimeRowsFor(pair));
 }
 async function executeRebuildPendingClasses() {
   if (rebuildClassesBusy || !rebuildClassesPreview) return;
@@ -15607,9 +15628,9 @@ async function executeRebuildPendingClasses() {
   const pairCount=preview.pairs.length;
   const targetCount=preview.targets.length;
   // Validate all preserved-date mappings before any destructive delete occurs.
-  try { for (const pair of preview.pairs) { const prior=preview.existingRows.filter(sc=>sc.studentId===pair.studentId&&sc.subjectId===pair.subjectId&&sc.classType===pair.type); buildDateOccurrences(todayStr,pair.frequency,pair.type,prior,[]); } }
+  try { for (const pair of preview.pairs) { const prior=preview.existingRows.filter(sc=>sc.studentId===pair.studentId&&sc.subjectId===pair.subjectId&&sc.classType===pair.type); buildDateOccurrences(todayStr,pair.frequency,pair.type,prior,rebuildTimeRowsFor(pair)); } }
   catch(e) { rebuildClassesMsg='Rebuild cancelled before deleting anything: '+(e.message||String(e)); render(); return; }
-  const msg=`This will remove ${targetCount} future Pending class records for ${preview.ids.length} active student(s), preserve ${preview.overdueCount} overdue Pending records and all Done/other-status records, then regenerate from saved Class Frequency for ${pairCount} student/subject/type combinations. Existing times on matching dates will be preserved. New Group times use 00:00; new Individual times alternate 01:00 / 02:00. Admin rebuild does not override a saved time with a teacher-entered time. Duplicate matching records stop the rebuild for review. Continue?`;
+  const msg=`This will remove ${targetCount} future Pending class records for ${preview.ids.length} active student(s), preserve ${preview.overdueCount} overdue Pending records and all Done/other-status records, then regenerate from saved Class Frequency for ${pairCount} student/subject/type combinations. Saved weekly timings from Teacher → Set up weekly schedule will be used for each student, subject and class type. Where a saved timing is blank, an existing matching class time is preserved; only genuinely new occurrences without a saved time use placeholders (Group 00:00; Individual 01:00 / 02:00). Duplicate matching records stop the rebuild for review. Continue?`;
   if (!confirm(msg)) return;
   rebuildClassesBusy=true; rebuildClassesMsg='Removing future pending classes…'; render();
   try {
@@ -15641,7 +15662,7 @@ function renderRebuildPendingClasses() {
   const students=rebuildActiveStudents();
   const preview=rebuildClassesPreview;
   const pairRows=preview&&preview.pairs.length?`<div class="table-scroll"><table><tr><th>Student</th><th>Subject</th><th>Type</th><th>Remaining</th><th>Future pending to remove</th><th>Overdue retained</th><th>Weekly frequency</th></tr>${preview.pairs.map(p=>`<tr><td>${esc(p.studentName)}</td><td>${esc(p.subjectName)}</td><td>${esc(p.type)}</td><td>${p.remaining}</td><td>${p.futurePending}</td><td>${p.overduePending}</td><td>${p.weeklyCount}/week</td></tr>`).join('')}</table></div>`:'<div class="empty">No eligible student/subject/type combinations with remaining subscription and saved Class Frequency were found.</div>';
-  return `<div class="card"><h2>Rebuild Pending Classes ${helpBtn('rebuild-classes')}</h2><div class="hint">Preview first. The rebuild removes only future-dated Pending classes for the selected active students. Overdue Pending classes, Done classes, and other statuses are preserved. New schedules use the saved Class Frequency table and existing <code>schedule_weekly_pattern</code> RPC; subscription limits and teacher conflicts remain enforced by that existing backend function.</div><div class="row-form" style="margin-top:12px"><label>Scope<select onchange="rebuildClassesScope=this.value;rebuildClassesPreview=null;render()"><option value="all" ${rebuildClassesScope==='all'?'selected':''}>All active students</option><option value="selected" ${rebuildClassesScope==='selected'?'selected':''}>One active student</option></select></label>${rebuildClassesScope==='selected'?`<label>Student<select onchange="rebuildClassesStudentId=this.value;rebuildClassesPreview=null;render()"><option value="">Select student…</option>${students.map(st=>`<option value="${st.id}" ${rebuildClassesStudentId===st.id?'selected':''}>${esc(studentLabel(st))}</option>`).join('')}</select></label>`:''}<button class="btn-primary" onclick="loadClassFrequencyRows().then(buildRebuildPreview)" ${rebuildClassesBusy?'disabled':''}>Preview Rebuild</button></div>${preview?`<div class="hint" style="margin-top:12px"><b>Preview summary:</b> ${preview.ids.length} active student(s); ${preview.targets.length} future Pending class(es) to remove; ${preview.overdueCount} overdue Pending class(es) to preserve; ${preview.pairs.length} eligible combinations. Only combinations with saved frequency and positive remaining balance are rebuilt; future Pending records outside those eligible combinations are left untouched.</div>${pairRows}<div class="hint" style="margin-top:8px;color:var(--brick)"><b>Provisional times:</b> Group = 00:00; Individual = 01:00 / 02:00. Newly generated times are provisional. Existing matching times are preserved. Overdue Pending records are preserved for history and do not consume subscription quota.</div><button class="btn-primary" style="margin-top:12px" onclick="executeRebuildPendingClasses()" ${rebuildClassesBusy?'disabled':''}>${rebuildClassesBusy?'Working…':'Confirm Rebuild'}</button>`:''}${rebuildClassesMsg?`<div class="hint" style="white-space:pre-wrap;margin-top:12px;color:${rebuildClassesMsg.startsWith('Rebuild finished')?'var(--forest)':'var(--brick)'}">${esc(rebuildClassesMsg)}</div>`:''}</div>`;
+  return `<div class="card"><h2>Rebuild Pending Classes ${helpBtn('rebuild-classes')}</h2><div class="hint">Preview first. The rebuild removes only future-dated Pending classes for the selected active students. Overdue Pending classes, Done classes, and other statuses are preserved. New schedules use the saved Class Frequency table and existing <code>schedule_weekly_pattern</code> RPC; subscription limits and teacher conflicts remain enforced by that existing backend function.</div><div class="row-form" style="margin-top:12px"><label>Scope<select onchange="rebuildClassesScope=this.value;rebuildClassesPreview=null;render()"><option value="all" ${rebuildClassesScope==='all'?'selected':''}>All active students</option><option value="selected" ${rebuildClassesScope==='selected'?'selected':''}>One active student</option></select></label>${rebuildClassesScope==='selected'?`<label>Student<select onchange="rebuildClassesStudentId=this.value;rebuildClassesPreview=null;render()"><option value="">Select student…</option>${students.map(st=>`<option value="${st.id}" ${rebuildClassesStudentId===st.id?'selected':''}>${esc(studentLabel(st))}</option>`).join('')}</select></label>`:''}<button class="btn-primary" onclick="loadClassFrequencyRows().then(buildRebuildPreview)" ${rebuildClassesBusy?'disabled':''}>Preview Rebuild</button></div>${preview?`<div class="hint" style="margin-top:12px"><b>Preview summary:</b> ${preview.ids.length} active student(s); ${preview.targets.length} future Pending class(es) to remove; ${preview.overdueCount} overdue Pending class(es) to preserve; ${preview.pairs.length} eligible combinations. Only combinations with saved frequency and positive remaining balance are rebuilt; future Pending records outside those eligible combinations are left untouched.</div>${pairRows}<div class="hint" style="margin-top:8px;color:var(--brick)"><b>Timing priority:</b> Saved weekly timings for that student/subject/type are used first. If a saved timing is blank, an existing matching class time is preserved. Placeholders (Group 00:00; Individual 01:00 / 02:00) are used only for new occurrences with no saved timing. Overdue Pending records are preserved for history and do not consume subscription quota.</div><button class="btn-primary" style="margin-top:12px" onclick="executeRebuildPendingClasses()" ${rebuildClassesBusy?'disabled':''}>${rebuildClassesBusy?'Working…':'Confirm Rebuild'}</button>`:''}${rebuildClassesMsg?`<div class="hint" style="white-space:pre-wrap;margin-top:12px;color:${rebuildClassesMsg.startsWith('Rebuild finished')?'var(--forest)':'var(--brick)'}">${esc(rebuildClassesMsg)}</div>`:''}</div>`;
 }
 
 function renderFees() {
