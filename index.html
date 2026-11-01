@@ -1458,6 +1458,7 @@ let studyPlanAiGap    = { loading: false, result: '', error: '', subjectId: '' }
 let studyPlanFilterStatus = 'all'; // 'all'|'missing'|'in_progress'|'completed'
 let studyPlanFilterSubjectId = '';
 let studyPlanFilterStudent = '';
+let studyPlanPendingSubjectId = '';
 let adminStudyPlanFilterTeacherId = '';
 let adminStudyPlanFilterSubjectId = '';
 let adminStudyPlanFilterStudent = '';
@@ -1912,7 +1913,7 @@ function setTeacherPortalTab(t) {
   if (t === 'students') teacherStudentSearch = '';
   if (t === 'attendance') { logDraft.teacherId = currentLinkedId; logDraft.date = todayStr; logMsg = ''; }
   if (t === 'report') { loadTeacherPayrollRecords().then(() => render()); return; }
-  if (t === 'studyplans') { studyPlanTeacherStudentId = ''; studyPlanTeacherSubjectId = ''; studyPlanDraftItems = []; studyPlanMsg = ''; studyPlanViewMode = 'report'; studyPlanFilterStatus = 'all'; studyPlanFilterSubjectId = ''; studyPlanFilterStudent = ''; loadStudyPlans().then(() => render()); return; }
+  if (t === 'studyplans') { studyPlanTeacherStudentId = ''; studyPlanTeacherSubjectId = ''; studyPlanDraftItems = []; studyPlanMsg = ''; studyPlanViewMode = 'report'; studyPlanFilterStatus = 'all'; studyPlanFilterSubjectId = ''; studyPlanFilterStudent = ''; studyPlanPendingSubjectId = ''; loadStudyPlans().then(() => render()); return; }
   if (t === 'homework') { hwShowForm = false; hwMsg = ''; hwFilterStudentId = ''; hwFilterStatus = 'assigned'; loadHomework().then(() => render()); return; }
   if (t === 'questionbank' && !teacherQbAccess) { teacherPortalTab = 'dashboard'; render(); return; }
   if (t === 'research' && !teacherResearchAccess) { teacherPortalTab = 'dashboard'; render(); return; }
@@ -18039,100 +18040,6 @@ function renderTeacherStudyPlans(teacher) {
     });
   });
 
-  // Apply filters
-  const filterStudentLc = studyPlanFilterStudent.toLowerCase();
-  let filtered = rows.filter(r => {
-    if (studyPlanFilterStatus === 'missing' && r.planStatus !== 'missing') return false;
-    if (studyPlanFilterStatus === 'in_progress' && r.planStatus !== 'in_progress') return false;
-    if (studyPlanFilterStatus === 'completed' && r.planStatus !== 'completed') return false;
-    if (studyPlanFilterSubjectId && r.subj.id !== studyPlanFilterSubjectId) return false;
-    if (filterStudentLc && !r.student.name.toLowerCase().includes(filterStudentLc)) return false;
-    return true;
-  });
-
-  // Subject dropdown for filter
-  const allSubjectsInRows = [...new Map(rows.map(r=>[r.subj.id, r.subj])).values()].sort((a,b)=>a.name.localeCompare(b.name));
-
-  const filterBar = `<div class="row-form" style="margin-bottom:16px;align-items:center;flex-wrap:wrap">
-    <select onchange="studyPlanFilterStatus=this.value;render()" style="font-size:13px">
-      <option value="all" ${studyPlanFilterStatus==='all'?'selected':''}>All</option>
-      <option value="missing" ${studyPlanFilterStatus==='missing'?'selected':''}>Missing plan</option>
-      <option value="in_progress" ${studyPlanFilterStatus==='in_progress'?'selected':''}>In progress</option>
-      <option value="completed" ${studyPlanFilterStatus==='completed'?'selected':''}>Completed</option>
-    </select>
-    <select onchange="studyPlanFilterSubjectId=this.value;render()" style="font-size:13px">
-      <option value="">All subjects</option>
-      ${allSubjectsInRows.map(s=>`<option value="${s.id}" ${studyPlanFilterSubjectId===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}
-    </select>
-    <input type="text" placeholder="Search student…" value="${escAttr(studyPlanFilterStudent)}" oninput="studyPlanFilterStudent=this.value;render()" style="font-size:13px;border:1px solid var(--line);border-radius:6px;padding:5px 10px;background:var(--paper);color:var(--ink);max-width:180px">
-    <button class="btn-small" onclick="studyPlanViewMode='edit';studyPlanTeacherStudentId='';studyPlanTeacherSubjectId='';studyPlanDraftItems=[];studyPlanMsg='';render()">+ New plan</button>
-  </div>`;
-
-  const statusBadge = status => {
-    if (status==='missing') return `<span style="color:var(--muted);font-size:12px">— no plan</span>`;
-    if (status==='completed') return `<span class="tag" style="background:var(--forest);color:#fff;font-size:11px">✅ Done</span>`;
-    if (status==='in_progress') return `<span class="tag" style="background:var(--gold);color:#fff;font-size:11px">🔄 In progress</span>`;
-    return `<span class="tag" style="background:var(--line);color:var(--muted);font-size:11px">Not started</span>`;
-  };
-
-  // ── At-risk flag helper ──
-  const now = Date.now();
-  function riskFlag(r) {
-    if (r.planStatus === 'missing') return { label: '🔴 No plan', color: 'var(--brick)' };
-    const ageDays = r.updatedAt ? (now - new Date(r.updatedAt).getTime()) / 86400000 : 999;
-    if (r.pct === 0 && r.total > 0 && ageDays > 7) return { label: '🟠 Not started', color: '#c87000' };
-    if (r.inProg > 0 && r.done === 0 && ageDays > 14) return { label: '🟡 Stuck', color: '#c87000' };
-    if (r.pct < 30 && r.total >= 8) return { label: '🔴 Far behind', color: 'var(--brick)' };
-    return null;
-  }
-
-  const tableHtml = filtered.length === 0
-    ? `<div class="empty">No plans match the current filters.</div>`
-    : `<div class="table-scroll"><table>
-        <tr><th>Student</th><th>Subject</th><th>Topics</th><th>Done</th><th>Progress</th><th>Status</th><th>Alert</th><th>Last updated</th><th></th></tr>
-        ${filtered.map(r=>{
-          const progBar = r.total ? `<div style="display:flex;align-items:center;gap:6px">
-            <div style="width:80px;height:6px;background:var(--line);border-radius:3px;overflow:hidden;flex-shrink:0">
-              <div style="height:100%;width:${r.pct}%;background:${r.pct===100?'var(--forest)':'var(--gold)'};border-radius:3px"></div>
-            </div>
-            <span style="font-size:11px;color:var(--muted)">${r.pct}%</span>
-          </div>` : `<span class="hint">—</span>`;
-          const updLabel = r.updatedAt ? new Date(r.updatedAt).toLocaleDateString('en-IN',{day:'numeric',month:'short'}) : '—';
-          const flag = riskFlag(r);
-          return `<tr style="${r.planStatus==='missing'?'color:var(--muted)':''}">
-            <td>${esc(r.student.name)}</td>
-            <td>${esc(r.subj.name)}</td>
-            <td>${r.total||'—'}</td>
-            <td>${r.total ? r.done : '—'}</td>
-            <td>${progBar}</td>
-            <td>${statusBadge(r.planStatus)}</td>
-            <td>${flag ? `<span style="font-size:11.5px;font-weight:600;color:${flag.color};white-space:nowrap">${flag.label}</span>` : ''}</td>
-            <td style="font-size:12px;color:var(--muted)">${updLabel}</td>
-            <td><button class="btn-small" onclick="studyPlanOpenEdit('${r.student.id}','${r.subj.id}')">${r.planStatus==='missing'?'Create':'Edit'}</button></td>
-          </tr>`;
-        }).join('')}
-      </table></div>`;
-
-  const totalCount = rows.length;
-  const missingCount = rows.filter(r=>r.planStatus==='missing').length;
-  const atRiskRows = rows.filter(r=>riskFlag(r));
-  const summaryLine = `<div style="font-size:13px;color:var(--muted);margin-bottom:14px">
-    ${totalCount} student-subject pair${totalCount!==1?'s':''} · <span style="color:${missingCount>0?'var(--brick)':'var(--forest)'}">${missingCount} without a plan</span>
-    ${filtered.length !== totalCount ? ` · showing ${filtered.length}` : ''}
-  </div>`;
-
-  // ── At-risk summary card ──
-  const atRiskCard = atRiskRows.length ? `
-    <div style="margin-bottom:16px;padding:12px 14px;background:rgba(166,67,46,0.06);border:1px solid rgba(166,67,46,0.2);border-radius:10px">
-      <div style="font-size:13px;font-weight:700;color:var(--brick);margin-bottom:8px">⚠️ ${atRiskRows.length} student${atRiskRows.length!==1?'s':''} need${atRiskRows.length===1?'s':''} attention</div>
-      ${atRiskRows.map(r=>{const f=riskFlag(r);return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;border-bottom:1px solid rgba(166,67,46,0.1)">
-        <span style="color:${f.color};font-weight:600;font-size:12px;white-space:nowrap">${f.label}</span>
-        <span style="color:var(--ink)">${esc(r.student.name)}</span>
-        <span style="color:var(--muted);font-size:12px">· ${esc(r.subj.name)}</span>
-        <button class="btn-small" style="margin-left:auto" onclick="studyPlanOpenEdit('${r.student.id}','${r.subj.id}')">${r.planStatus==='missing'?'Create':'Edit'}</button>
-      </div>`;}).join('')}
-    </div>` : '';
-
   // ── Class gap analysis ──
   // Deduplicate by name (same subject may have separate IDs per student)
   const allSubjectsInRows2 = [...new Map(rows.map(r=>[r.subj.name.toLowerCase(),r.subj])).values()].sort((a,b)=>a.name.localeCompare(b.name));
@@ -18154,13 +18061,111 @@ function renderTeacherStudyPlans(teacher) {
       ${studyPlanAiGap.error ? `<div style="font-size:12px;color:var(--brick);margin-top:4px">${esc(studyPlanAiGap.error)}</div>` : ''}
     </div>` : '';
 
+  // ── Created plans: only saved plans with at least one topic; grouped by student ──
+  const createdPlans = rows
+    .filter(r => r.plan && r.total > 0)
+    .filter(r => !studyPlanFilterSubjectId || r.subj.id === studyPlanFilterSubjectId)
+    .filter(r => !studyPlanFilterStudent || r.student.name.toLowerCase().includes(studyPlanFilterStudent.toLowerCase()))
+    .sort((a,b) => a.student.name.localeCompare(b.student.name, undefined, {sensitivity:'base'}) || a.subj.name.localeCompare(b.subj.name, undefined, {sensitivity:'base'}));
+
+  const createdPlanSubjects = [...new Map(rows.filter(r=>r.plan && r.total>0).map(r=>[r.subj.id,r.subj])).values()]
+    .sort((a,b)=>a.name.localeCompare(b.name, undefined, {sensitivity:'base'}));
+
+  const createdPlansFilterBar = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:16px 0 12px">
+    <input type="text" placeholder="Search student…" value="${escAttr(studyPlanFilterStudent)}" oninput="studyPlanFilterStudent=this.value;render()" style="font-size:13px;border:1px solid var(--line);border-radius:6px;padding:7px 10px;background:var(--paper);color:var(--ink);max-width:220px">
+    <select onchange="studyPlanFilterSubjectId=this.value;render()" style="font-size:13px;border:1px solid var(--line);border-radius:6px;padding:7px 10px;background:var(--paper);color:var(--ink)">
+      <option value="">All subjects</option>
+      ${createdPlanSubjects.map(s=>`<option value="${s.id}" ${studyPlanFilterSubjectId===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}
+    </select>
+    <button class="btn-small" onclick="studyPlanViewMode='edit';studyPlanTeacherStudentId='';studyPlanTeacherSubjectId='';studyPlanDraftItems=[];studyPlanMsg='';render()">+ New plan</button>
+    <span style="font-size:12px;color:var(--muted);margin-left:auto">${createdPlans.length} plan${createdPlans.length!==1?'s':''}</span>
+  </div>`;
+
+  const createdPlansByStudent = new Map();
+  createdPlans.forEach(r => {
+    if (!createdPlansByStudent.has(r.student.id)) createdPlansByStudent.set(r.student.id, {student:r.student, plans:[]});
+    createdPlansByStudent.get(r.student.id).plans.push(r);
+  });
+
+  const createdPlansHtml = createdPlansByStudent.size === 0
+    ? `<div class="empty">No created study plans match the current filters.</div>`
+    : [...createdPlansByStudent.values()].map(group => `
+      <div style="border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+          <div style="font-size:15px;font-weight:700;color:var(--ink)">${esc(group.student.name)}</div>
+          <span style="font-size:11px;color:var(--muted)">${group.plans.length} subject plan${group.plans.length!==1?'s':''}</span>
+        </div>
+        ${group.plans.map(r => {
+          const updatedLabel = r.updatedAt ? new Date(r.updatedAt).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}) : '—';
+          const progress = `<div style="display:flex;align-items:center;gap:7px;min-width:110px">
+            <div style="width:64px;height:6px;background:var(--line);border-radius:3px;overflow:hidden;flex-shrink:0"><div style="height:100%;width:${r.pct}%;background:${r.pct===100?'var(--forest)':'var(--gold)'};border-radius:3px"></div></div>
+            <span style="font-size:11px;color:var(--muted)">${r.pct}%</span>
+          </div>`;
+          const badge = r.planStatus==='completed'
+            ? `<span class="tag" style="background:var(--forest);color:#fff;font-size:10px">✅ Done</span>`
+            : r.planStatus==='in_progress'
+              ? `<span class="tag" style="background:var(--gold);color:#fff;font-size:10px">🔄 In progress</span>`
+              : `<span class="tag" style="background:var(--line);color:var(--muted);font-size:10px">Not started</span>`;
+          return `<div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--line);flex-wrap:wrap">
+            <div style="flex:1;min-width:125px;font-size:13px;font-weight:600;color:var(--ink)">${esc(r.subj.name)}</div>
+            <div style="font-size:12px;color:var(--muted);white-space:nowrap">${r.total} topics · ${r.done} done</div>
+            ${progress}
+            ${badge}
+            <div style="font-size:11px;color:var(--muted);white-space:nowrap">${updatedLabel}</div>
+            <button class="btn-small" onclick="studyPlanOpenEdit('${r.student.id}','${r.subj.id}')">Edit</button>
+          </div>`;
+        }).join('')}
+      </div>`).join('');
+
+  // Missing plans: mapped student-subject pairs without a saved plan containing topics.
+  const pendingPlans = rows
+    .filter(r => r.planStatus === 'missing')
+    .filter(r => !studyPlanFilterStudent || r.student.name.toLowerCase().includes(studyPlanFilterStudent.toLowerCase()))
+    .filter(r => !studyPlanPendingSubjectId || r.subj.id === studyPlanPendingSubjectId)
+    .sort((a,b) => a.student.name.localeCompare(b.student.name, undefined, {sensitivity:'base'}) || a.subj.name.localeCompare(b.subj.name, undefined, {sensitivity:'base'}));
+  const pendingSubjectOpts = [...new Map(rows.filter(r=>r.planStatus==='missing').map(r=>[r.subj.id,r.subj])).values()]
+    .sort((a,b)=>a.name.localeCompare(b.name, undefined, {sensitivity:'base'}));
+  const pendingPlansHtml = pendingPlans.length
+    ? `<div style="border:1px solid var(--line);border-radius:10px;overflow:hidden">${pendingPlans.map(r=>`
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap">
+          <div style="flex:1;min-width:150px;font-size:13px;font-weight:600;color:var(--ink)">${esc(r.student.name)}</div>
+          <div style="flex:1;min-width:120px;font-size:13px;color:var(--muted)">${esc(r.subj.name)}</div>
+          <span class="tag" style="background:rgba(190,80,60,0.10);color:var(--brick);font-size:10px">Not created</span>
+          <button class="btn-small" onclick="studyPlanOpenEdit('${r.student.id}','${r.subj.id}')">+ Create plan</button>
+        </div>`).join('')}</div>`
+    : `<div class="empty">No pending study plans. Every mapped student and subject has a created plan.</div>`;
+
+  const howToUseHtml = `<div style="margin:10px 0 18px;padding:12px 14px;background:var(--paper);border:1px solid var(--line);border-radius:10px">
+    <div style="font-size:14px;font-weight:700;color:var(--ink);margin-bottom:5px">How to use Study Plans</div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.65">Select <b>+ New plan</b> to choose a student and subject. Add topics manually, use <b>Suggest topics</b>, or extract topics from an uploaded textbook. Set each topic to <b>Not started</b>, <b>In progress</b> or <b>Done</b>, then select <b>Save plan</b>. Students and parents can view the saved plan and its progress in their portal.</div>
+  </div>`;
+
   return `<div class="card">
     <h2>Study Plans ${helpBtn('study-plans')}</h2>
-    ${summaryLine}
-    ${atRiskCard}
-    ${gapCard}
-    ${filterBar}
-    ${tableHtml}
+    ${howToUseHtml}
+    <div style="margin-top:4px">
+      <div style="font-size:15px;font-weight:700;color:var(--ink)">Created Study Plans</div>
+      <div class="hint" style="margin-top:3px">Plans are grouped by student name in alphabetical order.</div>
+      ${createdPlansFilterBar}
+      ${createdPlansHtml}
+    </div>
+    <div style="margin-top:22px">
+      <div class="hint" style="margin-bottom:10px">Class Gap Analysis reviews study-plan progress across students for the selected subject. It highlights topics that may need more attention and helps you decide what to revise or reinforce in class.</div>
+      ${gapCard}
+    </div>
+    <div style="margin-top:22px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <div style="font-size:15px;font-weight:700;color:var(--ink)">Pending Study Plans</div>
+        <span style="font-size:12px;color:var(--muted)">${pendingPlans.length} pending</span>
+        <input type="text" placeholder="Search student…" value="${escAttr(studyPlanFilterStudent)}" oninput="studyPlanFilterStudent=this.value;render()" style="font-size:12px;border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:var(--paper);color:var(--ink);max-width:180px">
+        <select onchange="studyPlanPendingSubjectId=this.value;render()" style="font-size:12px;border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:var(--paper);color:var(--ink)">
+          <option value="">All subjects</option>
+          ${pendingSubjectOpts.map(s=>`<option value="${s.id}" ${studyPlanPendingSubjectId===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="hint" style="margin-bottom:10px">Students and subjects for which no study plan with topics has been saved.</div>
+      ${pendingPlansHtml}
+    </div>
   </div>`;
 }
 function renderStudyPlanReadOnly(student) {
