@@ -9046,6 +9046,7 @@ async function addStudent() {
   const name = input.value.trim();
   if (!name) return;
   if (!isValidPersonName(name)) { addConfirmMsg.student = 'Name cannot contain numbers.'; render(); return; }
+  if (!confirm('You are about to create a New Student record.\n\nPlease confirm that this student does not already exist in the system.\n\nContinue with creating this student?')) return;
   const { data: row, error } = await sb.from('students').insert({ name, archived: false }).select().single();
   if (error) { addConfirmMsg.student = 'Could not add student: ' + error.message; render(); return; }
   data.students.push({ id: row.id, name: row.name, archived: !!row.archived, code: row.student_code || '', parentName: '', mobileNumber: '', email: '', address: '', photo: '', gradeId: '', boardId: '', academicYear: '', modePreference: '', classTypePreference: '', billSeparately: false });
@@ -14083,14 +14084,20 @@ function renderStudents() {
     + (archivedStudentOpts ? `<optgroup label="Archived">${archivedStudentOpts}</optgroup>` : '');
 
   const block1 = `
-    <div class="card">
-      <h2>Students</h2>
+    <div class="card" style="background:#fff5e6;border:1px solid #ead4b2">
+      <h2>Add Student</h2>
+      <div class="hint">Create a new student record. Please check that the student does not already exist before adding them.</div>
       <div class="row-form">
         <input type="text" id="newStudent" placeholder="Student's name" onkeydown="if(event.key==='Enter') addStudent()">
         <button class="btn-primary" onclick="addStudent()">Add student</button>
       </div>
       ${addConfirmMsg.student ? `<div class="hint" style="color:var(--forest)">✓ ${esc(addConfirmMsg.student)}</div>` : ''}
-      <div class="hint">Add a student here, then choose one below to manage their subscriptions, subject enrollment, and login — one student at a time.</div>
+    </div>
+  `;
+  const block2 = `
+    <div class="card" style="background:#edf5ff;border:1px solid #cbdcf2">
+      <h2>Search Student</h2>
+      <div class="hint">Search existing students by name, ID, parent, or mobile. Searching here will not create a student record.</div>
       <div class="row-form">
         <input type="text" id="studentSearchBox" placeholder="Search by name, ID, parent, or mobile…" oninput="filterStudentPicker()" style="width:220px">
       </div>
@@ -14101,12 +14108,12 @@ function renderStudents() {
   `;
 
   if (!selectedStudentId) {
-    return block1 + studentCallsDueCardHtml() + `<div class="card"><div class="empty">Choose a student above to manage their subscriptions, enrollments, and login.</div></div>` + bulkStudentCardHtml();
+    return block1 + block2 + studentCallsDueCardHtml() + `<div class="card"><div class="empty">Choose a student above to manage their subscriptions, enrollments, and login.</div></div>` + bulkStudentCardHtml();
   }
 
   const student = data.students.find(s=>s.id===selectedStudentId);
   if (!student) {
-    return block1 + `<div class="card"><div class="empty">That student no longer exists.</div></div>`;
+    return block1 + block2 + `<div class="card"><div class="empty">That student no longer exists.</div></div>`;
   }
 
   // ---- balances: every subject currently enrolled in, PLUS any subject with an existing
@@ -14257,7 +14264,7 @@ function renderStudents() {
 
   const manageStudentOptions = byName(data.students).map(s=>`<option value="${s.id}" ${s.id===student.id?'selected':''}>${esc(studentLabel(s))}${s.archived?' (archived)':''}</option>`).join('');
 
-  return block1 + `
+  return block1 + block2 + `
     <div class="card">
       <div class="row-form" style="justify-content:space-between">
         <div class="row-form" style="margin-bottom:0">
