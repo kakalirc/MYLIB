@@ -1054,6 +1054,13 @@ let sCalcMode = 'Offline';
 let sCalcClasses = '';
 let sCalcStudentId = '';   // whose calculator is showing (special rates are per student)
 let demandPreviewRows = null;
+let demandTrialRows = null;
+let demandTrialSkippedRows = [];
+let demandTrialNeverPaid = 0;
+let demandTrialMsg = '';
+let demandTrialBusy = false;
+let demandTrialMonth = '';
+let demandTrialRunAt = '';
 let demandSelectedMonth = ''; // Admin-selected target month for monthly fee requests
 let demandMsg = '';
 let demandConfirming = false;
@@ -10192,7 +10199,7 @@ async function setDemandTargetMonth(value) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value || '')) return;
   if (value === demandTargetMonth()) return;
   demandSelectedMonth = value;
-  demandPreviewRows = null; demandPreviewSnapshot = ''; demandSkippedRows = []; demandNeverPaid = 0; demandShowSkipped = false; demandMsg = 'Loading selected month status…';
+  demandPreviewRows = null; demandPreviewSnapshot = ''; demandSkippedRows = []; demandNeverPaid = 0; demandShowSkipped = false; demandTrialRows = null; demandTrialSkippedRows = []; demandTrialNeverPaid = 0; demandTrialMsg = ''; demandTrialMonth = ''; demandTrialRunAt = ''; demandMsg = 'Loading selected month status…';
   render();
   await loadFeeRequestRunState(value);
   demandMsg = '';
@@ -10358,6 +10365,89 @@ function demandDataSignature() {
     specialRates: stable(studentFeeRates.map(x=>[x.id,x.studentId,x.subjectId,x.type,x.rate,x.offlineRate,x.fromDate,x.toDate]))
   });
 }
+// Trial Run is an independent, read-only simulation. Unlike Preview, it deliberately
+// recalculates combinations that already have a pending request for the selected month.
+// It does not edit the Preview working state or write anything to Supabase.
+function demandApplyTrialDiscounts(rows, month) {
+  const inc = rows.filter(r => r.include);
+  const fams = new Set(inc.map(r => familyKeyOf(r.student.id)));
+  const monthDate = month + '-01', autoRef = 'AUTO-' + month, runLabel = demandRunLabel(month);
+  const recalculatedKeys = new Set(rows.map(r => demandKey(r)));
+  const pending = data.subscriptions.filter(r => r.kind === 'Request' && r.baseAmount != null && fams.has(familyKeyOf(r.studentId))
+    && !((r.requestMonth === monthDate || r.paymentReference === autoRef || (r.calcNote || '').startsWith(runLabel)) && recalculatedKeys.has(`${r.studentId}|${r.subjectId}|${r.type}`)));
+  rows.forEach(r => { r.base = feeBaseFor(r.subj.id, r.ty, r.mode, r.classes, r.student.id); r.noDiscount = false; });
+  const items = inc.map(r => ({ key: demandKey(r), studentId: r.student.id, classes: r.classes, base: r.base, fixed: null }))
+    .concat(pending.map(requestDiscountItem));
+  const res = bulkDiscountFor(items);
+  rows.forEach(r => {
+    const d = res.get(demandKey(r)) || bulkDiscountFor([{ key: 'trial', studentId: r.student.id, classes: r.classes, base: r.base, fixed: null }]).get('trial');
+    r.discount = d; r.quoteAmount = d.amount; r.amount = d.amount;
+  });
+}
+async function trialRunDemand() {
+  if (demandTrialBusy) return;
+  const month = demandTargetMonth();
+  demandTrialBusy = true; demandTrialRows = null; demandTrialSkippedRows = []; demandTrialNeverPaid = 0;
+  demandTrialMsg = 'Recalculating all eligible students and subjects…'; render();
+  try {
+    await Promise.all([loadClassFrequencyRows(), loadSessions(), loadScheduledClasses(), loadTeacherLeave(), loadStudentsAndSubscriptions()]);
+    const rows = [], skipped = []; let neverPaid = 0;
+    const monthDate = month + '-01', autoRef = 'AUTO-' + month, runLabel = demandRunLabel(month);
+    data.students.filter(st => !st.archived).forEach(student => {
+      subjectsForStudent(student.id).forEach(subj => {
+        TYPES.forEach(ty => {
+          const monthRecords = data.subscriptions.filter(s => s.studentId === student.id && s.subjectId === subj.id && s.type === ty
+            && (s.requestMonth === monthDate || s.paymentReference === autoRef || (s.calcNote || '').startsWith(runLabel)));
+          const existingPending = monthRecords.filter(s => s.kind === 'Request').length;
+          const existingPaid = monthRecords.filter(s => s.kind === 'Payment').length;
+          const res = demandCalcFor(student, subj, ty, month);
+          if (res.neverPaid) {
+            neverPaid++;
+            if (demandIsLanguageGrade(student)) skipped.push({ student, subj, ty, reason: 'Language-grade student has no valid prior payment; review manually.', existingPending, existingPaid });
+            return;
+          }
+          if (res.skip) {
+            skipped.push({ student, subj, ty, reason: res.skip, existingPending, existingPaid });
+            return;
+          }
+          rows.push({ ...res.row, existingPending, existingPaid,
+            trialReview: res.row.expectedDisplay === null ? (res.row.expectedDisplayNote || 'Expected frequency needs review.') : '' });
+        });
+      });
+    });
+    demandApplyTrialDiscounts(rows, month);
+    demandSortRows(rows);
+    demandTrialRows = rows; demandTrialSkippedRows = skipped; demandTrialNeverPaid = neverPaid;
+    demandTrialMonth = month; demandTrialRunAt = new Date().toLocaleString('en-IN');
+    demandTrialMsg = `Trial Run complete for ${monthLabelOf(month)}. Simulation only — no records were created, changed, deleted, or unlocked.`;
+  } catch (e) {
+    demandTrialRows = []; demandTrialSkippedRows = [];
+    demandTrialMsg = 'Trial Run could not be completed: ' + (e && e.message ? e.message : 'unknown error');
+  }
+  demandTrialBusy = false; render();
+}
+function trialRunDemandHtml() {
+  if (demandTrialRows === null) return '';
+  const rows = demandTrialRows, skipped = demandTrialSkippedRows;
+  const total = rows.reduce((a, r) => a + (Number(r.amount) || 0), 0);
+  const existingPending = [...rows, ...skipped].reduce((a, r) => a + (r.existingPending || 0), 0);
+  const existingPaid = [...rows, ...skipped].reduce((a, r) => a + (r.existingPaid || 0), 0);
+  const statusText = r => r.existingPaid ? `Payment already exists (${r.existingPaid})` : r.existingPending ? `Pending request already exists (${r.existingPending})` : 'No existing monthly request';
+  const table = rows.length ? `<div class="table-scroll"><table>
+    <tr><th>Student</th><th>Subject</th><th>Type</th><th>Existing monthly record</th><th>Classes left / owed</th><th>Expected</th><th>Calculated classes / package</th><th>Simulated amount</th><th>Review flag</th></tr>
+    ${rows.map(r => `<tr><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${esc(statusText(r))}</td><td>${r.left < 0 ? `${-r.left} owed` : r.left}</td><td>${r.expectedDisplay === null ? 'Review' : r.expectedDisplay}</td><td>${r.classes}</td><td>${rupees(r.amount)}</td><td>${r.trialReview ? `<span style="color:var(--brick)">${esc(r.trialReview)}</span>` : '—'}</td></tr>`).join('')}
+  </table></div>` : '<div class="empty">No fee requests were calculated for eligible student/subject/type combinations.</div>';
+  const skippedHtml = skipped.length ? `<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:700">Not calculated / review required (${skipped.length})</summary><div class="table-scroll" style="margin-top:8px"><table><tr><th>Student</th><th>Subject</th><th>Type</th><th>Existing monthly record</th><th>Reason</th></tr>${skipped.map(r => `<tr><td>${esc(studentLabel(r.student))}</td><td>${esc(r.subj.name)}</td><td>${r.ty}</td><td>${r.existingPaid ? `Payment (${r.existingPaid})` : r.existingPending ? `Pending (${r.existingPending})` : '—'}</td><td>${esc(r.reason)}</td></tr>`).join('')}</table></div></details>` : '';
+  return `<div class="card" style="margin-top:12px;border:1px solid var(--gold)">
+    <h3 style="margin:0 0 6px">Trial Run — Simulation Results</h3>
+    <div class="hint">${esc(demandTrialMsg)} ${demandTrialRunAt ? `Run at ${esc(demandTrialRunAt)}.` : ''}</div>
+    <div class="hint" style="margin-top:8px"><b>${rows.length}</b> recalculated combinations · <b>${existingPending}</b> existing pending request record(s) included · <b>${existingPaid}</b> existing payment record(s) identified · <b>${skipped.length}</b> not calculated / review · <b>${rupees(total)}</b> simulated total.</div>
+    <div class="hint" style="margin:6px 0 10px;color:var(--brick)"><b>Read-only:</b> Existing monthly requests are recalculated for comparison. Trial Run does not create or update requests, change payment records, alter the monthly run status, or affect Preview / Confirm / Reset.</div>
+    ${table}${demandTrialNeverPaid ? `<div class="hint" style="margin-top:8px">${demandTrialNeverPaid} subject/type combination(s) have never been paid; language-grade cases are listed for manual review.</div>` : ''}${skippedHtml}
+    <div class="row-form" style="margin-top:10px"><button class="btn-small" onclick="trialRunDemand()" ${demandTrialBusy ? 'disabled' : ''}>Run Trial Again</button><button class="btn-small" onclick="demandTrialRows=null;demandTrialSkippedRows=[];demandTrialMsg='';render()">Close Trial Results</button></div>
+  </div>`;
+}
+
 async function previewDemand() {
   const month = demandTargetMonth(); demandMsg = 'Loading current class frequency…'; demandShowSkipped = false; demandIgnoreLeft = new Set(); demandNoDiscount = new Set(); render();
   await Promise.all([loadClassFrequencyRows(), loadSessions(), loadScheduledClasses(), loadTeacherLeave(), loadStudentsAndSubscriptions()]);
@@ -15638,7 +15728,8 @@ function renderFees() {
           <div class="row-form" style="margin-top:10px;align-items:flex-end">
             <label style="display:flex;flex-direction:column;gap:5px;font-weight:700">Target Month<input type="month" value="${dMonth}" onchange="setDemandTargetMonth(this.value)" style="min-width:175px" aria-label="Target month for fee requests"></label>
             ${dRan?'': '<button class="btn-small btn-primary" onclick="previewDemand()">Preview Fee Requests</button>'}
-            <span class="hint">Preview works any day. Confirm is open from the 25th of the month before to the 7th of the selected month.</span>
+            <button class="btn-small btn-gold" onclick="trialRunDemand()" ${demandTrialBusy?'disabled':''}>${demandTrialBusy?'Running Trial…':'Trial Run'}</button>
+            <span class="hint">Trial Run recalculates all eligible students, including existing monthly requests, without saving anything. Preview works any day; Confirm is open from the 25th of the month before to the 7th.</span>
           </div>
           ${dRan?`
             <div class="hint" style="color:var(--forest);margin-top:8px">✓ Fee requests already raised for ${dMonthLabel}.</div>
@@ -15679,6 +15770,7 @@ function renderFees() {
             })():''}
           `}`;
       })()}
+      ${trialRunDemandHtml()}
     </div>
     <div class="card">
       <h2>All subscription payments <button class="help-btn" onclick="openHelp('all-payments',event)">?</button></h2>
