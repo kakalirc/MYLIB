@@ -1326,9 +1326,6 @@ let wixBookingScheduleDraft = {};
 let wixBookingEditId = null;
 let wixBookingEditDraft = {};
 let wixBookingFromId = null;   // set when navigating to Demo Register to schedule a Wix booking
-let wixConvertingId = null;    // booking id currently being converted to student
-let wixConvertDraft = {};      // { studentName, enrollDate, confirmed }
-let wixConvertMsg = '';
 let wixLastCreatedStudentId = '';
 // Razorpay (SQL 61): paid columns on bookings + payments the webhook could not match to one booking.
 let wixPaidReady = false;          // SQL 61 run (bookings carry the paid column)
@@ -1355,6 +1352,7 @@ let rzpFeeMsg = '';
 let rzpFeeShowDismissed = false;   // list set-aside payments so a mistake can be brought back
 let rzpLinkPick = {};              // payment id -> booking id picked in "Needs a look"  // id of student just created via Convert to Student or createAndLinkDemo
 let demoLinkingId = ''; // demo log id currently being linked to a student
+let wixCardLinkingDemoId = ''; // demo log opened from a Demo Bookings card
 let demoLinkStudentId = '';
 let demoLinkMsg = '';
 let demoLinkSearch = '';
@@ -4069,7 +4067,7 @@ async function createAndLinkDemo(id, nameFromDemo) {
   if (linkErr) { demoLinkMsg = 'Student created but link failed: ' + linkErr.message; render(); return; }
   if (dl) { dl.linkedStudentId = row.id; applyDemoConvert(dl); }
   await wixLinkDemo(dl, dl.linkedStudentId ? { status: 'Converted', converted_student_id: dl.linkedStudentId } : null);
-  demoLinkingId = ''; demoLinkStudentId = ''; demoLinkMsg = '';
+  demoLinkingId = ''; wixCardLinkingDemoId = ''; demoLinkStudentId = ''; demoLinkMsg = '';
   wixLastCreatedStudentId = row.id;
   demoLogMsg = `✓ Student "${name}"${row.student_code ? ' (' + row.student_code + ')' : ''} created and linked. Marked Converted — bonus will appear in payroll.`; render();
 }
@@ -4094,7 +4092,7 @@ async function linkDemoToStudent(id) {
   if (error) { demoLinkMsg = 'Error: ' + error.message; render(); return; }
   if (dl) { dl.linkedStudentId = demoLinkStudentId; applyDemoConvert(dl); }
   const wb = await wixLinkDemo(dl, dl.linkedStudentId ? { status: 'Converted', converted_student_id: dl.linkedStudentId } : null);
-  demoLinkingId = ''; demoLinkStudentId = ''; demoLinkMsg = '';
+  demoLinkingId = ''; wixCardLinkingDemoId = ''; demoLinkStudentId = ''; demoLinkMsg = '';
   demoLogMsg = 'Linked student and marked Converted — ₹100 bonus will appear in payroll.' + (wb ? ' Wix booking updated.' : ''); render();
 }
 // Converting also records the demo as done (admins may skip straight from Pending) and clears any Lost reason.
@@ -4327,9 +4325,30 @@ function wixScheduleInDemoRegister(id) {
   render();
   setTimeout(() => { const el = document.getElementById('demo-register-heading'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 150);
 }
+// Demo Bookings uses the same Demo Register Link & Convert workflow. Resolve the
+// booking to one unambiguous, non-cancelled demo log before exposing that workflow.
+function wixDemoLogForBooking(b) {
+  if (!b) return null;
+  if (b.demoLogId) return data.demoLogs.find(d => d.id === b.demoLogId && d.status !== 'Cancelled') || null;
+  const ph = phoneKey(b.phone), nm = (b.studentName || '').trim().toLowerCase();
+  const matches = data.demoLogs.filter(d => d.status !== 'Cancelled' && !d.linkedStudentId
+    && (ph ? phoneKey(d.parentMobile) === ph : !!nm && (d.studentName || '').trim().toLowerCase() === nm));
+  return matches.length === 1 ? matches[0] : null;
+}
 function wixStartConvert(id) {
   const b = data.wixBookings.find(x => x.id === id); if (!b) return;
-  wixConvertingId = id; wixConvertDraft = { studentName: b.studentName, confirmed: false }; wixConvertMsg = ''; render();
+  const dl = wixDemoLogForBooking(b);
+  if (!dl) {
+    wixBookingsMsg = 'Cannot convert here: no unique, active Demo Register entry is linked to this booking. Link or create the correct demo entry in Demo Register first.';
+    render(); return;
+  }
+  wixCardLinkingDemoId = dl.id; demoLinkingId = ''; demoLinkStudentId = ''; demoLinkMsg = ''; demoLinkSearch = '';
+  render();
+}
+async function createAndLinkDemoFromWixCard(id) {
+  const dl = data.demoLogs.find(d => d.id === id);
+  if (!dl) { demoLinkMsg = 'Demo Register entry not found.'; render(); return; }
+  await createAndLinkDemo(id, dl.studentName || '');
 }
 async function cancelWixBooking(id) {
   const wb = data.wixBookings.find(x => x.id === id);
@@ -4547,28 +4566,6 @@ async function rescheduleWixBooking(id) {
   if (error) { wixBookingsMsg = 'Could not reschedule: ' + error.message; render(); return; }
   if (wb) { wb.status = 'New'; wb.demoLogId = null; wb.scheduledTeacherId = null; wb.scheduledDate = ''; wb.scheduledTime = ''; }
   wixBookingsMsg = 'Booking reset to New — schedule a fresh demo below.'; render();
-}
-async function convertWixToStudent(id) {
-  const name = (wixConvertDraft.studentName || '').trim();
-  if (!name) { wixConvertMsg = 'Name is required.'; render(); return; }
-  // Duplicate check
-  const dup = data.students.find(s => s.name.trim().toLowerCase() === name.toLowerCase() && !s.archived);
-  if (dup && !wixConvertDraft.confirmed) {
-    wixConvertMsg = `⚠ A student named "${dup.name}" already exists. Click Save again to create anyway.`;
-    wixConvertDraft.confirmed = true; render(); return;
-  }
-  wixConvertMsg = 'Creating student…'; render();
-  const { data: row, error } = await sb.from('students').insert({ name, archived: false }).select().single();
-  if (error) { wixConvertMsg = 'Error: ' + error.message; render(); return; }
-  data.students.push({ id: row.id, name: row.name, archived: false, code: row.student_code || '' });
-  // Link wix booking to new student
-  await sb.from('wix_demo_bookings').update({ converted_student_id: row.id }).eq('id', id);
-  const wb = data.wixBookings.find(b => b.id === id);
-  if (wb) wb.convertedStudentId = row.id;
-  wixConvertingId = null; wixConvertDraft = {};
-  wixLastCreatedStudentId = row.id;
-  wixConvertMsg = `✓ Student "${name}" created (${row.student_code || row.id}).`;
-  render();
 }
 async function saveWixBookingDetails(id) {
   const ed = wixBookingEditDraft;
@@ -16279,32 +16276,37 @@ function renderWixBookings() {
         </div>`;
     }
 
-    // Convert to Student block
-    const isConverting = wixConvertingId === b.id;
+    // Convert to Student uses the exact Demo Register Link & Convert handlers.
+    const bookingDemo = wixDemoLogForBooking(b);
+    const isLinkingDemo = !!bookingDemo && wixCardLinkingDemoId === bookingDemo.id;
     const alreadyConverted = !!b.convertedStudentId;
     const convertedStudent = alreadyConverted ? data.students.find(s => s.id === b.convertedStudentId) : null;
     let convertBlock = '';
     if (alreadyConverted) {
       convertBlock = `<div style="margin-top:8px;font-size:12px;color:var(--forest)">🎓 Student created: <b>${esc(convertedStudent ? convertedStudent.name : b.convertedStudentId)}</b></div>`;
     } else if (wixConvertedDemoFor(b)) {
-      convertBlock = ''; // the note above links the student who already joined; a new student would be a duplicate
+      convertBlock = ''; // The Demo Register conversion already exists; never create a duplicate student.
     } else if (['Converted', 'Scheduled', 'Done', 'Lost'].includes(b.status)) {
-      if (isConverting) {
+      if (isLinkingDemo) {
         convertBlock = `
           <div style="background:rgba(60,94,66,0.07);border:1px solid var(--green,#3c5e42);border-radius:6px;padding:10px;margin-top:10px">
-            <div style="font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--forest);margin-bottom:8px">CREATE STUDENT RECORD</div>
-            ${wixConvertMsg ? `<div style="font-size:12px;margin-bottom:8px;font-weight:500;color:${wixConvertMsg.startsWith('✓')?'var(--forest)':'var(--brick)'}">${esc(wixConvertMsg)}</div>` : ''}
-            <input type="text" placeholder="Student name" value="${escAttr(wixConvertDraft.studentName||b.studentName)}"
-              oninput="wixConvertDraft.studentName=this.value;wixConvertDraft.confirmed=false;wixConvertMsg=''"
-              style="width:100%;margin-bottom:8px">
-            <div style="font-size:11px;color:var(--muted);margin-bottom:8px">📞 ${esc(b.phone)||'—'} · ✉ ${esc(b.email)||'—'}</div>
-            <div class="row-form" style="gap:6px;margin:0">
-              <button class="btn-small btn-primary" onclick="convertWixToStudent('${b.id}')">🎓 Save & Create Student</button>
-              <button class="btn-small" onclick="wixConvertingId=null;wixConvertDraft={};wixConvertMsg='';render()">✕ Cancel</button>
+            <div style="font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--forest);margin-bottom:8px">LINK &amp; CONVERT — DEMO REGISTER</div>
+            <input type="text" placeholder="Search existing student…" value="${esc(demoLinkSearch)}" oninput="demoLinkSearchInput(this)" style="font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:4px;width:100%;margin-bottom:6px">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+              <select id="demoLinkSelect" onchange="demoLinkStudentId=this.value" style="font-size:12px;padding:4px;border:1px solid var(--line);border-radius:4px;max-width:100%">
+                ${demoLinkOptionsHtml()}
+              </select>
+              <button class="btn-small btn-primary" style="font-size:11px" onclick="linkDemoToStudent('${bookingDemo.id}')">Link &amp; Convert</button>
             </div>
+            <div style="font-size:11px;color:var(--muted);margin-top:7px">No student record yet?</div>
+            <button class="btn-small btn-primary" style="font-size:11px;background:var(--forest)" onclick="createAndLinkDemoFromWixCard('${bookingDemo.id}')">🎓 Create Student &amp; Convert</button>
+            <button class="btn-small" style="font-size:11px;margin-left:4px" onclick="wixCardLinkingDemoId='';demoLinkStudentId='';demoLinkSearch='';demoLinkMsg='';render()">✕ Cancel</button>
+            ${demoLinkMsg ? `<div style="font-size:11px;margin-top:6px;color:${demoLinkMsg.startsWith('✓')?'var(--forest)':'var(--brick)'}">${esc(demoLinkMsg)}</div>` : ''}
           </div>`;
-      } else {
+      } else if (bookingDemo) {
         convertBlock = `<div style="margin-top:8px"><button class="btn-small btn-primary" style="background:var(--forest)" onclick="wixStartConvert('${b.id}')">🎓 Convert to Student</button></div>`;
+      } else {
+        convertBlock = `<div class="hint" style="font-size:11px;margin-top:8px">Cannot convert: no unique active Demo Register entry is linked to this booking. Link or create the correct demo entry in Demo Register first.</div>`;
       }
     }
 
@@ -16342,7 +16344,6 @@ function renderWixBookings() {
       <p class="hint" style="margin:0 0 12px">Paid demo bookings from the LIB Education website. Call the student, then schedule a teacher and time.</p>
       ${manualDemoFormHtml()}
       ${wixBookingsMsg ? `<div style="margin-bottom:10px;font-size:13px;font-weight:500;${wixBookingsMsg.includes('✓') ? 'color:var(--forest)' : 'color:var(--brick)'}">${esc(wixBookingsMsg)}</div>` : ''}
-      ${wixConvertMsg && !wixConvertingId ? `<div style="margin-bottom:10px;font-size:13px;font-weight:500;${wixConvertMsg.startsWith('✓') ? 'color:var(--forest)' : 'color:var(--brick)'}">${esc(wixConvertMsg)}${wixConvertMsg.startsWith('✓') && wixLastCreatedStudentId ? ` <button class="btn-small btn-primary" style="font-size:12px;margin-left:8px" onclick="setTab('students');selectStudent('${wixLastCreatedStudentId}');wixConvertMsg='';wixLastCreatedStudentId='';render()">→ Open student record</button>` : ''}</div>` : ''}
       <div class="row-form" style="gap:6px;flex-wrap:wrap;margin-bottom:14px">
         ${filters.map(f => { const cnt = data.wixBookings.filter(b => wixFilterMatch(b, f)).length; return `<button class="btn-small ${wixBookingsFilter===f?'btn-primary':''}" onclick="wixBookingsFilter='${f}';wixBookingsMsg='';wixBookingActionId=null;wixBookingEditId=null;render()">${f}${cnt > 0 ? ` (${cnt})` : ''}</button>`; }).join('')}
         ${wixPaidReady ? `<select onchange="wixPaidFilter=this.value;render()" style="font-size:12px">${['All', 'Paid', 'Not paid'].map(f => `<option value="${f}" ${wixPaidFilter === f ? 'selected' : ''}>${f === 'All' ? 'Paid or not' : f}</option>`).join('')}</select>` : ''}
@@ -16402,7 +16403,7 @@ function renderWixBookings() {
             const tName = teacherLabel(data.teachers.find(t=>t.id===d.teacherId)||{name:'?',code:''});
             const sName = d.linkedStudentId ? (data.students.find(s=>s.id===d.linkedStudentId)||{name:'?'}).name : '—';
             const statusBadge = demoStatusBadge(d, true);
-            const linkSection = demoLinkingId===d.id
+            const linkSection = wixCardLinkingDemoId===d.id ? '<span class="hint">Link &amp; Convert is open on the Demo Bookings card.</span>' : demoLinkingId===d.id
               ? '<div style="display:flex;flex-direction:column;gap:4px">'
                 + '<input type="text" placeholder="Search existing student…" value="'+esc(demoLinkSearch)+'" oninput="demoLinkSearchInput(this)" style="font-size:12px;padding:2px 6px;border:1px solid var(--line);border-radius:4px;width:180px">'
                 + '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">'
