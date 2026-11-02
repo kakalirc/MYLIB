@@ -542,7 +542,7 @@ const APP_VERSION = '2026.10';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-02 10:25 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-11-02 11:22 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -585,6 +585,11 @@ let setupSubTab = 'teachers';
 let frequencyRows = [];
 let frequencyLoading = false;
 let frequencyLoadError = '';
+// Attendance history is loaded specifically for Admin Class Frequency suggestions.
+let frequencyAttendanceRows = [];
+let frequencyAttendanceLoading = false;
+let frequencyAttendanceLoadError = '';
+let frequencySuggestionContext = null;
 let frequencyMsg = '';
 let frequencyStudentId = '';
 let frequencySubjectId = '';
@@ -2158,6 +2163,18 @@ function setTeacherPortalTab(t) {
   teacherPortalTab = t;
   if (t === 'dashboard' || t === 'pendingactions') { loadClassFrequencyRows().then(() => render()); loadTeacherPendingExtras(true); }
   if (t === 'frequency') { frequencyMsg = ''; loadClassFrequencyRows().then(() => render()); }
+  if (t === 'myfrequency') {
+    teacherMyFrequencyLoading = true;
+    teacherMyFrequencyError = '';
+    Promise.all([loadClassFrequencyRows(), loadScheduledClasses()]).then(() => {
+      teacherMyFrequencyLoading = false;
+      if (teacherPortalTab === 'myfrequency') render();
+    }).catch(e => {
+      teacherMyFrequencyLoading = false;
+      teacherMyFrequencyError = (e && e.message) ? e.message : 'Could not load your timetable.';
+      if (teacherPortalTab === 'myfrequency') render();
+    });
+  }
   trackUse('tab:' + t, true);
   teacherMobileTabMenuOpen = false;
   if (t === 'students') teacherStudentSearch = '';
@@ -14132,7 +14149,7 @@ function exportTeacherRegister() {
 function setSetupSubTab(tab) {
   setupSubTab = tab === 'frequency' ? 'frequency' : 'teachers';
   frequencyMsg = '';
-  if (setupSubTab === 'frequency') loadClassFrequencyRows().then(() => render());
+  if (setupSubTab === 'frequency') refreshFrequencySetupData().then(() => render());
   else render();
 }
 function frequencyCountTotal(row) {
@@ -14178,6 +14195,168 @@ async function loadClassFrequencyRows() {
     frequencyLoading = false;
   }
 }
+
+// Fetch only the fields needed for attendance-based recommendations. This is a read-only
+// analysis of the existing sessions table; it does not write attendance or frequency data.
+async function loadFrequencyAttendanceHistory() {
+  frequencyAttendanceLoading = true;
+  frequencyAttendanceLoadError = '';
+  try {
+    const { data: rows, error } = await selectAllPaged(
+      'sessions', ['date'], 'id,date,student_id,subject_id,class_type,status,count'
+    );
+    if (error) throw error;
+    frequencyAttendanceRows = rows || [];
+  } catch (e) {
+    frequencyAttendanceRows = [];
+    frequencyAttendanceLoadError = (e && e.message) ? e.message : 'Could not load attendance history.';
+  } finally {
+    frequencyAttendanceLoading = false;
+  }
+}
+async function refreshFrequencySetupData() {
+  await Promise.all([loadClassFrequencyRows(), loadFrequencyAttendanceHistory()]);
+}
+function frequencySuggestionDateWindow() {
+  const parts = String(todayStr).slice(0, 7).split('-').map(Number);
+  const year = parts[0], month = parts[1]; // month is 1-based
+  const start = new Date(Date.UTC(year, month - 4, 1)); // first day, three completed months before current month
+  const currentMonthStart = Date.UTC(year, month - 1, 1);
+  const end = new Date(currentMonthStart - 86400000); // final day of previous month
+  return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+}
+function frequencySuggestionDateLabel(value) {
+  if (!value) return '—';
+  const parts = String(value).split('-').map(Number);
+  if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) return String(value);
+  return new Date(Date.UTC(parts[0], parts[1] - 1, parts[2])).toLocaleDateString('en-IN', {
+    timeZone: 'UTC', day: '2-digit', month: 'short', year: 'numeric'
+  });
+}
+function frequencyWeekStart(dateValue) {
+  const parts = String(dateValue).split('-').map(Number);
+  const d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+  const offsetFromMonday = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - offsetFromMonday);
+  return d.toISOString().slice(0, 10);
+}
+function buildFrequencyAttendanceIndex() {
+  const index = new Map();
+  (frequencyAttendanceRows || []).forEach(row => {
+    const status = String(row.status || '').toLowerCase();
+    if (status !== 'present' && status !== 'absent') return;
+    const typeText = String(row.class_type || '').toLowerCase();
+    const classType = typeText === 'group' ? 'Group' : typeText === 'individual' ? 'Individual' : '';
+    const date = String(row.date || '').slice(0, 10);
+    const count = Number(row.count);
+    if (!classType || !/^\d{4}-\d{2}-\d{2}$/.test(date) || date > todayStr || !Number.isFinite(count) || count <= 0) return;
+    const key = String(row.student_id || '') + '|' + String(row.subject_id || '');
+    if (!index.has(key)) index.set(key, []);
+    index.get(key).push({ date, classType, status, count });
+  });
+  return index;
+}
+function analyseFrequencyAttendance(studentId, subjectId, attendanceIndex) {
+  const key = String(studentId || '') + '|' + String(subjectId || '');
+  const allRows = (attendanceIndex && attendanceIndex.get(key)) || [];
+  if (!allRows.length) return { hasRecords: false, types: [], usedFallback: false };
+  const window = frequencySuggestionDateWindow();
+  const recentRows = allRows.filter(r => r.date >= window.start && r.date <= window.end);
+  // If there are no records in the preferred three completed months, transparently fall back
+  // to the student's available historical records instead of silently fabricating a pattern.
+  const rows = recentRows.length ? recentRows : allRows;
+  const usedFallback = recentRows.length === 0;
+  const types = ['Group', 'Individual'].map(classType => {
+    const typeRows = rows.filter(r => r.classType === classType);
+    if (!typeRows.length) return null;
+    const sortedDates = typeRows.map(r => r.date).sort();
+    const firstDate = sortedDates[0], lastDate = sortedDates[sortedDates.length - 1];
+    const weekStarts = [...new Set(typeRows.map(r => frequencyWeekStart(r.date)))].sort();
+    const firstWeekMs = Date.parse(weekStarts[0] + 'T00:00:00Z');
+    const lastWeekMs = Date.parse(weekStarts[weekStarts.length - 1] + 'T00:00:00Z');
+    const weeksCovered = Math.max(1, Math.floor((lastWeekMs - firstWeekMs) / 604800000) + 1);
+    const classesTotal = typeRows.reduce((sum, r) => sum + r.count, 0);
+    const attendanceWeeks = weekStarts.length;
+    const totalsByDay = Object.fromEntries(FREQUENCY_DAYS.map(([key]) => [key, 0]));
+    typeRows.forEach(r => {
+      const parts = r.date.split('-').map(Number);
+      const weekday = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2])).getUTCDay();
+      const dayIndex = (weekday + 6) % 7; // Monday through Sunday
+      const dayKey = FREQUENCY_DAYS[dayIndex][0];
+      totalsByDay[dayKey] += r.count;
+    });
+    const suggestedCounts = Object.fromEntries(FREQUENCY_DAYS.map(([key]) => {
+      const averagePerWeek = totalsByDay[key] / weeksCovered;
+      // The frequency table stores whole classes per weekday. Round the observed weekly average
+      // to the nearest whole class; averages below 0.5 do not establish a recurring weekday.
+      return [key, averagePerWeek >= 0.5 ? Math.round(averagePerWeek) : 0];
+    }));
+    const suggestedTotal = FREQUENCY_DAYS.reduce((sum, [key]) => sum + suggestedCounts[key], 0);
+    const reliable = attendanceWeeks >= 4 && suggestedTotal > 0;
+    return {
+      classType, firstDate, lastDate, entries: typeRows.length, classesTotal,
+      attendanceWeeks, weeksCovered, suggestedCounts, suggestedTotal, reliable
+    };
+  }).filter(Boolean);
+  return {
+    hasRecords: true, types, usedFallback, windowStart: window.start, windowEnd: window.end,
+    rowsUsed: rows.length
+  };
+}
+function frequencySuggestionPattern(result) {
+  if (!result || !result.reliable) return 'No reliable weekly pattern';
+  return FREQUENCY_DAYS.filter(([key]) => Number(result.suggestedCounts[key]) > 0)
+    .map(([key, label]) => label.slice(0, 3) + ' ' + result.suggestedCounts[key]).join(', ');
+}
+function useFrequencyAttendanceSuggestion(studentId, subjectId, classType) {
+  const analysis = analyseFrequencyAttendance(studentId, subjectId, buildFrequencyAttendanceIndex());
+  const result = analysis.types.find(t => t.classType === classType && t.reliable);
+  if (!result) {
+    frequencyMsg = 'There is not enough attendance history to make a reliable suggestion for this class type.';
+    render();
+    return;
+  }
+  frequencyEditStudentId = studentId;
+  frequencyEditSubjectId = subjectId;
+  frequencyDraft = Object.fromEntries(FREQUENCY_DAYS.map(([key]) => [key, Number(result.suggestedCounts[key]) || 0]));
+  frequencySuggestionContext = {
+    studentId, subjectId, classType, firstDate: result.firstDate, lastDate: result.lastDate,
+    entries: result.entries, classesTotal: result.classesTotal,
+    attendanceWeeks: result.attendanceWeeks, weeksCovered: result.weeksCovered,
+    usedFallback: analysis.usedFallback
+  };
+  frequencyEditorOpen = true;
+  frequencyConfirmPending = false;
+  frequencyNewPickerOpen = false;
+  frequencyMsg = 'Suggested values have been prefilled from this student’s own ' + classType + ' attendance. Review them before saving.';
+  render();
+}
+function renderFrequencyAttendanceSuggestionCell(pair, attendanceIndex) {
+  if (pair.saved) return '<span class="hint">—</span>';
+  if (frequencyAttendanceLoading) return '<span class="hint">Loading attendance…</span>';
+  if (frequencyAttendanceLoadError) return '<span class="hint" style="color:var(--brick)">Attendance history unavailable</span>';
+  const analysis = analyseFrequencyAttendance(pair.student.id, pair.subject.id, attendanceIndex);
+  if (!analysis.hasRecords) return '<span class="hint">No attendance history found</span>';
+  const rangeLabel = analysis.usedFallback
+    ? 'No records in the preferred three-month window; older available history used.'
+    : 'Preferred three-month window used.';
+  const typeHtml = analysis.types.map(result => {
+    const pattern = result.reliable ? frequencySuggestionPattern(result) : 'Not enough data for a reliable suggestion';
+    const evidence = `${result.entries} attendance entries · ${fmtN(result.classesTotal)} classes · ${result.attendanceWeeks} attendance weeks`;
+    const period = `${frequencySuggestionDateLabel(result.firstDate)} – ${frequencySuggestionDateLabel(result.lastDate)}`;
+    return `<div style="padding:6px 0;border-top:1px solid var(--line)">
+      <div><b>${esc(result.classType)}:</b> ${esc(pattern)}</div>
+      <div class="hint" style="font-size:11px">${esc(evidence)} · ${esc(period)}</div>
+      ${result.reliable ? `<button class="btn-small" style="margin-top:4px" onclick="useFrequencyAttendanceSuggestion('${pair.student.id}','${pair.subject.id}','${result.classType}')">Use ${esc(result.classType)} suggestion</button>` : `<div class="hint" style="font-size:11px">At least 4 different attendance weeks are required.</div>`}
+    </div>`;
+  }).join('');
+  const multipleTypes = analysis.types.length > 1;
+  return `<div style="min-width:265px;max-width:380px">
+    <div class="hint" style="font-size:11px;margin-bottom:4px">${esc(rangeLabel)} Present and Absent are both counted.</div>
+    ${multipleTypes ? `<div class="hint" style="font-size:11px;color:var(--brick)">Both class types are present. Patterns are kept separate; the stored frequency is one pattern per student and subject. Choose which pattern to prefill.</div>` : ''}
+    ${typeHtml || '<span class="hint">No usable Group or Individual attendance found.</span>'}
+  </div>`;
+}
 function setFrequencyFilter(key, value) {
   if (key === 'search') frequencySearch = value;
   if (key === 'subject') frequencyFilterSubjectId = value;
@@ -14192,6 +14371,7 @@ function setFrequencyFilter(key, value) {
 function startFrequencyEditor(studentId, subjectId) {
   frequencyEditStudentId = studentId;
   frequencyEditSubjectId = subjectId;
+  frequencySuggestionContext = null;
   const saved = frequencyRowFor(studentId, subjectId);
   frequencyDraft = Object.fromEntries(FREQUENCY_DAYS.map(([key]) => [key, saved ? Math.max(0, Number(saved[key]) || 0) : 0]));
   frequencyEditorOpen = true;
@@ -14203,6 +14383,7 @@ function startFrequencyEditor(studentId, subjectId) {
 function closeFrequencyEditor() {
   frequencyEditorOpen = false;
   frequencyConfirmPending = false;
+  frequencySuggestionContext = null;
   frequencyEditStudentId = '';
   frequencyEditSubjectId = '';
   frequencyMsg = '';
@@ -14280,6 +14461,7 @@ function renderFrequencyEditor(teacherId) {
       <h2>${frequencyRowFor(student.id, subject.id) ? 'Edit' : 'Set'} Class Frequency</h2>
       <div class="hint">Student: <b>${esc(studentLabel(student))}</b> · Subject: <b>${esc(subject.name)}</b> · Teacher: <b>${esc(teacherName(subject.teacherId))}</b></div>
       <div class="hint" style="margin:8px 0 12px">Each class is 60 minutes. These settings save the weekly frequency only; they do not create or modify scheduled classes.</div>
+      ${frequencySuggestionContext && frequencySuggestionContext.studentId===student.id && frequencySuggestionContext.subjectId===subject.id ? `<div class="hint" style="border:1px solid var(--forest);padding:9px;margin-bottom:10px"><b>Prefilled from the student's own ${esc(frequencySuggestionContext.classType)} attendance.</b><br>Period: ${esc(frequencySuggestionDateLabel(frequencySuggestionContext.firstDate))} – ${esc(frequencySuggestionDateLabel(frequencySuggestionContext.lastDate))} · ${frequencySuggestionContext.entries} attendance entries · ${fmtN(frequencySuggestionContext.classesTotal)} classes across ${frequencySuggestionContext.attendanceWeeks} attendance weeks.${frequencySuggestionContext.usedFallback ? '<br>Older available history was used because the preferred three-month window had no records.' : ''}<br>Both Present and Absent records were included. Please review before saving.</div>` : ''}
       <div class="table-scroll"><table>
         <tr><th>Weekday</th><th>Include</th><th>Classes on this day</th></tr>
         ${FREQUENCY_DAYS.map(([key,label]) => {
@@ -14304,6 +14486,7 @@ function renderFrequencyEditor(teacherId) {
 function renderClassFrequencyAdmin() {
   const subjects = byName(data.subjects.filter(s => !s.archived));
   const teachers = byName(data.teachers.filter(t => !t.archived));
+  const attendanceIndex = buildFrequencyAttendanceIndex();
   const pairs = [];
   data.students.filter(s => !s.archived).forEach(student => {
     uniqueSubjectsForStudentFrequency(student.id).forEach(subject => {
@@ -14346,14 +14529,18 @@ function renderClassFrequencyAdmin() {
       <div class="stat" style="flex:1;min-width:180px"><div class="stat-label">Configured</div><div class="stat-value">${totalConfigured}</div></div>
       <div class="stat" style="flex:1;min-width:180px"><div class="stat-label">Not configured</div><div class="stat-value">${pairs.length-totalConfigured}</div></div>
     </div>`;
+  const suggestionWindow = frequencySuggestionDateWindow();
   return setupTabsHtml + frequencyDashboardHtml + `
     <div class="card">
       <h2>Class Frequency ${helpBtn('class-frequency')}</h2>
       <div class="hint">Configure weekly class counts for each enrolled student and subject. Every class is 60 minutes. This feature does not change scheduled classes.</div>
+      <div class="hint" style="margin-top:6px">For students whose frequency is not configured, suggestions are calculated from their own attendance for the last three completed calendar months (${esc(frequencySuggestionDateLabel(suggestionWindow.start))} – ${esc(frequencySuggestionDateLabel(suggestionWindow.end))}. If that period has no attendance records, older available history is used. Both Present and Absent records count. Suggested weekday counts use the average classes per calendar week between the first and last attendance record, rounded to a whole class. At least four different attendance weeks are required for a reliable suggestion.</div>
       <div class="row-form" style="margin-top:10px">
         <button class="btn-primary" onclick="startNewFrequencyAdmin()">+ New Frequency</button>
-        <button class="btn-small" onclick="loadClassFrequencyRows().then(()=>render())">↻ Refresh</button>
+        <button class="btn-small" onclick="refreshFrequencySetupData().then(()=>render())">↻ Refresh frequency &amp; attendance</button>
       </div>
+      ${frequencyAttendanceLoading ? '<div class="empty">Loading student attendance history for suggestions…</div>' : ''}
+      ${frequencyAttendanceLoadError ? `<div class="hint" style="color:var(--brick)">Could not load attendance history for suggestions: ${esc(frequencyAttendanceLoadError)}. The frequency records can still be edited, but attendance-based suggestions are unavailable.</div>` : ''}
       ${newPairHtml}
       ${frequencyEditorOpen && !frequencyFiltersApplied ? renderFrequencyEditor('') : ''}
       <h3>Filters</h3>
@@ -14381,7 +14568,7 @@ function renderClassFrequencyAdmin() {
       ${frequencyLoadError ? `<div class="hint" style="color:var(--brick)">Could not load Class Frequency: ${esc(frequencyLoadError)}. Check the table name, columns and RLS policies.</div>` : ''}
       ${frequencyMsg ? `<div class="hint" style="color:${frequencyMsg.startsWith('Could not')?'var(--brick)':'var(--forest)'}">${esc(frequencyMsg)}</div>` : ''}
       <div class="table-scroll"><table>
-        <tr><th>Student</th><th>Subject</th><th>Teacher</th><th>Weekly pattern</th><th>Total/week</th><th>Status</th><th>Action</th></tr>
+        <tr><th>Student</th><th>Subject</th><th>Teacher</th><th>Weekly pattern</th><th>Total/week</th><th>Status</th><th style="min-width:290px">Attendance-based suggestion</th><th>Action</th></tr>
         ${frequencyFiltersApplied ? filtered.map(p=>{
           const total = p.saved ? frequencyCountTotal(p.saved) : 0;
           const pattern = p.saved ? FREQUENCY_DAYS.filter(([key])=>Number(p.saved[key])>0).map(([key,label])=>`${label.slice(0,3)} ${p.saved[key]}`).join(', ') : '';
@@ -14390,12 +14577,13 @@ function renderClassFrequencyAdmin() {
             <td>${esc(studentLabel(p.student))}</td><td>${esc(p.subject.name)}</td><td>${esc(p.teacher.name)}</td>
             <td>${p.saved ? esc(pattern||'0 classes') : '<span class="hint">—</span>'}</td><td>${p.saved?total:'—'}</td>
             <td><span class="tag ${p.saved?'':'absent'}">${p.saved?'Configured':'Not configured'}</span></td>
+            <td>${renderFrequencyAttendanceSuggestionCell(p, attendanceIndex)}</td>
             <td><button class="btn-small ${p.saved?'':'btn-primary'}" onclick="startFrequencyEditor('${p.student.id}','${p.subject.id}')">${p.saved?'Edit':'Set up'}</button></td>
           </tr>
-          ${isOpen ? `<tr><td colspan="7">${renderFrequencyEditor('')}</td></tr>` : ''}`;
+          ${isOpen ? `<tr><td colspan="8">${renderFrequencyEditor('')}</td></tr>` : ''}`;
         }).join('') : ''}
-        ${frequencyFiltersApplied && !filtered.length ? `<tr><td colspan="7"><div class="empty">No student–subject pairs match these filters.</div></td></tr>` : ''}
-        ${!frequencyFiltersApplied ? `<tr><td colspan="7"><div class="empty">Set your filters above and click Apply Filters to view student–subject records.</div></td></tr>` : ''}
+        ${frequencyFiltersApplied && !filtered.length ? `<tr><td colspan="8"><div class="empty">No student–subject pairs match these filters.</div></td></tr>` : ''}
+        ${!frequencyFiltersApplied ? `<tr><td colspan="8"><div class="empty">Set your filters above and click Apply Filters to view student–subject records.</div></td></tr>` : ''}
       </table></div>
     </div>`;
 }
@@ -14406,7 +14594,7 @@ function resetFrequencyFilters() {
   render();
 }
 function startNewFrequencyAdmin() {
-  frequencyEditStudentId=''; frequencyEditSubjectId=''; frequencyEditorOpen=false; frequencyMsg='';
+  frequencyEditStudentId=''; frequencyEditSubjectId=''; frequencyEditorOpen=false; frequencySuggestionContext=null; frequencyMsg='';
   frequencyStudentId=''; frequencySubjectId=''; frequencyNewStudentSearch=''; frequencyNewPickerOpen=true;
   render();
 }
@@ -14426,7 +14614,7 @@ function renderClassFrequencyTeacher(teacher) {
   });
   return `
     <div class="card">
-      <h2>Class Frequency ${helpBtn('class-frequency-teacher')}</h2>
+      <h2>Class Frequency Setup ${helpBtn('class-frequency-teacher')}</h2>
       <div class="hint">Only students and subjects assigned to you are shown. Each class is 60 minutes. Weekly frequency settings do not change scheduled classes.</div>
       <div class="row-form">
         <select aria-label="Filter by student" onchange="setFrequencyFilter('student',this.value)"><option value="">All my students</option>${byName([...new Map(pairs.map(p=>[p.student.id,p.student])).values()]).map(st=>`<option value="${st.id}" ${frequencyFilterStudentId===st.id?'selected':''}>${esc(studentLabel(st))}</option>`).join('')}</select>
@@ -20908,7 +21096,7 @@ function renderTeacherDashboard(teacher) {
         ${expiring.map(r => `<tr><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${fmtN(r.unused)}</td><td>${esc(dayDate(r.expiresOn))}</td><td style="color:var(--brick)">${r.daysLeft}</td></tr>`).join('')}
       </table></div>
     </div>` : '';
-  // Pending Action Items: timing review and today's classes are separate, independently hideable sections.
+  // Pending Action Items keeps timing review and other action items here; the full Today's Classes table is shown on Dashboard.
   const needsReviewClasses = scheduledClasses.filter(function(sc){return sc.teacherId===teacher.id && isProvisionalScheduleTime(sc) && sc.status!=='Done' && sc.date>=todayStr;}).sort(function(a,b){return a.date===b.date?(a.time||'').localeCompare(b.time||''):a.date.localeCompare(b.date);});
   const timingReviewHtml = needsReviewClasses.length ? '<div class="card" style="border-left:4px solid var(--gold);background:var(--soft)"><h2 style="margin-top:0">⚠ Please Review and Correct Class Timings</h2><div class="hint">Some class timings are provisional after the pending-class rebuild. Please review and correct these times before conducting the classes. Batch classes may show 00:00; Individual classes may show 01:00 or 02:00. Use Edit in Today’s Classes for today’s lessons, or open Class Schedule to correct upcoming lessons. This notice remains while classes still have the agreed placeholder times. Corrected times no longer appear on this list.</div><div class="hint"><b>Timings awaiting review:</b> '+needsReviewClasses.length+' · Next: '+esc(dayDate(needsReviewClasses[0].date))+' '+esc(needsReviewClasses[0].time||'—')+' · '+esc(studentNameWithCode(needsReviewClasses[0].studentId))+'</div></div>' : '';
   const todaySchedHtml = (function(){
@@ -20994,7 +21182,7 @@ function renderTeacherDashboard(teacher) {
     const scStudent = sc => esc(studentNameWithCode(sc.studentId));
     const scSubject = sc => sc.subjectId ? esc(subjectName(sc.subjectId)) : '—';
     const act = [];
-    if (todaySchedHtml) act.push('<div id="pendToday">' + (p.todayDue.length ? '<div class="hint" style="margin:0 0 6px 4px"><b>' + p.todayDue.length + ' class' + (p.todayDue.length === 1 ? '' : 'es') + ' today</b> already past ' + (p.todayDue.length === 1 ? 'its' : 'their') + ' time and still Pending. <a href="#" onclick="setTeacherPortalTab(\'attendance\');return false">Give attendance</a></div>' : '') + todaySchedHtml + '</div>');
+    if (p.todayDue.length) act.push('<div id="pendToday"><div class="hint" style="margin:0 0 6px 4px"><b>' + p.todayDue.length + ' class' + (p.todayDue.length === 1 ? '' : 'es') + ' today</b> already past ' + (p.todayDue.length === 1 ? 'its' : 'their') + ' time and still Pending. <a href="#" onclick="setTeacherPortalTab(\'attendance\');return false">Give attendance</a></div></div>');
     if (timingReviewHtml) act.push('<div id="pendTimings">' + timingReviewHtml + '</div>');
     const setupHtml = teacherScheduleSetupHtml(teacher);
     if (setupHtml) act.push('<div id="pendSetup">' + setupHtml + '</div>');
@@ -21054,6 +21242,7 @@ function renderTeacherDashboard(teacher) {
   }
 
   return `
+    ${todaySchedHtml}
     ${teacherPendingBannerHtml(pend)}
     ${starSafe(() => starDashLineHtml(teacher), 'dashboard')}
     ${celebHtml}
@@ -21305,6 +21494,152 @@ function aiTeacherMonthCardHtml(teacher) {
   h+='</div>';
   return h;
 }
+
+// ===== Teacher: My Students Class Frequency =====
+// Read-only view of the teacher's saved recurring frequency and actual dated schedule.
+// It does not edit student_subject_frequency or scheduled_classes.
+let teacherMyFrequencyView = 'weekly';
+let teacherMyFrequencyLoading = false;
+let teacherMyFrequencyError = '';
+
+function teacherMyFrequencyDateOffset(offset) {
+  const parts = String(todayStr).split('-').map(Number);
+  const d = new Date(parts[0], parts[1] - 1, parts[2] + offset);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function teacherMyFrequencyDateLabel(dateValue) {
+  if (!dateValue) return '—';
+  const d = new Date(String(dateValue).slice(0, 10) + 'T00:00:00');
+  if (Number.isNaN(d.getTime())) return String(dateValue);
+  return d.toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'short' });
+}
+function teacherMyFrequencyWeeklyEntries(teacher) {
+  const byDay = FREQUENCY_DAYS.map(([key, label], dayIndex) => ({ key, label, entries: [] }));
+  const unconfigured = [];
+  const pairs = frequencyEligiblePairs(teacher.id);
+  pairs.forEach(pair => {
+    const fr = frequencyRowFor(pair.student.id, pair.subject.id);
+    if (!fr || frequencyCountTotal(fr) <= 0) {
+      unconfigured.push({ ...pair, reason: 'Class Frequency not configured' });
+      return;
+    }
+    const savedByType = fr.weekly_times && typeof fr.weekly_times === 'object' ? fr.weekly_times : {};
+    // Match the existing weekly schedule setup: show only class types with a subscription.
+    // Weekly timings are read from the type-specific weekly_times array, never used to invent a type.
+    const classTypes = TYPES.filter(type => studentSubscribed(pair.student.id, pair.subject.id, type) > 0);
+    if (!classTypes.length) {
+      unconfigured.push({ ...pair, reason: 'No Group or Individual subscription found' });
+      return;
+    }
+
+    FREQUENCY_DAYS.forEach(([dayKey, dayLabel], dayIndex) => {
+      const count = Math.max(0, Number(fr[dayKey]) || 0);
+      if (!count) return;
+      const weekdayNumber = [1, 2, 3, 4, 5, 6, 0][dayIndex];
+      classTypes.forEach(classType => {
+        const savedTimes = classType === 'Type not specified' ? [] : (Array.isArray(savedByType[classType]) ? savedByType[classType] : []);
+        for (let occurrence = 1; occurrence <= count; occurrence++) {
+          const timing = savedTimes.find(item => String(item.weekday) === String(weekdayNumber) && (Number(item.occurrence) || 1) === occurrence);
+          const time = timing && String(timing.time || '').slice(0, 5);
+          let timingLabel = 'Time not configured';
+          let sortTime = '99:99';
+          if (time && isProvisionalScheduleTime({ classType, time, status: 'Pending' })) {
+            timingLabel = 'Timing needs correction';
+          } else if (time) {
+            timingLabel = time;
+            sortTime = time;
+          }
+          byDay[dayIndex].entries.push({
+            student: pair.student,
+            subject: pair.subject,
+            classType,
+            occurrence,
+            count,
+            timingLabel,
+            sortTime
+          });
+        }
+      });
+    });
+  });
+  byDay.forEach(day => day.entries.sort((a, b) => a.sortTime.localeCompare(b.sortTime)
+    || studentLabel(a.student).localeCompare(studentLabel(b.student))
+    || String(a.subject.name || '').localeCompare(String(b.subject.name || ''))));
+  unconfigured.sort((a, b) => studentLabel(a.student).localeCompare(studentLabel(b.student))
+    || String(a.subject.name || '').localeCompare(String(b.subject.name || '')));
+  return { byDay, unconfigured };
+}
+function setTeacherMyFrequencyView(view) {
+  teacherMyFrequencyView = view === 'upcoming' ? 'upcoming' : 'weekly';
+  render();
+}
+async function refreshTeacherMyFrequency() {
+  teacherMyFrequencyLoading = true;
+  teacherMyFrequencyError = '';
+  render();
+  try {
+    await Promise.all([loadClassFrequencyRows(), loadScheduledClasses()]);
+  } catch (e) {
+    teacherMyFrequencyError = (e && e.message) ? e.message : 'Could not refresh the timetable.';
+  } finally {
+    teacherMyFrequencyLoading = false;
+    if (teacherPortalTab === 'myfrequency') render();
+  }
+}
+function renderTeacherMyStudentsClassFrequency(teacher) {
+  const viewToggle = `<div class="row-form" style="margin:0 0 14px;gap:8px;flex-wrap:wrap">
+    <button class="${teacherMyFrequencyView === 'weekly' ? 'btn-primary' : 'btn-small'}" onclick="setTeacherMyFrequencyView('weekly')">Weekly Pattern</button>
+    <button class="${teacherMyFrequencyView === 'upcoming' ? 'btn-primary' : 'btn-small'}" onclick="setTeacherMyFrequencyView('upcoming')">Next 7 Days</button>
+    <button class="btn-small" onclick="refreshTeacherMyFrequency()">↻ Refresh</button>
+  </div>`;
+  if (teacherMyFrequencyLoading) return `<div class="card"><h2>My Students Class Frequency</h2>${viewToggle}<div class="empty">Loading your class frequency and schedule…</div></div>`;
+  if (frequencyLoadError || teacherMyFrequencyError) return `<div class="card"><h2>My Students Class Frequency</h2>${viewToggle}<div class="hint" style="color:var(--brick)">${esc(frequencyLoadError || teacherMyFrequencyError)}</div></div>`;
+
+  if (teacherMyFrequencyView === 'upcoming') {
+    const endDate = teacherMyFrequencyDateOffset(6);
+    const rows = scheduledClasses.filter(sc => sc.teacherId === teacher.id && sc.date >= todayStr && sc.date <= endDate && sc.status !== 'Cancelled')
+      .sort((a, b) => a.date.localeCompare(b.date) || String(a.time || '').localeCompare(String(b.time || ''))
+        || studentNameWithCode(a.studentId).localeCompare(studentNameWithCode(b.studentId)));
+    const groups = new Map();
+    rows.forEach(sc => { if (!groups.has(sc.date)) groups.set(sc.date, []); groups.get(sc.date).push(sc); });
+    const groupHtml = Array.from(groups.entries()).map(([date, dayRows]) => {
+      const dayCards = dayRows.map(sc => {
+        const provisional = isProvisionalScheduleTime(sc);
+        const timeText = provisional ? 'Timing needs correction' : (sc.time || 'Time not configured');
+        const statusClass = sc.status === 'Done' ? 'tag' : sc.status === 'Missed' ? 'tag absent' : 'tag';
+        const statusStyle = sc.status === 'Done' ? 'background:var(--forest);color:#fff' : sc.status === 'Pending' ? 'background:var(--soft);color:var(--ink)' : '';
+        return `<div style="display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);flex-wrap:wrap">
+          <div style="min-width:110px;font-weight:700">${esc(timeText)}</div>
+          <div style="flex:1;min-width:160px"><b>${esc(studentNameWithCode(sc.studentId))}</b><div class="hint">${esc(sc.subjectId ? subjectName(sc.subjectId) : 'Subject not set')} · ${esc(sc.classType || 'Type not set')}</div></div>
+          <span class="${statusClass}" ${statusStyle ? `style="${statusStyle}"` : ''}>${esc(sc.status || 'Unknown')}</span>
+        </div>`;
+      }).join('');
+      return `<div class="card" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3 style="margin:0">${esc(teacherMyFrequencyDateLabel(date))}</h3><span class="tag">${dayRows.length} class${dayRows.length === 1 ? '' : 'es'}</span></div>${dayCards}</div>`;
+    }).join('');
+    return `<div class="card"><h2>My Students Class Frequency</h2><div class="hint">Actual scheduled classes from today through the next 6 days. Rescheduled dates and current class statuses are shown.</div>${viewToggle}
+      ${rows.length ? `<div class="stat-grid" style="margin-bottom:12px"><div class="stat-card"><div class="num">${rows.length}</div><div class="label">Scheduled classes</div></div><div class="stat-card"><div class="num">${new Set(rows.map(r => r.studentId)).size}</div><div class="label">Students</div></div></div>${groupHtml}` : '<div class="empty">No classes are scheduled in the next 7 days.</div>'}
+    </div>`;
+  }
+
+  const weekly = teacherMyFrequencyWeeklyEntries(teacher);
+  const allEntries = weekly.byDay.flatMap(day => day.entries);
+  const timingIssues = allEntries.filter(entry => entry.timingLabel !== entry.sortTime && entry.sortTime === '99:99').length;
+  const studentCount = new Set(allEntries.map(entry => entry.student.id)).size;
+  const dayHtml = weekly.byDay.map(day => {
+    const entriesHtml = day.entries.map(entry => `<div style="display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);flex-wrap:wrap">
+      <div style="min-width:128px"><b>${esc(entry.timingLabel)}</b>${entry.count > 1 ? `<div class="hint">Occurrence ${entry.occurrence} of ${entry.count}</div>` : ''}</div>
+      <div style="flex:1;min-width:160px"><b>${esc(studentNameWithCode(entry.student.id))}</b><div class="hint">${esc(entry.subject.name)} · ${esc(entry.classType)}</div></div>
+    </div>`).join('');
+    return `<div class="card" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h3 style="margin:0">${esc(day.label)}</h3><span class="tag">${day.entries.length} class${day.entries.length === 1 ? '' : 'es'}</span></div>${entriesHtml || '<div class="empty">No classes configured for this day.</div>'}</div>`;
+  }).join('');
+  const unconfiguredHtml = weekly.unconfigured.length ? `<div class="card" style="border-left:4px solid var(--gold)"><h3 style="margin-top:0">Needs setup or review</h3><div class="hint">These assigned student–subject combinations cannot yet be shown as a recurring class timetable.</div><div class="table-scroll"><table><tr><th>Student</th><th>Subject</th><th>Reason</th></tr>${weekly.unconfigured.map(pair => `<tr><td>${esc(studentLabel(pair.student))}</td><td>${esc(pair.subject.name)}</td><td>${esc(pair.reason)}</td></tr>`).join('')}</table></div></div>` : '';
+  return `<div class="card"><h2>My Students Class Frequency</h2><div class="hint">Your recurring weekly teaching pattern, grouped by weekday and ordered by saved class time. This view does not change schedules or attendance.</div>${viewToggle}
+    <div class="stat-grid" style="margin-bottom:12px"><div class="stat-card"><div class="num">${allEntries.length}</div><div class="label">Weekly classes</div></div><div class="stat-card"><div class="num">${studentCount}</div><div class="label">Students</div></div><div class="stat-card"><div class="num ${timingIssues ? 'zero' : ''}">${timingIssues}</div><div class="label">Timings to configure/correct</div></div></div>
+    ${dayHtml}
+    ${unconfiguredHtml}
+  </div>`;
+}
+
 function renderTeacherPortal() {
   const teacher = data.teachers.find(t=>t.id===currentLinkedId);
   if (!teacher) {
@@ -21312,8 +21647,9 @@ function renderTeacherPortal() {
   }
   const teacherTabGroups = [
     { label: 'Teaching', tabs: [
+      ['myfrequency', 'My Students Class Frequency'],
       ['schedule', 'Class Schedule'],
-      ['frequency', 'Class Frequency'],
+      ['frequency', 'Class Frequency Setup'],
       ['students', 'My Students'],
       ['studyplans', 'Study Plans'],
       ['homework', 'Homework'],
@@ -21335,8 +21671,9 @@ function renderTeacherPortal() {
   const teacherMobileTabsList = [
     ['dashboard', 'Dashboard'],
     ['pendingactions', 'Pending Action Items'],
+    ['myfrequency', 'My Students Class Frequency'],
     ['schedule', 'Class Schedule'],
-    ['frequency', 'Class Frequency'],
+    ['frequency', 'Class Frequency Setup'],
     ['students', 'My Students'],
     ['studyplans', 'Study Plans'],
     ['homework', 'Homework'],
@@ -21394,6 +21731,9 @@ function renderTeacherPortal() {
 function teacherPortalBodyHtml(teacher) {
   if (teacherPortalTab === 'dashboard' || teacherPortalTab === 'pendingactions') {
     return renderTeacherDashboard(teacher);
+  }
+  if (teacherPortalTab === 'myfrequency') {
+    return renderTeacherMyStudentsClassFrequency(teacher);
   }
   if (teacherPortalTab === 'schedule') {
     return renderTeacherSchedule(teacher, false);
