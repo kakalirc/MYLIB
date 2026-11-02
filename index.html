@@ -95,8 +95,24 @@ if (location.hostname !== 'app.libeducation.com') {
   .mobile-tab-bar { display: none; }
   /* Grouped sidebar nav (Admin, desktop) */
   .admin-layout { display: flex; gap: 24px; align-items: flex-start; }
-  .sidebar-nav { flex: 0 0 190px; }
+  /* Desktop navigation stays in view while the main page scrolls. The sidebar
+     gets its own scrollbar only when its menu is taller than the viewport. */
+  .sidebar-nav { flex: 0 0 190px; width: 190px; position: sticky; top: 12px; align-self: flex-start; max-height: calc(100vh - 24px); overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; }
   .sidebar-content { flex: 1; min-width: 0; }
+  .sidebar-collapse-toggle { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; min-height: 36px; margin: 0 0 8px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--ink); font: 600 12px 'Work Sans', sans-serif; cursor: pointer; }
+  .sidebar-collapse-toggle:hover { border-color: var(--brick); background: rgba(166,67,46,0.05); }
+  .sidebar-collapse-icon { font-size: 18px; line-height: 1; }
+  .sidebar-collapse-label { white-space: nowrap; }
+  .admin-layout.is-sidebar-collapsed { gap: 12px; }
+  .admin-layout.is-sidebar-collapsed .sidebar-nav { flex: 0 0 44px; width: 44px; }
+  .admin-layout.is-sidebar-collapsed .sidebar-collapse-toggle { width: 40px; height: 36px; min-height: 36px; margin: 0 auto 8px; padding: 0; }
+  .admin-layout.is-sidebar-collapsed .sidebar-collapse-label { display: none; }
+  .admin-layout.is-sidebar-collapsed .sidebar-item { display: flex; align-items: center; justify-content: center; width: 40px; height: 38px; padding: 0; margin: 2px auto; font-size: 0; line-height: 1; text-overflow: clip; }
+  .admin-layout.is-sidebar-collapsed .sidebar-item::before { content: attr(data-rail); display: block; font-size: 18px; line-height: 1; }
+  .admin-layout.is-sidebar-collapsed .sidebar-item > * { display: none !important; }
+  .admin-layout.is-sidebar-collapsed .sidebar-group-header { display: flex; align-items: center; justify-content: center; width: 40px; height: 32px; padding: 0; margin: 3px auto; font-size: 0; }
+  .admin-layout.is-sidebar-collapsed .sidebar-group-header::before { content: attr(data-rail); font-size: 13px; font-weight: 800; line-height: 1; }
+  .admin-layout.is-sidebar-collapsed .sidebar-group-header > * { display: none !important; }
   .sidebar-group { margin-bottom: 4px; }
   .sidebar-group-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 6px; font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); cursor: pointer; user-select: none; }
   .sidebar-group-header .chevron { font-size: 10px; transition: transform 0.15s ease; }
@@ -637,6 +653,48 @@ function helpBtn(key) { return `<button class="help-btn" onclick="openHelp('${ke
 function openHelp(s, e) { helpOpenSection = s; if(e) e.stopPropagation(); render(); }
 function closeHelp() { helpOpenSection = ''; render(); }
 let sidebarCollapsedGroups = {}; // groupLabel -> true if manually collapsed. The group containing the active tab is always shown regardless.
+function readDesktopSidebarPreference(role) {
+  try { return localStorage.getItem('lib_desktop_sidebar_collapsed_' + role) === '1'; } catch (e) { return false; }
+}
+let desktopSidebarCollapsed = {
+  admin: readDesktopSidebarPreference('admin'),
+  teacher: readDesktopSidebarPreference('teacher')
+};
+function isDesktopSidebarCollapsed(role) { return !!desktopSidebarCollapsed[role]; }
+function desktopSidebarRailIcon(key) {
+  const normalized = String(key || '').toLowerCase();
+  const map = {
+    dashboard:'⌂', pendingactions:'◷', starteacher:'★', myfrequency:'▦', schedule:'▤', frequency:'↻',
+    students:'♙', studyplans:'▥', homework:'✓', questionbank:'?', research:'⌕', attendance:'✓', report:'▤',
+    availability:'◷', profile:'♙', setup:'⚙', log:'▤', registrations:'＋', chat:'✉', wixbookings:'▣',
+    support:'?', rebuildclasses:'↻', fees:'₹', payroll:'▦', expenses:'−', reports:'▥', onboarding:'✉',
+    parents:'♧', users:'⚙', admins:'♙', ai:'✧', audit:'≡', superadmin:'★',
+    'daily work':'☷', money:'₹', people:'♙', teaching:'▤', system:'⚙', superadmin_group:'★',
+    attendance_group:'✓', account:'⚙'
+  };
+  return map[normalized] || (String(key || '?').trim().charAt(0).toUpperCase() || '?');
+}
+function desktopSidebarCollapseButtonHtml(role) {
+  const collapsed = isDesktopSidebarCollapsed(role);
+  return `<button type="button" class="sidebar-collapse-toggle" onclick="toggleDesktopSidebar('${role}')" aria-expanded="${collapsed ? 'false' : 'true'}" aria-label="${collapsed ? 'Expand' : 'Collapse'} navigation menu" title="${collapsed ? 'Expand menu' : 'Collapse menu'}"><span class="sidebar-collapse-icon" aria-hidden="true">${collapsed ? '›' : '‹'}</span><span class="sidebar-collapse-label">${collapsed ? 'Expand menu' : 'Collapse menu'}</span></button>`;
+}
+function toggleDesktopSidebar(role) {
+  const next = !isDesktopSidebarCollapsed(role);
+  desktopSidebarCollapsed[role] = next;
+  try { localStorage.setItem('lib_desktop_sidebar_collapsed_' + role, next ? '1' : '0'); } catch (e) {}
+  const layout = document.querySelector('.admin-layout');
+  if (layout) layout.classList.toggle('is-sidebar-collapsed', next);
+  const button = document.querySelector('.sidebar-collapse-toggle');
+  if (button) {
+    button.setAttribute('aria-expanded', next ? 'false' : 'true');
+    button.setAttribute('aria-label', next ? 'Expand navigation menu' : 'Collapse navigation menu');
+    button.title = next ? 'Expand menu' : 'Collapse menu';
+    const icon = button.querySelector('.sidebar-collapse-icon');
+    const label = button.querySelector('.sidebar-collapse-label');
+    if (icon) icon.textContent = next ? '›' : '‹';
+    if (label) label.textContent = next ? 'Expand menu' : 'Collapse menu';
+  }
+}
 function toggleMobileTabMenu() { mobileTabMenuOpen = !mobileTabMenuOpen; render(); }
 function toggleSidebarGroup(label) { sidebarCollapsedGroups[label] = !sidebarCollapsedGroups[label]; render(); }
 function copyText(text, btnEl) {
@@ -21716,17 +21774,18 @@ function renderTeacherPortal() {
   const currentTeacherTabLabel = (teacherMobileTabsList.find(([key])=>key===teacherPortalTab) || [,''])[1];
   const sidebarHtml = `
     <div class="sidebar-nav">
-      <div class="sidebar-item ${teacherPortalTab==='dashboard'?'active':''}" onclick="setTeacherPortalTab('dashboard')" style="font-weight:700;margin-bottom:10px">Dashboard</div>
-      <div class="sidebar-item ${teacherPortalTab==='pendingactions'?'active':''}" onclick="setTeacherPortalTab('pendingactions')" style="font-weight:700;margin-bottom:10px">Pending Action Items${pendingBadge}</div>
-      ${starOn ? `<div class="sidebar-item ${teacherPortalTab==='starteacher'?'active':''}" onclick="setTeacherPortalTab('starteacher')" style="font-weight:700;margin-bottom:10px">🏆 Star Teacher${starEarn ? ` <span class="star-pill" title="Points you can earn right now">+${starEarn}</span>` : ''}</div>` : ''}
+      ${desktopSidebarCollapseButtonHtml('teacher')}
+      <div class="sidebar-item ${teacherPortalTab==='dashboard'?'active':''}" data-rail="${desktopSidebarRailIcon('dashboard')}" title="Dashboard" aria-label="Dashboard" onclick="setTeacherPortalTab('dashboard')" style="font-weight:700;margin-bottom:10px">Dashboard</div>
+      <div class="sidebar-item ${teacherPortalTab==='pendingactions'?'active':''}" data-rail="${desktopSidebarRailIcon('pendingactions')}" title="Pending Action Items" aria-label="Pending Action Items" onclick="setTeacherPortalTab('pendingactions')" style="font-weight:700;margin-bottom:10px">Pending Action Items${pendingBadge}</div>
+      ${starOn ? `<div class="sidebar-item ${teacherPortalTab==='starteacher'?'active':''}" data-rail="${desktopSidebarRailIcon('starteacher')}" title="Star Teacher" aria-label="Star Teacher" onclick="setTeacherPortalTab('starteacher')" style="font-weight:700;margin-bottom:10px">🏆 Star Teacher${starEarn ? ` <span class="star-pill" title="Points you can earn right now">+${starEarn}</span>` : ''}</div>` : ''}
       ${teacherTabGroups.map(g => {
         const isCollapsed = !!sidebarCollapsedGroups[g.label] && g.label !== activeGroupLabel;
         return `
         <div class="sidebar-group">
-          <div class="sidebar-group-header" onclick="toggleSidebarGroup('${g.label}')">
+          <div class="sidebar-group-header" data-rail="${desktopSidebarRailIcon(g.label)}" title="${esc(g.label)}" onclick="toggleSidebarGroup('${g.label}')">
             <span>${esc(g.label)}</span><span class="chevron ${isCollapsed?'collapsed':''}">▾</span>
           </div>
-          ${isCollapsed ? '' : g.tabs.map(([key,label])=>`<div class="sidebar-item ${teacherPortalTab===key?'active':''}" onclick="setTeacherPortalTab('${key}')">${label}</div>`).join('')}
+          ${isCollapsed ? '' : g.tabs.map(([key,label])=>`<div class="sidebar-item ${teacherPortalTab===key?'active':''}" data-rail="${desktopSidebarRailIcon(key)}" title="${esc(label)}" aria-label="${esc(label)}" onclick="setTeacherPortalTab('${key}')">${label}</div>`).join('')}
         </div>`;
       }).join('')}
     </div>`;
@@ -21744,7 +21803,7 @@ function renderTeacherPortal() {
     </div>`;
   return `
     ${mobileTabBarHtml}
-    <div class="admin-layout">
+    <div class="admin-layout ${isDesktopSidebarCollapsed('teacher') ? 'is-sidebar-collapsed' : ''}">
       ${sidebarHtml}
       <div class="sidebar-content">${teacherPortalBodyHtml(teacher)}</div>
     </div>`;
@@ -26438,15 +26497,16 @@ function render() {
   const activeGroupLabel = (tabGroups.find(g => g.tabs.some(([key])=>key===currentTab)) || {}).label;
   const sidebarHtml = `
     <div class="sidebar-nav">
-      <div class="sidebar-item ${currentTab==='dashboard'?'active':''}" onclick="setTab('dashboard')" style="font-weight:700;margin-bottom:10px">Dashboard</div>
+      ${desktopSidebarCollapseButtonHtml('admin')}
+      <div class="sidebar-item ${currentTab==='dashboard'?'active':''}" data-rail="${desktopSidebarRailIcon('dashboard')}" title="Dashboard" aria-label="Dashboard" onclick="setTab('dashboard')" style="font-weight:700;margin-bottom:10px">Dashboard</div>
       ${tabGroups.map(g => {
         const isCollapsed = !!sidebarCollapsedGroups[g.label];
         return `
         <div class="sidebar-group">
-          <div class="sidebar-group-header" onclick="toggleSidebarGroup('${g.label}')">
+          <div class="sidebar-group-header" data-rail="${desktopSidebarRailIcon(g.label)}" title="${esc(g.label)}" onclick="toggleSidebarGroup('${g.label}')">
             <span>${esc(g.label)}</span><span class="chevron ${isCollapsed?'collapsed':''}">▾</span>
           </div>
-          ${isCollapsed ? '' : g.tabs.map(([key,label])=>`<div class="sidebar-item ${currentTab===key?'active':''}" onclick="setTab('${key}')">${label}</div>`).join('')}
+          ${isCollapsed ? '' : g.tabs.map(([key,label])=>`<div class="sidebar-item ${currentTab===key?'active':''}" data-rail="${desktopSidebarRailIcon(key)}" title="${esc(label)}" aria-label="${esc(label)}" onclick="setTab('${key}')">${label}</div>`).join('')}
         </div>`;
       }).join('')}
     </div>`;
@@ -26514,7 +26574,7 @@ function render() {
     </div>
     <div class="tagline">Subscriptions, per-class logging, teacher payroll, and Excel export.</div>
     ${mobileTabBarHtml}
-    <div class="admin-layout">
+    <div class="admin-layout ${isDesktopSidebarCollapsed('admin') ? 'is-sidebar-collapsed' : ''}">
       ${sidebarHtml}
       <div class="sidebar-content">
         ${body}
