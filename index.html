@@ -623,6 +623,17 @@ function myPhotoUploadHtml() {
   `;
 }
 let parentSelectedChildId = '';
+// Parent-only, per-child login ID cache. The ID is fetched through a scoped RPC, not by loading profiles.
+const parentStudentLoginCache = Object.create(null);
+const parentStudentLoginPending = new Set();
+async function ensureParentStudentLogin(studentId) {
+  if (!studentId || Object.prototype.hasOwnProperty.call(parentStudentLoginCache, studentId) || parentStudentLoginPending.has(studentId)) return;
+  parentStudentLoginPending.add(studentId);
+  const { data: loginId, error } = await sb.rpc('parent_student_login_id', { p_student_id: studentId });
+  parentStudentLoginPending.delete(studentId);
+  parentStudentLoginCache[studentId] = error ? { error: true } : { username: loginId || '' };
+  if (currentRole === 'Parent' && parentSelectedChildId === studentId) render();
+}
 let addingChildToParentId = null;
 let parentAddMsg = '';
 let selectedParentUserId = '';
@@ -18491,17 +18502,15 @@ function renderParentPortal() {
       </div>
     </div>` : `<div class="card"><div class="hint">Viewing: <b>${esc(child.name)}</b>${child.archived?' <span class="tag cat">Archived</span>':''}</div></div>`;
 
-  // Compact, collapsed-by-default student login details for the currently selected child.
-  // Use the same lookup as Student Maintenance so both screens recognise the same linked login.
-  // Student Maintenance includes archived profiles in its login list, so do not silently treat
-  // an archived-but-existing profile as if no login record exists.
-  const childStudentLogins = loginsForStudent(child.id);
-  const childStudentLogin = childStudentLogins.find(u => !u.archived) || childStudentLogins[0] || null;
+  // Parent-only secure lookup: the RPC verifies the parent-child link and returns only this child's login ID.
+  ensureParentStudentLogin(child.id);
+  const childLoginResult = parentStudentLoginCache[child.id];
   const childLoginDetails = `<details class="parent-student-login-details">
     <summary>Student Login Details</summary>
-    ${childStudentLogin ? `<div class="parent-student-login-content">
-      <div><span class="hint">Student Login ID</span><b>${esc(childStudentLogin.username)}</b>${childStudentLogin.archived ? ' <span class="tag cat">Archived login</span>' : ''}</div>
-      <div><span class="hint">Default password</span><b>${String(child.code || '').trim() && String(child.code).trim() === String(childStudentLogin.username || '').trim() ? 'Same as Student Login ID (if not changed)' : 'Set when the login was created; contact LIB Education if required'}</b></div>
+    ${!childLoginResult ? `<div class="hint" style="padding:8px 0 2px">Loading student login details…</div>` : childLoginResult.error ? `<div class="hint" style="padding:8px 0 2px">Could not load login details. Please try again later or contact LIB Education.</div>` : childLoginResult.username ? `<div class="parent-student-login-content">
+      <div><span class="hint">Student Login ID</span><b>${esc(childLoginResult.username)}</b></div>
+      <div><span class="hint">Default password</span><b>Same as Student Login ID</b></div>
+      <div class="hint">The student must change this password after the first login.</div>
     </div>` : `<div class="hint" style="padding:8px 0 2px">No Student Login has been created for ${esc(child.name)} yet. Please contact LIB Education.</div>`}
   </details>`;
 
@@ -18517,7 +18526,7 @@ function renderParentPortal() {
       ${discountRuleHtml(familyDiscountSaved(myChildren.flatMap(c => pendingFeeRequests(c.id))), true)}
       <div class="hint">Open each child to see the details and pay.</div>
     </div>` : '';
-  if (spOpen) return switcher + spPaperHtml();
+  if (spOpen) return switcher + childLoginDetails + spPaperHtml();
   return studentFeeOverdueBanner(child) + switcher + childLoginDetails + familyDue + studentDashboardStatsHtml(child) + renderStudyPlanReadOnly(child) + renderStudentHomeworkSection(child) + renderStudentPracticeSection(child) + renderStudentResourcesSection(child) + myPhotoUploadHtml() + renderStudentReportCards(child, studentViewMonth, 'setStudentViewMonth', esc(child.name) + "'s")
     + studentFeeCalculatorHtml(child);
 }
