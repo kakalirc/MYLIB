@@ -407,7 +407,7 @@ const APP_VERSION = '2026.10';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-10-31 09:00 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-11-02 10:25 IST'; // updated automatically each time a new file is generated
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1122,6 +1122,19 @@ let auditFilterFrom = localDateFromToday(-30);
 let auditFilterTo = todayStr;
 let auditLoading = false;
 let auditMsg = '';
+let cronReportJobs = [];
+let cronReportRows = [];
+let cronReportSummary = { total: 0, succeeded: 0, failed: 0, running: 0 };
+let cronReportSettings = {};
+let cronReportLoading = false;
+let cronReportLoaded = false;
+let cronReportMsg = '';
+let cronReportOffset = 0;
+let cronReportTotal = 0;
+let cronReportJobFilter = '';
+let cronReportStatusFilter = '';
+let cronReportFilterFrom = '';
+let cronReportFilterTo = '';
 let truncateBeforeDate = '';
 let dangerZoneUnlocked = false;
 let unlockPasswordAttempt = '';
@@ -2942,6 +2955,310 @@ function exportAuditLog(rows, filenameSuffix) {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheetRows.length?sheetRows:[{Timestamp:'None'}]), 'Audit Log');
   XLSX.writeFile(wb, 'audit-log' + (filenameSuffix||'') + '.xlsx');
 }
+// ---------- Superadmin Cron job execution report (read-only) ----------
+const CRON_REPORT_PAGE_SIZE = 100;
+function cronStatusLabel(status) {
+  const v = String(status || '').toLowerCase();
+  if (v === 'succeeded') return '<span class="tag" style="background:var(--forest);color:#fff">Succeeded</span>';
+  if (v === 'failed') return '<span class="tag" style="background:var(--brick);color:#fff">Failed</span>';
+  if (v === 'running') return '<span class="tag" style="background:#b7791f;color:#fff">Running</span>';
+  return `<span class="tag">${esc(status || 'Unknown')}</span>`;
+}
+function cronLocalDateTime(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? esc(value) : esc(d.toLocaleString());
+}
+function cronDurationLabel(row) {
+  if (!row || !row.start_time || !row.end_time) return row && String(row.status).toLowerCase() === 'running' ? 'In progress' : '—';
+  const seconds = Math.max(0, (new Date(row.end_time).getTime() - new Date(row.start_time).getTime()) / 1000);
+  if (!Number.isFinite(seconds)) return '—';
+  if (seconds < 60) return `${seconds.toFixed(1)} sec`;
+  const mins = Math.floor(seconds / 60), rem = Math.round(seconds % 60);
+  return `${mins} min ${rem} sec`;
+}
+function cronReportFilterChanged(field, value) {
+  if (field === 'job') cronReportJobFilter = value;
+  if (field === 'status') cronReportStatusFilter = value;
+  if (field === 'from') cronReportFilterFrom = value;
+  if (field === 'to') cronReportFilterTo = value;
+  loadCronJobReport(true);
+}
+function cronLocalDateBoundaryIso(value, endOfDay) {
+  if (!value) return null;
+  const parts = value.split('-').map(Number);
+  if (parts.length !== 3 || parts.some(n => !Number.isFinite(n))) return null;
+  const d = endOfDay ? new Date(parts[0], parts[1]-1, parts[2], 23, 59, 59, 999) : new Date(parts[0], parts[1]-1, parts[2], 0, 0, 0, 0);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+async function loadCronJobReport(reset) {
+  if (!isCurrentUserSuperuserAdmin() || !dangerZoneUnlocked) return;
+  if (cronReportLoading) return;
+  if (reset !== false) { cronReportOffset = 0; cronReportRows = []; cronReportTotal = 0; }
+  cronReportLoading = true; cronReportMsg = ''; render();
+  const { data: result, error } = await sb.rpc('superadmin_cron_execution_report', {
+    p_limit: CRON_REPORT_PAGE_SIZE,
+    p_offset: cronReportOffset,
+    p_jobid: cronReportJobFilter ? Number(cronReportJobFilter) : null,
+    p_status: cronReportStatusFilter || null,
+    p_from: cronLocalDateBoundaryIso(cronReportFilterFrom, false),
+    p_to: cronLocalDateBoundaryIso(cronReportFilterTo, true)
+  });
+  cronReportLoading = false;
+  if (error) { cronReportMsg = 'Could not load Cron history: ' + error.message; render(); return; }
+  if (!result || typeof result !== 'object') { cronReportMsg = 'The database returned an unexpected Cron report response.'; render(); return; }
+  cronReportJobs = Array.isArray(result.jobs) ? result.jobs : [];
+  cronReportSummary = result.summary || { total: 0, succeeded: 0, failed: 0, running: 0 };
+  cronReportSettings = result.settings || {};
+  const pageRows = Array.isArray(result.runs) ? result.runs : [];
+  cronReportRows = reset === false ? cronReportRows.concat(pageRows) : pageRows;
+  cronReportTotal = Number(result.filtered_total || 0);
+  cronReportOffset = cronReportRows.length;
+  cronReportLoaded = true;
+  render();
+}
+function cronFriendlySchedule(schedule) {
+  const fields = String(schedule || '').trim().split(/\s+/);
+  if (fields.length !== 5) return 'Non-standard interval / cron expression; use the raw schedule shown below.';
+  const labels = ['Minute', 'Hour', 'Day of month', 'Month', 'Day of week'];
+  const [minute, hour, day, month, weekday] = fields;
+  if (/^\*\/[1-9]\d*$/.test(minute) && hour === '*' && day === '*' && month === '*' && weekday === '*') {
+    return `Every ${minute.slice(2)} minute(s)`;
+  }
+  if (/^\d{1,2}$/.test(minute) && /^\d{1,2}$/.test(hour) && day === '*' && month === '*' && weekday === '*') {
+    return `Every day at ${String(Number(hour)).padStart(2, '0')}:${String(Number(minute)).padStart(2, '0')}`;
+  }
+  if (minute === '0' && /^\d{1,2}$/.test(hour) && day === '*' && month === '*' && weekday === '*') {
+    return `Every day at ${String(Number(hour)).padStart(2, '0')}:00`;
+  }
+  return 'Five-field schedule: ' + fields.map((v, i) => `${labels[i]} ${v}`).join(' · ');
+}
+function cronSettingLabel(key) {
+  const labels = {
+    'cron.timezone': 'Cron scheduler time zone',
+    'cron.database_name': 'Database used by Cron scheduler',
+    'cron.launch_active_jobs': 'Scheduler launches active jobs',
+    'cron.log_run': 'Record execution history',
+    'cron.log_statement': 'Log SQL statements when jobs start',
+    'cron.max_running_jobs': 'Maximum concurrently running jobs',
+    'cron.use_background_workers': 'Use PostgreSQL background workers',
+    'cron.enable_superuser_jobs': 'Allow superuser-scheduled jobs',
+    'TimeZone': 'Database session time zone'
+  };
+  return labels[key] || key;
+}
+function cronJobPurposeInfo(job) {
+  const fns = Array.isArray(job.functions) ? job.functions : [];
+  const names = fns.map(fn => String(fn.name || '').toLowerCase());
+  const has = name => names.includes(name);
+  const comment = fns.map(fn => String(fn.description || '').trim()).filter(Boolean);
+  const items = [];
+
+  if (has('purge_old_audit_and_login_logs')) {
+    items.push({
+      title: 'Deletes old Audit Log and Login Activity records',
+      detail: 'Permanently deletes rows from public.audit_log and public.login_log when created_at is earlier than the current timestamp minus 3 calendar months. Both tables use the same cutoff. Records from the latest 3 months are retained. This is a conditional DELETE; it does not truncate either whole table.',
+      verified: true
+    });
+  }
+  if (has('cleanup_notifications')) {
+    items.push({
+      title: 'Runs notification cleanup',
+      detail: 'Executes public.cleanup_notifications(). The exact notification types affected, age/status filters, retention period and whether related records are also changed are defined inside this database function. Those detailed rules must be reviewed in the function definition below; no retention period is assumed here.',
+      verified: false
+    });
+  }
+  if (has('generate_backlog_notifications')) {
+    items.push({
+      title: 'Generates backlog notifications',
+      detail: 'Executes public.generate_backlog_notifications(). The exact definition of a qualifying backlog item, recipients, notification content and duplicate-prevention rules are defined inside this database function. Review its definition below for those detailed rules.',
+      verified: false
+    });
+  }
+  if (has('apply_subscription_expiry')) {
+    items.push({
+      title: 'Processes subscription expiry',
+      detail: 'Executes public.apply_subscription_expiry(true). The job passes the boolean argument true. The meaning of that flag, which subscriptions qualify, the expiry-date conditions and the status or payment-related updates are determined by the function body shown below.',
+      verified: false
+    });
+  }
+
+  if (!items.length) {
+    if (comment.length) {
+      items.push({ title: 'Database-documented purpose', detail: comment.join(' '), verified: true });
+    } else {
+      items.push({
+        title: 'Purpose requires function review',
+        detail: 'The scheduled SQL command and called function definition are shown below. A precise plain-English summary has not been added because the report cannot safely infer the business rules from the function name alone.',
+        verified: false
+      });
+    }
+  } else if (comment.length) {
+    items.push({ title: 'Database function comment', detail: comment.join(' '), verified: true });
+  }
+  return items;
+}
+function cronJobPurposeHtml(job) {
+  const items = cronJobPurposeInfo(job);
+  return `<div style="margin:9px 0 10px;padding:10px 11px;border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:7px;background:var(--soft)">
+    <div style="font-weight:700;margin-bottom:6px">What this job does</div>
+    ${items.map(item => `<div style="margin-top:6px"><div style="font-weight:650">${esc(item.title)} ${item.verified ? '<span class="tag">Documented</span>' : '<span class="tag">Function rules need review</span>'}</div><div style="font-size:13px;line-height:1.55;margin-top:3px">${esc(item.detail)}</div></div>`).join('')}
+  </div>`;
+}
+function cronFunctionDetailsHtml(fn, job) {
+  const description = String(fn.description || '').trim();
+  const def = fn.definition || '';
+  return `
+    <div style="border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:8px;background:var(--card)">
+      <div style="font-weight:650;overflow-wrap:anywhere">${esc(fn.signature || ((fn.schema || 'public') + '.' + (fn.name || 'Unknown function')))}</div>
+      <div class="hint" style="margin:5px 0 8px">${description ? `<b>Purpose / database comment:</b> ${esc(description)}` : '<b>Purpose:</b> No plain-English database comment is saved for this function. Review its actual definition below; the report does not guess its behaviour.'}</div>
+      <div class="row-form" style="gap:6px;flex-wrap:wrap">
+        <span class="tag">${esc(fn.routine_type || 'Routine')}</span>
+        <span class="tag">${esc(fn.language || 'Unknown language')}</span>
+        <span class="tag">${esc(fn.security_mode || 'Security unknown')}</span>
+        <span class="tag">${esc(fn.volatility || 'Volatility unknown')}</span>
+      </div>
+      <div class="hint" style="margin-top:8px;line-height:1.6">
+        <b>Arguments:</b> ${esc(fn.arguments || 'None')}<br>
+        <b>Return type:</b> ${esc(fn.return_type || (fn.routine_type === 'Procedure' ? 'Procedure (no return value)' : 'Not available'))}<br>
+        <b>Owner:</b> ${esc(fn.owner || '—')}<br>
+        <b>Function-level settings:</b> ${esc(fn.search_path || '—')}<br>
+        <b>Parallel safety:</b> ${esc(fn.parallel_safety || '—')}
+      </div>
+      <details style="margin-top:8px">
+        <summary style="cursor:pointer;color:var(--forest);font-size:12.5px;font-weight:600">View actual database function definition</summary>
+        <pre style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:440px;overflow:auto;background:var(--soft);padding:10px;border-radius:6px;font-size:11.5px;line-height:1.45;margin-top:7px">${esc(def || 'Definition was not returned.')}</pre>
+      </details>
+    </div>`;
+}
+function cronJobConfigurationHtml(job) {
+  const functions = Array.isArray(job.functions) ? job.functions : [];
+  const tz = job.schedule_timezone || cronReportSettings['cron.timezone'] || 'Not exposed by pg_settings';
+  const jobLabel = job.jobname || `Job ${job.jobid}`;
+  return `
+    <details style="margin-top:8px;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--soft)">
+      <summary style="cursor:pointer;font-weight:650;color:var(--ink)">View purpose, setup and function details</summary>
+      <div style="padding-top:10px">
+        <div class="table-scroll" style="margin-top:8px"><table>
+          <tr><th>Configuration</th><th>Actual value</th></tr>
+          <tr><td>Job name / ID</td><td>${esc(jobLabel)} / ${esc(job.jobid)}</td></tr>
+          <tr><td>Schedule expression</td><td><code>${esc(job.schedule || '—')}</code></td></tr>
+          <tr><td>Schedule interpretation</td><td>${esc(cronFriendlySchedule(job.schedule))}</td></tr>
+          <tr><td>Scheduler time zone</td><td>${esc(tz)}</td></tr>
+          <tr><td>Active</td><td>${job.active ? 'Yes' : 'No'}</td></tr>
+          <tr><td>Database</td><td>${esc(job.database || '—')}</td></tr>
+          <tr><td>Execution username</td><td>${esc(job.username || '—')}</td></tr>
+          <tr><td>Connection node</td><td>${esc(job.nodename || '—')}</td></tr>
+          <tr><td>Connection port</td><td>${esc(job.nodeport || '—')}</td></tr>
+        </table></div>
+        <div style="margin-top:9px"><b>Exact scheduled SQL command</b><pre style="white-space:pre-wrap;overflow-wrap:anywhere;background:var(--card);border:1px solid var(--line);padding:9px;border-radius:6px;font-size:12px;margin:5px 0">${esc(job.command || '—')}</pre></div>
+        <h4 style="margin:12px 0 4px">Called database function(s) and setup</h4>
+        ${functions.length ? functions.map(fn => cronFunctionDetailsHtml(fn, job)).join('') : '<div class="hint">No direct public/schema-qualified database function definition was resolved from this command. The SQL command is shown above; it may be a direct SQL statement, call an unqualified function outside the public schema, or use a command format the name resolver does not recognise.</div>'}
+        <div class="hint" style="margin-top:8px">Function definitions shown here are direct function/procedure references detected in the scheduled command. Functions called internally by those definitions are not recursively expanded.</div>
+      </div>
+    </details>`;
+}
+function cronGlobalSettingsHtml() {
+  const settings = cronReportSettings || {};
+  const keys = Object.keys(settings).sort((a, b) => {
+    const order = ['cron.timezone','cron.database_name','cron.launch_active_jobs','cron.log_run','cron.log_statement','cron.max_running_jobs','cron.use_background_workers','cron.enable_superuser_jobs','TimeZone'];
+    return order.indexOf(a) - order.indexOf(b);
+  });
+  return `<details style="margin:12px 0;border:1px solid var(--line);border-radius:8px;padding:10px">
+    <summary style="cursor:pointer;font-weight:650">View global pg_cron / PostgreSQL scheduler settings (${keys.length} returned)</summary>
+    ${keys.length ? `<div class="table-scroll" style="margin-top:8px"><table><tr><th>Setting</th><th>Configured value</th><th>Meaning</th></tr>${keys.map(k => `<tr><td><code>${esc(k)}</code></td><td>${esc(settings[k])}</td><td>${esc(cronSettingLabel(k))}</td></tr>`).join('')}</table></div>` : '<div class="hint" style="margin-top:8px">No pg_cron settings were returned by pg_settings. Per-job schedule, database and user settings are still displayed above.</div>'}
+  </details>`;
+}
+function exportCronReport() {
+  if (!cronReportLoaded) return;
+  const wb = XLSX.utils.book_new();
+  const jobRows = (cronReportJobs || []).map(j => ({
+    'Job ID': j.jobid, 'Job name': j.jobname || '', 'Schedule expression': j.schedule,
+    'Schedule timezone': j.schedule_timezone || cronReportSettings['cron.timezone'] || '',
+    'Schedule explanation': cronFriendlySchedule(j.schedule), Active: j.active ? 'Yes' : 'No',
+    'What this job does': cronJobPurposeInfo(j).map(x => x.title + ': ' + x.detail).join(' | '),
+    Database: j.database || '', 'Database user': j.username || '',
+    'Connection node': j.nodename || '', 'Connection port': j.nodeport || '', Command: j.command || ''
+  }));
+  const functionRows = [];
+  (cronReportJobs || []).forEach(j => (j.functions || []).forEach(fn => functionRows.push({
+    'Job ID': j.jobid, 'Job name': j.jobname || '', 'Function signature': fn.signature || '',
+    Purpose: fn.description || 'No database comment recorded', 'Routine type': fn.routine_type || '',
+    Language: fn.language || '', 'Security mode': fn.security_mode || '', Owner: fn.owner || '',
+    Arguments: fn.arguments || '', 'Return type': fn.return_type || '', 'Search path': fn.search_path || '',
+    Volatility: fn.volatility || '', 'Parallel safety': fn.parallel_safety || '',
+    'Function definition': fn.definition || ''
+  })));
+  const runRows = (cronReportRows || []).map(r => ({
+    'Run ID': r.runid, 'Job ID': r.jobid, Status: r.status || '',
+    'Started (ISO)': r.start_time || '', 'Finished (ISO)': r.end_time || '',
+    'Duration (seconds)': r.duration_seconds == null ? '' : Number(r.duration_seconds),
+    'Job PID': r.job_pid || '', Database: r.database || '', 'Database user': r.username || '',
+    Command: r.command || '', 'Return / error message': r.return_message || ''
+  }));
+  const settingRows = Object.keys(cronReportSettings || {}).map(k => ({ Setting: k, Meaning: cronSettingLabel(k), Value: cronReportSettings[k] }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(jobRows.length ? jobRows : [{ 'Job ID': 'No jobs' }]), 'Cron Jobs');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(functionRows.length ? functionRows : [{ 'Function': 'No direct function definitions resolved' }]), 'Function Setup');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(runRows.length ? runRows : [{ Status: 'No executions loaded' }]), 'Loaded Executions');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(settingRows.length ? settingRows : [{ Setting: 'No settings returned' }]), 'Scheduler Settings');
+  XLSX.writeFile(wb, 'cron-execution-history-' + fileTimestamp() + '.xlsx');
+}
+function cronRunDetailsHtml(row) {
+  const command = row.command || '';
+  const message = row.return_message || '';
+  return `
+    <details style="margin-top:4px">
+      <summary style="cursor:pointer;color:var(--forest);font-size:12.5px">Execution details</summary>
+      <div style="padding:8px 10px;background:var(--soft);border-radius:6px;margin-top:6px;font-size:12px;line-height:1.5">
+        <div><b>Run ID:</b> ${esc(row.runid ?? '—')} · <b>Job PID:</b> ${esc(row.job_pid ?? '—')}</div>
+        <div><b>Database:</b> ${esc(row.database || '—')} · <b>Database user:</b> ${esc(row.username || '—')}</div>
+        <div style="margin-top:5px"><b>Command</b><pre style="white-space:pre-wrap;overflow-wrap:anywhere;margin:3px 0 8px">${esc(command || '—')}</pre></div>
+        <div><b>Return / error message</b><pre style="white-space:pre-wrap;overflow-wrap:anywhere;margin:3px 0 0">${esc(message || 'No message returned.')}</pre></div>
+      </div>
+    </details>`;
+}
+function cronReportHtml() {
+  if (!cronReportLoaded) return `<div class="hint">Read-only view of Supabase Cron schedules, actual scheduler settings, called database functions and execution history. Function definitions and comments are retrieved from PostgreSQL. Only direct calls in the scheduled command are resolved.</div>${cronReportMsg ? `<div class="hint" style="color:var(--brick)">${esc(cronReportMsg)}</div>` : ''}<button class="btn-small btn-primary" onclick="loadCronJobReport(true)" ${cronReportLoading?'disabled':''}>${cronReportLoading?'Loading…':'Load Cron report'}</button>`;
+  const jobs = cronReportJobs || [];
+  const runs = cronReportRows || [];
+  const jobOptions = `<option value="">All jobs</option>` + jobs.map(j=>`<option value="${escAttr(j.jobid)}" ${String(cronReportJobFilter)===String(j.jobid)?'selected':''}>Job ${esc(j.jobid)} — ${esc((j.jobname || j.command || '').slice(0,72))}</option>`).join('');
+  const runRows = runs.length ? runs.map(r=>`<tr>
+    <td style="white-space:nowrap">${esc(r.jobid)}</td>
+    <td>${cronStatusLabel(r.status)}</td>
+    <td style="min-width:155px">${cronLocalDateTime(r.start_time)}</td>
+    <td style="min-width:155px">${cronLocalDateTime(r.end_time)}</td>
+    <td style="white-space:nowrap">${esc(cronDurationLabel(r))}</td>
+    <td style="min-width:170px">${cronRunDetailsHtml(r)}</td>
+  </tr>`).join('') : `<tr><td colspan="6" class="empty">No execution records match these filters.</td></tr>`;
+  const cronTz = cronReportSettings['cron.timezone'] || 'Not exposed by pg_settings';
+  return `
+    <div class="hint">Current schedules and execution history from Supabase Cron. The actual scheduler time zone reported by PostgreSQL is <b>${esc(cronTz)}</b>. Execution timestamps are converted to this device's local time. This report is read-only and does not start, stop, edit or delete Cron jobs.</div>
+    ${cronReportMsg ? `<div class="hint" style="color:var(--brick)">${esc(cronReportMsg)}</div>` : ''}
+    <div class="row-form" style="align-items:flex-end">
+      <label>Job<br><select onchange="cronReportFilterChanged('job',this.value)" style="min-width:210px">${jobOptions}</select></label>
+      <label>Status<br><select onchange="cronReportFilterChanged('status',this.value)" style="min-width:145px"><option value="">All statuses</option><option value="succeeded" ${cronReportStatusFilter==='succeeded'?'selected':''}>Succeeded</option><option value="failed" ${cronReportStatusFilter==='failed'?'selected':''}>Failed</option><option value="running" ${cronReportStatusFilter==='running'?'selected':''}>Running</option></select></label>
+      <label>From<br><input type="date" value="${escAttr(cronReportFilterFrom)}" onchange="cronReportFilterChanged('from',this.value)"></label>
+      <label>To<br><input type="date" value="${escAttr(cronReportFilterTo)}" onchange="cronReportFilterChanged('to',this.value)"></label>
+      <button class="btn-small" onclick="loadCronJobReport(true)" ${cronReportLoading?'disabled':''}>${cronReportLoading?'Refreshing…':'Refresh'}</button>
+      <button class="btn-gold" onclick="exportCronReport()" ${!runs.length?'disabled':''}>Export report to Excel</button>
+    </div>
+    <div class="hint" style="margin-top:10px"><b>Execution totals across recorded history:</b> ${esc(String(cronReportSummary.total ?? 0))} total · <span style="color:var(--forest)">${esc(String(cronReportSummary.succeeded ?? 0))} succeeded</span> · <span style="color:var(--brick)">${esc(String(cronReportSummary.failed ?? 0))} failed</span> · ${esc(String(cronReportSummary.running ?? 0))} running</div>
+    <h3 style="margin:14px 0 6px">Scheduled jobs and configuration</h3>
+    ${jobs.length ? jobs.map(j => `<div style="border:1px solid var(--line);border-radius:9px;padding:11px;margin:8px 0;background:var(--card)">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>${esc(j.jobname || `Job ${j.jobid}`)}</b><span class="tag">ID ${esc(j.jobid)}</span>${j.active?'<span class="tag" style="background:var(--forest);color:#fff">Active</span>':'<span class="tag">Inactive</span>'}</div>
+      <div class="hint" style="margin-top:5px"><b>Schedule:</b> <code>${esc(j.schedule || '—')}</code> · ${esc(cronFriendlySchedule(j.schedule))} · <b>Timezone:</b> ${esc(j.schedule_timezone || cronTz)}</div>
+      ${cronJobPurposeHtml(j)}
+      <div class="hint" style="margin-top:4px;overflow-wrap:anywhere"><b>Command:</b> <code>${esc(j.command || '—')}</code></div>
+      ${cronJobConfigurationHtml(j)}
+    </div>`).join('') : '<div class="empty">No Cron jobs are currently configured.</div>'}
+    ${cronGlobalSettingsHtml()}
+    <h3 style="margin:16px 0 6px">Execution history</h3>
+    <div class="hint">Showing ${runs.length} of ${cronReportTotal} matching executions (maximum 100 per page).</div>
+    <div class="table-scroll"><table><tr><th>Job ID</th><th>Status</th><th>Started (local)</th><th>Finished (local)</th><th>Duration</th><th>Details</th></tr>${runRows}</table></div>
+    ${runs.length < cronReportTotal ? `<button class="btn-small" style="margin-top:10px" onclick="loadCronJobReport(false)" ${cronReportLoading?'disabled':''}>${cronReportLoading?'Loading…':'Load older executions'}</button>` : ''}
+  `;
+}
+
 // ---------- unlock password gate for the four highest-risk Setup actions ----------
 async function attemptUnlock(key) {
   unlockMsg = '';
@@ -7010,14 +7327,18 @@ function teacherRegisterEntries(teacherId, month) {
 
 
 // ---------- login ----------
-// Best-effort logging — never blocks or breaks login/logout if it fails for any reason.
-async function logLoginEvent(event, userId, username, role) {
-  if (!loginAuditEnabled) return;
+// Best-effort logging — the database enforces login_audit_enabled at insert time.
+// Do not use the browser's cached loginAuditEnabled value here: it may be stale or
+// not loaded at all for Student, Parent and Teacher sessions.
+async function logLoginEvent(event, username) {
   try {
-    const { error } = await sb.from('login_log').insert({ event, user_id: userId || null, username: username || null, role: role || null });
-    if (error) console.error('login_log insert failed:', error.message, { event, userId, username, role });
+    const { error } = await sb.rpc('record_login_activity', {
+      p_event: event,
+      p_username: username || null
+    });
+    if (error) console.error('Login Activity recording failed:', error.message, { event });
   } catch (e) {
-    console.error('login_log insert threw:', e);
+    console.error('Login Activity recording threw:', e);
   }
 }
 // =================== BIOMETRIC LOGIN ===================
@@ -7247,7 +7568,7 @@ async function attemptLoginSteps(u, p) {
   const { data: authData, error } = await sb.auth.signInWithPassword({ email, password: p });
   if (error) {
     loginError = 'Incorrect username or password.';
-    await logLoginEvent('login_failed', null, u, null);
+    await logLoginEvent('login_failed', u);
     render();
     return;
   }
@@ -7274,7 +7595,7 @@ async function attemptLoginSteps(u, p) {
   currentUserId = authData.user.id;
   pwIsDefault = (role === 'Parent' || role === 'Student') && p === u;   // bulk-made parent/student logins start with password = login ID
   aiUserEnabled = profile.ai_enabled !== false;
-  logLoginEvent('login', currentUserId, currentUsername, role); // not awaited: the log write shouldn't hold up the login
+  logLoginEvent('login', currentUsername); // not awaited: the log write shouldn't hold up the login
   setLoginStep(loadingStepText(role));
   const slow = setTimeout(() => setLoginStep('Almost there…'), 4000);
   try { await loadAfterLogin(); } finally { clearTimeout(slow); }
@@ -7458,7 +7779,7 @@ async function logout() {
     // so renderLogin() shows the fingerprint button immediately (no page reload).
     // On the next page load, initApp() will intercept the still-valid session
     // and set biometricLockActive = true again automatically.
-    if (currentUserId) logLoginEvent('logout', currentUserId, currentUsername, currentRole);
+    if (currentUserId) await logLoginEvent('logout', currentUsername);
     biometricLockActive = true;
     biometricLockedProfile = {
       username: currentUsername, role: currentRole,
@@ -7468,10 +7789,10 @@ async function logout() {
     };
     biometricLockedUserId = currentUserId;
   } else {
-    await Promise.all([
-      currentUserId ? logLoginEvent('logout', currentUserId, currentUsername, currentRole) : Promise.resolve(),
-      sb.auth.signOut(),
-    ]);
+    // Record logout while the authenticated Supabase session is still available;
+    // signing out concurrently could make auth.uid() unavailable to the RPC.
+    if (currentUserId) await logLoginEvent('logout', currentUsername);
+    await sb.auth.signOut();
   }
   resetResearchState();
   resetTeacherPendingExtra();
@@ -7487,6 +7808,9 @@ async function logout() {
   data = { teachers: [], subjects: [], students: [], studentSubjects: [], subscriptions: [], sessions: [], users: [], parentStudents: [], studentPhoneNumbers: [], adminPhoneNumbers: [], demoLogs: [], teacherPayrollRecords: [], wixBookings: [], supportTickets: [], registrations: [] };
   feeRates = {}; studentFeeRates = []; discountTiers = []; prospectQuotes = []; notifications = []; myAnnouncements = []; allAnnouncementsAdmin = [];
   auditRows = []; loginLogRows = []; scheduledClasses = []; teacherAvailability = []; teacherLeave = [];
+  cronReportJobs = []; cronReportRows = []; cronReportSummary = { total: 0, succeeded: 0, failed: 0, running: 0 }; cronReportSettings = {};
+  cronReportLoading = false; cronReportLoaded = false; cronReportMsg = ''; cronReportOffset = 0; cronReportTotal = 0;
+  cronReportJobFilter = ''; cronReportStatusFilter = ''; cronReportFilterFrom = ''; cronReportFilterTo = '';
   aiUsageRows = null; aiUsageNames = {}; appUsageRows = null; appUsageRecent = null; appUsageProfiles = [];
   qbAccessByTeacher = null; researchAccessByTeacher = null;
   expiryIndexCache = null;
@@ -17151,6 +17475,11 @@ function renderSuperadmin() {
       </div>
       `}
     </div>
+
+    <div class="card">
+      <h2>Cron Job Execution History</h2>
+      ${!dangerZoneUnlocked ? dangerZoneLockHtml('cronReport') : cronReportHtml()}
+    </div>
   `;
 }
 
@@ -21158,7 +21487,7 @@ const HELP = {
   'support-inbox': { t:'Support Inbox', b:"<ul><li>Problems reported by teachers, students and parents with the Support button.</li><li>Filter by Open, In progress or Resolved. Open a ticket to reply and change its status.</li><li>The person sees your reply and the status in their own Support window.</li></ul>" },
   'announcements': { t:'Announcements', b:"<ul><li>A short notice shown above the menu bar for the people you pick: everyone, a whole role (all teachers, students, parents or admins) or one person.</li><li>It stays until they dismiss it, it expires, or you delete it.</li></ul>" },
   'chat': { t:'Chat', b:"<ul><li>New message starts a one-to-one chat with a teacher, student or parent. New group chats with several people at once.</li><li>Unread messages show as a number on the menu and the 💬 button.</li></ul>" },
-  'superadmin': { t:'Superadmin tools', b:"<ul><li>Only superuser admins see this menu. Each card opens with the unlock password.</li><li><b>Academic Year</b>: type the year (e.g. 2026-27). <b>Advance everyone</b> sets it and moves every student (except Adult) up a grade, once a year. <b>Set year only</b> just records the current year (used for new students), no grade changes. <b>Fill blank student years</b> gives the year to students whose year is empty, no grade changes.</li><li><b>Export all data</b> downloads every table as Excel; <b>Import backup</b> loads one back.</li><li><b>Danger zone</b>: export and remove old Audit and Login entries, clear all data, and switch audit logging on or off. These cannot be undone, so export first.</li></ul>" },
+  'superadmin': { t:'Superadmin tools', b:"<ul><li>Only superuser admins see this menu. Each card opens with the unlock password.</li><li><b>Academic Year</b>: type the year (e.g. 2026-27). <b>Advance everyone</b> sets it and moves every student (except Adult) up a grade, once a year. <b>Set year only</b> just records the current year (used for new students), no grade changes. <b>Fill blank student years</b> gives the year to students whose year is empty, no grade changes.</li><li><b>Export all data</b> downloads every table as Excel; <b>Import backup</b> loads one back.</li><li><b>Danger zone</b>: export and remove old Audit and Login entries, clear all data, and switch audit logging on or off. These cannot be undone, so export first.</li><li><b>Cron Job Execution History</b>: read-only view of scheduled database jobs, actual scheduler settings and time zone, SQL commands, called function/procedure definitions, database comments, function security and execution history including errors.</li></ul>" },
   'star-teacher': { t:'Star Teacher', b:"<ul><li>A monthly game, just for fun. You earn points for good work: classes marked the same day, remarks, homework given and reviewed quickly, practice papers, study plans, lesson prep, shared resources, demos, renewals and using the app.</li><li>Points start again on the 1st of each month. Levels: Bronze 100, Silver 250, Gold 450, Platinum 700.</li><li><b>Earn now</b> shows what you can do today and how many points it gives; the number next to Star Teacher in the menu is the same total. <b>Ways to earn points</b> lists every rule.</li><li>Badges you win stay in your trophy shelf.</li><li>Only you can see your points. Other teachers never see them.</li></ul>" },
   'star-teacher-admin': { t:'Star Teacher', b:"<ul><li>A points game for teachers, no money. Tick <b>Show Star Teacher to teachers</b> to switch it on; teachers see it after they open or refresh the app.</li><li><b>Game starts on</b>: nothing before this date counts.</li><li>The leaderboard is for admins only. Tap a teacher to see where their points came from. ⬇ Excel downloads the month.</li><li>Points are worked out from the saved classes, homework, papers, plans, demos, renewals and app usage, so changing the start date recounts everything.</li></ul>" },
   'pending-actions': { t:'Pending Action Items', b:"<ul><li>Everything waiting for you, counted on the menu and in the gold strip on your Dashboard. Tap an item to jump to it.</li><li>Counted: today's classes past their time, class timings to correct (00:00 / 01:00 / 02:00), schedule setup (Class Frequency), demos to mark done, homework and practice papers to review, students without a study plan, unread chats, notifications and announcements, and availability not set.</li><li><b>Keep an eye on</b> is a reminder list and is not counted: lesson prep, expiring classes, renewals, low balances, students not seen, late homework or papers, and your open support tickets.</li><li>You can give attendance only for the current month, so mark every class before the month ends.</li></ul>" },
