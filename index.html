@@ -23927,7 +23927,14 @@ function onboardingParentMessage(ev, student) {
     isUpdate ? 'NEW TEACHER ASSIGNMENT' : 'TEACHER & SUBJECT DETAILS',
     teacherLines.length ? teacherLines.join('\n') : (isUpdate ? 'The teacher assignment details will be available in My LIB App.' : 'Teacher assignment details will be shared separately once available.'),
     onboardingModeText(student),
-    student.modePreference === 'Online' ? teacherIds.map(id => { const t = data.teachers.find(x => x.id === id); return t && t.onlineClassLink ? `${t.name} – Online Class Link\n${t.onlineClassLink}` : ''; }).filter(Boolean).join('\n') : '',
+    student.modePreference === 'Online' ? (() => {
+      const onlineLinks = teacherIds.map(id => {
+        const t = data.teachers.find(x => x.id === id);
+        return t && t.onlineClassLink ? `${t.name}: ${t.onlineClassLink}` : '';
+      }).filter(Boolean);
+      if (!onlineLinks.length) return '';
+      return `${isUpdate ? 'NEW TEACHER ONLINE CLASS LINK' : 'ONLINE CLASS LINKS'}\n${onlineLinks.join('\n')}`;
+    })() : '',
     '',
     'CLASS SCHEDULE',
     'Please refer to My LIB App for the latest Class Schedule and timings. Your teacher maintains and updates the schedule there.',
@@ -23941,7 +23948,10 @@ function onboardingParentMessage(ev, student) {
     'LIB Education'
   ].filter(x => x !== '');
   const onlineMissing = student.modePreference === 'Online' && teacherIds.some(id => { const t = data.teachers.find(x => x.id === id); return !t || !t.onlineClassLink; });
-  return { text: lines.join('\n'), ready: !onlineMissing, reason: onlineMissing ? 'Online mode is selected, but an assigned teacher has no Online Class URL in Teacher Details.' : '' };
+  const onlineMissingReason = isUpdate
+    ? 'The newly assigned teacher has no Online Class URL in Teacher Details. Add the URL before sending this Parent / Student update.'
+    : 'Online mode is selected, but an assigned teacher has no Online Class URL in Teacher Details.';
+  return { text: lines.join('\n'), ready: !onlineMissing, reason: onlineMissing ? onlineMissingReason : '' };
 }
 function onboardingMessageForTarget(ev, target) {
   const student = onboardingStudent(ev);
@@ -23971,10 +23981,16 @@ function onboardingTeacherTargets(ev, student) {
 function onboardingMessageCardHtml(ev, target) {
   const saved = onboardingMessageRecord(ev.id, target.recipient_key);
   const generated = onboardingMessageForTarget(ev, target);
-  const message = saved ? (saved.message_text || generated.text) : generated.text;
+  // For an unconfirmed additional-teacher Parent message, always refresh the preview
+  // from the current teacher record so the newly assigned teacher's Online Class URL
+  // is included after this template correction. Confirmed historical messages stay immutable.
+  const refreshUnconfirmedParentAssignment = !!saved && ev.event_type === 'teacher_assignment'
+    && target.recipient_type === 'parent' && saved.send_status !== 'confirmed';
+  const useSavedSnapshot = !!saved && !refreshUnconfirmedParentAssignment;
+  const message = useSavedSnapshot ? (saved.message_text || generated.text) : generated.text;
   const phone = saved ? (saved.phone_number || target.phone_number) : target.phone_number;
-  const ready = !!phone && (saved ? !!saved.message_text : generated.ready);
-  const why = !phone ? (target.recipient_type === 'teacher' ? 'Teacher mobile number is missing in Teacher Details.' : 'No Parent/Student WhatsApp number is available in Student Maintenance.') : (saved ? '' : generated.reason);
+  const ready = !!phone && (useSavedSnapshot ? !!saved.message_text : generated.ready);
+  const why = !phone ? (target.recipient_type === 'teacher' ? 'Teacher mobile number is missing in Teacher Details.' : 'No Parent/Student WhatsApp number is available in Student Maintenance.') : (useSavedSnapshot ? '' : generated.reason);
   const statusHtml = saved && saved.send_status === 'confirmed'
     ? `<span class="tag" style="background:rgba(60,94,66,.13);color:var(--forest)">Sent – Admin confirmed</span><div class="hint">Confirmed ${esc(onboardingDateTime(saved.confirmed_at))}</div>`
     : saved && saved.send_status === 'opened'
@@ -23982,7 +23998,7 @@ function onboardingMessageCardHtml(ev, target) {
       : '<span class="tag">Not sent</span>';
   const eventStatus = ev.status === 'pending';
   const sendButton = ready && (!saved || saved.send_status !== 'confirmed')
-    ? `<button class="btn-small btn-primary" data-onb-event="${escAttr(ev.id)}" data-onb-key="${escAttr(target.recipient_key)}" data-onb-type="${escAttr(target.recipient_type)}" data-onb-teacher="${escAttr(target.teacher_id || '')}" data-onb-label="${escAttr(target.recipient_label)}" data-onb-phone="${escAttr(phone)}" data-onb-text="${escAttr(saved ? saved.message_text : message)}" onclick="openOnboardingWhatsApp(this)">📤 ${saved ? 'Open WhatsApp again' : 'Open WhatsApp'}</button>`
+    ? `<button class="btn-small btn-primary" data-onb-event="${escAttr(ev.id)}" data-onb-key="${escAttr(target.recipient_key)}" data-onb-type="${escAttr(target.recipient_type)}" data-onb-teacher="${escAttr(target.teacher_id || '')}" data-onb-label="${escAttr(target.recipient_label)}" data-onb-phone="${escAttr(phone)}" data-onb-text="${escAttr(message)}" onclick="openOnboardingWhatsApp(this)">📤 ${saved ? 'Open WhatsApp again' : 'Open WhatsApp'}</button>`
     : (saved && saved.send_status === 'confirmed' ? '' : `<div class="hint" style="color:var(--brick)">${esc(why || 'Message is not ready.')}</div>`);
   const confirmButton = saved && saved.send_status === 'opened'
     ? `<button class="btn-small" onclick="confirmOnboardingMessage('${saved.id}')">Confirm sent</button>`
