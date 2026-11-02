@@ -18492,11 +18492,15 @@ function renderParentPortal() {
     </div>` : `<div class="card"><div class="hint">Viewing: <b>${esc(child.name)}</b>${child.archived?' <span class="tag cat">Archived</span>':''}</div></div>`;
 
   // Compact, collapsed-by-default student login details for the currently selected child.
-  const childStudentLogin = data.users.find(u => u.role === 'Student' && u.linkedId === child.id && !u.archived);
+  // Use the same lookup as Student Maintenance so both screens recognise the same linked login.
+  // Student Maintenance includes archived profiles in its login list, so do not silently treat
+  // an archived-but-existing profile as if no login record exists.
+  const childStudentLogins = loginsForStudent(child.id);
+  const childStudentLogin = childStudentLogins.find(u => !u.archived) || childStudentLogins[0] || null;
   const childLoginDetails = `<details class="parent-student-login-details">
     <summary>Student Login Details</summary>
     ${childStudentLogin ? `<div class="parent-student-login-content">
-      <div><span class="hint">Student Login ID</span><b>${esc(childStudentLogin.username)}</b></div>
+      <div><span class="hint">Student Login ID</span><b>${esc(childStudentLogin.username)}</b>${childStudentLogin.archived ? ' <span class="tag cat">Archived login</span>' : ''}</div>
       <div><span class="hint">Default password</span><b>${String(child.code || '').trim() && String(child.code).trim() === String(childStudentLogin.username || '').trim() ? 'Same as Student Login ID (if not changed)' : 'Set when the login was created; contact LIB Education if required'}</b></div>
     </div>` : `<div class="hint" style="padding:8px 0 2px">No Student Login has been created for ${esc(child.name)} yet. Please contact LIB Education.</div>`}
   </details>`;
