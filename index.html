@@ -21606,10 +21606,12 @@ function renderTeacherMyStudentsClassFrequency(teacher) {
       const dayCards = dayRows.map(sc => {
         const provisional = isProvisionalScheduleTime(sc);
         const timeText = provisional ? 'Timing needs correction' : (sc.time || 'Time not configured');
+        const canOpenScheduleSetup = !sc.time && sc.studentId && sc.subjectId && ['Group','Individual'].includes(sc.classType);
+        const timeSetupLink = canOpenScheduleSetup ? `<div class="hint" style="font-weight:400;margin-top:4px">Use <a href="#" onclick="openScheduleSetupSchedule('${esc(sc.studentId)}','${esc(sc.subjectId)}','${esc(sc.classType)}');return false;">Class Schedule</a> to set the class time for this student.</div>` : '';
         const statusClass = sc.status === 'Done' ? 'tag' : sc.status === 'Missed' ? 'tag absent' : 'tag';
         const statusStyle = sc.status === 'Done' ? 'background:var(--forest);color:#fff' : sc.status === 'Pending' ? 'background:var(--soft);color:var(--ink)' : '';
         return `<div style="display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);flex-wrap:wrap">
-          <div style="min-width:110px;font-weight:700">${esc(timeText)}</div>
+          <div style="min-width:110px;font-weight:700">${esc(timeText)}${timeSetupLink}</div>
           <div style="flex:1;min-width:160px"><b>${esc(studentNameWithCode(sc.studentId))}</b><div class="hint">${esc(sc.subjectId ? subjectName(sc.subjectId) : 'Subject not set')} · ${esc(sc.classType || 'Type not set')}</div></div>
           <span class="${statusClass}" ${statusStyle ? `style="${statusStyle}"` : ''}>${esc(sc.status || 'Unknown')}</span>
         </div>`;
@@ -21626,10 +21628,15 @@ function renderTeacherMyStudentsClassFrequency(teacher) {
   const timingIssues = allEntries.filter(entry => entry.timingLabel !== entry.sortTime && entry.sortTime === '99:99').length;
   const studentCount = new Set(allEntries.map(entry => entry.student.id)).size;
   const dayHtml = weekly.byDay.map(day => {
-    const entriesHtml = day.entries.map(entry => `<div style="display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);flex-wrap:wrap">
-      <div style="min-width:128px"><b>${esc(entry.timingLabel)}</b>${entry.count > 1 ? `<div class="hint">Occurrence ${entry.occurrence} of ${entry.count}</div>` : ''}</div>
+    const entriesHtml = day.entries.map(entry => {
+      const timeSetupLink = entry.timingLabel === 'Time not configured'
+        ? `<div class="hint" style="margin-top:4px">Use <a href="#" onclick="openScheduleSetupSchedule('${esc(entry.student.id)}','${esc(entry.subject.id)}','${esc(entry.classType)}');return false;">Class Schedule</a> to set the class time for this student.</div>`
+        : '';
+      return `<div style="display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);flex-wrap:wrap">
+      <div style="min-width:128px"><b>${esc(entry.timingLabel)}</b>${timeSetupLink}${entry.count > 1 ? `<div class="hint">Occurrence ${entry.occurrence} of ${entry.count}</div>` : ''}</div>
       <div style="flex:1;min-width:160px"><b>${esc(studentNameWithCode(entry.student.id))}</b><div class="hint">${esc(entry.subject.name)} · ${esc(entry.classType)}</div></div>
-    </div>`).join('');
+    </div>`;
+    }).join('');
     return `<div class="card" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h3 style="margin:0">${esc(day.label)}</h3><span class="tag">${day.entries.length} class${day.entries.length === 1 ? '' : 'es'}</span></div>${entriesHtml || '<div class="empty">No classes configured for this day.</div>'}</div>`;
   }).join('');
   const unconfiguredHtml = weekly.unconfigured.length ? `<div class="card" style="border-left:4px solid var(--gold)"><h3 style="margin-top:0">Needs setup or review</h3><div class="hint">These assigned student–subject combinations cannot yet be shown as a recurring class timetable.</div><div class="table-scroll"><table><tr><th>Student</th><th>Subject</th><th>Reason</th></tr>${weekly.unconfigured.map(pair => `<tr><td>${esc(studentLabel(pair.student))}</td><td>${esc(pair.subject.name)}</td><td>${esc(pair.reason)}</td></tr>`).join('')}</table></div></div>` : '';
