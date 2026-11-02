@@ -326,9 +326,16 @@ if (location.hostname !== 'app.libeducation.com') {
   #kbPanel .kb-help b { color:var(--ink);font-weight:600; }
   body.kb-open { padding-bottom:calc(52vh + 20px); }
 
-/* Pending fee requests: wrap content and place row actions below reference details. */
+/* Pending fee requests: responsive desktop table, compact tablet table and mobile cards. */
+.pending-fee-requests-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
 .pending-fee-requests-table {
   width: 100%;
+  min-width: 1080px;
   table-layout: fixed;
 }
 .pending-fee-requests-table th,
@@ -337,25 +344,33 @@ if (location.hostname !== 'app.libeducation.com') {
   overflow-wrap: break-word;
   word-break: normal;
   vertical-align: top;
+  min-width: 0;
 }
 .pending-fee-requests-table th:nth-child(1),
 .pending-fee-requests-table td:nth-child(1) { width: 5%; }
 .pending-fee-requests-table th:nth-child(2),
-.pending-fee-requests-table td:nth-child(2) { width: 13%; }
+.pending-fee-requests-table td:nth-child(2) { width: 12%; }
 .pending-fee-requests-table th:nth-child(3),
-.pending-fee-requests-table td:nth-child(3) { width: 12%; }
+.pending-fee-requests-table td:nth-child(3) { width: 11%; }
 .pending-fee-requests-table th:nth-child(4),
 .pending-fee-requests-table td:nth-child(4) { width: 6%; }
 .pending-fee-requests-table th:nth-child(5),
 .pending-fee-requests-table td:nth-child(5) { width: 7%; }
 .pending-fee-requests-table th:nth-child(6),
-.pending-fee-requests-table td:nth-child(6) { width: 9%; }
+.pending-fee-requests-table td:nth-child(6) { width: 8%; }
 .pending-fee-requests-table th:nth-child(7),
 .pending-fee-requests-table td:nth-child(7) { width: 9%; }
 .pending-fee-requests-table th:nth-child(8),
-.pending-fee-requests-table td:nth-child(8) { width: 11%; }
+.pending-fee-requests-table td:nth-child(8) { width: 14%; }
 .pending-fee-requests-table th:nth-child(9),
 .pending-fee-requests-table td:nth-child(9) { width: 28%; }
+.pending-request-date .hint {
+  white-space: normal !important;
+  overflow-wrap: break-word;
+  word-break: normal;
+  line-height: 1.35;
+  margin-top: 3px;
+}
 .pending-request-actions {
   display: flex;
   flex-wrap: wrap;
@@ -367,6 +382,126 @@ if (location.hostname !== 'app.libeducation.com') {
 .pending-request-actions .icon-btn {
   margin: 0;
   white-space: nowrap;
+}
+@media (min-width: 601px) and (max-width: 1024px) {
+  .pending-fee-requests-table {
+    min-width: 980px;
+    font-size: 12px;
+  }
+  .pending-fee-requests-table th,
+  .pending-fee-requests-table td {
+    padding: 7px 5px;
+  }
+  .pending-request-actions { gap: 4px; }
+  .pending-request-actions .btn-small { padding: 4px 7px; font-size: 11.5px; }
+}
+@media (max-width: 600px) {
+  .pending-fee-requests-scroll { overflow: visible; }
+  .pending-fee-requests-table,
+  .pending-fee-requests-table tbody {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+  .pending-fee-requests-table {
+    table-layout: auto;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 13px;
+  }
+  .pending-fee-requests-table tr.pending-fee-head { display: none; }
+  .pending-fee-requests-table tr.pending-fee-family-row {
+    display: block;
+    margin: 12px 0 8px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    overflow: hidden;
+    background: var(--soft);
+  }
+  .pending-fee-requests-table tr.pending-fee-family-row td {
+    display: block;
+    width: 100%;
+    padding: 10px 12px;
+    border: 0;
+    white-space: normal;
+  }
+  .pending-fee-requests-table tr.pending-fee-request-row {
+    display: grid;
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.4fr);
+    grid-template-areas:
+      "select student"
+      "subject type"
+      "classes remaining"
+      "amount requested"
+      "reference reference";
+    gap: 0 12px;
+    margin: 0 0 10px;
+    padding: 8px 11px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--paper);
+    box-shadow: var(--card-shadow);
+  }
+  .pending-fee-requests-table tr.pending-fee-request-row > td {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    min-width: 0;
+    width: auto;
+    padding: 7px 3px;
+    border-bottom: 1px dashed var(--line);
+    text-align: left;
+    overflow-wrap: break-word;
+    word-break: normal;
+  }
+  .pending-fee-requests-table tr.pending-fee-request-row > td::before {
+    content: attr(data-label);
+    display: block;
+    position: static;
+    width: auto;
+    margin-bottom: 3px;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.25;
+    text-transform: uppercase;
+    letter-spacing: .25px;
+  }
+  .pending-fee-requests-table tr.pending-fee-request-row > td:nth-child(1) { grid-area: select; flex-direction: row; align-items: center; gap: 7px; }
+  .pending-fee-requests-table tr.pending-fee-request-row > td:nth-child(2) { grid-area: student; font-weight: 700; }
+  .pending-fee-requests-table tr.pending-fee-request-row > td:nth-child(3) { grid-area: subject; }
+  .pending-fee-requests-table tr.pending-fee-request-row > td:nth-child(4) { grid-area: type; }
+  .pending-fee-requests-table tr.pending-fee-request-row > td:nth-child(5) { grid-area: classes; }
+  .pending-fee-requests-table tr.pending-fee-request-row > td:nth-child(6) { grid-area: remaining; }
+  .pending-fee-requests-table tr.pending-fee-request-row > td:nth-child(7) { grid-area: amount; }
+  .pending-fee-requests-table tr.pending-fee-request-row > td:nth-child(8) { grid-area: requested; }
+  .pending-fee-requests-table tr.pending-fee-request-row > td:nth-child(9) {
+    grid-area: reference;
+    border-bottom: 0;
+    padding-top: 9px;
+  }
+  .pending-fee-requests-table tr.pending-fee-request-row > td:nth-child(9)::before { margin-bottom: 5px; }
+  .pending-fee-requests-table .pending-request-date { min-width: 0; }
+  .pending-fee-requests-table .pending-request-date > b { overflow-wrap: anywhere; }
+  .pending-fee-requests-table .pending-request-date .hint { font-size: 11px; }
+  .pending-fee-requests-table .pending-request-actions { gap: 6px; margin-top: 9px; }
+  .pending-fee-requests-table .pending-request-actions .btn-small { padding: 6px 9px; }
+  .pending-fee-requests-table tr.pending-fee-edit-row,
+  .pending-fee-requests-table tr.pending-fee-form-row,
+  .pending-fee-requests-table tr.pending-fee-subtotal-row { display: block; margin: 0 0 10px; }
+  .pending-fee-requests-table tr.pending-fee-edit-row > td,
+  .pending-fee-requests-table tr.pending-fee-form-row > td { display: block; width: 100%; padding: 0; border: 0; }
+  .pending-fee-requests-table tr.pending-fee-subtotal-row > td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--soft);
+    font-size: 12px;
+  }
 }
 
 
@@ -10563,13 +10698,13 @@ function pendingFeeRequestsByFamilyHtml() {
       <button class="btn-small" onclick="selectAllPendingRequests(false)" ${selectedCount ? '' : 'disabled'}>Clear selection</button>
       <button class="btn-small" style="border-color:var(--brick);color:var(--brick)" onclick="deleteSelectedPendingRequests()" ${selectedCount ? '' : 'disabled'}>Delete selected (${selectedCount})</button>
     </div>
-    <div class="table-scroll"><table class="pending-fee-requests-table">
-      <tr><th>Select</th><th>Student</th><th>Subject</th><th>Type</th><th>Classes requested</th><th>Classes remaining</th><th>Amount</th><th>Requested</th><th>Reference &amp; working</th></tr>
+    <div class="table-scroll pending-fee-requests-scroll"><table class="pending-fee-requests-table no-stack">
+      <tr class="pending-fee-head"><th>Select</th><th>Student</th><th>Subject</th><th>Type</th><th>Classes requested</th><th>Classes remaining</th><th>Amount</th><th>Requested date</th><th>Reference &amp; working</th></tr>
       ${list.map(f => {
         const total = f.reqs.reduce((a, r) => a + (r.amountPaid || 0), 0);
         const kids = [...new Set(f.reqs.map(r => r.studentId))];
         const phones = familyPhones(f.sid);
-        const head = `<tr style="background:var(--soft)"><td colspan="9" style="white-space:normal">
+        const head = `<tr class="pending-fee-family-row" style="background:var(--soft)"><td colspan="9" style="white-space:normal">
           <b>${esc(familyParentName(f.sid))}</b> · ${esc(phones.join(', ') || '—')}${copyBtnHtml(phones[0])} · ${f.reqs.length} request${f.reqs.length === 1 ? '' : 's'} · <b>Family total ₹${total.toFixed(2)}</b>
           <span style="margin-left:6px"><button class="btn-small" onclick="generateFeeMessageForRequest('${f.reqs[0].id}')">Message</button>${familyWaChips(f.sid, familyFeeMessage(f.sid))}${f.reqs.length > 1 ? `<button class="btn-small btn-primary" onclick="startMarkAllPaid('${f.sid}')">Mark all paid</button>` : ''}</span> ${familyReminderHtml(f.sid)}
         </td></tr>`;
@@ -10578,14 +10713,14 @@ function pendingFeeRequestsByFamilyHtml() {
           return mine.map(r => {
             const isEditing = editingRequestId === r.id;
             const subjectOptions = subjectsForStudent(r.studentId).map(s => `<option value="${s.id}" ${editRequestDraft.subjectId===s.id?'selected':''}>${esc(studentLabel(s))}</option>`).join('');
-            const editPanel = isEditing ? `<tr><td colspan="9"><div style="margin:8px 0;padding:12px;border:1px solid var(--forest);border-radius:8px;background:rgba(60,94,66,0.06)"><div class="hint" style="margin-bottom:8px"><b>Edit pending fee request</b> — ${esc(studentNameWithCode(r.studentId))}</div>${editRequestMsg ? `<div class="hint" style="color:var(--brick)">${esc(editRequestMsg)}</div>` : ''}<div class="row-form" style="margin-bottom:0"><select onchange="editRequestDraftSet('subjectId', this.value)">${subjectOptions}</select><select onchange="editRequestDraftSet('type', this.value)">${TYPES.map(ty=>`<option value="${ty}" ${editRequestDraft.type===ty?'selected':''}>${ty}</option>`).join('')}</select><label>Classes <input type="number" id="editReqClasses_${r.id}" value="${editRequestDraft.classes}" min="0.5" step="0.5" style="width:80px" oninput="requestQuoteInput('edit','classes',this.value)"></label><label>Amount ₹ <input type="number" id="editReqAmount_${r.id}" value="${editRequestDraft.amountPaid}" min="0" step="any" style="width:100px" oninput="requestQuoteInput('edit','amount',this.value)"></label><label>Requested date <input type="date" id="editReqDate_${r.id}" value="${editRequestDraft.date}" onchange="editRequestDraft.date=this.value"></label><button class="btn-small btn-primary" onclick="saveRequestEdit('${r.id}')">Save</button><button class="btn-small" onclick="cancelEditRequest()">Cancel</button></div><div class="hint" id="editReqQuoteHint">${feeQuoteHintHtml(editRequestDraft, 'edit')}</div></div></td></tr>` : '';
-            return `<tr><td><input type="checkbox" aria-label="Select pending request for ${esc(studentNameWithCode(r.studentId))}" ${selectedPendingRequestIds.has(r.id) ? 'checked' : ''} onchange="togglePendingRequestSelection('${r.id}',this.checked)"></td><td>${esc(studentNameWithCode(r.studentId))}</td><td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td><td><b>${studentRemaining(r.studentId, r.subjectId, r.type)}</b></td><td>${(r.amountPaid || 0).toFixed(2)}${requestDiscountHint(r)}</td><td>${r.date || '—'}${savedAtHtml(r.createdAt, r.date)}</td><td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${calcNoteHtml(r)}<div class="pending-request-actions">${markingPaidId === r.id ? '<span class="hint">Confirm below</span>' : `<button class="btn-small" onclick="startMarkPaid('${r.id}')">Mark paid</button><button class="btn-small" onclick="startEditRequest('${r.id}')">Edit</button><button class="icon-btn" title="Remove pending request" aria-label="Remove pending request" onclick="if(confirm('Remove this pending fee request? This cannot be undone.')) cancelFeeRequest('${r.id}')">✕</button>`}</div></td></tr>${editPanel}`;
+            const editPanel = isEditing ? `<tr class="pending-fee-edit-row"><td colspan="9"><div style="margin:8px 0;padding:12px;border:1px solid var(--forest);border-radius:8px;background:rgba(60,94,66,0.06)"><div class="hint" style="margin-bottom:8px"><b>Edit pending fee request</b> — ${esc(studentNameWithCode(r.studentId))}</div>${editRequestMsg ? `<div class="hint" style="color:var(--brick)">${esc(editRequestMsg)}</div>` : ''}<div class="row-form" style="margin-bottom:0"><select onchange="editRequestDraftSet('subjectId', this.value)">${subjectOptions}</select><select onchange="editRequestDraftSet('type', this.value)">${TYPES.map(ty=>`<option value="${ty}" ${editRequestDraft.type===ty?'selected':''}>${ty}</option>`).join('')}</select><label>Classes <input type="number" id="editReqClasses_${r.id}" value="${editRequestDraft.classes}" min="0.5" step="0.5" style="width:80px" oninput="requestQuoteInput('edit','classes',this.value)"></label><label>Amount ₹ <input type="number" id="editReqAmount_${r.id}" value="${editRequestDraft.amountPaid}" min="0" step="any" style="width:100px" oninput="requestQuoteInput('edit','amount',this.value)"></label><label>Requested date <input type="date" id="editReqDate_${r.id}" value="${editRequestDraft.date}" onchange="editRequestDraft.date=this.value"></label><button class="btn-small btn-primary" onclick="saveRequestEdit('${r.id}')">Save</button><button class="btn-small" onclick="cancelEditRequest()">Cancel</button></div><div class="hint" id="editReqQuoteHint">${feeQuoteHintHtml(editRequestDraft, 'edit')}</div></div></td></tr>` : '';
+            return `<tr class="pending-fee-request-row"><td data-label="Select"><input type="checkbox" aria-label="Select pending request for ${esc(studentNameWithCode(r.studentId))}" ${selectedPendingRequestIds.has(r.id) ? 'checked' : ''} onchange="togglePendingRequestSelection('${r.id}',this.checked)"></td><td data-label="Student">${esc(studentNameWithCode(r.studentId))}</td><td data-label="Subject">${esc(subjectName(r.subjectId))}</td><td data-label="Type">${r.type}</td><td data-label="Classes requested">${r.classes}</td><td data-label="Classes remaining"><b>${studentRemaining(r.studentId, r.subjectId, r.type)}</b></td><td data-label="Amount">${(r.amountPaid || 0).toFixed(2)}${requestDiscountHint(r)}</td><td data-label="Requested date"><div class="pending-request-date"><b>${esc(r.date || '—')}</b>${savedAtHtml(r.createdAt, r.date)}</div></td><td data-label="Reference &amp; working">${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${calcNoteHtml(r)}<div class="pending-request-actions">${markingPaidId === r.id ? '<span class="hint">Confirm below</span>' : `<button class="btn-small" onclick="startMarkPaid('${r.id}')">Mark paid</button><button class="btn-small" onclick="startEditRequest('${r.id}')">Edit</button><button class="icon-btn" title="Remove pending request" aria-label="Remove pending request" onclick="if(confirm('Remove this pending fee request? This cannot be undone.')) cancelFeeRequest('${r.id}')">✕</button>`}</div></td></tr>${editPanel}`;
           }).join('')
-            + (kids.length > 1 ? `<tr><td colspan="6" class="hint" style="text-align:right">Subtotal for ${esc((data.students.find(s => s.id === kid) || {}).name || '')}</td><td><b>${mine.reduce((a, r) => a + (r.amountPaid || 0), 0).toFixed(2)}</b></td><td colspan="2"></td></tr>` : '');
+            + (kids.length > 1 ? `<tr class="pending-fee-subtotal-row"><td colspan="9"><span>Subtotal for ${esc((data.students.find(s => s.id === kid) || {}).name || '')}</span><b>₹${mine.reduce((a, r) => a + (r.amountPaid || 0), 0).toFixed(2)}</b></td></tr>` : '');
         }).join('');
         const single = f.reqs.find(r => r.id === markingPaidId);
         const forms = (single ? markPaidFormHtml(single) : '') + markAllPaidFormHtml(f.sid);
-        return head + rows + (forms ? `<tr><td colspan="9">${forms}</td></tr>` : '');
+        return head + rows + (forms ? `<tr class="pending-fee-form-row"><td colspan="9">${forms}</td></tr>` : '');
       }).join('')}
     </table></div>`;
 }
