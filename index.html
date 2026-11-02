@@ -542,7 +542,7 @@ const APP_VERSION = '2026.10';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-02 11:22 IST'; // updated automatically each time a new file is generated
+const BUILD_TIMESTAMP = '2026-11-02 13:55 IST'; // V16 Student Onboarding & Communication
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -579,6 +579,15 @@ function activeCategories() { return categories.filter(c=>!c.archived); }
 let data = { teachers: [], subjects: [], students: [], studentSubjects: [], subscriptions: [], sessions: [], users: [], parentStudents: [], studentPhoneNumbers: [], adminPhoneNumbers: [], demoLogs: [], teacherPayrollRecords: [], wixBookings: [], supportTickets: [], registrations: [] };
 let loaded = false;
 let currentTab = 'dashboard';
+
+// Student Onboarding & WhatsApp Communication (V16).
+let onboardingEvents = [];
+let onboardingMessages = [];
+let onboardingLoading = false;
+let onboardingLoadError = '';
+let onboardingView = 'pending';
+let onboardingBusyEventId = '';
+let onboardingActionMsg = '';
 
 // Class Frequency feature state. This feature only stores weekly counts; it never edits scheduled_classes.
 let setupSubTab = 'teachers';
@@ -3518,6 +3527,7 @@ async function loadUsersAndParents() {
   if (!psErr && psRows) {
     data.parentStudents = psRows.map(r => ({ id: r.id, parentUserId: r.parent_user_id, studentId: r.student_id }));
   }
+  return { ok: !pErr && !psErr, error: pErr || psErr || null };
 }
 // Calls the Admin-only create-login Edge Function (create / resetPassword / delete),
 // which uses service_role privileges the browser never holds directly.
@@ -3594,6 +3604,7 @@ async function loadSessions() {
       createdAt: r.created_at || ''
     }));
   }
+  return { ok: !error, error: error || null };
 }
 // Supabase caps any single query at 1,000 rows (the project's "Max rows" API setting) and truncates SILENTLY. Rows
 // come back oldest-first, so on a growing table the NEWEST rows (e.g. a just-generated weekly schedule) vanish from the
@@ -4623,7 +4634,7 @@ async function createAndLinkDemo(id, nameFromDemo) {
   const name = nameFromDemo.trim();
   if (!name) { demoLinkMsg = 'No student name on this demo log.'; render(); return; }
   demoLinkMsg = 'Creating student…'; render();
-  const { data: row, error } = await sb.from('students').insert({ name, archived: false }).select().single();
+  const { data: row, error } = await sb.from('students').insert({ name, archived: false, onboarding_source: 'demo_register_create_link' }).select().single();
   if (error) { demoLinkMsg = 'Could not create student: ' + error.message; render(); return; }
   data.students.push({ id: row.id, name: row.name, archived: false, code: row.student_code || '' });
   demoLinkStudentId = row.id;
@@ -5427,6 +5438,7 @@ async function loadStudentsAndSubscriptions() {
       createdAt: r.created_at || ''   // teachers' list (teacher_my_subscriptions) has no saved time
     }));
   }
+  return { ok: !stErr && !phErr && !enErr && !subErr, error: stErr || phErr || enErr || subErr || null };
 }
 async function loadSubscriptionRows() {
   // Teachers get subscriptions through teacher_my_subscriptions() (SQL 45): classes, dates and expiry only, never
@@ -6964,6 +6976,7 @@ async function loadTeachersAndSubjects() {
   if (!sErr && subjectRows) {
     data.subjects = subjectRows.map(r => ({ id: r.id, name: r.name, category: r.category, teacherId: r.teacher_id }));
   }
+  return { ok: !tErr && !sErr, error: tErr || sErr || null };
 }
 async function save() {
   const { users, ...appData } = data;
@@ -7301,8 +7314,9 @@ async function loadExpiryConfig() {
       sb.from('subscription_expiry_settings').select('*').eq('id', 1).maybeSingle(),
     ]);
     if (!r.error && r.data) expiryRules = r.data.map(x => ({ maxClasses: Number(x.max_classes), days: Number(x.days) }));
-    if (!s.error && s.data) expirySettings = { enabled: !!s.data.enabled, startDate: s.data.start_date || '' };
-  } catch (e) { /* migration not run yet: the feature simply stays off */ }
+    if (!s.error) expirySettings = s.data ? { enabled: !!s.data.enabled, startDate: s.data.start_date || '' } : { enabled: false, startDate: '' };
+    return { ok: !r.error && !s.error, error: r.error || s.error || null };
+  } catch (e) { return { ok: false, error: e }; /* keep the feature safely unavailable if refresh fails */ }
 }
 async function runExpirySweep(force, reloadAlways) {
   try {
@@ -7818,6 +7832,7 @@ async function refreshAllData(silent) {
       loadMyPhoto(),
     ]);
     if (currentRole === 'Admin' && currentTab === 'audit') { await Promise.all([loadAuditLog(), loadLoginLog()]); }
+    if (currentRole === 'Admin' && currentTab === 'onboarding') await loadStudentOnboardingData();
     if (currentRole === 'Admin' && (currentTab === 'users' || currentTab === 'chat')) await loadAllAnnouncementsAdmin();
     // Only confirm success for an explicit click — the periodic and focus/visibility
     // triggers run silently in the background, and a "Refreshed." popping up
@@ -9625,7 +9640,7 @@ async function addStudent() {
   if (!name) return;
   if (!isValidPersonName(name)) { addConfirmMsg.student = 'Name cannot contain numbers.'; render(); return; }
   if (!confirm('You are about to create a New Student record.\n\nPlease confirm that this student does not already exist in the system.\n\nContinue with creating this student?')) return;
-  const { data: row, error } = await sb.from('students').insert({ name, archived: false }).select().single();
+  const { data: row, error } = await sb.from('students').insert({ name, archived: false, onboarding_source: 'student_maintenance_add' }).select().single();
   if (error) { addConfirmMsg.student = 'Could not add student: ' + error.message; render(); return; }
   data.students.push({ id: row.id, name: row.name, archived: !!row.archived, code: row.student_code || '', parentName: '', mobileNumber: '', email: '', address: '', photo: '', gradeId: '', boardId: '', academicYear: '', modePreference: '', classTypePreference: '', billSeparately: false });
   input.value = '';
@@ -9647,7 +9662,7 @@ async function addSibling(fromId) {
   const gradeId = gradeEl ? gradeEl.value : '';
   if (!name) { siblingMsg = "Type the new student's name."; render(); return; }
   if (!isValidPersonName(name)) { siblingMsg = 'Name cannot contain numbers.'; render(); return; }
-  const payload = { name, archived: false, parent_name: src.parentName || null, mobile_number: src.mobileNumber || null, email: src.email || null, address: src.address || null,
+  const payload = { name, archived: false, onboarding_source: 'student_maintenance_copy', parent_name: src.parentName || null, mobile_number: src.mobileNumber || null, email: src.email || null, address: src.address || null,
     grade_id: gradeId || null, board_id: src.boardId || null, academic_year: src.academicYear || null, mode_preference: src.modePreference || null, class_type_preference: src.classTypePreference || null };
   const { data: row, error } = await sb.from('students').insert(payload).select().single();
   if (error) { siblingMsg = 'Could not add: ' + error.message; render(); return; }
@@ -13261,10 +13276,10 @@ async function actuallySaveSessionEdit(id, count, date) {
 
 // Address-bar names that differ from the tab key: Settings (key 'users', once called Setup) shows as #setup,
 // so Teachers & Subjects (key 'setup') shows as #teachers-subjects. Old #users links still work.
-const TAB_HASH = { users: 'setup', setup: 'teachers-subjects' };
+const TAB_HASH = { users: 'setup', setup: 'teachers-subjects', onboarding: 'student-onboarding' };
 function tabFromHash(h) { const k = Object.keys(TAB_HASH).find(k => TAB_HASH[k] === h); return k || h; }
 function setTab(t) { currentTab = t; if (t === 'setup' && setupSubTab === 'frequency') loadClassFrequencyRows().then(() => render()); trackUse('tab:' + t, true); location.hash = TAB_HASH[t] || t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'registrations') { regMsg = ''; loadRegistrations().then(() => render()); } if (t === 'fees') { rzpFeeMsg = ''; loadRazorpayFeePayments().then(() => render()); } if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; tbAdminEditId=''; tbAdminMsg=''; Promise.all([loadStudyPlans(), loadTextbookLibrary()]).then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
-  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); } }
+  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); } if (t === 'onboarding') loadStudentOnboardingData().then(() => render()); }
 function setPayrollMonth(v) { payrollMonth = v; render(); }
 function setNetProfitMonth(v) { netProfitMonth = v; render(); }
 function setNetProfitViewMode(v) { netProfitViewMode = v; render(); }
@@ -23711,6 +23726,419 @@ function qbTableHtml(qs, isAdmin) {
 // ─────────────────────────────────────────────────────────────
 // QUESTION BANK — Admin
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// STUDENT ONBOARDING & WHATSAPP COMMUNICATION (V16)
+// The SQL migration creates events from new students rows, detects new teacher
+// assignments, and auto-closes applicable events when attendance is first logged.
+// WhatsApp is always opened by an Admin; message sending is manually confirmed.
+// ─────────────────────────────────────────────────────────────
+async function loadStudentOnboardingData() {
+  if (currentRole !== 'Admin') return;
+  onboardingLoading = true;
+  onboardingLoadError = '';
+  const [eventsRes, messagesRes] = await Promise.all([
+    selectAllPaged('student_onboarding_events', ['created_at']),
+    selectAllPaged('student_onboarding_messages', ['created_at'])
+  ]);
+  if (eventsRes.error || messagesRes.error) {
+    const err = eventsRes.error || messagesRes.error;
+    onboardingLoadError = 'Could not load onboarding records. Run student_onboarding_communication_v16.sql in Supabase first. ' + (err && err.message ? err.message : '');
+    onboardingEvents = [];
+    onboardingMessages = [];
+  } else {
+    onboardingEvents = (eventsRes.data || []).slice().sort((a,b) => String(b.created_at||'').localeCompare(String(a.created_at||'')));
+    onboardingMessages = (messagesRes.data || []).slice().sort((a,b) => String(a.created_at||'').localeCompare(String(b.created_at||'')));
+  }
+  onboardingLoading = false;
+}
+function onboardingEventKindLabel(ev) {
+  if (ev.event_type === 'initial') return 'New student onboarding';
+  if (ev.event_type === 'teacher_assignment') return 'New teacher assignment';
+  if (ev.event_type === 'manual_recommunication') return 'Admin-requested communication';
+  return 'Communication event';
+}
+function onboardingSourceLabel(source) {
+  const labels = {
+    student_maintenance_add: 'Student Maintenance · Add Student',
+    student_maintenance_copy: 'Student Maintenance · Copy to New Student',
+    demo_register_create_link: 'Demo Register · Create and Link Demo',
+    registration_accept: 'Registration · Accept',
+    student_maintenance_subject_enrollment: 'Student Maintenance · Subject Enrollment',
+    manual_admin: 'Manually initiated by Admin',
+    other: 'Other student creation route'
+  };
+  return labels[source] || source || 'Source not recorded';
+}
+function onboardingStatusLabel(status) {
+  if (status === 'manually_completed') return 'Manually Completed';
+  if (status === 'communication_completed') return 'Communication Completed';
+  if (status === 'class_started_auto_closed') return 'Class Started – Auto Closed';
+  return 'Pending Communication';
+}
+function onboardingStatusBadge(status) {
+  if (status === 'communication_completed') return '<span class="tag" style="background:rgba(60,94,66,.13);color:var(--forest)">Communication Completed</span>';
+  if (status === 'manually_completed') return '<span class="tag" style="background:rgba(42,46,51,.12);color:var(--ink)">Manually Completed</span>';
+  if (status === 'class_started_auto_closed') return '<span class="tag" style="background:rgba(42,108,160,.12);color:#245a83">Class Started – Auto Closed</span>';
+  return '<span class="tag absent">Pending Communication</span>';
+}
+function onboardingDateTime(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? String(value) : d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+function onboardingStudent(ev) { return data.students.find(s => s.id === ev.student_id) || null; }
+function onboardingEventTeacherIds(ev) {
+  const ids = Array.isArray(ev.expected_teacher_ids) ? ev.expected_teacher_ids.filter(Boolean) : [];
+  if (ev.event_type === 'teacher_assignment' && ev.teacher_id && !ids.includes(ev.teacher_id)) ids.push(ev.teacher_id);
+  return [...new Set(ids)];
+}
+function onboardingEventTeachers(ev) {
+  return onboardingEventTeacherIds(ev).map(id => data.teachers.find(t => t.id === id) || { id, name: 'Teacher record unavailable', mobileNumber: '', onlineClassLink: '' });
+}
+function onboardingTeacherSubjectRows(studentId, teacherId, ev) {
+  let rows = data.studentSubjects.filter(en => en.studentId === studentId).map(en => ({ enrollment: en, subject: subject(en.subjectId) })).filter(x => x.subject && x.subject.teacherId === teacherId);
+  if (ev.event_type === 'teacher_assignment' && ev.subject_id) rows = rows.filter(x => x.subject.id === ev.subject_id);
+  return rows;
+}
+function onboardingTypeText(student, subjectId) {
+  const pref = student.classTypePreference || '';
+  if (pref === 'Group' || pref === 'Individual') return pref;
+  const kinds = [...new Set(data.subscriptions.filter(x => x.studentId === student.id && x.subjectId === subjectId && x.kind !== 'Request').map(x => x.type).filter(x => x === 'Group' || x === 'Individual'))];
+  if (kinds.length === 1) return kinds[0];
+  if (kinds.length === 2) return 'Group / Individual';
+  if (pref === 'Both') return 'Both (exact class type is maintained in My LIB App)';
+  return 'Not specified';
+}
+function onboardingModeText(student) {
+  const mode = student.modePreference || '';
+  if (mode === 'Online' || mode === 'Offline') return 'Mode preference: ' + mode;
+  if (mode === 'Both') return 'Mode preference: Both (the actual class mode is maintained in My LIB App)';
+  return 'Mode preference has not been specified.';
+}
+function onboardingGradeText(student) {
+  const g = grades.find(x => String(x.id) === String(student.gradeId));
+  return g ? g.name : '';
+}
+function onboardingBoardText(student) {
+  const b = boards.find(x => String(x.id) === String(student.boardId));
+  return b ? b.name : '';
+}
+function onboardingMyLibUrl() {
+  const stable = (APP_LINK_LINES || []).find(x => /^Stable Release:/i.test(x));
+  return stable ? stable.replace(/^Stable Release:\s*/i, '').trim() : 'https://app.libeducation.com';
+}
+function onboardingSubscriptionStatusLines(studentId) {
+  const student = data.students.find(s => s.id === studentId);
+  if (!student) return ['Subscription details are unavailable.'];
+  const subjectIds = [...new Set(data.studentSubjects.filter(x => x.studentId === studentId).map(x => x.subjectId))];
+  if (!subjectIds.length) return ['No subject assignments are currently recorded.'];
+  const lines = [];
+  subjectIds.forEach(subjectId => {
+    const label = subjectName(subjectId);
+    const relevant = data.subscriptions.filter(x => x.studentId === studentId && x.subjectId === subjectId);
+    const types = [...new Set(relevant.map(x => x.type).filter(x => x === 'Group' || x === 'Individual'))];
+    if (!types.length) {
+      lines.push(`${label}: No subscription/payment record currently found.`);
+      return;
+    }
+    types.forEach(type => {
+      const paidOrAdjusted = relevant.filter(x => x.type === type && x.kind !== 'Request');
+      const requests = relevant.filter(x => x.type === type && x.kind === 'Request');
+      if (!paidOrAdjusted.length) {
+        lines.push(`${label} (${type}): ${requests.length ? 'Fee request pending; no confirmed payment record found.' : 'No subscription/payment record found.'}`);
+        return;
+      }
+      const remaining = studentRemaining(studentId, subjectId, type);
+      const allocated = allocateSubscriptions(studentId, subjectId, type);
+      const hasActiveBatch = allocated.some(x => x.status === 'Active' && Number(x.remainingHere) > 0);
+      const hasUpcomingBatch = allocated.some(x => x.status === 'Upcoming' && Number(x.remainingHere) > 0);
+      const hasExpiredBatch = allocated.some(x => x.status === 'Expired' && Number(x.expiredClasses || 0) > 0);
+      let status;
+      if (remaining > 0) status = hasActiveBatch ? 'Active' : (hasUpcomingBatch ? 'Upcoming' : 'Balance available');
+      else status = hasExpiredBatch ? 'Expired' : 'Exhausted';
+      let line = `${label} (${type}): ${status} — ${Math.max(0, remaining)} class${Math.max(0, remaining) === 1 ? '' : 'es'} remaining.`;
+      if (requests.length) line += ` ${requests.length} fee request${requests.length === 1 ? '' : 's'} pending.`;
+      const soon = expiringSoon(studentId).filter(x => x.subjectId === subjectId && x.type === type);
+      if (soon.length) line += ` ${soon.reduce((a,x) => a + x.unused, 0)} unused class(es) approaching expiry; earliest expiry ${dayDate(soon[0].expiresOn)}.`;
+      lines.push(line);
+    });
+  });
+  return lines.length ? lines : ['No subscription/payment information is currently available.'];
+}
+function onboardingTeacherMessage(ev, student, teacher) {
+  const rows = onboardingTeacherSubjectRows(student.id, teacher.id, ev);
+  const subjectsText = rows.map(x => `${x.subject.name} (${onboardingTypeText(student, x.subject.id)})`).join('\n');
+  const grade = onboardingGradeText(student), board = onboardingBoardText(student);
+  const parentPhones = familyPhoneList(student.id);
+  const parentPhone = parentPhones.length ? parentPhones.map(x => `${x.label || 'Contact'}: ${x.number}`).join('\n') : '';
+  const lines = [
+    `Hello ${teacher.name || 'Teacher'},`,
+    '',
+    ev.event_type === 'initial' ? 'A new student has been assigned to you at LIB Education.' : (ev.event_type === 'teacher_assignment' ? 'A student has been newly assigned to you at LIB Education.' : 'Here is an updated communication for your assigned student at LIB Education.'),
+    '',
+    'STUDENT DETAILS',
+    `Student Name: ${student.name}`,
+    student.code ? `Student ID: ${student.code}` : '',
+    grade ? `Grade: ${grade}` : '',
+    board ? `Board: ${board}` : '',
+    '',
+    'YOUR ASSIGNMENT',
+    subjectsText ? subjectsText : 'Subject assignment details are not currently available.',
+    onboardingModeText(student),
+    student.modePreference === 'Online' && teacher.onlineClassLink ? `ONLINE CLASS LINK\n${teacher.onlineClassLink}` : '',
+    '',
+    'CLASS SCHEDULE',
+    'Please refer to My LIB App for the latest Class Schedule and timings. You maintain and update the schedule there.',
+    onboardingMyLibUrl(),
+    '',
+    parentPhone ? `FAMILY CONTACT DETAILS\n${parentPhone}` : '',
+    '',
+    'Please review the student details in My LIB App.',
+    '',
+    'Regards,',
+    'LIB Education'
+  ].filter(x => x !== '');
+  return { text: lines.join('\n'), ready: !!teacher.mobileNumber && rows.length > 0 && !(student.modePreference === 'Online' && !teacher.onlineClassLink), reason: !teacher.mobileNumber ? 'Teacher mobile number is missing in Teacher Details.' : (!rows.length ? 'No current subject assignment is available for this teacher.' : (student.modePreference === 'Online' && !teacher.onlineClassLink ? 'Online mode is selected, but this teacher has no Online Class URL in Teacher Details.' : '')) };
+}
+function onboardingParentMessage(ev, student) {
+  const teacherIds = onboardingEventTeacherIds(ev);
+  const teacherLines = teacherIds.map(id => {
+    const t = data.teachers.find(x => x.id === id);
+    const rows = onboardingTeacherSubjectRows(student.id, id, ev);
+    if (!t || !rows.length) return '';
+    return `${t.name}: ${rows.map(x => x.subject.name + ' (' + onboardingTypeText(student, x.subject.id) + ')').join(', ')}`;
+  }).filter(Boolean);
+  const login = loginsForStudent(student.id)[0] || null;
+  const parentGreetingName = student.parentName || familyMembers(student.id).map(x => x.parentName).find(Boolean) || '';
+  const grade = onboardingGradeText(student), board = onboardingBoardText(student);
+  const isUpdate = ev.event_type === 'teacher_assignment';
+  const isRecommunication = ev.event_type === 'manual_recommunication';
+  const lines = [
+    `Dear ${parentGreetingName || 'Parent/Guardian'},`,
+    '',
+    isUpdate ? `We would like to inform you about a new teacher assignment for ${student.name} at LIB Education.` : (isRecommunication ? `Here is an updated communication about ${student.name}'s learning at LIB Education.` : `Welcome to LIB Education! We are pleased to welcome ${student.name} to our learning programme.`),
+    '',
+    'STUDENT DETAILS',
+    `Student: ${student.name}`,
+    student.code ? `Student ID: ${student.code}` : '',
+    grade ? `Grade: ${grade}` : '',
+    board ? `Board: ${board}` : '',
+    '',
+    isUpdate ? 'NEW TEACHER ASSIGNMENT' : 'TEACHER & SUBJECT DETAILS',
+    teacherLines.length ? teacherLines.join('\n') : (isUpdate ? 'The teacher assignment details will be available in My LIB App.' : 'Teacher assignment details will be shared separately once available.'),
+    onboardingModeText(student),
+    student.modePreference === 'Online' ? teacherIds.map(id => { const t = data.teachers.find(x => x.id === id); return t && t.onlineClassLink ? `${t.name} – Online Class Link\n${t.onlineClassLink}` : ''; }).filter(Boolean).join('\n') : '',
+    '',
+    'CLASS SCHEDULE',
+    'Please refer to My LIB App for the latest Class Schedule and timings. Your teacher maintains and updates the schedule there.',
+    onboardingMyLibUrl(),
+    '',
+    login ? `STUDENT LOGIN ID\n${login.username}\nPlease use the initial password provided by LIB Education. Change it after your first login if the app prompts you to do so.` : 'STUDENT LOGIN\nStudent login details will be shared separately once the Student Login has been created.',
+    isRecommunication ? '' : '',
+    isRecommunication ? `CURRENT SUBSCRIPTION POSITION (checked ${dayDate(todayStr)})\n${onboardingSubscriptionStatusLines(student.id).join('\n')}` : '',
+    '',
+    'Regards,',
+    'LIB Education'
+  ].filter(x => x !== '');
+  const onlineMissing = student.modePreference === 'Online' && teacherIds.some(id => { const t = data.teachers.find(x => x.id === id); return !t || !t.onlineClassLink; });
+  return { text: lines.join('\n'), ready: !onlineMissing, reason: onlineMissing ? 'Online mode is selected, but an assigned teacher has no Online Class URL in Teacher Details.' : '' };
+}
+function onboardingMessageForTarget(ev, target) {
+  const student = onboardingStudent(ev);
+  if (!student) return { text: '', ready: false, reason: 'Student record is no longer available.' };
+  if (target.recipient_type === 'teacher') {
+    const teacher = data.teachers.find(t => t.id === target.teacher_id);
+    if (!teacher) return { text: '', ready: false, reason: 'Teacher record is no longer available.' };
+    return onboardingTeacherMessage(ev, student, teacher);
+  }
+  return onboardingParentMessage(ev, student);
+}
+function onboardingMessageRecord(eventId, recipientKey) {
+  return onboardingMessages.find(m => m.event_id === eventId && m.recipient_key === recipientKey) || null;
+}
+function onboardingParentTargets(ev, student) {
+  return familyPhoneList(student.id).map(p => ({
+    recipient_type: 'parent', recipient_key: 'parent:' + phoneKey(p.number), phone_number: p.number,
+    recipient_label: p.label || familyParentName(student.id) || 'Parent/Guardian', teacher_id: null
+  }));
+}
+function onboardingTeacherTargets(ev, student) {
+  return onboardingEventTeachers(ev).map(t => ({
+    recipient_type: 'teacher', recipient_key: 'teacher:' + t.id, phone_number: t.mobileNumber || '',
+    recipient_label: t.name || 'Teacher', teacher_id: t.id
+  }));
+}
+function onboardingMessageCardHtml(ev, target) {
+  const saved = onboardingMessageRecord(ev.id, target.recipient_key);
+  const generated = onboardingMessageForTarget(ev, target);
+  const message = saved ? (saved.message_text || generated.text) : generated.text;
+  const phone = saved ? (saved.phone_number || target.phone_number) : target.phone_number;
+  const ready = !!phone && (saved ? !!saved.message_text : generated.ready);
+  const why = !phone ? (target.recipient_type === 'teacher' ? 'Teacher mobile number is missing in Teacher Details.' : 'No Parent/Student WhatsApp number is available in Student Maintenance.') : (saved ? '' : generated.reason);
+  const statusHtml = saved && saved.send_status === 'confirmed'
+    ? `<span class="tag" style="background:rgba(60,94,66,.13);color:var(--forest)">Sent – Admin confirmed</span><div class="hint">Confirmed ${esc(onboardingDateTime(saved.confirmed_at))}</div>`
+    : saved && saved.send_status === 'opened'
+      ? `<span class="tag" style="background:rgba(190,130,30,.13);color:#8a5a0a">WhatsApp opened – awaiting confirmation</span>`
+      : '<span class="tag">Not sent</span>';
+  const eventStatus = ev.status === 'pending';
+  const sendButton = ready && (!saved || saved.send_status !== 'confirmed')
+    ? `<button class="btn-small btn-primary" data-onb-event="${escAttr(ev.id)}" data-onb-key="${escAttr(target.recipient_key)}" data-onb-type="${escAttr(target.recipient_type)}" data-onb-teacher="${escAttr(target.teacher_id || '')}" data-onb-label="${escAttr(target.recipient_label)}" data-onb-phone="${escAttr(phone)}" data-onb-text="${escAttr(saved ? saved.message_text : message)}" onclick="openOnboardingWhatsApp(this)">📤 ${saved ? 'Open WhatsApp again' : 'Open WhatsApp'}</button>`
+    : (saved && saved.send_status === 'confirmed' ? '' : `<div class="hint" style="color:var(--brick)">${esc(why || 'Message is not ready.')}</div>`);
+  const confirmButton = saved && saved.send_status === 'opened'
+    ? `<button class="btn-small" onclick="confirmOnboardingMessage('${saved.id}')">Confirm sent</button>`
+    : '';
+  return `<div class="student-section" style="margin-top:10px;background:#fbfaf6">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>${target.recipient_type === 'teacher' ? 'Teacher message · ' : 'Parent / Student message · '}${esc(target.recipient_label)}</b>${statusHtml}</div>
+    <div class="hint" style="margin:5px 0">WhatsApp: ${esc(phone || 'Number not available')}</div>
+    <details style="margin:7px 0"><summary style="cursor:pointer;font-weight:600">Preview WhatsApp message</summary><pre style="white-space:pre-wrap;font:13px/1.5 inherit;background:#f3f1eb;border-radius:6px;padding:10px;margin-top:8px">${esc(message || 'Message cannot be prepared yet.')}</pre></details>
+    ${sendButton ? `<div class="row-form" style="margin:6px 0">${sendButton}${confirmButton}</div>` : ''}
+    ${!sendButton && confirmButton ? `<div class="row-form" style="margin:6px 0">${confirmButton}</div>` : ''}
+  </div>`;
+}
+function onboardingEventCardHtml(ev, history) {
+  const student = onboardingStudent(ev);
+  const name = student ? studentLabel(student) : 'Student record unavailable';
+  const teachers = student ? onboardingTeacherTargets(ev, student) : [];
+  const parents = student ? onboardingParentTargets(ev, student) : [];
+  const rows = onboardingMessages.filter(m => m.event_id === ev.id);
+  const confirmedCount = rows.filter(m => m.send_status === 'confirmed').length;
+  const title = onboardingEventKindLabel(ev);
+  const manualButton = !history && ev.status === 'pending'
+    ? `<button class="btn-small" onclick="manuallyCompleteOnboarding('${ev.id}')">Mark Onboarding Complete</button>` : '';
+  const reconButton = history && student
+    ? `<button class="btn-small btn-primary" ${onboardingBusyEventId===student.id?'disabled':''} onclick="startStudentOnboardingRecommunication('${student.id}')">${onboardingBusyEventId===student.id?'Preparing…':'Prepare New Communication'}</button>` : '';
+  const closeText = ev.status !== 'pending' ? `<div class="hint">${esc(onboardingStatusLabel(ev.status))}${ev.closed_at ? ' · ' + esc(onboardingDateTime(ev.closed_at)) : ''}</div>` : '';
+  const sourceText = ev.event_type === 'initial' ? `<div class="hint">Created through: ${esc(onboardingSourceLabel(ev.source))}</div>` : (ev.source ? `<div class="hint">Source: ${esc(onboardingSourceLabel(ev.source))}</div>` : '');
+  const messageSection = student ? `
+    <div style="margin-top:10px"><b>WhatsApp communication</b> <span class="hint">(${confirmedCount} confirmed)</span></div>
+    ${teachers.length ? teachers.map(t => onboardingMessageCardHtml(ev, t)).join('') : '<div class="hint" style="margin-top:8px">No teacher assignment is currently recorded for this event.</div>'}
+    ${parents.length ? parents.map(p => onboardingMessageCardHtml(ev, p)).join('') : '<div class="hint" style="color:var(--brick);margin-top:8px">Parent / Student WhatsApp number is missing. Add a number in Student Maintenance.</div>'}
+    ${!parents.length || teachers.some(t => !t.phone_number) ? '<div class="hint" style="color:var(--brick);margin-top:8px">Missing recipient details prevent Communication Completed. You may still use Manual Completion.</div>' : ''}
+  ` : '<div class="hint">The linked student record is no longer available. Communication cannot be prepared.</div>';
+  return `<div class="card" style="margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
+      <div><h3 style="margin:0 0 4px">${esc(name)}</h3><div class="hint">${esc(title)} · Created ${esc(onboardingDateTime(ev.created_at))}</div>${sourceText}</div>
+      <div>${onboardingStatusBadge(ev.status)}</div>
+    </div>
+    ${closeText}
+    ${messageSection}
+    ${history ? `<div class="hint" style="margin-top:10px">This event's message confirmations are retained. New communication creates a separate event and refreshes subscription information at preparation time.</div>` : ''}
+    <div class="row-form" style="margin-top:12px">${manualButton}${reconButton}</div>
+  </div>`;
+}
+async function openOnboardingWhatsApp(button) {
+  if (!button) return;
+  const eventId = button.dataset.onbEvent || '';
+  const recipientKey = button.dataset.onbKey || '';
+  const recipientType = button.dataset.onbType || '';
+  const teacherId = button.dataset.onbTeacher || null;
+  const recipientLabel = button.dataset.onbLabel || '';
+  const phone = button.dataset.onbPhone || '';
+  const message = button.dataset.onbText || '';
+  if (!eventId || !recipientKey || !phone || !message) return;
+  const old = onboardingMessageRecord(eventId, recipientKey);
+  if (old && old.send_status === 'confirmed') { alert('This message is already confirmed as sent. Use Prepare New Communication from Completed History to send a new message.'); return; }
+  // Open WhatsApp synchronously inside the user gesture so browser popup blockers do not interfere.
+  launchWhatsApp(phone, message, 'web');
+  button.disabled = true;
+  const event = onboardingEvents.find(e => e.id === eventId);
+  if (recipientType === 'parent' && event) {
+    const student = onboardingStudent(event);
+    const allKeys = student ? familyPhoneList(student.id).map(p => 'parent:' + phoneKey(p.number)).filter(Boolean) : [recipientKey];
+    const expected = [...new Set([...(event.expected_parent_keys || []), ...allKeys])];
+    const { error: targetErr } = await sb.from('student_onboarding_events').update({ expected_parent_keys: expected }).eq('id', eventId);
+    if (targetErr) { onboardingActionMsg = 'WhatsApp opened, but the recipient checklist could not be saved: ' + targetErr.message; button.disabled = false; render(); return; }
+    event.expected_parent_keys = expected;
+  }
+  const payload = {
+    event_id: eventId, recipient_key: recipientKey, recipient_type: recipientType,
+    teacher_id: teacherId || null, recipient_label: recipientLabel,
+    phone_number: phone, message_text: message, send_status: 'opened', opened_at: new Date().toISOString(), updated_at: new Date().toISOString()
+  };
+  const { data: row, error } = await sb.from('student_onboarding_messages').upsert(payload, { onConflict: 'event_id,recipient_key' }).select().single();
+  button.disabled = false;
+  if (error) { onboardingActionMsg = 'WhatsApp opened, but the message record could not be saved: ' + error.message; render(); return; }
+  const ix = onboardingMessages.findIndex(m => m.event_id === eventId && m.recipient_key === recipientKey);
+  if (ix >= 0) onboardingMessages[ix] = row; else onboardingMessages.push(row);
+  onboardingActionMsg = 'WhatsApp opened. After sending the message in WhatsApp, return here and click Confirm sent.';
+  render();
+}
+async function confirmOnboardingMessage(messageId) {
+  onboardingActionMsg = '';
+  const { data: result, error } = await sb.rpc('confirm_student_onboarding_message', { p_message_id: messageId });
+  if (error) { onboardingActionMsg = 'Could not confirm message: ' + error.message; render(); return; }
+  if (!result || !result.ok) { onboardingActionMsg = 'Could not confirm message.'; render(); return; }
+  await loadStudentOnboardingData();
+  onboardingActionMsg = result.event_status === 'communication_completed'
+    ? 'All required WhatsApp messages are confirmed. Onboarding is Communication Completed.'
+    : 'Message marked as sent. Other required recipient confirmations are still pending.';
+  render();
+}
+async function manuallyCompleteOnboarding(eventId) {
+  const ev = onboardingEvents.find(e => e.id === eventId);
+  if (!ev || ev.status !== 'pending') return;
+  const confirmed = onboardingMessages.filter(m => m.event_id === eventId && m.send_status === 'confirmed').length;
+  if (!confirm(`Manually complete onboarding for ${studentName(ev.student_id)}?\n\nThis closes the pending item even if WhatsApp messages remain unconfirmed. The message statuses will NOT be changed.\n\nCurrently confirmed messages: ${confirmed}.`)) return;
+  const { data: result, error } = await sb.rpc('complete_student_onboarding_event', { p_event_id: eventId });
+  if (error) { onboardingActionMsg = 'Could not complete onboarding: ' + error.message; render(); return; }
+  await loadStudentOnboardingData();
+  onboardingActionMsg = result && result.event_status === 'manually_completed'
+    ? 'Onboarding marked Manually Completed. WhatsApp message statuses were preserved.'
+    : 'Onboarding status: ' + (result ? result.event_status : 'updated');
+  render();
+}
+async function startStudentOnboardingRecommunication(studentId) {
+  onboardingActionMsg = '';
+  onboardingBusyEventId = studentId;
+  render();
+  // Refresh all current details and subscription inputs before a new communication event is created.
+  const results = await Promise.all([
+    loadStudentsAndSubscriptions(), loadSessions(), loadTeachersAndSubjects(), loadUsersAndParents(), loadExpiryConfig()
+  ]);
+  const failedRefresh = results.find(r => !r || r.ok !== true);
+  if (failedRefresh) {
+    onboardingBusyEventId = '';
+    onboardingActionMsg = 'Could not refresh all current student, teacher, attendance and subscription information. No new communication was created. Please refresh the Admin data and try again.';
+    render();
+    return;
+  }
+  const student = data.students.find(s => s.id === studentId);
+  if (!student) { onboardingBusyEventId = ''; onboardingActionMsg = 'Student record not found.'; render(); return; }
+  const teacherIds = [...new Set(data.studentSubjects.filter(x => x.studentId === studentId).map(x => subject(x.subjectId)).filter(Boolean).map(x => x.teacherId).filter(Boolean))];
+  const { data: newId, error } = await sb.rpc('start_student_onboarding_recommunication', { p_student_id: studentId, p_teacher_ids: teacherIds });
+  onboardingBusyEventId = '';
+  if (error) { onboardingActionMsg = 'Could not start new communication: ' + error.message; render(); return; }
+  await loadStudentOnboardingData();
+  onboardingView = 'pending';
+  onboardingActionMsg = 'A new communication event has been created. Subscription status was refreshed and will be shown in the Parent / Student message.';
+  render();
+}
+function renderStudentOnboarding() {
+  if (onboardingLoading) return `<div class="card"><div class="empty">Loading Student Onboarding & Communication…</div></div>`;
+  const pending = onboardingEvents.filter(e => e.status === 'pending');
+  const history = onboardingEvents.filter(e => e.status !== 'pending');
+  const visible = onboardingView === 'pending' ? pending : history;
+  const summary = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin:12px 0">
+      <div class="card" style="margin:0;padding:12px"><div class="hint">Pending Communication</div><div style="font-size:26px;font-weight:700">${pending.length}</div></div>
+      <div class="card" style="margin:0;padding:12px"><div class="hint">Communication Completed</div><div style="font-size:26px;font-weight:700">${history.filter(e=>e.status==='communication_completed').length}</div></div>
+      <div class="card" style="margin:0;padding:12px"><div class="hint">Manually Completed</div><div style="font-size:26px;font-weight:700">${history.filter(e=>e.status==='manually_completed').length}</div></div>
+      <div class="card" style="margin:0;padding:12px"><div class="hint">Class Started – Auto Closed</div><div style="font-size:26px;font-weight:700">${history.filter(e=>e.status==='class_started_auto_closed').length}</div></div>
+    </div>`;
+  const list = visible.map(e => onboardingEventCardHtml(e, onboardingView === 'history')).join('');
+  return `<div class="page-head"><div><h1>Student Onboarding & Communication</h1><div class="hint">WhatsApp only · Admin opens each message and confirms it after sending.</div></div><button class="btn-small" onclick="loadStudentOnboardingData().then(()=>render())" ${onboardingLoading?'disabled':''}>↻ Refresh</button></div>
+    ${summary}
+    ${onboardingActionMsg ? `<div class="hint" style="color:var(--forest);margin:8px 0">${esc(onboardingActionMsg)}</div>` : ''}
+    ${onboardingLoadError ? `<div class="card" style="border-color:var(--brick)"><div class="hint" style="color:var(--brick)">${esc(onboardingLoadError)}</div></div>` : `
+      <div class="row-form" style="margin-bottom:12px">
+        <button class="btn-small ${onboardingView==='pending'?'btn-primary':''}" onclick="onboardingView='pending';onboardingActionMsg='';render()">Pending Communication (${pending.length})</button>
+        <button class="btn-small ${onboardingView==='history'?'btn-primary':''}" onclick="onboardingView='history';onboardingActionMsg='';render()">Completed History (${history.length})</button>
+      </div>
+      ${visible.length ? list : `<div class="card"><div class="empty">${onboardingView==='pending'?'No pending onboarding communications.':'No completed communication history yet.'}</div></div>`}
+    `}
+  `;
+}
+
 function renderAdminQuestionBank() {
   if (qbLoading) return `<div class="card"><div class="empty">Loading question bank…</div></div>`;
 
@@ -25737,7 +26165,7 @@ async function regAccept(id) {
   } else if (selectedExisting) {
     row = selectedExisting;
   } else {
-    const payload = { name, archived: false, parent_name: r.parent_name || null, mobile_number: r.parent_mobile || null, email: r.email || null, address: r.address || null,
+    const payload = { name, archived: false, onboarding_source: 'registration_accept', parent_name: r.parent_name || null, mobile_number: r.parent_mobile || null, email: r.email || null, address: r.address || null,
       grade_id: d.gradeId || null, board_id: d.boardId || null, academic_year: (d.academicYear || '').trim() || null,
       mode_preference: d.mode || null, class_type_preference: d.ctype || null };
     const { data: created, error } = await sb.from('students').insert(payload).select().single();
@@ -25972,6 +26400,7 @@ function render() {
     ]},
     { label: 'People', tabs: [
       ['students', 'Students & Subscriptions'],
+      ['onboarding', 'Student Onboarding & Communication'],
       ['setup', 'Teachers & Subjects'],
       ['parents', 'Parents'],
     ]},
@@ -26027,6 +26456,7 @@ function render() {
   if (currentTab === 'dashboard') body = renderDashboard();
   else if (currentTab === 'setup') body = renderSetup();
   else if (currentTab === 'students') body = renderStudents();
+  else if (currentTab === 'onboarding') body = renderStudentOnboarding();
   else if (currentTab === 'fees') body = renderFees();
   else if (currentTab === 'rebuildclasses') body = renderRebuildPendingClasses();
   else if (currentTab === 'expenses') body = renderExpenses();
