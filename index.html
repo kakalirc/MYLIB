@@ -82,6 +82,20 @@ if (location.hostname !== 'app.libeducation.com') {
   .modal-backdrop { position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:998; }
   .modal-box { position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--paper);border-radius:10px;padding:24px 28px;width:min(480px,92vw);max-height:85vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,0.22);z-index:999; }
   .modal-box h3 { font-family:'Zilla Slab',serif;font-size:17px;margin:0 0 16px;font-weight:600; }
+  .teacher-tip-backdrop { position:fixed;inset:0;background:rgba(18,24,22,0.58);z-index:10000; }
+  .teacher-tip-modal { position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:min(520px,calc(100vw - 28px));max-height:85vh;overflow-y:auto;box-sizing:border-box;background:var(--paper,#fff);color:var(--ink,#252525);border:1px solid var(--line,#ddd);border-radius:14px;padding:24px 26px;box-shadow:0 16px 48px rgba(0,0,0,0.28);z-index:10001; }
+  .teacher-tip-top { display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px; }
+  .teacher-tip-label { display:inline-flex;align-items:center;gap:7px;padding:5px 9px;border-radius:20px;background:rgba(197,151,62,0.14);color:var(--forest,#355641);font-size:11px;font-weight:800;letter-spacing:0.06em; }
+  .teacher-tip-close { border:0;background:transparent;color:var(--muted,#777);font-size:24px;line-height:1;cursor:pointer;padding:0 2px; }
+  .teacher-tip-modal h2 { font-family:'Zilla Slab',serif;color:var(--forest,#355641);font-size:24px;line-height:1.2;margin:0 0 9px; }
+  .teacher-tip-lead { font-size:15px;font-weight:600;line-height:1.5;margin:0 0 18px; }
+  .teacher-tip-section { border-top:1px solid var(--line,#ddd);padding-top:13px;margin-top:13px; }
+  .teacher-tip-section h3 { margin:0 0 6px;font-size:13px;color:var(--forest,#355641);font-family:'Work Sans',sans-serif;font-weight:700; }
+  .teacher-tip-section p { margin:0;color:var(--ink,#252525);font-size:13px;line-height:1.55; }
+  .teacher-tip-section ul { margin:7px 0 0;padding-left:19px;font-size:13px;line-height:1.55; }
+  .teacher-tip-section li { margin:3px 0; }
+  .teacher-tip-actions { display:flex;align-items:center;justify-content:flex-end;gap:9px;flex-wrap:wrap;margin-top:20px; }
+  @media(max-width:520px) { .teacher-tip-modal { padding:20px 18px; } .teacher-tip-modal h2 { font-size:21px; } .teacher-tip-actions { flex-direction:column;align-items:stretch; } .teacher-tip-actions button { width:100%; } }
   .help-backdrop { position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:900; }
   .help-panel { position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,0.18);z-index:901;width:min(480px,92vw);max-height:80vh;overflow-y:auto;padding:24px 28px; }
   .help-panel h3 { margin:0 0 14px;color:var(--forest);font-size:17px; }
@@ -558,7 +572,7 @@ const APP_VERSION = '2026.10';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-02 13:55 IST'; // V16 Student Onboarding & Communication
+const BUILD_TIMESTAMP = '2026-11-03 11:30 IST'; // V19 Daily Teacher Feature Tip popup
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -595,6 +609,13 @@ function activeCategories() { return categories.filter(c=>!c.archived); }
 let data = { teachers: [], subjects: [], students: [], studentSubjects: [], subscriptions: [], sessions: [], users: [], parentStudents: [], studentPhoneNumbers: [], adminPhoneNumbers: [], demoLogs: [], teacherPayrollRecords: [], wixBookings: [], supportTickets: [], registrations: [] };
 let loaded = false;
 let currentTab = 'dashboard';
+
+// Daily Teacher Feature Tip. The actual daily claim is stored in app_events via SQL RPCs,
+// so dismissal and device changes do not cause the same day's tip to reappear.
+let teacherDailyTip = null;
+let teacherDailyTipPending = null;
+let teacherDailyTipCheckStarted = false;
+let teacherDailyTipClaiming = false;
 
 // Student Onboarding & WhatsApp Communication (V16).
 let onboardingEvents = [];
@@ -1005,6 +1026,232 @@ function appUsageFeatureLabel(f) {
   if (f.startsWith('tab:')) { const k = f.slice(4); return 'Opened ' + (APP_USAGE_SCREENS[k] || k); }
   return f;
 }
+
+// Teacher-only daily feature tips. Usage keys match the existing tab/action events.
+// Screen visits and meaningful actions are both considered where the app already tracks them.
+const TEACHER_DAILY_TIPS = [
+  {
+    id: 'myfrequency', tab: 'myfrequency', usageKeys: ['tab:myfrequency'],
+    title: 'My Students Class Frequency',
+    lead: 'See your weekly teaching pattern and the classes scheduled over the next 7 days.',
+    what: 'This screen groups your recurring class frequency by weekday. Switch to Next 7 Days to review the actual upcoming scheduled classes, their timings and statuses.',
+    points: ['Weekly Pattern groups your recurring teaching by weekday.', 'Next 7 Days shows upcoming scheduled classes and their current status.', 'Refresh reloads the frequency and schedule information.'],
+    benefit: 'Use it as a weekly reference to understand your teaching commitments and spot timings that need attention.'
+  },
+  {
+    id: 'schedule', tab: 'schedule', usageKeys: ['tab:schedule', 'class.schedule'],
+    title: 'Class Schedule',
+    lead: 'Set up and review the weekly timetable for the students assigned to you.',
+    what: 'Choose a student (or all students), subject and class type, then define the weekly days and times for classes. You can also review the schedule by day or month.',
+    points: ['Set a recurring weekly pattern for the relevant students and subjects.', 'Review scheduled classes in day or month view.', 'Check class times before making schedule changes.'],
+    benefit: 'A maintained weekly schedule makes your upcoming teaching commitments easier to review.'
+  },
+  {
+    id: 'frequency', tab: 'frequency', usageKeys: ['tab:frequency'],
+    title: 'Class Frequency Setup',
+    lead: 'Record how many classes each of your assigned students has in a typical week.',
+    what: 'Set weekly class counts for each student and subject. You can filter the list by student, subject, configured status and weekday.',
+    points: ['Find entries that are configured or still missing.', 'Filter by weekday or weekly class-count range.', 'Only students and subjects assigned to you are shown.'],
+    benefit: 'This stores the recurring weekly frequency separately; changing it does not change the actual scheduled classes.'
+  },
+  {
+    id: 'students', tab: 'students', usageKeys: ['tab:students'],
+    title: 'My Students',
+    lead: 'Quickly find the students enrolled in your subjects.',
+    what: 'This screen lists your assigned students and provides search, contact details and class-balance information.',
+    points: ['Search by student name, parent, phone or email.', 'Review the learner contact details.', 'Check remaining class balances before planning the next class.'],
+    benefit: 'Use it as your student reference when preparing for classes or contacting a family.'
+  },
+  {
+    id: 'studyplans', tab: 'studyplans', usageKeys: ['tab:studyplans', 'studyplan.save'],
+    title: 'Study Plans',
+    lead: 'Create a topic-wise plan and track teaching progress for each student and subject.',
+    what: 'Choose a student and subject, add the topics to be covered, and update each topic as Not started, In progress or Done.',
+    points: ['Maintain the topics to be covered.', 'Update progress as lessons are completed.', 'Review how many topics are complete and the overall progress.'],
+    benefit: 'A study plan gives you and the centre a clearer view of the teaching progress and what remains.'
+  },
+  {
+    id: 'homework', tab: 'homework', usageKeys: ['tab:homework', 'homework.assign', 'homework.submit', 'homework.review'],
+    title: 'Homework',
+    lead: 'Assign work to students and keep track of submissions that need review.',
+    what: 'Choose a student and subject to assign homework, then use the homework list to follow its status, including submitted and late work.',
+    points: ['Create or edit a homework assignment.', 'Filter homework by student and status.', 'Identify submitted work waiting for review.'],
+    benefit: 'Keeping assignments and reviews in this screen makes student follow-up easier.'
+  },
+  {
+    id: 'questionbank', tab: 'questionbank', usageKeys: ['tab:questionbank', 'paper.make', 'paper.assign', 'paper.open', 'paper.submit', 'paper.mark'],
+    title: 'Question Bank',
+    lead: 'Review questions and use them to prepare practice papers for students.',
+    what: 'The Question Bank includes a review queue, the full approved question bank and practice-paper tools.',
+    points: ['Review questions awaiting your decision.', 'Find approved questions in the full question bank.', 'Prepare and assign practice papers, then review student attempts.'],
+    benefit: 'Build reusable question material and organise practice work for your students.'
+  },
+  {
+    id: 'research', tab: 'research', usageKeys: ['tab:research', 'brief.make', 'resource.add', 'resource.share', 'resource.open'],
+    title: 'Research & Lesson Prep',
+    lead: 'Prepare a teaching brief for the subject and chapter you are teaching next.',
+    what: 'Select a subject and chapter to get a short brief with key points, a teaching order, common mistakes, examples and practice questions.',
+    points: ['Choose the subject and chapter for your next lesson.', 'Use the brief to organise the lesson flow.', 'Save and revisit lesson-preparation notes and resources.'],
+    benefit: 'Use the brief as a preparation aid. Check AI-generated material against your textbook before class.'
+  },
+  {
+    id: 'attendance', tab: 'attendance', usageKeys: ['tab:attendance', 'attendance.give'],
+    title: 'Give Attendance',
+    lead: 'Record the classes you have conducted for your students.',
+    what: 'Select the student, subject, class type and date, then record the class status and number of classes. The screen also shows the available class balance.',
+    points: ['Choose the correct student and subject.', 'Record the class status and class count.', 'Check the balance warning before saving.'],
+    benefit: 'Recording attendance promptly keeps learner class usage and remaining balance up to date.'
+  },
+  {
+    id: 'report', tab: 'report', usageKeys: ['tab:report'],
+    title: 'My Attendance Report',
+    lead: 'Review the classes recorded against your teacher account.',
+    what: 'Use the report to review attendance history by month, including the date, student, subject, class type, status and classes recorded.',
+    points: ['Review your recorded classes for the selected month.', 'Check Present and Absent entries.', 'Use the report to verify your class records.'],
+    benefit: 'A regular review helps you spot missing or incorrect attendance entries.'
+  },
+  {
+    id: 'availability', tab: 'availability', usageKeys: ['tab:availability'],
+    title: 'Availability',
+    lead: 'Set your available teaching windows and review the free-slot report.',
+    what: 'Add the weekdays and time ranges when you are available. The Free Slots Report compares those windows with classes already scheduled.',
+    points: ['Add or remove weekly availability windows.', 'Review free time for one day or from today through the current month.', 'Remember that availability is advisory; the actual schedule may still be outside these windows.'],
+    benefit: 'Keeping availability current helps the centre identify possible times when a class can be scheduled.'
+  },
+  {
+    id: 'profile', tab: 'profile', usageKeys: ['tab:profile'],
+    title: 'My Profile',
+    lead: 'Keep your own contact and payment details up to date.',
+    what: 'Review your teacher details, update your mobile number and enter eligible bank or payment details. Your online class link is also shown here when one is saved.',
+    points: ['Update your mobile number.', 'Check the bank/payment details already on record.', 'Review the online class link shown on your profile, if available.'],
+    benefit: 'Accurate profile details help the centre contact you and maintain the correct payment information.'
+  },
+  {
+    id: 'setup', tab: 'setup', usageKeys: ['tab:setup'],
+    title: 'Setup',
+    lead: 'Manage your password and quick-login settings.',
+    what: 'Use this screen to change your password and review biometric quick login for the current device.',
+    points: ['Change your password when required.', 'Set up quick login on a supported device.', 'Remove the quick-login credential for this device if needed.'],
+    benefit: 'Keeping your sign-in details current helps protect access to your teacher account.'
+  }
+];
+
+function teacherDailyTipCandidates() {
+  return TEACHER_DAILY_TIPS.filter(t => {
+    if (t.id === 'questionbank' && !teacherQbAccess) return false;
+    if (t.id === 'research' && (!teacherResearchAccess || !aiMasterEnabled)) return false;
+    return true;
+  });
+}
+
+function teacherDailyTipHtml() {
+  if (currentRole !== 'Teacher' || !teacherDailyTip) return '';
+  const tip = teacherDailyTip;
+  return `
+    <div class="teacher-tip-backdrop" role="presentation" onclick="dismissTeacherDailyTip()"></div>
+    <section class="teacher-tip-modal" role="dialog" aria-modal="true" aria-labelledby="teacherDailyTipTitle" onclick="event.stopPropagation()">
+      <div class="teacher-tip-top">
+        <span class="teacher-tip-label">&#9733; TODAY'S FEATURE TIP</span>
+        <button class="teacher-tip-close" type="button" aria-label="Close tip" onclick="dismissTeacherDailyTip()">&times;</button>
+      </div>
+      <h2 id="teacherDailyTipTitle">${esc(tip.title)}</h2>
+      <p class="teacher-tip-lead">${esc(tip.lead)}</p>
+      <div class="teacher-tip-section">
+        <h3>What does this feature do?</h3>
+        <p>${esc(tip.what)}</p>
+        <ul>${tip.points.map(point => `<li>${esc(point)}</li>`).join('')}</ul>
+      </div>
+      <div class="teacher-tip-section">
+        <h3>How does it help?</h3>
+        <p>${esc(tip.benefit)}</p>
+      </div>
+      <div class="teacher-tip-actions">
+        <button type="button" class="btn-primary" onclick="openTeacherDailyTipFeature()">Open Feature &#8594;</button>
+        <button type="button" class="btn-small" onclick="dismissTeacherDailyTip()">Close</button>
+      </div>
+    </section>`;
+}
+
+function dismissTeacherDailyTip() {
+  // Display is recorded when the popup is claimed; closing it does not count as feature use.
+  teacherDailyTip = null;
+  render();
+}
+
+function openTeacherDailyTipFeature() {
+  const tip = teacherDailyTip;
+  if (!tip) return;
+  teacherDailyTip = null;
+  teacherDailyTipPending = null;
+  setTeacherPortalTab(tip.tab);
+}
+
+async function maybeOpenTeacherDailyTipWhenSafe() {
+  if (currentRole !== 'Teacher' || !isLoggedIn || !teacherDailyTipPending || teacherDailyTip || teacherDailyTipClaiming) return;
+  // Do not cover an active work screen or an in-progress form. Show only after the Dashboard is open.
+  if (teacherPortalTab !== 'dashboard') return;
+  if (typeof hasUnsavedEditInProgress === 'function' && hasUnsavedEditInProgress()) return;
+  const userId = currentUserId;
+  const tip = teacherDailyTipPending;
+  teacherDailyTipClaiming = true;
+  try {
+    const { data: claimed, error } = await sb.rpc('claim_teacher_daily_tip', {
+      p_tip_date: todayStr,
+      p_feature_id: tip.id
+    });
+    teacherDailyTipClaiming = false;
+    if (error) throw error;
+    if (!isLoggedIn || currentRole !== 'Teacher' || currentUserId !== userId) return;
+    teacherDailyTipPending = null;
+    if (claimed === true) {
+      teacherDailyTip = tip;
+      render();
+    }
+  } catch (e) {
+    teacherDailyTipClaiming = false;
+    teacherDailyTipPending = null;
+    console.warn('Daily teacher feature tip was not shown:', e && e.message ? e.message : e);
+  }
+}
+
+async function maybeLoadDailyTeacherTip() {
+  if (currentRole !== 'Teacher' || !isLoggedIn || !currentUserId || teacherDailyTipCheckStarted || !sb) return;
+  teacherDailyTipCheckStarted = true;
+  const userId = currentUserId;
+  const candidates = teacherDailyTipCandidates();
+  if (!candidates.length) return;
+  const featureKeys = [...new Set(candidates.flatMap(t => t.usageKeys))];
+  try {
+    const { data: context, error } = await sb.rpc('get_teacher_daily_tip_context', {
+      p_tip_date: todayStr,
+      p_features: featureKeys
+    });
+    if (error) throw error;
+    if (!isLoggedIn || currentRole !== 'Teacher' || currentUserId !== userId || !context || context.shown_today) return;
+    const usage = new Map((context.usage || []).map(r => [r.feature, Date.parse(r.created_at)]));
+    const lastTip = new Map((context.tip_history || []).map(r => [r.feature_id, Date.parse(r.created_at)]));
+    const cutoff = Date.now() - 30 * 86400000;
+    const eligible = candidates.map((tip, index) => {
+      const times = tip.usageKeys.map(k => usage.get(k)).filter(Number.isFinite);
+      const lastUsed = times.length ? Math.max(...times) : null;
+      return { tip, index, lastUsed, lastTip: lastTip.get(tip.id) || 0 };
+    }).filter(x => x.lastUsed === null || x.lastUsed <= cutoff);
+    if (!eligible.length) return;
+    eligible.sort((a, b) => {
+      const aNever = a.lastUsed === null, bNever = b.lastUsed === null;
+      if (aNever !== bNever) return aNever ? -1 : 1; // Never recorded first.
+      if (!aNever && a.lastUsed !== b.lastUsed) return a.lastUsed - b.lastUsed; // Then longest unused.
+      if (a.lastTip !== b.lastTip) return a.lastTip - b.lastTip; // Rotate tips with the oldest/never-shown first.
+      return a.index - b.index;
+    });
+    teacherDailyTipPending = eligible[0].tip;
+    maybeOpenTeacherDailyTipWhenSafe();
+  } catch (e) {
+    // A missing/unavailable tip RPC must never affect normal teacher login or app use.
+    console.warn('Daily teacher feature tips are unavailable:', e && e.message ? e.message : e);
+  }
+}
+
 // Admin → Audit Log → App usage.
 let appUsageOpen = false;
 let appUsageMonth = todayStr.slice(0, 7);
@@ -1020,7 +1267,7 @@ function toggleAppUsageRow(key) { appUsageExpanded[key] = !appUsageExpanded[key]
 async function appUsageSelect(from, to) {
   let rows = [];
   for (let i = 0; i < 200000; i += 1000) {
-    const r = await sb.from('app_events').select('user_id, role, linked_id, feature, created_at').gte('created_at', from).lt('created_at', to).order('created_at').order('id').range(i, i + 999);
+    const r = await sb.from('app_events').select('user_id, role, linked_id, feature, created_at').gte('created_at', from).lt('created_at', to).not('feature', 'like', 'teacher.tip.%').order('created_at').order('id').range(i, i + 999);
     if (r.error) return { error: r.error };
     rows = rows.concat(r.data || []);
     if (!r.data || r.data.length < 1000) break;
@@ -7732,6 +7979,7 @@ async function loginWithBiometric() {
     parentSelectedChildId = firstChild ? firstChild.studentId : '';
   }
   render();
+  maybeLoadDailyTeacherTip();
   scrollToHashSection(); // honor deep link hash (e.g. #rates-fees from WhatsApp)
 }
 // Returns an HTML card for the settings section of any role, so users can
@@ -7840,6 +8088,7 @@ async function attemptLoginSteps(u, p) {
   loginError = '';
   biometricOfferShown = false; // ensure the offer can fire for this fresh login
   render();
+  maybeLoadDailyTeacherTip();
   scrollToHashSection(); // honor deep link hash (e.g. #rates-fees from WhatsApp)
   offerBiometricEnrollment(); // one-time banner to set up fingerprint login
 }
@@ -8023,6 +8272,7 @@ async function logout() {
   resetTeacherPendingExtra();
   resetStarState();
   teacherPortalTab = 'dashboard'; // the next login starts on the Dashboard, so a tab's data is loaded when it is opened
+  teacherDailyTip = null; teacherDailyTipPending = null; teacherDailyTipCheckStarted = false; teacherDailyTipClaiming = false;
   isLoggedIn = false; currentUsername = ''; currentRole = ''; currentLinkedId = ''; currentUserId = ''; parentSelectedChildId = ''; pwIsDefault = false; userMsg.changePw = ''; spAssignments = []; spPapers = {}; spOpen = null; spPhotoUrls = {};
   biometricOfferShown = false; // allow the enrollment banner on the next password login
   dangerZoneUnlocked = false; unlockPasswordAttempt = ''; unlockMsg = '';
@@ -21975,8 +22225,10 @@ function renderPortalShell(bodyHtml) {
     ${helpPanelHtml()}
     ${aiHelpPanelHtml()}
     ${supportModalHtml()}
+    ${currentRole === 'Teacher' ? teacherDailyTipHtml() : ''}
   `;
   window.scrollTo(0, _sy);
+  if (currentRole === 'Teacher') maybeOpenTeacherDailyTipWhenSafe();
 }
 
 const HELP = {
@@ -26657,6 +26909,7 @@ async function initApp() {
   }
   await loadAfterLogin();
   render(); // re-render now that photo, announcements and notifications are loaded
+  maybeLoadDailyTeacherTip();
   scrollToHashSection(); // honor #rates-fees (or any future data-section hash)
 }
 initApp();
