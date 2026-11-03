@@ -572,7 +572,7 @@ const APP_VERSION = '2026.11';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-03 12:31 IST'; // V20 Teacher Monitoring navigation
+const BUILD_TIMESTAMP = '2026-11-03 13:08 IST'; // V21 Question Bank Monitoring
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -688,7 +688,7 @@ function desktopSidebarRailIcon(key) {
     dashboard:'⌂', pendingactions:'◷', starteacher:'★', myfrequency:'▦', schedule:'▤', frequency:'↻',
     students:'♙', studyplans:'▥', homework:'✓', questionbank:'?', research:'⌕', attendance:'✓', report:'▤',
     availability:'◷', profile:'♙', setup:'⚙', log:'▤', registrations:'＋', chat:'✉', wixbookings:'▣',
-    support:'?', rebuildclasses:'↻', fees:'₹', payroll:'▦', expenses:'−', reports:'▥', onboarding:'✉',
+    support:'?', rebuildclasses:'↻', qbmonitoring:'▦', fees:'₹', payroll:'▦', expenses:'−', reports:'▥', onboarding:'✉',
     parents:'♧', users:'⚙', admins:'♙', ai:'✧', audit:'≡', superadmin:'★',
     'daily work':'☷', money:'₹', people:'♙', teaching:'▤', system:'⚙', superadmin_group:'★',
     attendance_group:'✓', account:'⚙'
@@ -1017,7 +1017,7 @@ const APP_USAGE_ACTIONS = [
   ['chat.send', 'Chat message sent'], ['ai.use', 'AI button used'],
 ];
 const APP_USAGE_SCREENS = {
-  schedule: 'Class Schedule', students: 'Students', studyplans: 'Study Plans', homework: 'Homework', questionbank: 'Question Bank',
+  schedule: 'Class Schedule', students: 'Students', studyplans: 'Study Plans', homework: 'Homework', questionbank: 'Question Bank', qbmonitoring: 'Question Bank Monitoring',
   research: 'Research', researchmonitor: 'Research Monitoring', staradmin: 'Star Teacher Monitoring', appusage: 'App Usage', aiusage: 'AI Usage', attendance: 'Give Attendance', report: 'Attendance Report', availability: 'Availability', profile: 'My Profile',
   setup: 'Setup / Teachers & Subjects', dashboard: 'Dashboard', log: 'Class Log', chat: 'Communication', wixbookings: 'Demo Bookings',
   fees: 'Fees', rebuildclasses: 'Rebuild Pending Classes', expenses: 'Expenses', reports: 'Reports & Export', payroll: 'Payroll', parents: 'Parents', admins: 'Manage Admins', users: 'Settings', superadmin: 'Superadmin tools',
@@ -11855,14 +11855,15 @@ const SUPPORT_KB = {
 - Students & Subscriptions (People): add or edit students, enrol them in subjects, record payments, refunds and credit transfers, see subscription history and receipts. Call log keeps every phone call with the student or parent (+ Add call note, Call again on date; demo-stage calls show too). Special fee rates sets an agreed per-class rate for one student (used instead of Fee setup). Bill separately keeps a student out of their family's combined fee message. Create all student logins (with no student picked) makes the missing student logins in one go (login ID and first password = student code) with 📤 WhatsApp buttons to send the details.
 - Teachers & Subjects (People): add teachers and subjects, and set which teacher teaches each subject. The Class Frequency button sets how many classes each student has on each weekday (used by Raise fee requests and Rebuild Pending Classes).
 - Parents (People): one parent login per family and which children are linked. Create all parent logins makes the missing ones (login ID and first password = parent's 10-digit mobile) with a 📤 WhatsApp button to send the details.
-- Teacher Monitoring: the central area for reviewing teacher activity and output. It contains Star Teacher, Research Monitoring, App Usage, AI Usage, Study Plans, Homework and Question Bank.
+- Teacher Monitoring: the central area for reviewing teacher activity and output. It contains Star Teacher, Research Monitoring, App Usage, AI Usage, Study Plans, Homework and Question Bank Monitoring. The existing Question Bank work screen is under Daily Work.
 - Star Teacher (Teacher Monitoring): switch the monthly points game on or off, set its start date, view the leaderboard, and inspect each teacher's points, level, badges and activity breakdown.
 - Research Monitoring (Teacher Monitoring): review teacher-wise saved lesson briefs and resources added/shared, with month and teacher filters. Brief text and private notes are not displayed.
 - App Usage (Teacher Monitoring): review screens opened and tracked actions by teacher, by feature or by user, including teachers with no recorded activity in the last 30 days.
 - AI Usage (Teacher Monitoring): review AI calls, tokens and estimated costs by user and feature. AI settings and access controls remain under System → AI.
 - Study Plans (Teacher Monitoring): read-only view of every teacher's study plans and progress, plus the Textbook library (every uploaded book; rename, retag or delete).
 - Homework (Teacher Monitoring): every homework set by teachers, with filters by teacher, student and status.
-- Question Bank (Teacher Monitoring): Review Queue (approve new or edited questions), Full Question Bank, Archived, Practice Papers and Past Papers. Pick board, subject and grade to see questions. Old-syllabus questions stay hidden unless you tick "Old syllabus only".
+- Question Bank (Daily work): Review Queue (approve new or edited questions), Full Question Bank, Archived, Practice Papers and Past Papers. Pick board, subject and grade to see questions. Old-syllabus questions stay hidden unless you tick "Old syllabus only".
+- Question Bank Monitoring (Teacher Monitoring): read-only teacher-wise Question Bank activity, including access status, visits, questions added/approved, practice papers created, student assignments, submissions and reviews. Counts are based on existing app events and database timestamps.
 - Settings (System, once called Setup): grades, categories, boards and subject names; Question Bank access and Research access (which teachers get those tabs); add users and manage their logins; change your password.
 - Manage Admins (System): add or remove admin accounts.
 - AI (System): AI Settings (master switch, API key and cost estimate prices) and AI access (per role and per person).
@@ -13599,6 +13600,7 @@ const TAB_HASH = { users: 'setup', setup: 'teachers-subjects', onboarding: 'stud
 function tabFromHash(h) { const k = Object.keys(TAB_HASH).find(k => TAB_HASH[k] === h); return k || h; }
 function setTab(t) { currentTab = t; if (t === 'setup' && setupSubTab === 'frequency') loadClassFrequencyRows().then(() => render()); trackUse('tab:' + t, true); location.hash = TAB_HASH[t] || t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'registrations') { regMsg = ''; loadRegistrations().then(() => render()); } if (t === 'fees') { rzpFeeMsg = ''; loadRazorpayFeePayments().then(() => render()); } if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; tbAdminEditId=''; tbAdminMsg=''; Promise.all([loadStudyPlans(), loadTextbookLibrary()]).then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
   if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); }
+  if (t === 'qbmonitoring') loadQuestionBankMonitoring();
   if (t === 'staradmin') { starAdminOpen = true; loadStarExtras(true); }
   if (t === 'researchmonitor') loadResearchMonitoring();
   if (t === 'appusage') { appUsageOpen = true; appUsageRole = 'Teacher'; loadAppUsage(); }
@@ -26186,6 +26188,211 @@ function renderResearchMonitoring() {
   </div>`;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Admin → Teacher Monitoring → Question Bank Monitoring.
+// Read-only report. Attribution uses profiles.linked_teacher_id for question records,
+// qb_practice_papers.created_by_teacher_id for papers, and app_events for screen visits.
+let qbMonitoringMonth = todayStr.slice(0, 7);
+let qbMonitoringTeacherId = '';
+let qbMonitoringLoading = false;
+let qbMonitoringData = null;
+let qbMonitoringError = '';
+const QB_MONITORING_FEATURES = ['tab:questionbank', 'paper.make', 'paper.assign', 'paper.open', 'paper.submit', 'paper.mark'];
+
+async function qbMonitoringPagedDate(table, columns, dateColumn, from, to) {
+  const PAGE = 1000;
+  let all = [];
+  for (let offset = 0; offset < 500000; offset += PAGE) {
+    const { data: rows, error } = await sb.from(table).select(columns)
+      .gte(dateColumn, from).lt(dateColumn, to)
+      .order(dateColumn).order('id').range(offset, offset + PAGE - 1);
+    if (error) return { data: null, error };
+    all = all.concat(rows || []);
+    if (!rows || rows.length < PAGE) break;
+  }
+  return { data: all, error: null };
+}
+
+async function qbMonitoringLoadEvents() {
+  const PAGE = 1000;
+  let all = [];
+  for (let offset = 0; offset < 500000; offset += PAGE) {
+    const { data: rows, error } = await sb.from('app_events')
+      .select('id,linked_id,feature,created_at')
+      .eq('role', 'Teacher').in('feature', QB_MONITORING_FEATURES)
+      .order('created_at').order('id').range(offset, offset + PAGE - 1);
+    if (error) return { data: null, error };
+    all = all.concat(rows || []);
+    if (!rows || rows.length < PAGE) break;
+  }
+  return { data: all, error: null };
+}
+
+async function loadQuestionBankMonitoring() {
+  if (currentRole !== 'Admin' || qbMonitoringLoading) return;
+  qbMonitoringLoading = true;
+  qbMonitoringData = null;
+  qbMonitoringError = '';
+  render();
+  const [y, m] = qbMonitoringMonth.split('-').map(Number);
+  const from = qbMonitoringMonth + '-01T00:00:00+05:30';
+  const to = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10) + 'T00:00:00+05:30';
+  try {
+    const [profiles, access, added, approved, papers, assignments, events] = await Promise.all([
+      sb.from('profiles').select('id,role,linked_teacher_id').eq('role', 'Teacher'),
+      sb.from('teachers').select('id,qb_access'),
+      qbMonitoringPagedDate('qb_questions', 'id,added_by,created_at', 'created_at', from, to),
+      qbMonitoringPagedDate('qb_questions', 'id,approved_by,approved_at', 'approved_at', from, to),
+      selectAllPaged('qb_practice_papers', ['created_at'], 'id,title,total_marks,created_at,created_by_teacher_id,subject_name,grade_id,status'),
+      selectAllPaged('qb_student_assignments', ['assigned_at'], 'id,paper_id,student_id,status,assigned_at,submitted_at,reviewed_at,total_score'),
+      qbMonitoringLoadEvents(),
+    ]);
+    const failures = [];
+    if (profiles.error) failures.push('Teacher login mapping: ' + profiles.error.message);
+    if (access.error) failures.push('Question Bank access: ' + access.error.message);
+    if (added.error) failures.push('Questions added: ' + added.error.message);
+    if (approved.error) failures.push('Questions approved: ' + approved.error.message);
+    if (papers.error) failures.push('Practice papers: ' + papers.error.message);
+    if (assignments.error) failures.push('Student assignments: ' + assignments.error.message);
+    if (events.error) failures.push('App usage history: ' + events.error.message);
+    const profileToTeacher = {};
+    (profiles.data || []).forEach(p => { if (p.linked_teacher_id) profileToTeacher[p.id] = p.linked_teacher_id; });
+    const accessByTeacher = {};
+    (access.data || []).forEach(t => { accessByTeacher[t.id] = t.qb_access === true; });
+    qbMonitoringData = {
+      profileToTeacher,
+      accessByTeacher,
+      added: added.data || [],
+      approved: approved.data || [],
+      papers: papers.data || [],
+      assignments: assignments.data || [],
+      events: events.data || [],
+      errors: failures,
+    };
+  } catch (e) {
+    qbMonitoringError = (e && e.message) || String(e);
+  }
+  qbMonitoringLoading = false;
+  render();
+}
+
+function qbMonitoringMonthHas(value, month) { return !!value && String(value).slice(0, 7) === month; }
+function qbMonitoringShortId(value) { return value ? String(value).slice(-8) : '—'; }
+function renderQuestionBankMonitoring() {
+  if (qbMonitoringLoading && !qbMonitoringData) return '<div class="card"><div class="empty">Loading Question Bank Monitoring…</div></div>';
+  if (!qbMonitoringData) return `<div class="card"><h2 style="font-family:'Zilla Slab',serif;margin:0 0 8px">Question Bank Monitoring</h2><div class="hint" style="color:var(--brick)">${esc(qbMonitoringError || 'Question Bank monitoring data is not loaded.')}</div><button class="btn-small" onclick="loadQuestionBankMonitoring()">Retry</button></div>`;
+  const d = qbMonitoringData;
+  const teachers = byName(data.teachers.filter(t => !t.archived && (!qbMonitoringTeacherId || t.id === qbMonitoringTeacherId)));
+  const paperById = new Map(d.papers.map(p => [p.id, p]));
+  const papersThisMonth = d.papers.filter(p => qbMonitoringMonthHas(p.created_at, qbMonitoringMonth));
+  const qAddTeacher = row => d.profileToTeacher[row.added_by] || '';
+  const qApproveTeacher = row => d.profileToTeacher[row.approved_by] || '';
+  const addedThisMonth = d.added.filter(r => qbMonitoringMonthHas(r.created_at, qbMonitoringMonth));
+  const approvedThisMonth = d.approved.filter(r => qbMonitoringMonthHas(r.approved_at, qbMonitoringMonth));
+  const assignments = d.assignments;
+  const eventTeacher = e => e.linked_id || '';
+  const eventsThisMonth = d.events.filter(e => qbMonitoringMonthHas(e.created_at, qbMonitoringMonth));
+  const records = teachers.map(t => {
+    const tid = t.id;
+    const myPapers = d.papers.filter(p => p.created_by_teacher_id === tid);
+    const myPaperIds = new Set(myPapers.map(p => p.id));
+    const myAssignments = assignments.filter(a => myPaperIds.has(a.paper_id));
+    const myEvents = d.events.filter(e => eventTeacher(e) === tid);
+    const myMonthEvents = eventsThisMonth.filter(e => eventTeacher(e) === tid);
+    const visits = myMonthEvents.filter(e => e.feature === 'tab:questionbank').length;
+    const lastUsed = myEvents.reduce((last, e) => !last || String(e.created_at) > String(last) ? e.created_at : last, '');
+    return {
+      teacher: t,
+      access: Object.prototype.hasOwnProperty.call(d.accessByTeacher, tid) ? (d.accessByTeacher[tid] ? 'On' : 'Off') : 'Unknown',
+      visits,
+      lastUsed,
+      added: addedThisMonth.filter(r => qAddTeacher(r) === tid).length,
+      approved: approvedThisMonth.filter(r => qApproveTeacher(r) === tid).length,
+      papers: papersThisMonth.filter(p => p.created_by_teacher_id === tid).length,
+      assigned: myAssignments.filter(a => qbMonitoringMonthHas(a.assigned_at, qbMonitoringMonth)).length,
+      submitted: myAssignments.filter(a => qbMonitoringMonthHas(a.submitted_at, qbMonitoringMonth)).length,
+      reviewed: myAssignments.filter(a => qbMonitoringMonthHas(a.reviewed_at, qbMonitoringMonth)).length,
+      waiting: myAssignments.filter(a => a.status === 'submitted').length,
+      allPapers: myPapers,
+      allAssignments: myAssignments,
+    };
+  });
+  const sum = key => records.reduce((n, r) => n + (Number(r[key]) || 0), 0);
+  const activeAccess = records.filter(r => r.access === 'On').length;
+  const teacherFilter = `<select onchange="qbMonitoringTeacherId=this.value;render()"><option value="">All teachers</option>${byName(data.teachers.filter(t => !t.archived)).map(t => `<option value="${escAttr(t.id)}" ${t.id === qbMonitoringTeacherId ? 'selected' : ''}>${esc(teacherLabel(t))}</option>`).join('')}</select>`;
+  const stats = [
+    ['Questions added', sum('added')], ['Questions approved', sum('approved')],
+    ['Papers created', sum('papers')], ['Student assignments', sum('assigned')],
+    ['Submissions', sum('submitted')], ['Reviewed', sum('reviewed')],
+    ['Awaiting marking now', sum('waiting')],
+  ];
+  const summaryRows = records.map(r => `<tr style="cursor:pointer" onclick="qbMonitoringTeacherId='${escAttr(r.teacher.id)}';render()" title="Select this teacher">
+    <td><b>${esc(teacherLabel(r.teacher))}</b></td><td><span class="tag ${r.access === 'On' ? 'cat' : ''}">${r.access}</span></td>
+    <td>${r.visits || 0}</td><td>${esc(r.lastUsed ? formatTimestampIST(r.lastUsed) : 'No recorded use')}</td>
+    <td>${r.added}</td><td>${r.approved}</td><td>${r.papers}</td><td>${r.assigned}</td><td>${r.submitted}</td><td>${r.reviewed}</td><td>${r.waiting}</td>
+  </tr>`).join('');
+  let detailHtml = '';
+  if (qbMonitoringTeacherId) {
+    const r = records.find(x => x.teacher.id === qbMonitoringTeacherId);
+    if (r) {
+      const paperRows = r.allPapers.filter(p => qbMonitoringMonthHas(p.created_at, qbMonitoringMonth)).map(p => {
+        const aa = r.allAssignments.filter(a => a.paper_id === p.id);
+        return `<tr><td>${esc(p.title || 'Untitled paper')}</td><td>${esc(p.subject_name || '—')}</td><td>${esc(qbByName(grades, p.grade_id) || '—')}</td><td>${esc(formatTimestampIST(p.created_at))}</td><td>${aa.length}</td><td>${aa.filter(a => a.status === 'submitted').length}</td><td>${aa.filter(a => a.status === 'reviewed').length}</td></tr>`;
+      }).join('');
+      const activity = [];
+      addedThisMonth.filter(q => qAddTeacher(q) === qbMonitoringTeacherId).forEach(q => activity.push({ at: q.created_at, action: 'Question added', detail: 'Question ' + qbMonitoringShortId(q.id) }));
+      approvedThisMonth.filter(q => qApproveTeacher(q) === qbMonitoringTeacherId).forEach(q => activity.push({ at: q.approved_at, action: 'Question approved', detail: 'Question ' + qbMonitoringShortId(q.id) }));
+      r.allPapers.filter(p => qbMonitoringMonthHas(p.created_at, qbMonitoringMonth)).forEach(p => activity.push({ at: p.created_at, action: 'Practice paper created', detail: p.title || 'Untitled paper' }));
+      r.allAssignments.forEach(a => {
+        const p = paperById.get(a.paper_id) || {};
+        const student = data.students.find(s => s.id === a.student_id);
+        if (qbMonitoringMonthHas(a.assigned_at, qbMonitoringMonth)) activity.push({ at: a.assigned_at, action: 'Paper assigned', detail: (p.title || 'Practice paper') + ' → ' + (student ? student.name : 'Student') });
+        if (qbMonitoringMonthHas(a.submitted_at, qbMonitoringMonth)) activity.push({ at: a.submitted_at, action: 'Paper submitted', detail: (p.title || 'Practice paper') + ' → ' + (student ? student.name : 'Student') });
+        if (qbMonitoringMonthHas(a.reviewed_at, qbMonitoringMonth)) activity.push({ at: a.reviewed_at, action: 'Paper reviewed', detail: (p.title || 'Practice paper') + ' → ' + (student ? student.name : 'Student') });
+      });
+      eventsThisMonth.filter(e => eventTeacher(e) === qbMonitoringTeacherId && e.feature === 'tab:questionbank')
+        .forEach(e => activity.push({ at: e.created_at, action: 'Opened Question Bank', detail: 'Question Bank visit' }));
+      const recentRows = activity.sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 150).map(a => `<tr><td>${esc(formatTimestampIST(a.at))}</td><td>${esc(a.action)}</td><td>${esc(a.detail)}</td></tr>`).join('');
+      const pendingRows = r.allAssignments.filter(a => a.status === 'submitted').map(a => {
+        const p = paperById.get(a.paper_id) || {};
+        const student = data.students.find(s => s.id === a.student_id);
+        return `<tr><td>${esc(p.title || 'Practice paper')}</td><td>${esc(student ? student.name : 'Student')}</td><td>${esc(formatTimestampIST(a.submitted_at))}</td><td>${a.submitted_at ? qbDaysSince(a.submitted_at) + ' days' : '—'}</td></tr>`;
+      }).join('');
+      detailHtml = `<div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${esc(teacherLabel(r.teacher))} — details</h3><button class="btn-small" onclick="qbMonitoringTeacherId='';render()">Show all teachers</button></div>
+        <div class="stat-grid" style="margin-top:12px">
+          <div class="stat-card"><div class="num">${r.access}</div><div class="label">Question Bank access</div></div>
+          <div class="stat-card"><div class="num">${r.visits}</div><div class="label">Visits this month</div></div>
+          <div class="stat-card"><div class="num">${esc(r.lastUsed ? formatTimestampIST(r.lastUsed) : '—')}</div><div class="label">Last recorded QB use</div></div>
+        </div>
+        <h3>Practice papers created this month</h3>
+        ${paperRows ? `<div class="table-scroll"><table><tr><th>Paper</th><th>Subject</th><th>Class</th><th>Created</th><th>Assigned</th><th>Waiting</th><th>Reviewed</th></tr>${paperRows}</table></div>` : '<div class="empty">No practice papers created by this teacher in the selected month.</div>'}
+        <h3 style="margin-top:18px">Currently waiting for marking</h3>
+        ${pendingRows ? `<div class="table-scroll"><table><tr><th>Paper</th><th>Student</th><th>Submitted</th><th>Waiting</th></tr>${pendingRows}</table></div>` : '<div class="empty">No submitted papers are currently waiting for marking.</div>'}
+        <h3 style="margin-top:18px">Question Bank activity this month ${activity.length > 150 ? '<span class="hint">(latest 150)</span>' : ''}</h3>
+        ${recentRows ? `<div class="table-scroll"><table><tr><th>Date</th><th>Activity</th><th>Details</th></tr>${recentRows}</table></div>` : '<div class="empty">No Question Bank activity recorded for this teacher in the selected month.</div>'}
+      </div>`;
+    }
+  }
+  return `<div>
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+      <div><h2 style="font-family:'Zilla Slab',serif;margin:0 0 6px">Question Bank Monitoring</h2><div class="hint">Read-only teacher-wise report. Question counts use the recorded added/approved user IDs; paper activity uses the paper owner and assignment timestamps.</div></div>
+      <button class="btn-small" onclick="loadQuestionBankMonitoring()" ${qbMonitoringLoading ? 'disabled' : ''}>↻ Refresh</button>
+    </div>
+    <div class="row-form" style="margin-bottom:14px;flex-wrap:wrap;gap:8px;align-items:center">
+      <label>Month <input type="month" value="${escAttr(qbMonitoringMonth)}" onchange="qbMonitoringMonth=this.value;loadQuestionBankMonitoring()"></label>
+      ${teacherFilter}
+    </div>
+    ${d.errors && d.errors.length ? `<div class="card" style="border-color:var(--gold)"><div class="hint">Some data could not be loaded; affected figures may be incomplete:<br>${d.errors.map(esc).join('<br>')}</div></div>` : ''}
+    <div class="stat-grid" style="margin-bottom:16px">${stats.map(([label, n]) => `<div class="stat-card"><div class="num ${n ? '' : 'zero'}">${n}</div><div class="label">${label}</div></div>`).join('')}<div class="stat-card"><div class="num">${activeAccess}</div><div class="label">Teachers with access</div></div></div>
+    <div class="card"><h3 style="margin:0 0 10px">Teacher-wise activity</h3>
+      ${records.length ? `<div class="table-scroll"><table><tr><th>Teacher</th><th>Access</th><th>Visits</th><th>Last recorded QB use</th><th>Questions added</th><th>Questions approved</th><th>Papers created</th><th>Assigned</th><th>Submitted</th><th>Reviewed</th><th>Waiting now</th></tr>${summaryRows}</table></div>` : '<div class="empty">No active teachers match this filter.</div>'}
+      <div class="hint" style="margin-top:8px">Visits and question/paper creation, assignment, submission and review counts refer to the selected month. “Waiting now” is the current outstanding count, regardless of when the paper was assigned. Select a teacher row for details.</div>
+    </div>
+    ${detailHtml}
+  </div>`;
+}
+
 function renderAdminHomework() {
   let hw = [...homeworkData];
   const filterStudentLc = adminHwFilterStudent.toLowerCase();
@@ -26858,6 +27065,7 @@ function render() {
       ['wixbookings', 'Demo Bookings' + (data.wixBookings.filter(b=>b.status==='New').length ? ` (${data.wixBookings.filter(b=>b.status==='New').length})` : '')],
       ['support', 'Support' + (data.supportTickets.filter(t=>t.status==='open').length ? ` (${data.supportTickets.filter(t=>t.status==='open').length})` : '')],
       ['rebuildclasses', 'Rebuild Pending Classes'],
+      ['questionbank', 'Question Bank'],
     ]},
     { label: 'Money', tabs: [
       ['fees', 'Fees'],
@@ -26878,7 +27086,7 @@ function render() {
       ['aiusage', 'AI Usage'],
       ['studyplans', 'Study Plans'],
       ['homework', 'Homework'],
-      ['questionbank', 'Question Bank'],
+      ['qbmonitoring', 'Question Bank Monitoring'],
     ]},
     { label: 'System', tabs: [
       ['users', 'Settings'],
@@ -26947,6 +27155,7 @@ function render() {
   else if (currentTab === 'studyplans') body = renderAdminStudyPlans();
   else if (currentTab === 'homework') body = renderAdminHomework();
   else if (currentTab === 'questionbank') body = renderAdminQuestionBank();
+  else if (currentTab === 'qbmonitoring') body = renderQuestionBankMonitoring();
   else if (currentTab === 'audit') body = renderAuditLog();
   else if (currentTab === 'ai') body = renderAiAdmin();
   else if (currentTab === 'wixbookings') body = renderWixBookings();
