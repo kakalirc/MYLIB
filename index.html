@@ -567,12 +567,12 @@ if (location.hostname !== 'app.libeducation.com') {
 <div class="wrap" id="app"><div class="app-splash"><div class="app-splash-name">My LIB</div><div class="app-splash-sub">LIB Education · Parent, Student &amp; Teacher login</div><div class="app-splash-spinner"></div></div></div>
 
 <script>
-const APP_VERSION = '2026.10';
+const APP_VERSION = '2026.11';
 // The app links every WhatsApp message gives (never the address the sender happens to be on).
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-03 11:30 IST'; // V19 Daily Teacher Feature Tip popup
+const BUILD_TIMESTAMP = '2026-11-03 12:31 IST'; // V20 Teacher Monitoring navigation
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -952,9 +952,10 @@ async function setTeacherResearchAccess(teacherId, on) {
   researchAccessMsg = teacherName(teacherId) + (on ? ' can now use Research.' : ' no longer has Research.');
   render();
 }
-// Admin → AI → AI usage: AI calls made through the server, per user per month (ai_usage_log, SQL 46).
+// Admin → Teacher Monitoring → AI Usage: AI calls made through the server, per user per month (ai_usage_log, SQL 46).
 let aiUsageOpen = false;
 let aiUsageMonth = todayStr.slice(0, 7);
+let aiUsageRole = 'Teacher';
 let aiUsageRows = null; // log rows for aiUsageMonth; null = not loaded yet
 let aiUsageMsg = '';
 let aiUsageNames = {};  // profile id → login name
@@ -985,6 +986,7 @@ function toggleAiUsageCard() {
   render();
 }
 function setAiUsageMonth(v) { if (v) { aiUsageMonth = v; loadAiUsage(); } }
+function setAiUsageRole(v) { aiUsageRole = v || ''; render(); }
 function aiUsageUserLabel(r) {
   if (r.teacher_id) { const t = data.teachers.find(x => x.id === r.teacher_id); if (t) return teacherLabel(t); }
   return aiUsageNames[r.user_id] || 'Unknown user';
@@ -1016,7 +1018,7 @@ const APP_USAGE_ACTIONS = [
 ];
 const APP_USAGE_SCREENS = {
   schedule: 'Class Schedule', students: 'Students', studyplans: 'Study Plans', homework: 'Homework', questionbank: 'Question Bank',
-  research: 'Research', attendance: 'Give Attendance', report: 'Attendance Report', availability: 'Availability', profile: 'My Profile',
+  research: 'Research', researchmonitor: 'Research Monitoring', staradmin: 'Star Teacher Monitoring', appusage: 'App Usage', aiusage: 'AI Usage', attendance: 'Give Attendance', report: 'Attendance Report', availability: 'Availability', profile: 'My Profile',
   setup: 'Setup / Teachers & Subjects', dashboard: 'Dashboard', log: 'Class Log', chat: 'Communication', wixbookings: 'Demo Bookings',
   fees: 'Fees', rebuildclasses: 'Rebuild Pending Classes', expenses: 'Expenses', reports: 'Reports & Export', payroll: 'Payroll', parents: 'Parents', admins: 'Manage Admins', users: 'Settings', superadmin: 'Superadmin tools',
   audit: 'Audit Log', support: 'Support', ai: 'AI',
@@ -1252,7 +1254,7 @@ async function maybeLoadDailyTeacherTip() {
   }
 }
 
-// Admin → Audit Log → App usage.
+// Admin → Teacher Monitoring → App Usage.
 let appUsageOpen = false;
 let appUsageMonth = todayStr.slice(0, 7);
 let appUsageView = 'feature'; // feature | user | notusing
@@ -8134,7 +8136,11 @@ async function refreshAllData(silent) {
       loadMyAnnouncements(),
       loadNotifications(),
     ]);
-    if (starOn && (currentRole === 'Teacher' || starAdminOpen)) loadStarExtras(true);
+    if (currentRole === 'Admin' && currentTab === 'staradmin') { starAdminOpen = true; loadStarExtras(true); }
+    else if (starOn && currentRole === 'Teacher') loadStarExtras(true);
+    if (currentRole === 'Admin' && currentTab === 'researchmonitor') loadResearchMonitoring();
+    if (currentRole === 'Admin' && currentTab === 'appusage') { appUsageOpen = true; appUsageRole = 'Teacher'; loadAppUsage(); }
+    if (currentRole === 'Admin' && currentTab === 'aiusage') { aiUsageOpen = true; aiUsageRole = 'Teacher'; loadAiUsage(); }
     await Promise.all([
       loadMyPhoto(),
     ]);
@@ -11849,13 +11855,18 @@ const SUPPORT_KB = {
 - Students & Subscriptions (People): add or edit students, enrol them in subjects, record payments, refunds and credit transfers, see subscription history and receipts. Call log keeps every phone call with the student or parent (+ Add call note, Call again on date; demo-stage calls show too). Special fee rates sets an agreed per-class rate for one student (used instead of Fee setup). Bill separately keeps a student out of their family's combined fee message. Create all student logins (with no student picked) makes the missing student logins in one go (login ID and first password = student code) with 📤 WhatsApp buttons to send the details.
 - Teachers & Subjects (People): add teachers and subjects, and set which teacher teaches each subject. The Class Frequency button sets how many classes each student has on each weekday (used by Raise fee requests and Rebuild Pending Classes).
 - Parents (People): one parent login per family and which children are linked. Create all parent logins makes the missing ones (login ID and first password = parent's 10-digit mobile) with a 📤 WhatsApp button to send the details.
-- Study Plans (Teaching): read-only view of every teacher's study plans and progress, plus the Textbook library (every uploaded book; rename, retag or delete).
-- Homework (Teaching): every homework set by teachers, with filters by teacher, student and status.
-- Question Bank (Teaching): Review Queue (approve new or edited questions), Full Question Bank, Archived, Practice Papers and Past Papers. Pick board, subject and grade to see questions. Old-syllabus questions stay hidden unless you tick "Old syllabus only".
-- Settings (System, once called Setup): grades, categories, boards and subject names; Question Bank access and Research access (which teachers get those tabs); Star Teacher (switch the teacher points game on or off, set its start date, and see the admin-only leaderboard); add users and manage their logins; change your password.
+- Teacher Monitoring: the central area for reviewing teacher activity and output. It contains Star Teacher, Research Monitoring, App Usage, AI Usage, Study Plans, Homework and Question Bank.
+- Star Teacher (Teacher Monitoring): switch the monthly points game on or off, set its start date, view the leaderboard, and inspect each teacher's points, level, badges and activity breakdown.
+- Research Monitoring (Teacher Monitoring): review teacher-wise saved lesson briefs and resources added/shared, with month and teacher filters. Brief text and private notes are not displayed.
+- App Usage (Teacher Monitoring): review screens opened and tracked actions by teacher, by feature or by user, including teachers with no recorded activity in the last 30 days.
+- AI Usage (Teacher Monitoring): review AI calls, tokens and estimated costs by user and feature. AI settings and access controls remain under System → AI.
+- Study Plans (Teacher Monitoring): read-only view of every teacher's study plans and progress, plus the Textbook library (every uploaded book; rename, retag or delete).
+- Homework (Teacher Monitoring): every homework set by teachers, with filters by teacher, student and status.
+- Question Bank (Teacher Monitoring): Review Queue (approve new or edited questions), Full Question Bank, Archived, Practice Papers and Past Papers. Pick board, subject and grade to see questions. Old-syllabus questions stay hidden unless you tick "Old syllabus only".
+- Settings (System, once called Setup): grades, categories, boards and subject names; Question Bank access and Research access (which teachers get those tabs); add users and manage their logins; change your password.
 - Manage Admins (System): add or remove admin accounts.
-- AI (System): AI Settings (master switch, API key, cost estimate prices), AI access (per role and per person) and AI usage (calls and estimated cost per user and feature).
-- Audit Log (System): every change made in the app, login activity, and App usage (which features each person uses). Each part opens with a tap.
+- AI (System): AI Settings (master switch, API key and cost estimate prices) and AI access (per role and per person).
+- Audit Log (System): every change made in the app and login activity. Each part opens with a tap.
 - Superadmin tools (Superadmin, superuser admins only): Academic Year (Advance everyone moves grades up once a year; Set year only and Fill blank student years never change grades), Export all data, Import backup, truncate old Audit & Login entries, clear all data and Audit Logging Controls. Each opens with the unlock password.`,
   Teacher: `My LIB app guide for Teacher:
 - Dashboard: today's classes, students needing renewal, low balances, students not seen in a while, your demo classes and student notes. A gold strip shows how many items need your action.
@@ -13587,7 +13598,12 @@ async function actuallySaveSessionEdit(id, count, date) {
 const TAB_HASH = { users: 'setup', setup: 'teachers-subjects', onboarding: 'student-onboarding' };
 function tabFromHash(h) { const k = Object.keys(TAB_HASH).find(k => TAB_HASH[k] === h); return k || h; }
 function setTab(t) { currentTab = t; if (t === 'setup' && setupSubTab === 'frequency') loadClassFrequencyRows().then(() => render()); trackUse('tab:' + t, true); location.hash = TAB_HASH[t] || t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'registrations') { regMsg = ''; loadRegistrations().then(() => render()); } if (t === 'fees') { rzpFeeMsg = ''; loadRazorpayFeePayments().then(() => render()); } if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; tbAdminEditId=''; tbAdminMsg=''; Promise.all([loadStudyPlans(), loadTextbookLibrary()]).then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
-  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); } if (t === 'onboarding') loadStudentOnboardingData().then(() => render()); }
+  if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); }
+  if (t === 'staradmin') { starAdminOpen = true; loadStarExtras(true); }
+  if (t === 'researchmonitor') loadResearchMonitoring();
+  if (t === 'appusage') { appUsageOpen = true; appUsageRole = 'Teacher'; loadAppUsage(); }
+  if (t === 'aiusage') { aiUsageOpen = true; aiUsageRole = 'Teacher'; loadAiUsage(); }
+  if (t === 'onboarding') loadStudentOnboardingData().then(() => render()); }
 function setPayrollMonth(v) { payrollMonth = v; render(); }
 function setNetProfitMonth(v) { netProfitMonth = v; render(); }
 function setNetProfitViewMode(v) { netProfitViewMode = v; render(); }
@@ -17583,49 +17599,7 @@ function renderAiAdmin() {
     <div class="card"><h2>AI Settings ${helpBtn('ai-settings')}</h2><div class="hint" style="margin-bottom:12px">AI features use Claude to improve messages, generate summaries and answer student questions.</div><label style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><input type="checkbox" id="aiMasterToggle" ${aiMasterEnabled?'checked':''} onchange="(async()=>{const k=document.getElementById('aiKeyInput').value.trim()||aiApiKey;await saveAiSettings(k,this.checked);render();})()"> <b>AI enabled (master switch)</b></label><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="password" autocomplete="new-password" id="aiKeyInput" placeholder="sk-ant-..." value="${esc(aiApiKey)}" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:monospace"><button class="btn-small btn-primary" onclick="(async()=>{const k=document.getElementById('aiKeyInput').value.trim();const en=document.getElementById('aiMasterToggle').checked;await saveAiSettings(k,en);render();})()">Save</button></div>${aiKeyMsg?`<div class="hint" style="margin-top:8px;color:${aiKeyMsg==='Saved.'?'var(--forest)':'var(--brick)'}">${esc(aiKeyMsg)}</div>`:''}<div class="hint" style="margin-top:8px">Get key at <b>console.anthropic.com</b>. See real spend there under Usage / Cost.</div>${aiCostSettingsHtml()}</div>
     ${aiAccessCardHtml()}
 
-    <div class="card">
-      <h2 style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none" onclick="toggleAiUsageCard()">
-        <span style="font-size:12px;color:var(--muted)">${aiUsageOpen ? '▼' : '▶'}</span>
-        AI usage
-        ${!aiUsageOpen ? `<span class="tag" style="margin-left:auto;font-size:11px;font-weight:400">by user</span>` : ''}
-      </h2>
-      ${aiUsageOpen ? `
-      <div class="hint">Every AI call in the app, per user and per feature, with an estimated cost. The real bill is at console.anthropic.com under Usage / Cost.</div>
-      <div class="row-form"><label>Month</label><input type="month" value="${escAttr(aiUsageMonth)}" onchange="setAiUsageMonth(this.value)"></div>
-      ${aiUsageMsg ? `<div class="hint" style="color:var(--brick)">${esc(aiUsageMsg)}</div>` : ''}
-      ${aiUsageRows === null ? '<div class="hint">Loading…</div>' : !aiUsageRows.length ? (aiUsageMsg ? '' : '<div class="empty">No AI calls this month.</div>') : (() => {
-        const byUser = {};
-        aiUsageRows.forEach(r => {
-          const k = r.user_id || 'none';
-          const u = byUser[k] || (byUser[k] = { label: aiUsageUserLabel(r), role: r.role || '', calls: 0, failed: 0, inTok: 0, outTok: 0, cost: 0, unpriced: false, last: '' });
-          u.calls++; if (!r.ok) u.failed++;
-          const c = aiRowCostUsd(r); if (c == null) { if (r.input_tokens || r.output_tokens) u.unpriced = true; } else u.cost += c;
-          u.inTok += r.input_tokens || 0; u.outTok += r.output_tokens || 0;
-          if (String(r.created_at) > u.last) u.last = String(r.created_at);
-        });
-        const list = Object.values(byUser).sort((a, b) => b.cost - a.cost || (b.inTok + b.outTok) - (a.inTok + a.outTok));
-        const fmt = n => n.toLocaleString('en-IN');
-        const byFeat = {};
-        aiUsageRows.forEach(r => {
-          const f = byFeat[r.feature || 'other'] || (byFeat[r.feature || 'other'] = { calls: 0, cost: 0 });
-          f.calls++; f.cost += aiRowCostUsd(r) || 0;
-        });
-        const totalCost = list.reduce((a, u) => a + u.cost, 0);
-        const missing = [...new Set(aiUsageRows.filter(r => (r.input_tokens || r.output_tokens) && !aiPrice(r.model)).map(r => r.model || '(no model)'))];
-        return `<div class="table-scroll"><table>
-          <tr><th>User</th><th>Role</th><th>Calls</th><th>Tokens in</th><th>Tokens out</th><th>Est. cost</th><th>Last used</th></tr>
-          ${list.map(u => `<tr><td>${esc(u.label)}</td><td>${esc(u.role)}</td><td>${u.calls}${u.failed ? ` <span style="font-size:12px;color:var(--brick)">(${u.failed} failed)</span>` : ''}</td><td>${fmt(u.inTok)}</td><td>${fmt(u.outTok)}</td><td>${u.unpriced && !u.cost ? '—' : aiCostFmt(u.cost)}${u.unpriced ? '*' : ''}</td><td>${esc(formatTimestampIST(u.last))}</td></tr>`).join('')}
-          <tr><td><b>Total</b></td><td></td><td><b>${aiUsageRows.length}</b></td><td><b>${fmt(list.reduce((a, u) => a + u.inTok, 0))}</b></td><td><b>${fmt(list.reduce((a, u) => a + u.outTok, 0))}</b></td><td><b>${aiCostFmt(totalCost)}</b></td><td></td></tr>
-        </table></div>
-        <div style="margin-top:12px"><b>By feature</b></div>
-        <div class="table-scroll"><table>
-          <tr><th>Feature</th><th>Calls</th><th>Est. cost</th></tr>
-          ${Object.entries(byFeat).sort((a, b) => b[1].cost - a[1].cost).map(([k, f]) => `<tr><td>${esc(k)}</td><td>${f.calls}</td><td>${aiCostFmt(f.cost)}</td></tr>`).join('')}
-        </table></div>
-        <div class="hint">Est. cost = tokens × the prices in Cost estimate (AI Settings, above)${aiUsdInr ? `, at ₹${esc(String(aiUsdInr))} per $` : ' (in $ until you enter a ₹ per $ rate there)'}. Your Anthropic bill can differ a little (tax, rounding).${missing.length ? ` * No price yet for ${esc(missing.join(', '))}, so those calls are left out; add it in AI Settings.` : ''}</div>`;
-      })()}
-      ` : ''}
-    </div>
+
 
   `;
 }
@@ -17712,30 +17686,7 @@ function renderAuditLog() {
       ` : ''}
     </div>
 
-    <div class="card">
-      <h2 style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none" onclick="toggleAppUsageCard()">
-        <span style="font-size:12px;color:var(--muted)">${appUsageOpen ? '▼' : '▶'}</span>
-        App usage
-        ${!appUsageOpen ? `<span class="tag" style="margin-left:auto;font-size:11px;font-weight:400">which features people use</span>` : ''}
-      </h2>
-      ${appUsageOpen ? `
-      <div class="hint">Which parts of the app each person uses: screens opened and key actions (attendance, homework, practice papers, briefs, resources, chat, AI). Only who, what and when is kept, never marks, messages or money. Logins are in Audit Log.</div>
-      <div class="row-form">
-        <select onchange="setAppUsageView(this.value)">
-          <option value="feature" ${appUsageView==='feature'?'selected':''}>By feature</option>
-          <option value="user" ${appUsageView==='user'?'selected':''}>By user</option>
-          <option value="notusing" ${appUsageView==='notusing'?'selected':''}>Not using (last 30 days)</option>
-        </select>
-        <select onchange="setAppUsageRole(this.value)">
-          <option value="" ${!appUsageRole?'selected':''}>All roles</option>
-          ${['Teacher','Student','Parent','Admin'].map(r => `<option value="${r}" ${appUsageRole===r?'selected':''}>${r}s</option>`).join('')}
-        </select>
-        ${appUsageView !== 'notusing' ? `<label>Month</label><input type="month" value="${escAttr(appUsageMonth)}" onchange="setAppUsageMonth(this.value)">` : ''}
-      </div>
-      ${appUsageMsg ? `<div class="hint" style="color:var(--brick)">${esc(appUsageMsg)}</div>` : ''}
-      ${appUsageHtml()}
-      ` : ''}
-    </div>
+
 
   `;
 }
@@ -17988,8 +17939,6 @@ function renderUsers() {
       `}
       ` : ''}
     </div>
-
-    ${starAdminCardHtml()}
 
     <div class="card">
       <h2>Add user</h2>
@@ -21179,7 +21128,7 @@ function starAfterRenderInner() {
   setTimeout(() => el.remove(), 5000);
 }
 
-// Admin: Settings → Star Teacher (switch, start date, leaderboard)
+// Admin → Teacher Monitoring → Star Teacher (switch, start date, leaderboard)
 function toggleStarAdminCard() { starAdminOpen = !starAdminOpen; if (starAdminOpen) loadStarExtras(); render(); }
 async function saveStarSettings(on, start) {
   if (!starSettingsRowId) { starMsg = 'Could not save: run SQL 66 first.'; render(); return; }
@@ -21259,6 +21208,98 @@ function starAdminCardHtml() {
       <div class="hint" style="margin-top:6px">Question Bank and lesson prep points only count for teachers who have that access. Tap a teacher to see their points.</div>`}
       ` : ''}
     </div>`;
+}
+
+
+function renderStarTeacherAdmin() {
+  // The existing leaderboard, game switch, start date and teacher drill-down remain unchanged.
+  return `<div>
+    <h2 style="font-family:'Zilla Slab',serif;margin:0 0 6px">Star Teacher Monitoring</h2>
+    <div class="hint" style="margin-bottom:14px">Monitor each teacher's monthly points, level, badges and activity breakdown. The existing game settings are available here too.</div>
+    ${starSafe(() => starAdminCardHtml(), 'Admin monitoring page')}
+  </div>`;
+}
+
+function renderAppUsageAdmin() {
+  return `<div>
+    <h2 style="font-family:'Zilla Slab',serif;margin:0 0 6px">App Usage</h2>
+    <div class="hint" style="margin-bottom:14px">Review which app screens teachers open and which tracked actions they perform. The default view is filtered to Teachers; the role filter can show other roles when needed.</div>
+        <div class="card">
+      <h2 style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none" onclick="toggleAppUsageCard()">
+        <span style="font-size:12px;color:var(--muted)">${appUsageOpen ? '▼' : '▶'}</span>
+        App usage
+        ${!appUsageOpen ? `<span class="tag" style="margin-left:auto;font-size:11px;font-weight:400">which features people use</span>` : ''}
+      </h2>
+      ${appUsageOpen ? `
+      <div class="hint">Which parts of the app each person uses: screens opened and key actions (attendance, homework, practice papers, briefs, resources, chat, AI). Only who, what and when is kept, never marks, messages or money. Logins are in Audit Log.</div>
+      <div class="row-form">
+        <select onchange="setAppUsageView(this.value)">
+          <option value="feature" ${appUsageView==='feature'?'selected':''}>By feature</option>
+          <option value="user" ${appUsageView==='user'?'selected':''}>By user</option>
+          <option value="notusing" ${appUsageView==='notusing'?'selected':''}>Not using (last 30 days)</option>
+        </select>
+        <select onchange="setAppUsageRole(this.value)">
+          <option value="" ${!appUsageRole?'selected':''}>All roles</option>
+          ${['Teacher','Student','Parent','Admin'].map(r => `<option value="${r}" ${appUsageRole===r?'selected':''}>${r}s</option>`).join('')}
+        </select>
+        ${appUsageView !== 'notusing' ? `<label>Month</label><input type="month" value="${escAttr(appUsageMonth)}" onchange="setAppUsageMonth(this.value)">` : ''}
+      </div>
+      ${appUsageMsg ? `<div class="hint" style="color:var(--brick)">${esc(appUsageMsg)}</div>` : ''}
+      ${appUsageHtml()}
+      ` : ''}
+    </div>
+  </div>`;
+}
+
+function renderAiUsageAdmin() {
+  const aiUsageFilteredRows = aiUsageRows === null ? null : aiUsageRows.filter(r => !aiUsageRole || r.role === aiUsageRole);
+  return `<div>
+    <h2 style="font-family:'Zilla Slab',serif;margin:0 0 6px">AI Usage</h2>
+    <div class="hint" style="margin-bottom:14px">Review AI calls, token usage and estimated cost by user and feature. AI configuration and access controls remain under System → AI.</div>
+        <div class="card">
+      <h2 style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none" onclick="toggleAiUsageCard()">
+        <span style="font-size:12px;color:var(--muted)">${aiUsageOpen ? '▼' : '▶'}</span>
+        AI usage
+        ${!aiUsageOpen ? `<span class="tag" style="margin-left:auto;font-size:11px;font-weight:400">by user</span>` : ''}
+      </h2>
+      ${aiUsageOpen ? `
+      <div class="hint">AI calls in the app, per user and per feature, with an estimated cost. The default view shows Teachers. The real bill is at console.anthropic.com under Usage / Cost.</div>
+      <div class="row-form"><label>Month <input type="month" value="${escAttr(aiUsageMonth)}" onchange="setAiUsageMonth(this.value)"></label><label>Role <select onchange="setAiUsageRole(this.value)"><option value="Teacher" ${aiUsageRole==='Teacher'?'selected':''}>Teachers</option><option value="Student" ${aiUsageRole==='Student'?'selected':''}>Students</option><option value="Parent" ${aiUsageRole==='Parent'?'selected':''}>Parents</option><option value="Admin" ${aiUsageRole==='Admin'?'selected':''}>Admins</option><option value="" ${!aiUsageRole?'selected':''}>All roles</option></select></label></div>
+      ${aiUsageMsg ? `<div class="hint" style="color:var(--brick)">${esc(aiUsageMsg)}</div>` : ''}
+      ${aiUsageFilteredRows === null ? '<div class="hint">Loading…</div>' : !aiUsageFilteredRows.length ? (aiUsageMsg ? '' : '<div class="empty">No AI calls this month.</div>') : (() => {
+        const byUser = {};
+        aiUsageFilteredRows.forEach(r => {
+          const k = r.user_id || 'none';
+          const u = byUser[k] || (byUser[k] = { label: aiUsageUserLabel(r), role: r.role || '', calls: 0, failed: 0, inTok: 0, outTok: 0, cost: 0, unpriced: false, last: '' });
+          u.calls++; if (!r.ok) u.failed++;
+          const c = aiRowCostUsd(r); if (c == null) { if (r.input_tokens || r.output_tokens) u.unpriced = true; } else u.cost += c;
+          u.inTok += r.input_tokens || 0; u.outTok += r.output_tokens || 0;
+          if (String(r.created_at) > u.last) u.last = String(r.created_at);
+        });
+        const list = Object.values(byUser).sort((a, b) => b.cost - a.cost || (b.inTok + b.outTok) - (a.inTok + a.outTok));
+        const fmt = n => n.toLocaleString('en-IN');
+        const byFeat = {};
+        aiUsageFilteredRows.forEach(r => {
+          const f = byFeat[r.feature || 'other'] || (byFeat[r.feature || 'other'] = { calls: 0, cost: 0 });
+          f.calls++; f.cost += aiRowCostUsd(r) || 0;
+        });
+        const totalCost = list.reduce((a, u) => a + u.cost, 0);
+        const missing = [...new Set(aiUsageFilteredRows.filter(r => (r.input_tokens || r.output_tokens) && !aiPrice(r.model)).map(r => r.model || '(no model)'))];
+        return `<div class="table-scroll"><table>
+          <tr><th>User</th><th>Role</th><th>Calls</th><th>Tokens in</th><th>Tokens out</th><th>Est. cost</th><th>Last used</th></tr>
+          ${list.map(u => `<tr><td>${esc(u.label)}</td><td>${esc(u.role)}</td><td>${u.calls}${u.failed ? ` <span style="font-size:12px;color:var(--brick)">(${u.failed} failed)</span>` : ''}</td><td>${fmt(u.inTok)}</td><td>${fmt(u.outTok)}</td><td>${u.unpriced && !u.cost ? '—' : aiCostFmt(u.cost)}${u.unpriced ? '*' : ''}</td><td>${esc(formatTimestampIST(u.last))}</td></tr>`).join('')}
+          <tr><td><b>Total</b></td><td></td><td><b>${aiUsageFilteredRows.length}</b></td><td><b>${fmt(list.reduce((a, u) => a + u.inTok, 0))}</b></td><td><b>${fmt(list.reduce((a, u) => a + u.outTok, 0))}</b></td><td><b>${aiCostFmt(totalCost)}</b></td><td></td></tr>
+        </table></div>
+        <div style="margin-top:12px"><b>By feature</b></div>
+        <div class="table-scroll"><table>
+          <tr><th>Feature</th><th>Calls</th><th>Est. cost</th></tr>
+          ${Object.entries(byFeat).sort((a, b) => b[1].cost - a[1].cost).map(([k, f]) => `<tr><td>${esc(k)}</td><td>${f.calls}</td><td>${aiCostFmt(f.cost)}</td></tr>`).join('')}
+        </table></div>
+        <div class="hint">Est. cost = tokens × the prices in Cost estimate (AI Settings, above)${aiUsdInr ? `, at ₹${esc(String(aiUsdInr))} per $` : ' (in $ until you enter a ₹ per $ rate there)'}. Your Anthropic bill can differ a little (tax, rounding).${missing.length ? ` * No price yet for ${esc(missing.join(', '))}, so those calls are left out; add it in AI Settings.` : ''}</div>`;
+      })()}
+      ` : ''}
+    </div>
+  </div>`;
 }
 
 function renderTeacherDashboard(teacher) {
@@ -26046,6 +26087,105 @@ function qbPapersHtml() {
   return `${QB_CARD_CSS}${qbPaperMsg ? `<div class="hint" style="color:${/^✓/.test(qbPaperMsg) ? 'var(--forest)' : 'var(--brick)'};margin-bottom:8px">${esc(qbPaperMsg)}</div>` : ''}${body}`;
 }
 
+
+// Admin → Teacher Monitoring → Research Monitoring. Read-only summaries of saved briefs and teacher resources.
+let researchAdminMonth = todayStr.slice(0, 7);
+let researchAdminTeacherId = '';
+let researchAdminNotes = null;
+let researchAdminResources = null;
+let researchAdminLoading = false;
+let researchAdminNotesError = '';
+let researchAdminResourcesError = '';
+async function loadResearchMonitoring() {
+  if (currentRole !== 'Admin') return;
+  researchAdminLoading = true;
+  researchAdminNotesError = '';
+  researchAdminResourcesError = '';
+  researchAdminNotes = null;
+  researchAdminResources = null;
+  render();
+  const [y, m] = researchAdminMonth.split('-').map(Number);
+  const from = researchAdminMonth + '-01T00:00:00+05:30';
+  const to = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10) + 'T00:00:00+05:30';
+  try {
+    const [notes, resources] = await Promise.all([
+      sb.from('teacher_research_notes').select('id,teacher_id,subject_name,grade_id,chapter,created_at').gte('created_at', from).lt('created_at', to).order('created_at', { ascending: false }).limit(5000),
+      sb.from('teacher_resources').select('id,teacher_id,subject_id,grade_id,chapter,title,link_url,file_name,shared,created_at').gte('created_at', from).lt('created_at', to).order('created_at', { ascending: false }).limit(5000),
+    ]);
+    if (notes.error) { researchAdminNotes = []; researchAdminNotesError = notes.error.message; }
+    else researchAdminNotes = notes.data || [];
+    if (resources.error) { researchAdminResources = []; researchAdminResourcesError = resources.error.message; }
+    else researchAdminResources = resources.data || [];
+  } catch (e) {
+    researchAdminNotes = researchAdminNotes || [];
+    researchAdminResources = researchAdminResources || [];
+    researchAdminNotesError = researchAdminNotesError || ((e && e.message) || String(e));
+    researchAdminResourcesError = researchAdminResourcesError || ((e && e.message) || String(e));
+  }
+  researchAdminLoading = false;
+  render();
+}
+function renderResearchMonitoring() {
+  const notesAll = researchAdminNotes || [];
+  const resourcesAll = researchAdminResources || [];
+  const notes = notesAll.filter(r => !researchAdminTeacherId || r.teacher_id === researchAdminTeacherId);
+  const resources = resourcesAll.filter(r => !researchAdminTeacherId || r.teacher_id === researchAdminTeacherId);
+  const getTeacher = id => data.teachers.find(t => t.id === id);
+  const teacherName = id => { const t = getTeacher(id); return t ? teacherLabel(t) : 'Teacher not found'; };
+  const subjectName = id => { const s = data.subjects.find(x => x.id === id); return s ? s.name : '—'; };
+  const noteByTeacher = new Map(), resourceByTeacher = new Map();
+  notes.forEach(r => noteByTeacher.set(r.teacher_id, (noteByTeacher.get(r.teacher_id) || 0) + 1));
+  resources.forEach(r => {
+    const e = resourceByTeacher.get(r.teacher_id) || { total: 0, shared: 0 };
+    e.total++; if (r.shared) e.shared++;
+    resourceByTeacher.set(r.teacher_id, e);
+  });
+  const teacherIds = data.teachers.filter(t => !t.archived && (!researchAdminTeacherId || t.id === researchAdminTeacherId)).map(t => t.id);
+  const byTeacherHtml = teacherIds.length ? `<div class="table-scroll"><table>
+    <tr><th>Teacher</th><th>Lesson briefs</th><th>Resources added</th><th>Resources shared</th></tr>
+    ${teacherIds.map(id => { const r = resourceByTeacher.get(id) || { total: 0, shared: 0 }; return `<tr><td>${esc(teacherName(id))}</td><td>${noteByTeacher.get(id) || 0}</td><td>${r.total}</td><td>${r.shared}</td></tr>`; }).sort((a,b) => a.localeCompare(b)).join('')}
+  </table></div>` : '<div class="empty">No Research activity found for this month and filter.</div>';
+  const noteRows = notes.slice(0, 200).map(r => `<tr>
+    <td>${esc(formatTimestampIST(r.created_at))}</td><td>${esc(teacherName(r.teacher_id))}</td><td>${esc(r.subject_name || '—')}</td>
+    <td>${esc(qbByName(grades, r.grade_id) || '—')}</td><td>${esc(r.chapter || '—')}</td><td><span class="tag cat">Saved</span></td>
+  </tr>`).join('');
+  const resourceRows = resources.slice(0, 200).map(r => `<tr>
+    <td>${esc(formatTimestampIST(r.created_at))}</td><td>${esc(teacherName(r.teacher_id))}</td><td>${esc(r.title || r.file_name || '—')}</td>
+    <td>${esc(subjectName(r.subject_id))}</td><td>${esc(r.chapter || '—')}</td>
+    <td>${r.shared ? '<span class="tag cat">Shared</span>' : '<span class="tag">Not shared</span>'}</td>
+    <td>${r.link_url ? `<a href="${escAttr(r.link_url)}" target="_blank" rel="noopener">Open link</a>` : esc(r.file_name || 'Uploaded file')}</td>
+  </tr>`).join('');
+  const totalShared = resources.filter(r => r.shared).length;
+  return `<div>
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+      <div><h2 style="font-family:'Zilla Slab',serif;margin:0 0 6px">Research Monitoring</h2>
+      <div class="hint">Read-only view of teachers' saved lesson briefs and resources. Brief contents and private notes are not displayed here.</div></div>
+      <button class="btn-small" onclick="loadResearchMonitoring()" ${researchAdminLoading ? 'disabled' : ''}>↻ Refresh</button>
+    </div>
+    <div class="row-form" style="margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <label>Month <input type="month" value="${escAttr(researchAdminMonth)}" onchange="researchAdminMonth=this.value;loadResearchMonitoring()"></label>
+      <select onchange="researchAdminTeacherId=this.value;render()"><option value="">All teachers</option>
+        ${byName(data.teachers.filter(t => !t.archived)).map(t => `<option value="${t.id}" ${t.id === researchAdminTeacherId ? 'selected' : ''}>${esc(teacherLabel(t))}</option>`).join('')}
+      </select>
+    </div>
+    ${researchAdminLoading ? '<div class="hint">Loading Research activity…</div>' : ''}
+    ${researchAdminNotesError ? `<div class="hint" style="color:var(--brick)">Could not load saved lesson briefs: ${esc(researchAdminNotesError)}</div>` : ''}
+    ${researchAdminResourcesError ? `<div class="hint" style="color:var(--brick)">Could not load teacher resources: ${esc(researchAdminResourcesError)}</div>` : ''}
+    <div class="stat-grid" style="margin-bottom:16px">
+      <div class="stat-card"><div class="num">${notes.length}</div><div class="label">Lesson briefs saved</div></div>
+      <div class="stat-card"><div class="num">${resources.length}</div><div class="label">Resources added</div></div>
+      <div class="stat-card"><div class="num">${totalShared}</div><div class="label">Resources shared</div></div>
+    </div>
+    <div class="card"><h3 style="margin:0 0 10px">Teacher-wise activity</h3>${byTeacherHtml}</div>
+    <div class="card"><h3 style="margin:0 0 10px">Saved lesson briefs ${notes.length > 200 ? `<span class="hint">(showing latest 200 of ${notes.length})</span>` : ''}</h3>
+      ${noteRows ? `<div class="table-scroll"><table><tr><th>Created</th><th>Teacher</th><th>Subject</th><th>Grade</th><th>Chapter</th><th>Status</th></tr>${noteRows}</table></div>` : '<div class="empty">No saved briefs for this month.</div>'}
+    </div>
+    <div class="card"><h3 style="margin:0 0 10px">Teacher resources ${resources.length > 200 ? `<span class="hint">(showing latest 200 of ${resources.length})</span>` : ''}</h3>
+      ${resourceRows ? `<div class="table-scroll"><table><tr><th>Added</th><th>Teacher</th><th>Resource</th><th>Subject</th><th>Chapter</th><th>Sharing</th><th>File / Link</th></tr>${resourceRows}</table></div>` : '<div class="empty">No resources added for this month.</div>'}
+    </div>
+  </div>`;
+}
+
 function renderAdminHomework() {
   let hw = [...homeworkData];
   const filterStudentLc = adminHwFilterStudent.toLowerCase();
@@ -26731,7 +26871,11 @@ function render() {
       ['setup', 'Teachers & Subjects'],
       ['parents', 'Parents'],
     ]},
-    { label: 'Teaching', tabs: [
+    { label: 'Teacher Monitoring', tabs: [
+      ['staradmin', 'Star Teacher'],
+      ['researchmonitor', 'Research Monitoring'],
+      ['appusage', 'App Usage'],
+      ['aiusage', 'AI Usage'],
       ['studyplans', 'Study Plans'],
       ['homework', 'Homework'],
       ['questionbank', 'Question Bank'],
@@ -26796,6 +26940,10 @@ function render() {
   else if (currentTab === 'parents') body = renderParents();
   else if (currentTab === 'users') body = renderUsers();
   else if (currentTab === 'admins') body = renderManageAdmins();
+  else if (currentTab === 'staradmin') body = renderStarTeacherAdmin();
+  else if (currentTab === 'researchmonitor') body = renderResearchMonitoring();
+  else if (currentTab === 'appusage') body = renderAppUsageAdmin();
+  else if (currentTab === 'aiusage') body = renderAiUsageAdmin();
   else if (currentTab === 'studyplans') body = renderAdminStudyPlans();
   else if (currentTab === 'homework') body = renderAdminHomework();
   else if (currentTab === 'questionbank') body = renderAdminQuestionBank();
