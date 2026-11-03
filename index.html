@@ -572,7 +572,7 @@ const APP_VERSION = '2026.11';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-03 17:15 IST'; // V21 + move classes between children of one family
+const BUILD_TIMESTAMP = '2026-11-03 13:08 IST'; // V21 Question Bank Monitoring
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1978,10 +1978,6 @@ let refundDraft = { subjectId: '', type: 'Group', date: todayStr };
 let transferDraft = { fromSubjectId: '', toSubjectId: '', type: 'Group', classes: '' };
 let transferConfirmModal = null; // set when the To subject is a different teacher, to warn before confirming
 let transferMsg = '';
-// Family transfer: move classes left from this student to another child of the same family (SQL 78).
-let familyTransferDraft = { studentId: '', fromSubjectId: '', type: 'Group', toStudentId: '', toSubjectId: '' };
-let familyTransferMsg = '';
-let familyTransferMissing = false;   // SQL 78 not run yet
 let refundMsg = '';
 let requestDraft = { subjectId: '', type: 'Group', mode: '', classes: '', amountPaid: '', amountEdited: false, date: todayStr };
 let requestMsg = '';
@@ -7551,21 +7547,15 @@ function transferHistoryRows(studentId) {
     groups.get(key).push(s);
   });
   const rows = [];
-  groups.forEach((mine, key) => {
-    // A family transfer (SQL 78) puts the other half on the other child, so look across all students for it.
-    const list = key.startsWith('solo-') ? mine : data.subscriptions.filter(s => s.transferGroupId === key && (s.kind === 'TransferOut' || s.kind === 'TransferIn'));
+  groups.forEach(list => {
     const out = list.find(s => s.kind === 'TransferOut'), inn = list.find(s => s.kind === 'TransferIn');
-    const base = mine.find(s => s.kind === 'TransferOut') || mine[0];
+    const base = out || inn;
     const fromSubj = out ? subject(out.subjectId) : null, toSubj = inn ? subject(inn.subjectId) : null;
-    const crossStudent = !!(out && inn && out.studentId !== inn.studentId) || (!(out && inn) && /^Family transfer:/.test(base.paymentRemarks || ''));
     rows.push({
       id: base.id, date: base.date, type: base.type, classes: Math.abs(base.classes),
       fromName: out ? subjectName(out.subjectId) : '', toName: inn ? subjectName(inn.subjectId) : '',
       fromTeacher: fromSubj ? teacherName(fromSubj.teacherId) : '', toTeacher: toSubj ? teacherName(toSubj.teacherId) : '',
-      crossTeacher: !!(fromSubj && toSubj && fromSubj.teacherId !== toSubj.teacherId),
-      crossStudent,
-      fromStudent: crossStudent && out ? studentName(out.studentId) : '', toStudent: crossStudent && inn ? studentName(inn.studentId) : '',
-      remarks: base.paymentRemarks || ''   // the other child's half may be hidden from a student/parent login; the remark names it
+      crossTeacher: !!(fromSubj && toSubj && fromSubj.teacherId !== toSubj.teacherId)
     });
   });
   return rows.sort((a,b) => (a.date||'').localeCompare(b.date||'') || a.id.localeCompare(b.id));
@@ -7573,14 +7563,12 @@ function transferHistoryRows(studentId) {
 // Read-only table rows for transfers (no Edit/delete: removing one half would unbalance the two subjects).
 function transferRowsHtml(rows, colspan, withActionCell) {
   if (!rows.length) return '';
-  const side = (stu, name, teacher) => name ? (stu ? '<b>' + esc(stu) + '</b> · ' : '') + esc(name) + ' <span class="hint">(' + esc(teacher) + ')</span>' : '<span class="hint">?</span>';
-  const label = r => (r.crossStudent && !(r.fromName && r.toName)) ? esc(r.remarks || 'Family transfer')
-    : `${side(r.fromStudent, r.fromName, r.fromTeacher)} → ${side(r.toStudent, r.toName, r.toTeacher)}`;
-  return `<tr><td colspan="${colspan}" class="hint"><b>Class transfers</b> — balance moved between subjects or children of one family, no money involved</td></tr>` +
+  const label = r => `${r.fromName ? esc(r.fromName) + ' <span class="hint">(' + esc(r.fromTeacher) + ')</span>' : '<span class="hint">?</span>'} → ${r.toName ? esc(r.toName) + ' <span class="hint">(' + esc(r.toTeacher) + ')</span>' : '<span class="hint">?</span>'}`;
+  return `<tr><td colspan="${colspan}" class="hint"><b>Class transfers</b> — balance moved between subjects, no money involved</td></tr>` +
     rows.map(r => `
         <tr>
           <td>${label(r)}</td><td>${r.type}</td><td>${r.classes}</td><td>—</td><td>${esc(r.date||'—')}</td>
-          <td><span class="tag">Transfer</span>${r.crossStudent ? ' <span class="tag">Family</span>' : ''}${r.crossTeacher ? ' <span class="tag absent">Different teacher</span>' : ''}</td>
+          <td><span class="tag">Transfer</span>${r.crossTeacher ? ' <span class="tag absent">Different teacher</span>' : ''}</td>
           <td>—</td><td>—</td><td><span class="hint">—</span></td>${withActionCell ? '<td></td>' : ''}
         </tr>`).join('');
 }
@@ -8291,7 +8279,6 @@ async function logout() {
   resetStarState();
   teacherPortalTab = 'dashboard'; // the next login starts on the Dashboard, so a tab's data is loaded when it is opened
   teacherDailyTip = null; teacherDailyTipPending = null; teacherDailyTipCheckStarted = false; teacherDailyTipClaiming = false;
-  weeklyPatternTeacherId = ''; weeklyPatternAdminFreqLoaded = false;
   isLoggedIn = false; currentUsername = ''; currentRole = ''; currentLinkedId = ''; currentUserId = ''; parentSelectedChildId = ''; pwIsDefault = false; userMsg.changePw = ''; spAssignments = []; spPapers = {}; spOpen = null; spPhotoUrls = {};
   biometricOfferShown = false; // allow the enrollment banner on the next password login
   dangerZoneUnlocked = false; unlockPasswordAttempt = ''; unlockMsg = '';
@@ -13073,131 +13060,10 @@ function transferConfirmModalHtml() {
         <div class="hint" style="font-size:14px; line-height:1.6">This moves ${esc(String(m.classes))} class${m.classes===1?'':'es'} from ${esc(m.fromTeacherName)}'s subject to ${esc(m.toTeacherName)}'s subject — ${esc(m.toTeacherName)} will be paid for classes given against this balance from now on, not ${esc(m.fromTeacherName)}. Continue?</div>
         <div class="row-form" style="margin-top:14px">
           <button class="btn-small" onclick="cancelTransferModal()">Cancel</button>
-          <button class="btn-primary btn-danger" onclick="${m.family ? 'actuallyAddFamilyTransfer' : 'actuallyAddClassTransfer'}(transferConfirmModal.classes)">Transfer anyway</button>
+          <button class="btn-primary btn-danger" onclick="actuallyAddClassTransfer(transferConfirmModal.classes)">Transfer anyway</button>
         </div>
       </div>
     </div>`;
-}
-// ---- Family transfer (SQL 78) ----
-// Allowed only between two children of one family (familyMembers) when the per-class rate each would pay is the
-// same: feeRateFor (special rate, else Fee setup) for that child's subject + type in the mode they usually take.
-function familyTransferDraftFor(studentId) {
-  if (familyTransferDraft.studentId !== studentId) { familyTransferDraft = { studentId, fromSubjectId: '', type: 'Group', toStudentId: '', toSubjectId: '' }; familyTransferMsg = ''; }
-  return familyTransferDraft;
-}
-function familyTransferSet(field, val) {
-  familyTransferDraft[field] = val;
-  if (field === 'toStudentId') familyTransferDraft.toSubjectId = '';
-  if (field === 'fromSubjectId' && familyTransferDraft.toStudentId && !familyTransferDraft.toSubjectId) {
-    // Pre-pick the other child's subject in the same category, if there is exactly one.
-    const from = subject(val);
-    const same = from ? subjectsForStudent(familyTransferDraft.toStudentId).filter(x => x.category === from.category) : [];
-    if (same.length === 1) familyTransferDraft.toSubjectId = same[0].id;
-  }
-  if (field === 'toStudentId' && familyTransferDraft.fromSubjectId) {
-    const from = subject(familyTransferDraft.fromSubjectId);
-    const same = from ? subjectsForStudent(val).filter(x => x.category === from.category) : [];
-    if (same.length === 1) familyTransferDraft.toSubjectId = same[0].id;
-  }
-  familyTransferMsg = '';
-  render();
-}
-function familyTransferCheck(d) {
-  const fromSubj = subject(d.fromSubjectId), toSubj = subject(d.toSubjectId);
-  if (!d.studentId || !fromSubj || !d.toStudentId || !toSubj || !d.type) return null;
-  const fromMode = studentUsualMode(d.studentId, fromSubj.id, d.type), toMode = studentUsualMode(d.toStudentId, toSubj.id, d.type);
-  const a = feeRateFor(d.studentId, fromSubj, d.type, fromMode), b = feeRateFor(d.toStudentId, toSubj, d.type, toMode);
-  const family = familyMembers(d.studentId).some(s => s.id === d.toStudentId) && d.toStudentId !== d.studentId;
-  const left = studentRemaining(d.studentId, fromSubj.id, d.type);
-  let reason = '';
-  if (!family) reason = `${studentName(d.toStudentId)} is not in the same family.`;
-  else if (!(a.rate > 0) || !(b.rate > 0)) reason = 'No per-class rate is set for one of them (Fee setup or Special fee rates), so the rates cannot be compared.';
-  else if (Math.abs(a.rate - b.rate) > 0.001) reason = 'The rates are not the same, so classes cannot be moved between them.';
-  else if (left <= 0) reason = 'No classes left to move.';
-  return { fromSubj, toSubj, fromMode, toMode, fromRate: a.rate, toRate: b.rate, fromSpecial: a.special, toSpecial: b.special, left, ok: !reason, reason };
-}
-function addFamilyTransfer() {
-  const d = familyTransferDraft;
-  const input = document.getElementById('familyTransferClasses');
-  const classes = Number(input ? input.value : 0);
-  familyTransferMsg = '';
-  const chk = familyTransferCheck(d);
-  if (!chk) return;
-  if (!chk.ok) { familyTransferMsg = chk.reason; render(); return; }
-  if (!(classes > 0)) { familyTransferMsg = 'Type how many classes to move.'; render(); return; }
-  if (classes > chk.left) { familyTransferMsg = `Only ${chk.left} ${d.type} class${chk.left===1?'':'es'} left in ${subjectName(d.fromSubjectId)}.`; render(); return; }
-  const what = `${classes} ${d.type} class${classes===1?'':'es'} from ${studentName(d.studentId)} (${chk.fromSubj.name}) to ${studentName(d.toStudentId)} (${chk.toSubj.name})`;
-  if (chk.fromSubj.teacherId !== chk.toSubj.teacherId) {
-    transferConfirmModal = { family: true, classes, fromTeacherName: teacherName(chk.fromSubj.teacherId), toTeacherName: teacherName(chk.toSubj.teacherId) };
-    render(); return;
-  }
-  if (!confirm(`Move ${what}? No money changes hands.`)) return;
-  actuallyAddFamilyTransfer(classes);
-}
-async function actuallyAddFamilyTransfer(classes) {
-  transferConfirmModal = null;
-  const d = familyTransferDraft;
-  const { data: result, error } = await sb.rpc('transfer_classes_between_students', {
-    p_from_student_id: d.studentId, p_to_student_id: d.toStudentId, p_from_subject_id: d.fromSubjectId, p_to_subject_id: d.toSubjectId,
-    p_type: d.type, p_classes: classes
-  });
-  if (error) {
-    familyTransferMissing = /transfer_classes_between_students/.test(error.message || '');
-    familyTransferMsg = familyTransferMissing ? 'Run SQL 78 (fee-requests/78-family-class-transfer.sql) in Supabase first.' : 'Could not move: ' + error.message;
-    render(); return;
-  }
-  if (!result || !result.ok) {
-    familyTransferMsg = result && result.error === 'not_enough_balance'
-      ? `Can't move ${classes} classes, only ${result.remaining} left.`
-      : 'Could not move: ' + (result ? result.error : 'unknown error');
-    render(); return;
-  }
-  await loadStudentsAndSubscriptions();
-  familyTransferMsg = `Moved ${classes} class${classes===1?'':'es'} to ${studentName(d.toStudentId)} (${subjectName(d.toSubjectId)}).`;
-  familyTransferDraft = { studentId: d.studentId, fromSubjectId: '', type: d.type, toStudentId: '', toSubjectId: '' };
-  if (typeof trackUse === 'function') trackUse('family_class_transfer');
-  render();
-}
-function familyTransferCardHtml(student, balanceSubjects) {
-  const d = familyTransferDraftFor(student.id);
-  const others = byName(familyMembers(student.id).filter(s => s.id !== student.id && !s.archived));
-  const rateTxt = (r, sp, mode) => '₹' + (Number(r) || 0).toLocaleString('en-IN') + ' per class' + (sp ? ' (special rate)' : ' (' + mode + ')');
-  const chk = familyTransferCheck(d);
-  let body;
-  if (!others.length) body = '<div class="empty">No other child in this family. Families are matched by parent login or parent mobile number; a student set to "Bill separately" counts as their own family.</div>';
-  else if (!balanceSubjects.length) body = '<div class="empty">This student has no classes on record to move.</div>';
-  else {
-    const toSubjects = d.toStudentId ? byName(subjectsForStudent(d.toStudentId)) : [];
-    body = `
-      <div class="row-form">
-        <select onchange="familyTransferSet('fromSubjectId', this.value)">
-          <option value="">From subject…</option>
-          ${balanceSubjects.map(subj=>`<option value="${subj.id}" ${d.fromSubjectId===subj.id?'selected':''}>${esc(subj.name)} (${esc(teacherName(subj.teacherId))})</option>`).join('')}
-        </select>
-        <select onchange="familyTransferSet('type', this.value)">${TYPES.map(ty=>`<option value="${ty}" ${d.type===ty?'selected':''}>${ty}</option>`).join('')}</select>
-        <select onchange="familyTransferSet('toStudentId', this.value)">
-          <option value="">To child…</option>
-          ${others.map(o=>`<option value="${o.id}" ${d.toStudentId===o.id?'selected':''}>${esc(studentLabel(o))}</option>`).join('')}
-        </select>
-        <select onchange="familyTransferSet('toSubjectId', this.value)" ${d.toStudentId?'':'disabled'}>
-          <option value="">Their subject…</option>
-          ${d.toStudentId && !toSubjects.length ? '<option value="" disabled>Not enrolled in any subject yet</option>' : ''}
-          ${toSubjects.map(subj=>`<option value="${subj.id}" ${d.toSubjectId===subj.id?'selected':''}>${esc(subj.name)} (${esc(teacherName(subj.teacherId))})</option>`).join('')}
-        </select>
-        <label>Classes <input type="number" id="familyTransferClasses" min="0.5" step="0.5" style="width:80px"></label>
-        <button class="btn-primary" ${chk && chk.ok ? '' : 'disabled'} onclick="addFamilyTransfer()">Move classes</button>
-      </div>
-      ${d.fromSubjectId ? `<div class="hint">Left in ${esc(subjectName(d.fromSubjectId))} (${d.type}): <b>${studentRemaining(student.id, d.fromSubjectId, d.type)}</b></div>` : ''}
-      ${chk ? `<div class="hint">Rate for ${esc(student.name)}: <b>${rateTxt(chk.fromRate, chk.fromSpecial, chk.fromMode)}</b> · Rate for ${esc(studentName(d.toStudentId))}: <b>${rateTxt(chk.toRate, chk.toSpecial, chk.toMode)}</b></div>
-        <div class="hint" style="color:${chk.ok?'var(--forest)':'var(--brick)'}">${chk.ok ? '✓ Same family and same rate, classes can be moved.' : '✗ ' + esc(chk.reason)}</div>` : ''}`;
-  }
-  return `
-      <div class="student-section" style="background:#e8f8ee">
-      <h3>Move classes to another child in the family <button class="help-btn" onclick="openHelp('family-transfer',event)">?</button></h3>
-      <div class="hint">Moves classes this student has left to another child's subject, with no new money. Allowed only when both children are in the same family and pay the same rate per class.</div>
-      ${familyTransferMsg ? `<div class="hint" style="color:${familyTransferMsg.startsWith('Moved')?'var(--forest)':'var(--brick)'}">${esc(familyTransferMsg)}</div>` : ''}
-      ${body}
-      </div>`;
 }
 async function deleteSubscription(id) {
   const sub = data.subscriptions.find(s => s.id === id);
@@ -14296,7 +14162,7 @@ function exportStudentReport() {
 
   // Class transfers get their own sheet (their columns don't fit the payment sheet); only added when the student has any.
   const xferRows = transferHistoryRows(reportStudentId).map(r => ({
-    Date: r.date, From_Student: r.fromStudent || '', To_Student: r.toStudent || '', From_Subject: r.fromName, From_Teacher: r.fromTeacher, To_Subject: r.toName, To_Teacher: r.toTeacher,
+    Date: r.date, From_Subject: r.fromName, From_Teacher: r.fromTeacher, To_Subject: r.toName, To_Teacher: r.toTeacher,
     Type: r.type, Classes: r.classes, Different_Teacher: r.crossTeacher ? 'Yes' : 'No', Reference: r.reference||'', Remarks: r.remarks||''
   }));
   if (xferRows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(xferRows), 'Transfers');
@@ -15786,7 +15652,6 @@ function renderStudents() {
       `}
 
       </div>
-      ${familyTransferCardHtml(student, balanceSubjects)}
       <div class="student-section" style="background:#e8f8ee">
       <h3>Subscription history <button class="help-btn" onclick="openHelp('sub-history',event)">?</button></h3>
       ${historyHtml}
@@ -16219,6 +16084,9 @@ function renderReports(only) {
     const mine = monthSessions.filter(s=>s.teacherId===t.id);
     const byCatType = {};
     let pay = 0;
+    let countedClasses = 0;
+    let missingRateClasses = 0;
+    const rateMap = {};
     categories.forEach(c=>{
       TYPES.forEach(ty=>{
         const inGroup = mine.filter(s=>{ const subj=subject(s.subjectId); return subj && subj.category===c.id && s.classType===ty; });
@@ -16226,25 +16094,27 @@ function renderReports(only) {
         byCatType[c.id+'_'+ty] = count;
         RATE_MODES.forEach(md => {
           const modeCount = inGroup.filter(s=>s.mode===md).reduce((a,s)=>a+s.count,0);
-          pay += modeCount * (t.rates[rateKey(c.id,ty,md)]||0);
+          if (modeCount <= 0) return;
+          countedClasses += modeCount;
+          const key = rateKey(c.id,ty,md);
+          const savedRate = t.rates ? t.rates[key] : undefined;
+          const numericRate = Number(savedRate);
+          const hasRate = savedRate !== undefined && savedRate !== null && savedRate !== '' && Number.isFinite(numericRate);
+          const rate = hasRate ? numericRate : 0;
+          pay += modeCount * rate;
+          if (!hasRate || !Number.isFinite(rate)) {
+            missingRateClasses += modeCount;
+          } else {
+            rateMap[rate] = (rateMap[rate]||0) + modeCount;
+          }
         });
       });
     });
-    // Build a rate-wise summary: group all class counts that share the same rate into one line
-    const rateMap = {};
-    categories.forEach(c=>{
-      TYPES.forEach(ty=>{
-        const inGroup = mine.filter(s=>{ const subj=subject(s.subjectId); return subj && subj.category===c.id && s.classType===ty; });
-        RATE_MODES.forEach(md=>{
-          const cnt = inGroup.filter(s=>s.mode===md).reduce((a,s)=>a+s.count,0);
-          const rate = t.rates[rateKey(c.id,ty,md)]||0;
-          if (cnt > 0) rateMap[rate] = (rateMap[rate]||0) + cnt;
-        });
-      });
-    });
+    // Only configured rates appear in the rate-wise breakdown. Missing rates are
+    // reported separately so they cannot be mistaken for an intentionally zero rate.
     const breakdown = Object.entries(rateMap).sort((a,b)=>Number(b[0])-Number(a[0]))
       .map(([rate,cnt])=>({ rate: Number(rate), cnt, earn: Number(rate)*cnt }));
-    return { t, name: teacherLabel(t), byCatType, pay, breakdown, uncounted: payrollUncountedClasses(mine) };
+    return { t, name: teacherLabel(t), byCatType, pay, breakdown, countedClasses, missingRateClasses, uncounted: payrollUncountedClasses(mine) };
   });
   // Include demo bonuses (Converted, in the selected month) in each teacher's payroll row
   payrollRows.forEach(r => {
@@ -16396,7 +16266,8 @@ function renderReports(only) {
             ${r.breakdown.map(b=>`${fmtN(b.cnt)} × ₹${b.rate} = ₹${b.earn.toFixed(2)}`).join('<br>')}
             ${r.demoLines && r.demoLines.length ? r.demoLines.map(l=>`<br><span style="color:var(--forest)">+ ₹${l.amount.toFixed(0)} demo bonus — ${esc(l.studentName)}</span>`).join('') : ''}
             ${r.demoLines && r.demoLines.length ? `<br><b style="color:var(--ink)">= ₹${r.pay.toFixed(0)} total</b>` : ''}
-            ${r.breakdown.length===0 && !(r.demoLines&&r.demoLines.length) ? '<span style="color:var(--brick)">No rates set — check Fee setup</span>' : ''}
+            ${r.countedClasses===0 ? '<span style="color:var(--muted)">No attendance recorded for this month.</span>' : ''}
+            ${r.missingRateClasses>0 ? `<br><span style="color:var(--brick)">⚠ Rate missing for ${fmtN(r.missingRateClasses)} class${r.missingRateClasses===1?'':'es'} — check Teacher Maintenance.</span>` : ''}
             ${r.uncounted ? `<br><span style="color:var(--brick)">⚠ ${fmtN(r.uncounted)} class${r.uncounted===1?'':'es'} not counted — subject or category missing</span>` : ''}
           </td>
           <td>${adjHtml}</td>
@@ -19975,9 +19846,6 @@ async function clearPendingSchedule(studentId, subjectId, classType) {
   weeklyPatternMsg = `Removed ${toClear.length} pending class${toClear.length===1?'':'es'}.`; render();
 }
 let submittingWeeklyPattern = false;
-// The teacher whose weekly card is on screen: the teacher themself, or the teacher an admin opened in Teachers & Subjects.
-let weeklyPatternTeacherId = '';
-let weeklyPatternAdminFreqLoaded = false;
 function weeklyPatternLoadDaysFromFrequency() {
   weeklyPatternDraft.days = [];
   if (weeklyPatternDraft.studentId !== 'all' && weeklyPatternDraft.subjectId !== 'all' && weeklyPatternDraft.classType !== 'all') {
@@ -20022,7 +19890,7 @@ function weeklyPatternSet(field, val) {
   weeklyGeneratedView = null;
   weeklyPatternMsg = '';
   if (field === 'studentId') {
-    const subjects = val === 'all' ? [] : uniqueSubjectsForStudentAndTeacher(val, weeklyPatternTeacherId || currentLinkedId);
+    const subjects = val === 'all' ? [] : uniqueSubjectsForStudentAndTeacher(val, currentLinkedId);
     weeklyPatternDraft.subjectId = subjects.length === 1 ? subjects[0].id : 'all';
     weeklyPatternDraft.classType = 'all';
   }
@@ -20081,10 +19949,8 @@ function buildDateOccurrences(startDate, frequency, classType, existingRows, tim
 }
 async function submitWeeklyPattern(teacherId) {
   if (submittingWeeklyPattern) return;
-  const {studentId,subjectId,classType}=weeklyPatternDraft;
-  if(!weeklyPatternDraft.startDate){weeklyPatternMsg='Select a start date.';render();return;}
-  // Never replace or create classes before today: overdue Pending classes are always kept.
-  const startDate=weeklyPatternDraft.startDate<todayStr?todayStr:weeklyPatternDraft.startDate;
+  const {studentId,subjectId,classType,startDate}=weeklyPatternDraft;
+  if(!startDate){weeklyPatternMsg='Select a start date.';render();return;}
   if(currentRole==='Teacher'&&teacherId!==currentLinkedId){weeklyPatternMsg='You can only generate schedules for your own assigned students.';render();return;}
   const targets=weeklyPatternTargetsForTeacher(teacherId);
   if(!targets.length){weeklyPatternMsg='No matching student/subject/class-type combinations with a saved Class Frequency and subscription were found. Check the filters and Class Frequency setup.';render();return;}
@@ -20120,9 +19986,6 @@ async function submitWeeklyPattern(teacherId) {
     render();return;
   }
   const confirmedTargets=weeklyPatternPreview.targets;
-  const replaceCount=confirmedTargets.reduce((sum,t)=>sum+scheduledClasses.filter(c=>c.studentId===t.studentId&&c.subjectId===t.subjectId&&c.teacherId===teacherId&&c.classType===t.classType&&c.status==='Pending'&&c.date>=startDate).length,0);
-  if(!confirm(`Update the weekly pattern for ${confirmedTargets.length} combination(s)? This will replace ${replaceCount} future Pending class record(s) from ${startDate} onward. Completed and past classes will be preserved.`)) return;
-  // Save the typed timings only after the person pressed OK, so Cancel changes nothing.
   if (isSingleExplicit) {
     try {
       await saveWeeklyPatternPreferences();
@@ -20133,6 +19996,8 @@ async function submitWeeklyPattern(teacherId) {
       return;
     }
   }
+  const replaceCount=confirmedTargets.reduce((sum,t)=>sum+scheduledClasses.filter(c=>c.studentId===t.studentId&&c.subjectId===t.subjectId&&c.teacherId===teacherId&&c.classType===t.classType&&c.status==='Pending'&&c.date>=startDate).length,0);
+  if(!confirm(`Update the weekly pattern for ${confirmedTargets.length} combination(s)? This will replace ${replaceCount} future Pending class record(s) from ${startDate} onward. Completed and past classes will be preserved.`)) return;
   submittingWeeklyPattern=true; weeklyPatternMsg='Updating future Pending classes…'; render();
   let generated=0,updated=0,conflictCount=0,warningCount=0,leaveCount=0,unfilled=0,failed=[];
   for(const target of confirmedTargets){
@@ -20168,13 +20033,6 @@ async function submitWeeklyPattern(teacherId) {
   weeklyPatternMsg=parts.join(' '); weeklyPatternPreview=null; render();
 }
 function renderTeacherSchedule(teacher, isAdminCaller) {
-  if (weeklyPatternTeacherId !== teacher.id) {
-    // A different teacher's card: start from a clean draft so another teacher's student is never carried over.
-    if (weeklyPatternTeacherId) { weeklyPatternDraft = { studentId: 'all', subjectId: 'all', classType: 'all', startDate: todayStr, days: [] }; weeklyPatternPreview = null; weeklyGeneratedView = null; weeklyPatternMsg = ''; }
-    weeklyPatternTeacherId = teacher.id;
-  }
-  // Admins don't load Class Frequency at login; load it once so the weekly card can find each student's saved frequency.
-  if (isAdminCaller && !weeklyPatternAdminFreqLoaded && !frequencyLoading) { weeklyPatternAdminFreqLoaded = true; loadClassFrequencyRows().then(() => render()); }
   const myStudents = byName(data.students.filter(s=>!s.archived && subjectsForStudentAndTeacher(s.id, teacher.id).length));
   const draftSubjects = scheduleDraft.studentId ? subjectsForStudentAndTeacher(scheduleDraft.studentId, teacher.id) : [];
   const draftTypes = scheduleTypeOptionsFor(scheduleDraft.studentId, scheduleDraft.subjectId);
@@ -20185,7 +20043,7 @@ function renderTeacherSchedule(teacher, isAdminCaller) {
   return `
     <div class="card">
       <h2>Set up weekly schedule <button class="help-btn" onclick="openHelp('weekly-setup',event)">?</button></h2>
-      ${weeklyPatternMsg ? `<div class="hint" style="color:${/^(Generated|Updated|Updating|Preview ready|Removed|Class date|Saving|Loading)/.test(weeklyPatternMsg)&&!/ failed:/.test(weeklyPatternMsg)?'var(--forest)':'var(--brick)'}">${esc(weeklyPatternMsg)}</div>` : ''}
+      ${weeklyPatternMsg ? `<div class="hint" style="color:${weeklyPatternMsg.startsWith('Generated')?'var(--forest)':'var(--brick)'}">${esc(weeklyPatternMsg)}</div>` : ''}
       <div class="row-form">
         <label>Student<select onchange="weeklyPatternSet('studentId', this.value)">
           <option value="all" ${weeklyPatternDraft.studentId==='all'?'selected':''}>All Students</option>
@@ -20202,7 +20060,7 @@ function renderTeacherSchedule(teacher, isAdminCaller) {
             return weeklyPatternTargetsForTeacher(teacher.id).some(t=>t.classType===ty);
           }).map(ty=>`<option value="${ty}" ${weeklyPatternDraft.classType===ty?'selected':''}>${ty}</option>`).join('')}
         </select></label>
-        <label>Start date <input type="date" min="${todayStr}" value="${weeklyPatternDraft.startDate}" onchange="weeklyPatternSet('startDate', this.value)"></label>
+        <label>Start date <input type="date" value="${weeklyPatternDraft.startDate}" onchange="weeklyPatternSet('startDate', this.value)"></label>
       </div>
       <div class="hint">Select a student to load the saved subject and class type where there is only one choice. The saved Class Frequency and previously saved weekly timings are loaded automatically. Confirming saves the days and timings as the recurring pattern; future Pending classes from the start date are replaced, while completed and past classes are preserved. Each class is 60 minutes.</div>
       ${weeklyPatternDraft.studentId!=='all' && weeklyPatternDraft.subjectId!=='all' && weeklyPatternDraft.classType!=='all' ? (weeklyPatternDraft.days.length ? weeklyPatternDraft.days.map((d,i)=>`<div class="row-form"><label>${WEEKDAY_LABELS[Number(d.weekday)]} · occurrence ${weeklyPatternDraft.days.slice(0,i+1).filter(x=>x.weekday===d.weekday).length}<input type="time" value="${d.time}" placeholder="Optional" onchange="weeklyPatternTimeSet(${i},this.value)"></label></div>`).join('') : '<div class="hint" style="color:var(--brick)">No usable Class Frequency found. Set or correct the frequency first.</div>') : '<div class="hint">Bulk setup uses each matching student/subject frequency. Narrow all three filters to one combination to enter individual class times.</div>'}
@@ -20663,8 +20521,7 @@ async function openScheduleSetupSchedule(studentId, subjectId, classType) {
 
 async function saveWeeklyPendingClassEdit(id) {
   const entry = scheduledClasses.find(x=>x.id===id);
-  if (!entry || entry.status !== 'Pending') return;
-  if (currentRole === 'Teacher' && entry.teacherId !== currentLinkedId) return;
+  if (!entry || entry.teacherId !== currentLinkedId || entry.status !== 'Pending') return;
   if (!editScheduleDraft.date || !/^([01]\d|2[0-3]):[0-5]\d$/.test(editScheduleDraft.time || '')) {
     weeklyPatternMsg = 'Choose a valid date and time.'; render(); return;
   }
@@ -21459,15 +21316,27 @@ function renderTeacherDashboard(teacher) {
   // This month's earnings so far: classes given this month x this teacher's rate for that category, class type and mode.
   const monthSessions = data.sessions.filter(s=>s.teacherId===teacher.id && s.date.startsWith(teacherEarningsMonth));
   let earnings = 0;
+  let earningsCountedClasses = 0;
+  let earningsMissingRateClasses = 0;
   const earningsRateMap = {};
   categories.forEach(c=>{
     TYPES.forEach(ty=>{
       const inGroup = monthSessions.filter(s=>{ const subj=subject(s.subjectId); return subj && subj.category===c.id && s.classType===ty; });
       RATE_MODES.forEach(md => {
         const modeCount = inGroup.filter(s=>s.mode===md).reduce((a,s)=>a+s.count,0);
-        const rate = (teacher.rates || {})[rateKey(c.id,ty,md)]||0;
-        if (modeCount > 0) earningsRateMap[rate] = (earningsRateMap[rate]||0) + modeCount;
+        if (modeCount <= 0) return;
+        earningsCountedClasses += modeCount;
+        const key = rateKey(c.id,ty,md);
+        const savedRate = (teacher.rates || {})[key];
+        const numericRate = Number(savedRate);
+        const hasRate = savedRate !== undefined && savedRate !== null && savedRate !== '' && Number.isFinite(numericRate);
+        const rate = hasRate ? numericRate : 0;
         earnings += modeCount * rate;
+        if (!hasRate || !Number.isFinite(rate)) {
+          earningsMissingRateClasses += modeCount;
+        } else {
+          earningsRateMap[rate] = (earningsRateMap[rate]||0) + modeCount;
+        }
       });
     });
   });
@@ -21568,11 +21437,13 @@ function renderTeacherDashboard(teacher) {
   const demoBonusLabel = teacherDemoBonusItems.length === 1
     ? '\u20b9' + teacherDemoBonus.toFixed(0) + ' demo bonus \u2014 ' + demoBonusStudentName(teacherDemoBonusItems[0])
     : '\u20b9' + teacherDemoBonus.toFixed(0) + ' demo bonus (' + teacherDemoBonusItems.length + ' demos: ' + teacherDemoBonusItems.map(demoBonusStudentName).join(', ') + ')';
-  const earningsRevealContent = (earningsBreakdown.length || teacherDemoBonus > 0)
+  const earningsRevealContent = (earningsBreakdown.length || teacherDemoBonus > 0 || earningsMissingRateClasses > 0)
     ? earningsBreakdown.map(b=>fmtN(b.cnt)+' \u00d7 \u20b9'+b.rate+' = \u20b9'+b.earn.toFixed(2)).join(' + ')
       + (teacherDemoBonus > 0 ? (earningsBreakdown.length ? ' + ' : '')+'<span style="color:var(--forest)">'+demoBonusLabel+'</span>' : '')
       + ' = \u20b9'+earnings.toFixed(2)
       + (teacherAdj !== 0 ? ' <span style="color:'+(teacherAdj<0?'var(--brick)':'var(--forest)')+'">'+( teacherAdj>0?'+':'')+' \u20b9'+teacherAdj.toFixed(2)+' adjustment'+(teacherAdjNote?' ('+esc(teacherAdjNote)+')':'')+'</span> = <b>\u20b9'+teacherNet.toFixed(2)+'</b>' : ' = <b>\u20b9'+earnings.toFixed(2)+'</b>')
+      + (earningsCountedClasses===0 ? '<br><span style="color:var(--muted)">No classes recorded for this month.</span>' : '')
+      + (earningsMissingRateClasses>0 ? '<br><span style="color:var(--brick)">⚠ Rate missing for '+fmtN(earningsMissingRateClasses)+' class'+(earningsMissingRateClasses===1?'':'es')+' — please contact Admin.</span>' : '')
       + (teacherPaid ? ' <span class="tag" style="background:var(--forest);color:#fff;margin-left:6px">\u2713 Paid'+(teacherPaidDate?' '+teacherPaidDate:'')+'</span>'+(teacherPaidRef?'<span style="font-size:11px;color:var(--hint);margin-left:6px">'+esc(teacherPaidRef)+'</span>':'') : ' <span class="tag absent" style="margin-left:6px">Pending</span>')
     : 'No classes recorded for this month.';
   const needingRenewal = countStudentsNeedingRenewal(teacher.id);
@@ -22429,7 +22300,6 @@ const HELP = {
   'fee-requests': { t:'Fee requests', b:"<ul><li>A placeholder for an expected payment — doesn't add to the class count until marked Paid.</li><li>Use it when a parent confirms they will pay soon.</li><li>Amount fills in by itself from Fee setup (rate for the subject's category, Group/Individual and Online/Offline × classes, with the discount tier applied). Online/Offline starts on the mode the student uses most. You can type your own amount for a special price.</li><li><b>Calculate</b> fills classes and amount with the same rules as Fees › Raise fee requests (package, regular weekdays, irregular, owed classes) for this month, and the working is saved on the request.</li><li>Once marked Paid it becomes a real payment and classes are added.</li><li>Message makes one WhatsApp message for the student's whole family (see the ? next to Short reminder in the message box).</li></ul>" },
   'record-payment': { t:'Record subscription payment', b:'<ul><li>Records a new class purchase for this student.</li><li>Pick subject, class type, Online/Offline and number of classes. The amount fills in from Fee setup (rate × classes, less any discount) — you can type a different amount.</li><li>The payment date sets the expiry date (120 to 365 days depending on batch size).</li><li>Reference and Remarks are optional, for your records.</li></ul>' },
   'issue-refund': { t:'Issue a refund', b:'<ul><li>Reduces a student\'s unused class count for a specific subject and type.</li><li>Only unused classes can be refunded — cannot refund classes already given.</li><li>The original payment record is unchanged; a Refund entry is created.</li></ul>' },
-  'family-transfer': { t:'Move classes to another child in the family', b:"<ul><li>Moves classes left from this student to another child of the same family, no money involved.</li><li>Same family = same parent login or same parent mobile number. A student set to Bill separately counts as their own family.</li><li>Allowed only when the rate per class is the same for both: each child's Special fee rate if set, else Fee setup, in the mode (Online or Offline) they usually take.</li><li>Both sides must be the same class type (Group or Individual). If the teachers differ you are asked to confirm, since it changes who gets paid.</li><li>Shows in both children's Subscription history with a Family tag.</li></ul>" },
   'transfer-credits': { t:'Transfer class credits', b:"<ul><li>Moves already-purchased classes from one subject to another — no money involved.</li><li>Both subjects must be the same class type (Group or Individual).</li><li>If subjects have different teachers you'll be asked to confirm, since it changes who gets paid.</li></ul>" },
   'sub-history': { t:'Subscription history', b:'<ul><li><b>Active</b> — being drawn down now (oldest first).</li><li><b>Upcoming</b> — next in line after the active payment runs out.</li><li><b>Expired</b> — unused classes removed after the expiry date.</li><li>Click Edit to correct a date, amount, reference or expiry date.</li></ul>' },
   'fee-msg-settings': { t:'Fee Message Settings', b:'<ul><li>Sets the UPI ID and contact number shown in every fee reminder message.</li><li>Parents send payment screenshots to the contact number.</li><li>Tick or untick <b>Add Razorpay online payment link</b> to put the Online Payment link in fee messages (and the Pay online button for parents/students) or leave it out. You can also change the link here.</li></ul>' },
