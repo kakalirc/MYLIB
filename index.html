@@ -572,7 +572,7 @@ const APP_VERSION = '2026.11';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-03 13:08 IST'; // V21 Question Bank Monitoring
+const BUILD_TIMESTAMP = '2026-11-03 14:55 IST'; // V21 Question Bank Monitoring + weekly schedule fixes
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -8279,6 +8279,7 @@ async function logout() {
   resetStarState();
   teacherPortalTab = 'dashboard'; // the next login starts on the Dashboard, so a tab's data is loaded when it is opened
   teacherDailyTip = null; teacherDailyTipPending = null; teacherDailyTipCheckStarted = false; teacherDailyTipClaiming = false;
+  weeklyPatternTeacherId = ''; weeklyPatternAdminFreqLoaded = false;
   isLoggedIn = false; currentUsername = ''; currentRole = ''; currentLinkedId = ''; currentUserId = ''; parentSelectedChildId = ''; pwIsDefault = false; userMsg.changePw = ''; spAssignments = []; spPapers = {}; spOpen = null; spPhotoUrls = {};
   biometricOfferShown = false; // allow the enrollment banner on the next password login
   dangerZoneUnlocked = false; unlockPasswordAttempt = ''; unlockMsg = '';
@@ -19840,6 +19841,9 @@ async function clearPendingSchedule(studentId, subjectId, classType) {
   weeklyPatternMsg = `Removed ${toClear.length} pending class${toClear.length===1?'':'es'}.`; render();
 }
 let submittingWeeklyPattern = false;
+// The teacher whose weekly card is on screen: the teacher themself, or the teacher an admin opened in Teachers & Subjects.
+let weeklyPatternTeacherId = '';
+let weeklyPatternAdminFreqLoaded = false;
 function weeklyPatternLoadDaysFromFrequency() {
   weeklyPatternDraft.days = [];
   if (weeklyPatternDraft.studentId !== 'all' && weeklyPatternDraft.subjectId !== 'all' && weeklyPatternDraft.classType !== 'all') {
@@ -19884,7 +19888,7 @@ function weeklyPatternSet(field, val) {
   weeklyGeneratedView = null;
   weeklyPatternMsg = '';
   if (field === 'studentId') {
-    const subjects = val === 'all' ? [] : uniqueSubjectsForStudentAndTeacher(val, currentLinkedId);
+    const subjects = val === 'all' ? [] : uniqueSubjectsForStudentAndTeacher(val, weeklyPatternTeacherId || currentLinkedId);
     weeklyPatternDraft.subjectId = subjects.length === 1 ? subjects[0].id : 'all';
     weeklyPatternDraft.classType = 'all';
   }
@@ -19943,8 +19947,10 @@ function buildDateOccurrences(startDate, frequency, classType, existingRows, tim
 }
 async function submitWeeklyPattern(teacherId) {
   if (submittingWeeklyPattern) return;
-  const {studentId,subjectId,classType,startDate}=weeklyPatternDraft;
-  if(!startDate){weeklyPatternMsg='Select a start date.';render();return;}
+  const {studentId,subjectId,classType}=weeklyPatternDraft;
+  if(!weeklyPatternDraft.startDate){weeklyPatternMsg='Select a start date.';render();return;}
+  // Never replace or create classes before today: overdue Pending classes are always kept.
+  const startDate=weeklyPatternDraft.startDate<todayStr?todayStr:weeklyPatternDraft.startDate;
   if(currentRole==='Teacher'&&teacherId!==currentLinkedId){weeklyPatternMsg='You can only generate schedules for your own assigned students.';render();return;}
   const targets=weeklyPatternTargetsForTeacher(teacherId);
   if(!targets.length){weeklyPatternMsg='No matching student/subject/class-type combinations with a saved Class Frequency and subscription were found. Check the filters and Class Frequency setup.';render();return;}
@@ -19980,6 +19986,9 @@ async function submitWeeklyPattern(teacherId) {
     render();return;
   }
   const confirmedTargets=weeklyPatternPreview.targets;
+  const replaceCount=confirmedTargets.reduce((sum,t)=>sum+scheduledClasses.filter(c=>c.studentId===t.studentId&&c.subjectId===t.subjectId&&c.teacherId===teacherId&&c.classType===t.classType&&c.status==='Pending'&&c.date>=startDate).length,0);
+  if(!confirm(`Update the weekly pattern for ${confirmedTargets.length} combination(s)? This will replace ${replaceCount} future Pending class record(s) from ${startDate} onward. Completed and past classes will be preserved.`)) return;
+  // Save the typed timings only after the person pressed OK, so Cancel changes nothing.
   if (isSingleExplicit) {
     try {
       await saveWeeklyPatternPreferences();
@@ -19990,8 +19999,6 @@ async function submitWeeklyPattern(teacherId) {
       return;
     }
   }
-  const replaceCount=confirmedTargets.reduce((sum,t)=>sum+scheduledClasses.filter(c=>c.studentId===t.studentId&&c.subjectId===t.subjectId&&c.teacherId===teacherId&&c.classType===t.classType&&c.status==='Pending'&&c.date>=startDate).length,0);
-  if(!confirm(`Update the weekly pattern for ${confirmedTargets.length} combination(s)? This will replace ${replaceCount} future Pending class record(s) from ${startDate} onward. Completed and past classes will be preserved.`)) return;
   submittingWeeklyPattern=true; weeklyPatternMsg='Updating future Pending classes…'; render();
   let generated=0,updated=0,conflictCount=0,warningCount=0,leaveCount=0,unfilled=0,failed=[];
   for(const target of confirmedTargets){
@@ -20027,6 +20034,13 @@ async function submitWeeklyPattern(teacherId) {
   weeklyPatternMsg=parts.join(' '); weeklyPatternPreview=null; render();
 }
 function renderTeacherSchedule(teacher, isAdminCaller) {
+  if (weeklyPatternTeacherId !== teacher.id) {
+    // A different teacher's card: start from a clean draft so another teacher's student is never carried over.
+    if (weeklyPatternTeacherId) { weeklyPatternDraft = { studentId: 'all', subjectId: 'all', classType: 'all', startDate: todayStr, days: [] }; weeklyPatternPreview = null; weeklyGeneratedView = null; weeklyPatternMsg = ''; }
+    weeklyPatternTeacherId = teacher.id;
+  }
+  // Admins don't load Class Frequency at login; load it once so the weekly card can find each student's saved frequency.
+  if (isAdminCaller && !weeklyPatternAdminFreqLoaded && !frequencyLoading) { weeklyPatternAdminFreqLoaded = true; loadClassFrequencyRows().then(() => render()); }
   const myStudents = byName(data.students.filter(s=>!s.archived && subjectsForStudentAndTeacher(s.id, teacher.id).length));
   const draftSubjects = scheduleDraft.studentId ? subjectsForStudentAndTeacher(scheduleDraft.studentId, teacher.id) : [];
   const draftTypes = scheduleTypeOptionsFor(scheduleDraft.studentId, scheduleDraft.subjectId);
@@ -20037,7 +20051,7 @@ function renderTeacherSchedule(teacher, isAdminCaller) {
   return `
     <div class="card">
       <h2>Set up weekly schedule <button class="help-btn" onclick="openHelp('weekly-setup',event)">?</button></h2>
-      ${weeklyPatternMsg ? `<div class="hint" style="color:${weeklyPatternMsg.startsWith('Generated')?'var(--forest)':'var(--brick)'}">${esc(weeklyPatternMsg)}</div>` : ''}
+      ${weeklyPatternMsg ? `<div class="hint" style="color:${/^(Generated|Updated|Updating|Preview ready|Removed|Class date|Saving|Loading)/.test(weeklyPatternMsg)&&!/ failed:/.test(weeklyPatternMsg)?'var(--forest)':'var(--brick)'}">${esc(weeklyPatternMsg)}</div>` : ''}
       <div class="row-form">
         <label>Student<select onchange="weeklyPatternSet('studentId', this.value)">
           <option value="all" ${weeklyPatternDraft.studentId==='all'?'selected':''}>All Students</option>
@@ -20054,7 +20068,7 @@ function renderTeacherSchedule(teacher, isAdminCaller) {
             return weeklyPatternTargetsForTeacher(teacher.id).some(t=>t.classType===ty);
           }).map(ty=>`<option value="${ty}" ${weeklyPatternDraft.classType===ty?'selected':''}>${ty}</option>`).join('')}
         </select></label>
-        <label>Start date <input type="date" value="${weeklyPatternDraft.startDate}" onchange="weeklyPatternSet('startDate', this.value)"></label>
+        <label>Start date <input type="date" min="${todayStr}" value="${weeklyPatternDraft.startDate}" onchange="weeklyPatternSet('startDate', this.value)"></label>
       </div>
       <div class="hint">Select a student to load the saved subject and class type where there is only one choice. The saved Class Frequency and previously saved weekly timings are loaded automatically. Confirming saves the days and timings as the recurring pattern; future Pending classes from the start date are replaced, while completed and past classes are preserved. Each class is 60 minutes.</div>
       ${weeklyPatternDraft.studentId!=='all' && weeklyPatternDraft.subjectId!=='all' && weeklyPatternDraft.classType!=='all' ? (weeklyPatternDraft.days.length ? weeklyPatternDraft.days.map((d,i)=>`<div class="row-form"><label>${WEEKDAY_LABELS[Number(d.weekday)]} · occurrence ${weeklyPatternDraft.days.slice(0,i+1).filter(x=>x.weekday===d.weekday).length}<input type="time" value="${d.time}" placeholder="Optional" onchange="weeklyPatternTimeSet(${i},this.value)"></label></div>`).join('') : '<div class="hint" style="color:var(--brick)">No usable Class Frequency found. Set or correct the frequency first.</div>') : '<div class="hint">Bulk setup uses each matching student/subject frequency. Narrow all three filters to one combination to enter individual class times.</div>'}
@@ -20515,7 +20529,8 @@ async function openScheduleSetupSchedule(studentId, subjectId, classType) {
 
 async function saveWeeklyPendingClassEdit(id) {
   const entry = scheduledClasses.find(x=>x.id===id);
-  if (!entry || entry.teacherId !== currentLinkedId || entry.status !== 'Pending') return;
+  if (!entry || entry.status !== 'Pending') return;
+  if (currentRole === 'Teacher' && entry.teacherId !== currentLinkedId) return;
   if (!editScheduleDraft.date || !/^([01]\d|2[0-3]):[0-5]\d$/.test(editScheduleDraft.time || '')) {
     weeklyPatternMsg = 'Choose a valid date and time.'; render(); return;
   }
