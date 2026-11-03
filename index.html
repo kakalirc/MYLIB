@@ -572,7 +572,7 @@ const APP_VERSION = '2026.11';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-03 14:55 IST'; // V21 Question Bank Monitoring + weekly schedule fixes
+const BUILD_TIMESTAMP = '2026-11-03 17:15 IST'; // V21 + move classes between children of one family
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1978,6 +1978,10 @@ let refundDraft = { subjectId: '', type: 'Group', date: todayStr };
 let transferDraft = { fromSubjectId: '', toSubjectId: '', type: 'Group', classes: '' };
 let transferConfirmModal = null; // set when the To subject is a different teacher, to warn before confirming
 let transferMsg = '';
+// Family transfer: move classes left from this student to another child of the same family (SQL 78).
+let familyTransferDraft = { studentId: '', fromSubjectId: '', type: 'Group', toStudentId: '', toSubjectId: '' };
+let familyTransferMsg = '';
+let familyTransferMissing = false;   // SQL 78 not run yet
 let refundMsg = '';
 let requestDraft = { subjectId: '', type: 'Group', mode: '', classes: '', amountPaid: '', amountEdited: false, date: todayStr };
 let requestMsg = '';
@@ -7547,15 +7551,21 @@ function transferHistoryRows(studentId) {
     groups.get(key).push(s);
   });
   const rows = [];
-  groups.forEach(list => {
+  groups.forEach((mine, key) => {
+    // A family transfer (SQL 78) puts the other half on the other child, so look across all students for it.
+    const list = key.startsWith('solo-') ? mine : data.subscriptions.filter(s => s.transferGroupId === key && (s.kind === 'TransferOut' || s.kind === 'TransferIn'));
     const out = list.find(s => s.kind === 'TransferOut'), inn = list.find(s => s.kind === 'TransferIn');
-    const base = out || inn;
+    const base = mine.find(s => s.kind === 'TransferOut') || mine[0];
     const fromSubj = out ? subject(out.subjectId) : null, toSubj = inn ? subject(inn.subjectId) : null;
+    const crossStudent = !!(out && inn && out.studentId !== inn.studentId) || (!(out && inn) && /^Family transfer:/.test(base.paymentRemarks || ''));
     rows.push({
       id: base.id, date: base.date, type: base.type, classes: Math.abs(base.classes),
       fromName: out ? subjectName(out.subjectId) : '', toName: inn ? subjectName(inn.subjectId) : '',
       fromTeacher: fromSubj ? teacherName(fromSubj.teacherId) : '', toTeacher: toSubj ? teacherName(toSubj.teacherId) : '',
-      crossTeacher: !!(fromSubj && toSubj && fromSubj.teacherId !== toSubj.teacherId)
+      crossTeacher: !!(fromSubj && toSubj && fromSubj.teacherId !== toSubj.teacherId),
+      crossStudent,
+      fromStudent: crossStudent && out ? studentName(out.studentId) : '', toStudent: crossStudent && inn ? studentName(inn.studentId) : '',
+      remarks: base.paymentRemarks || ''   // the other child's half may be hidden from a student/parent login; the remark names it
     });
   });
   return rows.sort((a,b) => (a.date||'').localeCompare(b.date||'') || a.id.localeCompare(b.id));
@@ -7563,12 +7573,14 @@ function transferHistoryRows(studentId) {
 // Read-only table rows for transfers (no Edit/delete: removing one half would unbalance the two subjects).
 function transferRowsHtml(rows, colspan, withActionCell) {
   if (!rows.length) return '';
-  const label = r => `${r.fromName ? esc(r.fromName) + ' <span class="hint">(' + esc(r.fromTeacher) + ')</span>' : '<span class="hint">?</span>'} → ${r.toName ? esc(r.toName) + ' <span class="hint">(' + esc(r.toTeacher) + ')</span>' : '<span class="hint">?</span>'}`;
-  return `<tr><td colspan="${colspan}" class="hint"><b>Class transfers</b> — balance moved between subjects, no money involved</td></tr>` +
+  const side = (stu, name, teacher) => name ? (stu ? '<b>' + esc(stu) + '</b> · ' : '') + esc(name) + ' <span class="hint">(' + esc(teacher) + ')</span>' : '<span class="hint">?</span>';
+  const label = r => (r.crossStudent && !(r.fromName && r.toName)) ? esc(r.remarks || 'Family transfer')
+    : `${side(r.fromStudent, r.fromName, r.fromTeacher)} → ${side(r.toStudent, r.toName, r.toTeacher)}`;
+  return `<tr><td colspan="${colspan}" class="hint"><b>Class transfers</b> — balance moved between subjects or children of one family, no money involved</td></tr>` +
     rows.map(r => `
         <tr>
           <td>${label(r)}</td><td>${r.type}</td><td>${r.classes}</td><td>—</td><td>${esc(r.date||'—')}</td>
-          <td><span class="tag">Transfer</span>${r.crossTeacher ? ' <span class="tag absent">Different teacher</span>' : ''}</td>
+          <td><span class="tag">Transfer</span>${r.crossStudent ? ' <span class="tag">Family</span>' : ''}${r.crossTeacher ? ' <span class="tag absent">Different teacher</span>' : ''}</td>
           <td>—</td><td>—</td><td><span class="hint">—</span></td>${withActionCell ? '<td></td>' : ''}
         </tr>`).join('');
 }
@@ -13061,10 +13073,131 @@ function transferConfirmModalHtml() {
         <div class="hint" style="font-size:14px; line-height:1.6">This moves ${esc(String(m.classes))} class${m.classes===1?'':'es'} from ${esc(m.fromTeacherName)}'s subject to ${esc(m.toTeacherName)}'s subject — ${esc(m.toTeacherName)} will be paid for classes given against this balance from now on, not ${esc(m.fromTeacherName)}. Continue?</div>
         <div class="row-form" style="margin-top:14px">
           <button class="btn-small" onclick="cancelTransferModal()">Cancel</button>
-          <button class="btn-primary btn-danger" onclick="actuallyAddClassTransfer(transferConfirmModal.classes)">Transfer anyway</button>
+          <button class="btn-primary btn-danger" onclick="${m.family ? 'actuallyAddFamilyTransfer' : 'actuallyAddClassTransfer'}(transferConfirmModal.classes)">Transfer anyway</button>
         </div>
       </div>
     </div>`;
+}
+// ---- Family transfer (SQL 78) ----
+// Allowed only between two children of one family (familyMembers) when the per-class rate each would pay is the
+// same: feeRateFor (special rate, else Fee setup) for that child's subject + type in the mode they usually take.
+function familyTransferDraftFor(studentId) {
+  if (familyTransferDraft.studentId !== studentId) { familyTransferDraft = { studentId, fromSubjectId: '', type: 'Group', toStudentId: '', toSubjectId: '' }; familyTransferMsg = ''; }
+  return familyTransferDraft;
+}
+function familyTransferSet(field, val) {
+  familyTransferDraft[field] = val;
+  if (field === 'toStudentId') familyTransferDraft.toSubjectId = '';
+  if (field === 'fromSubjectId' && familyTransferDraft.toStudentId && !familyTransferDraft.toSubjectId) {
+    // Pre-pick the other child's subject in the same category, if there is exactly one.
+    const from = subject(val);
+    const same = from ? subjectsForStudent(familyTransferDraft.toStudentId).filter(x => x.category === from.category) : [];
+    if (same.length === 1) familyTransferDraft.toSubjectId = same[0].id;
+  }
+  if (field === 'toStudentId' && familyTransferDraft.fromSubjectId) {
+    const from = subject(familyTransferDraft.fromSubjectId);
+    const same = from ? subjectsForStudent(val).filter(x => x.category === from.category) : [];
+    if (same.length === 1) familyTransferDraft.toSubjectId = same[0].id;
+  }
+  familyTransferMsg = '';
+  render();
+}
+function familyTransferCheck(d) {
+  const fromSubj = subject(d.fromSubjectId), toSubj = subject(d.toSubjectId);
+  if (!d.studentId || !fromSubj || !d.toStudentId || !toSubj || !d.type) return null;
+  const fromMode = studentUsualMode(d.studentId, fromSubj.id, d.type), toMode = studentUsualMode(d.toStudentId, toSubj.id, d.type);
+  const a = feeRateFor(d.studentId, fromSubj, d.type, fromMode), b = feeRateFor(d.toStudentId, toSubj, d.type, toMode);
+  const family = familyMembers(d.studentId).some(s => s.id === d.toStudentId) && d.toStudentId !== d.studentId;
+  const left = studentRemaining(d.studentId, fromSubj.id, d.type);
+  let reason = '';
+  if (!family) reason = `${studentName(d.toStudentId)} is not in the same family.`;
+  else if (!(a.rate > 0) || !(b.rate > 0)) reason = 'No per-class rate is set for one of them (Fee setup or Special fee rates), so the rates cannot be compared.';
+  else if (Math.abs(a.rate - b.rate) > 0.001) reason = 'The rates are not the same, so classes cannot be moved between them.';
+  else if (left <= 0) reason = 'No classes left to move.';
+  return { fromSubj, toSubj, fromMode, toMode, fromRate: a.rate, toRate: b.rate, fromSpecial: a.special, toSpecial: b.special, left, ok: !reason, reason };
+}
+function addFamilyTransfer() {
+  const d = familyTransferDraft;
+  const input = document.getElementById('familyTransferClasses');
+  const classes = Number(input ? input.value : 0);
+  familyTransferMsg = '';
+  const chk = familyTransferCheck(d);
+  if (!chk) return;
+  if (!chk.ok) { familyTransferMsg = chk.reason; render(); return; }
+  if (!(classes > 0)) { familyTransferMsg = 'Type how many classes to move.'; render(); return; }
+  if (classes > chk.left) { familyTransferMsg = `Only ${chk.left} ${d.type} class${chk.left===1?'':'es'} left in ${subjectName(d.fromSubjectId)}.`; render(); return; }
+  const what = `${classes} ${d.type} class${classes===1?'':'es'} from ${studentName(d.studentId)} (${chk.fromSubj.name}) to ${studentName(d.toStudentId)} (${chk.toSubj.name})`;
+  if (chk.fromSubj.teacherId !== chk.toSubj.teacherId) {
+    transferConfirmModal = { family: true, classes, fromTeacherName: teacherName(chk.fromSubj.teacherId), toTeacherName: teacherName(chk.toSubj.teacherId) };
+    render(); return;
+  }
+  if (!confirm(`Move ${what}? No money changes hands.`)) return;
+  actuallyAddFamilyTransfer(classes);
+}
+async function actuallyAddFamilyTransfer(classes) {
+  transferConfirmModal = null;
+  const d = familyTransferDraft;
+  const { data: result, error } = await sb.rpc('transfer_classes_between_students', {
+    p_from_student_id: d.studentId, p_to_student_id: d.toStudentId, p_from_subject_id: d.fromSubjectId, p_to_subject_id: d.toSubjectId,
+    p_type: d.type, p_classes: classes
+  });
+  if (error) {
+    familyTransferMissing = /transfer_classes_between_students/.test(error.message || '');
+    familyTransferMsg = familyTransferMissing ? 'Run SQL 78 (fee-requests/78-family-class-transfer.sql) in Supabase first.' : 'Could not move: ' + error.message;
+    render(); return;
+  }
+  if (!result || !result.ok) {
+    familyTransferMsg = result && result.error === 'not_enough_balance'
+      ? `Can't move ${classes} classes, only ${result.remaining} left.`
+      : 'Could not move: ' + (result ? result.error : 'unknown error');
+    render(); return;
+  }
+  await loadStudentsAndSubscriptions();
+  familyTransferMsg = `Moved ${classes} class${classes===1?'':'es'} to ${studentName(d.toStudentId)} (${subjectName(d.toSubjectId)}).`;
+  familyTransferDraft = { studentId: d.studentId, fromSubjectId: '', type: d.type, toStudentId: '', toSubjectId: '' };
+  if (typeof trackUse === 'function') trackUse('family_class_transfer');
+  render();
+}
+function familyTransferCardHtml(student, balanceSubjects) {
+  const d = familyTransferDraftFor(student.id);
+  const others = byName(familyMembers(student.id).filter(s => s.id !== student.id && !s.archived));
+  const rateTxt = (r, sp, mode) => '₹' + (Number(r) || 0).toLocaleString('en-IN') + ' per class' + (sp ? ' (special rate)' : ' (' + mode + ')');
+  const chk = familyTransferCheck(d);
+  let body;
+  if (!others.length) body = '<div class="empty">No other child in this family. Families are matched by parent login or parent mobile number; a student set to "Bill separately" counts as their own family.</div>';
+  else if (!balanceSubjects.length) body = '<div class="empty">This student has no classes on record to move.</div>';
+  else {
+    const toSubjects = d.toStudentId ? byName(subjectsForStudent(d.toStudentId)) : [];
+    body = `
+      <div class="row-form">
+        <select onchange="familyTransferSet('fromSubjectId', this.value)">
+          <option value="">From subject…</option>
+          ${balanceSubjects.map(subj=>`<option value="${subj.id}" ${d.fromSubjectId===subj.id?'selected':''}>${esc(subj.name)} (${esc(teacherName(subj.teacherId))})</option>`).join('')}
+        </select>
+        <select onchange="familyTransferSet('type', this.value)">${TYPES.map(ty=>`<option value="${ty}" ${d.type===ty?'selected':''}>${ty}</option>`).join('')}</select>
+        <select onchange="familyTransferSet('toStudentId', this.value)">
+          <option value="">To child…</option>
+          ${others.map(o=>`<option value="${o.id}" ${d.toStudentId===o.id?'selected':''}>${esc(studentLabel(o))}</option>`).join('')}
+        </select>
+        <select onchange="familyTransferSet('toSubjectId', this.value)" ${d.toStudentId?'':'disabled'}>
+          <option value="">Their subject…</option>
+          ${d.toStudentId && !toSubjects.length ? '<option value="" disabled>Not enrolled in any subject yet</option>' : ''}
+          ${toSubjects.map(subj=>`<option value="${subj.id}" ${d.toSubjectId===subj.id?'selected':''}>${esc(subj.name)} (${esc(teacherName(subj.teacherId))})</option>`).join('')}
+        </select>
+        <label>Classes <input type="number" id="familyTransferClasses" min="0.5" step="0.5" style="width:80px"></label>
+        <button class="btn-primary" ${chk && chk.ok ? '' : 'disabled'} onclick="addFamilyTransfer()">Move classes</button>
+      </div>
+      ${d.fromSubjectId ? `<div class="hint">Left in ${esc(subjectName(d.fromSubjectId))} (${d.type}): <b>${studentRemaining(student.id, d.fromSubjectId, d.type)}</b></div>` : ''}
+      ${chk ? `<div class="hint">Rate for ${esc(student.name)}: <b>${rateTxt(chk.fromRate, chk.fromSpecial, chk.fromMode)}</b> · Rate for ${esc(studentName(d.toStudentId))}: <b>${rateTxt(chk.toRate, chk.toSpecial, chk.toMode)}</b></div>
+        <div class="hint" style="color:${chk.ok?'var(--forest)':'var(--brick)'}">${chk.ok ? '✓ Same family and same rate, classes can be moved.' : '✗ ' + esc(chk.reason)}</div>` : ''}`;
+  }
+  return `
+      <div class="student-section" style="background:#e8f8ee">
+      <h3>Move classes to another child in the family <button class="help-btn" onclick="openHelp('family-transfer',event)">?</button></h3>
+      <div class="hint">Moves classes this student has left to another child's subject, with no new money. Allowed only when both children are in the same family and pay the same rate per class.</div>
+      ${familyTransferMsg ? `<div class="hint" style="color:${familyTransferMsg.startsWith('Moved')?'var(--forest)':'var(--brick)'}">${esc(familyTransferMsg)}</div>` : ''}
+      ${body}
+      </div>`;
 }
 async function deleteSubscription(id) {
   const sub = data.subscriptions.find(s => s.id === id);
@@ -14163,7 +14296,7 @@ function exportStudentReport() {
 
   // Class transfers get their own sheet (their columns don't fit the payment sheet); only added when the student has any.
   const xferRows = transferHistoryRows(reportStudentId).map(r => ({
-    Date: r.date, From_Subject: r.fromName, From_Teacher: r.fromTeacher, To_Subject: r.toName, To_Teacher: r.toTeacher,
+    Date: r.date, From_Student: r.fromStudent || '', To_Student: r.toStudent || '', From_Subject: r.fromName, From_Teacher: r.fromTeacher, To_Subject: r.toName, To_Teacher: r.toTeacher,
     Type: r.type, Classes: r.classes, Different_Teacher: r.crossTeacher ? 'Yes' : 'No', Reference: r.reference||'', Remarks: r.remarks||''
   }));
   if (xferRows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(xferRows), 'Transfers');
@@ -15653,6 +15786,7 @@ function renderStudents() {
       `}
 
       </div>
+      ${familyTransferCardHtml(student, balanceSubjects)}
       <div class="student-section" style="background:#e8f8ee">
       <h3>Subscription history <button class="help-btn" onclick="openHelp('sub-history',event)">?</button></h3>
       ${historyHtml}
@@ -22295,6 +22429,7 @@ const HELP = {
   'fee-requests': { t:'Fee requests', b:"<ul><li>A placeholder for an expected payment — doesn't add to the class count until marked Paid.</li><li>Use it when a parent confirms they will pay soon.</li><li>Amount fills in by itself from Fee setup (rate for the subject's category, Group/Individual and Online/Offline × classes, with the discount tier applied). Online/Offline starts on the mode the student uses most. You can type your own amount for a special price.</li><li><b>Calculate</b> fills classes and amount with the same rules as Fees › Raise fee requests (package, regular weekdays, irregular, owed classes) for this month, and the working is saved on the request.</li><li>Once marked Paid it becomes a real payment and classes are added.</li><li>Message makes one WhatsApp message for the student's whole family (see the ? next to Short reminder in the message box).</li></ul>" },
   'record-payment': { t:'Record subscription payment', b:'<ul><li>Records a new class purchase for this student.</li><li>Pick subject, class type, Online/Offline and number of classes. The amount fills in from Fee setup (rate × classes, less any discount) — you can type a different amount.</li><li>The payment date sets the expiry date (120 to 365 days depending on batch size).</li><li>Reference and Remarks are optional, for your records.</li></ul>' },
   'issue-refund': { t:'Issue a refund', b:'<ul><li>Reduces a student\'s unused class count for a specific subject and type.</li><li>Only unused classes can be refunded — cannot refund classes already given.</li><li>The original payment record is unchanged; a Refund entry is created.</li></ul>' },
+  'family-transfer': { t:'Move classes to another child in the family', b:"<ul><li>Moves classes left from this student to another child of the same family, no money involved.</li><li>Same family = same parent login or same parent mobile number. A student set to Bill separately counts as their own family.</li><li>Allowed only when the rate per class is the same for both: each child's Special fee rate if set, else Fee setup, in the mode (Online or Offline) they usually take.</li><li>Both sides must be the same class type (Group or Individual). If the teachers differ you are asked to confirm, since it changes who gets paid.</li><li>Shows in both children's Subscription history with a Family tag.</li></ul>" },
   'transfer-credits': { t:'Transfer class credits', b:"<ul><li>Moves already-purchased classes from one subject to another — no money involved.</li><li>Both subjects must be the same class type (Group or Individual).</li><li>If subjects have different teachers you'll be asked to confirm, since it changes who gets paid.</li></ul>" },
   'sub-history': { t:'Subscription history', b:'<ul><li><b>Active</b> — being drawn down now (oldest first).</li><li><b>Upcoming</b> — next in line after the active payment runs out.</li><li><b>Expired</b> — unused classes removed after the expiry date.</li><li>Click Edit to correct a date, amount, reference or expiry date.</li></ul>' },
   'fee-msg-settings': { t:'Fee Message Settings', b:'<ul><li>Sets the UPI ID and contact number shown in every fee reminder message.</li><li>Parents send payment screenshots to the contact number.</li><li>Tick or untick <b>Add Razorpay online payment link</b> to put the Online Payment link in fee messages (and the Pay online button for parents/students) or leave it out. You can also change the link here.</li></ul>' },
