@@ -572,7 +572,7 @@ const APP_VERSION = '2026.11';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-03 19:45 IST'; // V21 + payroll rate-missing warnings + restore PRs #146, #147
+const BUILD_TIMESTAMP = '2026-11-04 18:30 IST'; // + New subscriptions and renewals: add missing classes (SQL 79, nightly job)
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -10248,7 +10248,7 @@ async function removeStudentPhoneNumberAdmin(id) {
   data.studentPhoneNumbers = data.studentPhoneNumbers.filter(p=>p.id!==id);
   render();
 }
-function selectStudent(id) { selectedStudentId = id; subDraft = newSubDraft(); subPayPendingWarning = null; refundDraft = { subjectId: '', type: 'Group', date: todayStr }; refundMsg = ''; requestDraft = { subjectId: '', type: 'Group', mode: '', classes: '', amountPaid: '', amountEdited: false, date: todayStr }; requestMsg = ''; enrollDraft = { teacherId: '', subjectId: '' }; enrollShowAllSubjects = false; addConfirmMsg.student = ''; contactMsg = ''; render(); loadStudentPhotoOnDemand(id); }
+function selectStudent(id) { selectedStudentId = id; studentGapMsg = ''; subDraft = newSubDraft(); subPayPendingWarning = null; refundDraft = { subjectId: '', type: 'Group', date: todayStr }; refundMsg = ''; requestDraft = { subjectId: '', type: 'Group', mode: '', classes: '', amountPaid: '', amountEdited: false, date: todayStr }; requestMsg = ''; enrollDraft = { teacherId: '', subjectId: '' }; enrollShowAllSubjects = false; addConfirmMsg.student = ''; contactMsg = ''; render(); loadStudentPhotoOnDemand(id); }
 function backToStudentList() { selectedStudentId = ''; addConfirmMsg.student = ''; contactMsg = ''; render(); }
 function subDraftSet(field, val) {
   subDraft[field] = val;
@@ -11858,6 +11858,7 @@ const SUPPORT_KB = {
 - Demo Bookings (Daily work): demo bookings from the website arrive here (New → Scheduled → Done → Converted or Lost, or Cancelled). Teachers mark their own demos Done on their Dashboard; admins can set any status, mark Lost with an optional reason, and skip straight from Pending to Converted. A converted demo gives the teacher a demo bonus. The Demo Register shows Demo results per teacher (Converted %) and why demos were lost.
 - New registrations (Daily work): forms families send from the public link app.libeducation.com/register.html (no login). Accept adds the student (or a brother/sister to a family with the same mobile) and makes the parent login (mobile) and student login (student code); Reject (Reopen undoes it) or Archive (Show archived, Unarchive); nothing is deleted. The student's page shows what the form said that isn't on the record (subjects wanted, school, how they heard, message). Copy or WhatsApp the link from this page.
 - Support (Daily work): view and resolve issues raised by teachers, students or parents.
+- New subscriptions and renewals (top of the Rebuild Pending Classes page): adds paid classes that are not on the schedule yet (new students, renewals) after the last scheduled class, from Class Frequency and saved timings. Only adds, never deletes. Runs by itself every night at 1 AM; Preview then Confirm to run it now. A student's page shows paid classes not on the schedule with an Add button. Students with no Class Frequency or no teacher are listed under Needs setup.
 - Rebuild Pending Classes (Daily work): rebuild the upcoming class schedule from each student's Class Frequency. Preview first. Only future Pending classes are removed; new classes get placeholder times (Group 00:00, Individual 01:00/02:00) that the teacher corrects.
 - Fees (Money): per-class rates (Fee setup), discount structure, fee calculator, students needing renewal, Razorpay payments to confirm, pending fee requests (grouped by family, Mark all paid), all subscription payments and the UPI / contact details used in fee messages.
 - Raise fee requests (Fees page): makes the month's requests for every student from Class Frequency, classes left, packages and teacher leave. Preview any day; Confirm from the 25th of the month before to the 7th, once a month (Reset to redo). Each request keeps its working. 'Ignore classes left' tick (per row, all subjects of a student, whole family, or Raise anyway in Not raised) bills the full month without subtracting classes left; the fee message then leaves out the classes left. Owed classes are never ignored.
@@ -15610,6 +15611,7 @@ function renderStudents() {
       <div class="student-section" style="background:#e8f8ee">
       <h3>Subscription balances <button class="help-btn" onclick="openHelp('sub-balances',event)">?</button></h3>
       <div class="table-scroll"><table><tr><th>Subject</th><th>Type</th><th>Subscribed</th><th>Used</th><th>Expired</th><th>Remaining</th></tr>${balRows}</table></div>
+      ${studentUnscheduledHtml(student)}
 
       </div>
       ${studentSpecialRatesHtml(student, enrolledSubjects)}
@@ -16868,6 +16870,99 @@ async function executeRebuildPendingClasses() {
     rebuildClassesPreview=null;
   } catch(e) { rebuildClassesMsg='Rebuild stopped: '+(e.message||String(e))+'. Check the schedule before running again; some changes may already have been applied.'; await loadScheduledClasses(); }
   finally { rebuildClassesBusy=false; render(); }
+}
+// ---------- New subscriptions and renewals: add missing classes (SQL 79) ----------
+// Add-only: for each student/subject/class type, classes left minus future Pending classes are added
+// after the last class already on the schedule. Nothing is deleted or moved. The same database
+// function also runs every night at 01:00 IST (pg_cron job 'mylib-new-subscription-classes').
+function newSubsSqlMissing(error) { return /schedule_new_subscription_classes|auto_schedule_log/.test((error && (error.message || error.details || error.hint)) || ''); }
+// Classes left that are not on the schedule yet, worked out in the app (used for the student page box).
+function unscheduledGapsFor(studentId) {
+  const out = [];
+  subjectsForStudent(studentId).forEach(subj => TYPES.forEach(ty => {
+    if (!data.subscriptions.some(p => p.studentId === studentId && p.subjectId === subj.id && p.type === ty && p.kind !== 'Request')) return;
+    const left = Math.floor(Number(studentRemaining(studentId, subj.id, ty)) || 0);
+    const future = scheduledClasses.filter(sc => sc.studentId === studentId && sc.subjectId === subj.id && sc.classType === ty && sc.status === 'Pending' && sc.date >= todayStr).length;
+    if (left - future > 0) out.push({ subjectId: subj.id, subjectName: subj.name, type: ty, left, future, gap: left - future });
+  }));
+  return out;
+}
+async function loadNewSubsLog() {
+  newSubsLogLoading = true;
+  const since = new Date(Date.now() - 30 * 86400000).toISOString();
+  const { data: rows, error } = await sb.from('auto_schedule_log').select('*').gte('run_at', since).order('run_at', { ascending: false }).limit(300);
+  newSubsLogLoading = false; newSubsLogLoaded = true;
+  if (error) { newSubsSqlNotRun = newSubsSqlMissing(error) || /relation|does not exist|schema cache/i.test(error.message || ''); newSubsLog = []; }
+  else { newSubsSqlNotRun = false; newSubsLog = rows || []; }
+  render();
+}
+async function newSubsRun(dryRun, studentId) {
+  if (newSubsBusy) return;
+  if (!dryRun) {
+    const p = newSubsPreview && !studentId ? newSubsPreview : null;
+    const n = p ? p.added_total : null;
+    if (!confirm(studentId
+      ? `Add the missing classes for ${studentName(studentId)} to the schedule? Existing classes are not changed.`
+      : `Add ${n == null ? 'the missing' : n} class${n === 1 ? '' : 'es'} to the schedule? Existing classes are not changed or deleted.`)) return;
+  }
+  newSubsBusy = true; if (studentId) studentGapMsg = 'Adding classes…'; else newSubsMsg = dryRun ? 'Working out the missing classes…' : 'Adding classes…';
+  render();
+  const { data: result, error } = await sb.rpc('schedule_new_subscription_classes', { p_student_id: studentId || null, p_dry_run: !!dryRun, p_source: studentId ? 'student page' : 'app' });
+  newSubsBusy = false;
+  let msg;
+  if (error) msg = newSubsSqlMissing(error) ? 'Run SQL 79 (new-subscriptions/79-new-subscription-classes.sql) in Supabase first.' : 'Could not schedule: ' + error.message;
+  else if (!result || !result.ok) msg = 'Could not schedule: ' + ((result && result.error) || 'unknown error');
+  if (msg) { if (studentId) studentGapMsg = msg; else { newSubsMsg = msg; newSubsPreview = null; } render(); return; }
+  if (dryRun) { newSubsPreview = result; newSubsMsg = ''; render(); return; }
+  await loadScheduledClasses();
+  const rows = result.rows || [];
+  const notes = rows.filter(r => r.note).map(r => `${r.student} / ${r.subject} (${r.class_type}): ${r.note}`);
+  const done = `Added ${result.added_total} class${result.added_total === 1 ? '' : 'es'} for ${rows.filter(r => r.added > 0).length} student/subject/type line(s).` + (notes.length ? '\n\nNeeds a look:\n• ' + notes.join('\n• ') : '');
+  if (studentId) studentGapMsg = done; else { newSubsMsg = done; newSubsPreview = null; }
+  if (typeof trackUse === 'function') trackUse('new_subscription_classes');
+  loadNewSubsLog();
+}
+function newSubsRowsTable(rows, withAdded) {
+  return `<div class="table-scroll"><table><tr><th>Student</th><th>Subject</th><th>Type</th><th>Classes left</th><th>On schedule</th><th>${withAdded ? 'Will add' : 'Not on schedule'}</th><th>From – to</th><th>Note</th></tr>${rows.map(r => `<tr><td>${esc(r.student)}</td><td>${esc(r.subject)}</td><td>${esc(r.class_type)}</td><td>${r.classes_left ?? '—'}</td><td>${r.already_scheduled ?? '—'}</td><td><b>${withAdded ? r.added : r.not_scheduled}</b></td><td>${r.first_date ? esc(dayDate(r.first_date)) + (r.last_date && r.last_date !== r.first_date ? ' – ' + esc(dayDate(r.last_date)) : '') : '—'}</td><td>${esc(r.note || '')}</td></tr>`).join('')}</table></div>`;
+}
+function newSubsSetupHtml(list) {
+  if (!list || !list.length) return '';
+  return `<div class="hint" style="margin-top:12px;color:var(--brick)"><b>Needs setup first (${list.length}):</b> these students have paid classes, but no classes can be made until this is fixed.</div><div class="table-scroll"><table><tr><th>Student</th><th>Subject</th><th>Type</th><th>Not on schedule</th><th>What's missing</th><th></th></tr>${list.map(r => `<tr><td>${esc(r.student)}</td><td>${esc(r.subject)}</td><td>${esc(r.class_type)}</td><td>${r.not_scheduled}</td><td>${esc(r.note)}</td><td><button class="btn-small" onclick="setTab('students');selectStudent('${r.student_id}')">Open student</button></td></tr>`).join('')}</table></div>`;
+}
+function newSubsLogHtml() {
+  if (!newSubsLog.length) return `<div class="hint" style="margin-top:10px">No classes added in the last 30 days yet.</div>`;
+  const runs = new Map();
+  newSubsLog.forEach(r => { const day = (new Date(r.run_at)).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); const key = day + '|' + (r.source || 'app'); const a = runs.get(key) || []; a.push(r); runs.set(key, a); });
+  const srcLabel = s => s === 'nightly' ? 'Nightly job' : s === 'student page' ? 'Student page' : 'Run from this card';
+  return [...runs.entries()].slice(0, 15).map(([key, rows]) => {
+    const [day, src] = key.split('|');
+    const added = rows.reduce((a, r) => a + (Number(r.added) || 0), 0);
+    return `<details style="margin-top:8px"><summary style="cursor:pointer"><b>${esc(dayDate(day))}</b> · ${esc(srcLabel(src))} · ${added} class${added === 1 ? '' : 'es'} added for ${rows.length} line${rows.length === 1 ? '' : 's'}</summary>${newSubsRowsTable(rows.map(r => ({ student: studentName(r.student_id), subject: subjectName(r.subject_id), class_type: r.class_type, classes_left: null, already_scheduled: null, added: r.added, first_date: r.first_date, last_date: r.last_date, note: r.note })), true)}</details>`;
+  }).join('');
+}
+function renderNewSubscriptionClasses() {
+  if (!newSubsLogLoaded && !newSubsLogLoading) loadNewSubsLog();
+  const p = newSubsPreview;
+  const toAdd = p ? (p.rows || []).filter(r => r.added > 0 || r.note) : [];
+  return `<div class="card"><h2>New subscriptions and renewals ${helpBtn('new-sub-classes')}</h2>
+    <div class="hint">Puts paid classes that aren't on the schedule yet onto it: after a new subscription, a renewal or a marked-paid fee request. It only <b>adds</b> classes after the last class already scheduled, using the Class Frequency and saved weekly timings (placeholder times where none are saved). It never deletes or moves a class. It runs by itself every night at 1 AM; use this card to run it now.</div>
+    ${newSubsSqlNotRun ? `<div class="hint" style="color:var(--brick);margin-top:8px">Run SQL 79 (new-subscriptions/79-new-subscription-classes.sql) in Supabase to turn this on, including the nightly job.</div>` : ''}
+    <div class="row-form" style="margin-top:12px"><button class="btn-primary" onclick="newSubsRun(true)" ${newSubsBusy ? 'disabled' : ''}>Preview</button></div>
+    ${p ? (toAdd.length ? `<div class="hint" style="margin-top:12px"><b>Preview:</b> ${p.added_total} class${p.added_total === 1 ? '' : 'es'} to add for ${toAdd.filter(r => r.added > 0).length} student/subject/type line(s). Nothing is saved until you press Confirm.</div>${newSubsRowsTable(toAdd, true)}${p.added_total > 0 ? `<button class="btn-primary" style="margin-top:12px" onclick="newSubsRun(false)" ${newSubsBusy ? 'disabled' : ''}>${newSubsBusy ? 'Working…' : 'Confirm, add these classes'}</button>` : ''}` : `<div class="hint" style="margin-top:12px;color:var(--forest)">✓ Every paid class that can be scheduled is already on the schedule.</div>`) + newSubsSetupHtml(p.needs_setup) : ''}
+    ${newSubsMsg ? `<div class="hint" style="white-space:pre-wrap;margin-top:12px;color:${/^(Added|Adding|Working)/.test(newSubsMsg) ? 'var(--forest)' : 'var(--brick)'}">${esc(newSubsMsg)}</div>` : ''}
+    <h3 style="margin-top:16px">Classes added in the last 30 days</h3>
+    ${newSubsLogLoading && !newSubsLogLoaded ? '<div class="hint">Loading…</div>' : newSubsSqlNotRun ? '' : newSubsLogHtml()}
+  </div>`;
+}
+// Student page box: shown when this student has paid classes that are not on the schedule yet.
+function studentUnscheduledHtml(student) {
+  const gaps = unscheduledGapsFor(student.id);
+  if (!gaps.length && !studentGapMsg) return '';
+  const lines = gaps.map(g => `${esc(g.subjectName)} (${g.type}): <b>${g.gap}</b> of ${g.left} classes left not on the schedule`).join('<br>');
+  return `<div class="hint" style="margin-top:10px;padding:10px;border-left:4px solid var(--gold);background:var(--soft)">
+    ${gaps.length ? `<b>Paid classes not on the schedule yet</b><br>${lines}<br><button class="btn-small" style="margin-top:6px" onclick="newSubsRun(false,'${student.id}')" ${newSubsBusy ? 'disabled' : ''}>Add them to the schedule</button> <span style="font-size:12px">Adds after the last scheduled class, changes nothing else. The nightly job does this too.</span>` : ''}
+    ${studentGapMsg ? `<div style="white-space:pre-wrap;margin-top:6px;color:${/^(Added|Adding)/.test(studentGapMsg) ? 'var(--forest)' : 'var(--brick)'}">${esc(studentGapMsg)}</div>` : ''}
+  </div>`;
 }
 function renderRebuildPendingClasses() {
   const students=rebuildActiveStudents();
@@ -19618,6 +19713,7 @@ let rebuildClassesStudentId = '';
 let rebuildClassesPreview = null;
 let rebuildClassesMsg = '';
 let rebuildClassesBusy = false;
+let newSubsPreview = null, newSubsMsg = '', newSubsBusy = false, newSubsLog = [], newSubsLogLoaded = false, newSubsLogLoading = false, newSubsSqlNotRun = false, studentGapMsg = '';
 
 function scheduleSet(field, val) {
   scheduleDraft[field] = val;
@@ -22497,6 +22593,7 @@ const HELP = {
   'special-rates': { t:'Special fee rates', b:"<ul><li>An agreed per-class rate for one student, subject and Group / Individual, from a date and optionally until a date.</li><li>While it is in use it replaces the Fee setup rate everywhere: Record payment, fee requests, Calculate, Raise fee requests, Fee calculator and the student's and parent's Applicable Rates.</li><li>Leave Offline rate empty if it is the same as Online. Discount tiers still apply on top.</li><li>Requests and payments already saved are not changed. Remove puts the student back on Fee setup rates.</li></ul>" },
   'class-frequency': { t:'Class Frequency', b:"<ul><li>How many classes each student has on each weekday, per subject (each class is 60 minutes).</li><li>+ New Frequency or Edit: tick the weekdays and set the classes on each day.</li><li>Raise fee requests uses it to count the month's classes, and Rebuild Pending Classes uses it to make the schedule. Saving it does not change classes already scheduled.</li><li>Pairs still Not configured are listed so you can fill them in. Teachers can set it for their own students too.</li></ul>" },
   'class-frequency-teacher': { t:'Class Frequency', b:"<ul><li>How many classes each of your students has on each weekday, per subject (each class is 60 minutes).</li><li>Tap Set or Edit, tick the weekdays and set the classes on each day, then Save.</li><li>The office uses it to work out monthly fees and to build the class schedule, so keep it up to date when a student's timetable changes.</li><li>Saving it does not change classes already scheduled. A student with no frequency shows under Pending Action Items.</li></ul>" },
+  'new-sub-classes': { t:'New subscriptions and renewals', b:"<ul><li>Puts paid classes that are not on the schedule yet onto it, for new students and renewals.</li><li>For each student, subject and class type: classes left minus Pending classes from today on = classes to add.</li><li>Adds them after the last class already scheduled, on the Class Frequency days, at the saved weekly timings (or placeholder times: Group 00:00, Individual 01:00 or 02:00, which the teacher corrects).</li><li>Never deletes, moves or changes a class. Teacher clashes and teacher leave days are skipped.</li><li>Runs by itself every night at 1 AM. Press <b>Preview</b> to see what it would add now, then <b>Confirm</b>. The list below shows what was added in the last 30 days.</li><li>Students with no Class Frequency or no teacher on the subject are listed under Needs setup.</li><li>A student's page also shows paid classes not on the schedule, with an Add button.</li></ul>" },
   'rebuild-classes': { t:'Rebuild Pending Classes', b:"<ul><li>Makes a fresh schedule of upcoming classes from each student's Class Frequency, for all active students or one student.</li><li>Always press <b>Preview Rebuild</b> first: it shows, per student and subject, the future Pending classes it will remove and how many it will make.</li><li>Only future Pending classes are removed. Done classes, overdue Pending classes and other statuses stay as they are. Subscription limits and teacher clashes are still checked.</li><li>New classes get placeholder times (Group 00:00, Individual 01:00 or 02:00). The teacher sees them under 'class timings to correct' and puts in the real time.</li></ul>" },
   'demo-bookings': { t:'Demo Bookings', b:"<ul><li>Demo bookings from the website. The tabs follow each booking: <b>New → Scheduled → Done → Converted</b> or <b>Lost</b> (or Cancelled).</li><li>New: call the family, then Confirm a teacher and time (or Schedule in Demo Register).</li><li>Scheduled: Mark done after the demo, Mark lost (with an optional reason), Reschedule or Cancel.</li><li>Done: Convert to Student creates the student record; Mark lost if they did not join. Lost cards have Reopen.</li><li><b>+ Manual Demo Booking</b>: for demos booked by phone, WhatsApp, walk-in or referral. Type the parent's name, mobile, subject and where it came from; <b>✏️ Edit</b> on its card changes the name, details or demo fee (incl. Free demo); it then works exactly like a Wix booking (ack, calls, schedule, Convert) and shows a purple <b>Manual</b> tag.</li><li>New booking: press <b>📤 Send acknowledgement</b> to thank the parent on WhatsApp (website link only). The card then shows <b>✓ Ack sent</b> with the time, so it is not sent twice.</li><li>Scheduled: <b>✏️ Change time</b> moves the same demo to a new date, time or teacher (the teacher gets a bell notification, a call note records the change, then send the new time on WhatsApp). <b>🔄 Reschedule</b> starts over from New.</li><li>Calls: after phoning a parent, press <b>+ Add call note</b> (when, what happened, what they said, and an optional <b>Call again on</b> date). Every call stays on the card, newest first; notes can be edited, never deleted. Bookings with a call due today or earlier show under <b>Calls due</b> and on the dashboard.</li><li>Booking form: each card shows what the parent filled in on the website (subject, Online / Offline, requirements, message) and the Wix order number. <b>View full form</b> shows every answer on the form (new bookings only).</li><li>Paid / Not paid: payments made on Razorpay mark the booking Paid by themselves. A payment the app could not match is shown at the top so you can pick the booking.</li></ul>" },
   'demo-register': { t:'Demo Register', b:"<ul><li>Every demo a teacher gave, with its status: Pending, Done, Converted or Lost.</li><li>Teachers mark their own demos Done from their Dashboard. You can set any status, add a Lost reason, or go straight to Converted.</li><li><b>Link &amp; Convert</b> links the demo to the student who joined; the teacher gets a ₹100 demo bonus in that month's payroll.</li><li>Demo results shows each teacher's demos and Converted %, and why demos were lost.</li></ul>" },
@@ -27308,7 +27405,7 @@ function render() {
   else if (currentTab === 'students') body = renderStudents();
   else if (currentTab === 'onboarding') body = renderStudentOnboarding();
   else if (currentTab === 'fees') body = renderFees();
-  else if (currentTab === 'rebuildclasses') body = renderRebuildPendingClasses();
+  else if (currentTab === 'rebuildclasses') body = renderNewSubscriptionClasses() + renderRebuildPendingClasses();
   else if (currentTab === 'expenses') body = renderExpenses();
   else if (currentTab === 'chat') body = renderChat();
   else if (currentTab === 'log') body = renderLog();
