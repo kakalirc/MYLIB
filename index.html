@@ -579,7 +579,7 @@ const APP_VERSION = '2026.11';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-04 19:55 IST'; // + Google tag (GTM-M7Z7JWS4) on index, register and terms pages
+const BUILD_TIMESTAMP = '2026-11-05 08:25 IST'; // Student Maintenance: Subscription history newest first
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -15389,8 +15389,10 @@ function renderStudents() {
   const canIssueRefund = refundDraft.subjectId && refundDraft.date;
 
   // ---- this student's subscription history ----
-  const historyRows = allSubscriptionRows().filter(r=>r.studentId===student.id);
-  const historyTransfers = transferHistoryRows(student.id);
+  // Newest first (by date, then by when it was saved), as Rishin asked.
+  const historyRows = allSubscriptionRows().filter(r=>r.studentId===student.id)
+    .sort((a,b) => (b.date||'').localeCompare(a.date||'') || String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+  const historyTransfers = transferHistoryRows(student.id).slice().reverse();
   const historyEditBox = historyRows.filter(r => r.id === editingRequestId).map(r => {
     const d = editRequestDraft;
     const editSubjectOptions = balanceSubjects.map(s=>`<option value="${s.id}" ${d.subjectId===s.id?'selected':''}>${esc(studentLabel(s))}</option>`).join('');
