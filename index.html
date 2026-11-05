@@ -14445,10 +14445,12 @@ function centreStudentsCardHtml() {
     : '<div class="empty">No active students have Mode set to Offline.</div>';
   return `
     <div class="card" id="centreStudentsCard">
-      <h2>This Centre Students</h2>
-      <div class="hint">Active students whose Mode is Offline.</div>
-      <div style="font-size:18px;font-weight:600;margin:8px 0">${rows.length} student${rows.length === 1 ? '' : 's'}</div>
-      ${body}
+      <details>
+        <summary><h2 style="display:inline;margin:0">This Centre Students</h2> <span class="hint">(${rows.length} student${rows.length === 1 ? '' : 's'})</span></summary>
+        <div class="hint">Active students whose Mode is Offline.</div>
+        <div style="font-size:18px;font-weight:600;margin:8px 0">${rows.length} student${rows.length === 1 ? '' : 's'}</div>
+        ${body}
+      </details>
     </div>`;
 }
 // Admin top bar 'This Centre Students: N' → Reports & Export, scrolled to the card.
