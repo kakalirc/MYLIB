@@ -16233,6 +16233,7 @@ function renderReports(only) {
     let countedClasses = 0;
     let missingRateClasses = 0;
     const rateMap = {};
+    const rateStudentsMap = {};
     categories.forEach(c=>{
       TYPES.forEach(ty=>{
         const inGroup = mine.filter(s=>{ const subj=subject(s.subjectId); return subj && subj.category===c.id && s.classType===ty; });
@@ -16252,6 +16253,15 @@ function renderReports(only) {
             missingRateClasses += modeCount;
           } else {
             rateMap[rate] = (rateMap[rate]||0) + modeCount;
+            if (!rateStudentsMap[rate]) rateStudentsMap[rate] = {};
+            inGroup.filter(s=>s.mode===md).forEach(session=>{
+              const studentId = session.studentId;
+              const student = data.students.find(st=>st.id===studentId);
+              const studentName = student ? studentLabel(student) : 'Unknown student';
+              const studentKey = studentId || studentName;
+              rateStudentsMap[rate][studentKey] = rateStudentsMap[rate][studentKey] || { name: studentName, count: 0 };
+              rateStudentsMap[rate][studentKey].count += Number(session.count)||0;
+            });
           }
         });
       });
@@ -16259,7 +16269,10 @@ function renderReports(only) {
     // Only configured rates appear in the rate-wise breakdown. Missing rates are
     // reported separately so they cannot be mistaken for an intentionally zero rate.
     const breakdown = Object.entries(rateMap).sort((a,b)=>Number(b[0])-Number(a[0]))
-      .map(([rate,cnt])=>({ rate: Number(rate), cnt, earn: Number(rate)*cnt }));
+      .map(([rate,cnt])=>({
+        rate: Number(rate), cnt, earn: Number(rate)*cnt,
+        students: Object.values(rateStudentsMap[rate]||{}).sort((a,b)=>a.name.localeCompare(b.name))
+      }));
     return { t, name: teacherLabel(t), byCatType, pay, breakdown, countedClasses, missingRateClasses, uncounted: payrollUncountedClasses(mine) };
   });
   // Include demo bonuses (Converted, in the selected month) in each teacher's payroll row
@@ -16409,7 +16422,7 @@ function renderReports(only) {
           <td>${esc(r.name)}</td>
           <td style="text-align:right;white-space:nowrap">₹${r.pay.toFixed(2)}</td>
           <td style="font-size:12px;color:var(--hint);padding-left:8px">
-            ${r.breakdown.map(b=>`${fmtN(b.cnt)} × ₹${b.rate} = ₹${b.earn.toFixed(2)}`).join('<br>')}
+            ${r.breakdown.map(b=>`${fmtN(b.cnt)} × ₹${b.rate} = ₹${b.earn.toFixed(2)}${b.students.length ? `<br><span style="display:block;padding-left:10px;font-size:11px;color:var(--muted)">${b.students.map(st=>`${esc(st.name)} (${fmtN(st.count)})`).join(', ')}</span>` : ''}`).join('<br>')}
             ${r.demoLines && r.demoLines.length ? r.demoLines.map(l=>`<br><span style="color:var(--forest)">+ ₹${l.amount.toFixed(0)} demo bonus — ${esc(l.studentName)}</span>`).join('') : ''}
             ${r.demoLines && r.demoLines.length ? `<br><b style="color:var(--ink)">= ₹${r.pay.toFixed(0)} total</b>` : ''}
             ${r.countedClasses===0 ? '<span style="color:var(--muted)">No attendance recorded for this month.</span>' : ''}
