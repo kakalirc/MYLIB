@@ -12681,12 +12681,13 @@ function prospectQuoteText() {
   const tier = prospectAppliedTier();
   const final = prospectFinalAmount();
   const classWord = classes === 1 ? 'class' : 'classes';
-  const lines = [`Hello${name ? ' ' + name : ''},`, '', `Here is the fee quote for ${classes} ${prospectType} ${classWord}${cat ? ` (${cat.name}, ${prospectMode})` : ''}:`, `Fee: ₹${base.toFixed(0)}`];
-  if (tier) lines.push(`Bulk discount (${tier.percent}%): −₹${(base - final).toFixed(0)}`);
-  lines.push(`Total fee: ₹${final.toFixed(0)}`, 'Payment status: Pending', '', 'Payment Options');
+  const money = n => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+  const lines = [`Hi${name ? ' ' + name : ''},`, '', 'Here’s your fee quote from LIB Education:', '', `${classes} ${prospectType} ${classWord}${cat ? ` (${cat.name}, ${prospectMode})` : ''}`, `Fee before discount: ₹${money(base)}`];
+  if (tier) lines.push(`Bulk discount: ${tier.percent}%`);
+  lines.push(`Total payable: ₹${money(final)}`, '', 'If you’d like to proceed, you can pay using:');
   if (upiId) lines.push(`UPI: ${upiId}`);
-  if (razorpayOn) lines.push(`Online Payment: ${razorpayFeePage}`, 'While making the online payment, please enter:', `Tuition Fee: ${inrText(final)}`, `Student Name: ${name || '[Student name]'}`);
-  if (feeContactMobile) lines.push(`After payment, please share the confirmation screenshot at ${feeContactMobile}.`);
+  if (razorpayOn) lines.push(`Online payment: ${razorpayFeePage}`, '', 'For online payment, please enter:', `Tuition Fee: ₹${money(final)}`, `Student Name: ${name || '[Student name]'}`);
+  if (feeContactMobile) lines.push('', `After paying, please send the payment confirmation screenshot to ${feeContactMobile}.`);
   lines.push('', 'Thank you,', 'Regards,', 'LIB Admin');
   return lines.join('\n');
 }
@@ -26896,13 +26897,15 @@ function regFeeAmount(d) {
 }
 function regFeeMessage(r) {
   const d = regFeeDraft(r), cat = categories.find(c => String(c.id) === String(d.categoryId));
-  const { base, tier, total } = regFeeAmount(d), classes = Number(d.classes) || 0;
-  const lines = [`Hello ${d.name.trim() || r.parent_name || 'Parent'},`, '', `The requested tuition fee for ${d.name.trim() || r.student_name} is for ${classes} ${d.type} ${classes === 1 ? 'class' : 'classes'}${cat ? ` (${cat.name}, ${d.mode})` : ''}.`, `Fee: ₹${base.toFixed(0)}`];
-  if (tier) lines.push(`Bulk discount (${tier.percent}%): −₹${(base-total).toFixed(0)}`);
-  lines.push(`Total fee: ₹${total.toFixed(0)}`, 'Payment status: Pending', '', 'Payment Options');
+  const { total } = regFeeAmount(d), classes = Number(d.classes) || 0;
+  const money = n => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+  const parentName = (r.parent_name || '').trim() || 'Parent';
+  const studentName = d.name.trim() || r.student_name || 'your child';
+  const classWord = classes === 1 ? 'class' : 'classes';
+  const lines = [`Hello ${parentName},`, '', `We’ve received the registration form for ${studentName}. The fee requested is ₹${money(total)} for ${classes} ${d.type} ${classWord}${cat ? ` (${cat.name}, ${d.mode})` : ''}. Payment is pending.`, '', upiId && razorpayOn ? 'You can pay using either option:' : 'You can pay using:'];
   if (upiId) lines.push(`UPI: ${upiId}`);
-  if (razorpayOn) lines.push(`Online Payment: ${razorpayFeePage}`, 'While making the online payment, please enter:', `Tuition Fee: ${inrText(total)}`, `Student Name: ${d.name.trim() || r.student_name}`);
-  if (feeContactMobile) lines.push(`After payment, please share the confirmation screenshot at ${feeContactMobile}.`);
+  if (razorpayOn) lines.push(`Online payment: ${razorpayFeePage}`, '', 'For online payment, please enter:', `Tuition Fee: ₹${money(total)}`, `Student Name: ${studentName}`);
+  if (feeContactMobile) lines.push('', `After paying, please send the payment confirmation screenshot to ${feeContactMobile}. We’ll verify the payment and contact you about the next steps.`);
   lines.push('', 'Thank you,', 'Regards,', 'LIB Admin');
   return lines.join('\n');
 }
@@ -27198,7 +27201,6 @@ function regCardHtml(r) {
   const when = r.created_at ? new Date(r.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
   const prefs = [r.mode_preference, r.class_type_preference].filter(Boolean).join(' · ');
   const line = (label, v) => v ? `<div><span class="hint">${label}:</span> ${v}</div>` : '';
-  const waText = `Hello ${r.parent_name || ''}, this is LIB Education about the registration form for ${r.student_name}.`;
   let action = '';
   if (r.status === 'New' && regAcceptId === r.id) {
     const d = regAcceptDraft;
@@ -27229,7 +27231,7 @@ function regCardHtml(r) {
     const fd = regFeeDraft(r), fee = regFeeAmount(fd);
     const rateExists = fd.categoryId && fd.type && fd.mode && Number(feeRates[rateKey(fd.categoryId, fd.type, fd.mode)]) > 0;
     action = `<div class="row-form" style="margin-top:8px"><button class="btn-small btn-primary" onclick="regOpenAccept('${r.id}')">✓ Accept</button><button class="btn-small" onclick="regRejectId='${r.id}';render()">✗ Reject</button>
-      <a class="btn-small" href="tel:+91${escAttr(phoneKey(r.parent_mobile))}" style="text-decoration:none">📞 Call</a>${waButtonHtml(phoneKey(r.parent_mobile), '💬 WhatsApp', waText)}
+      <a class="btn-small" href="tel:+91${escAttr(phoneKey(r.parent_mobile))}" style="text-decoration:none">📞 Call</a>
       <button class="btn-small" onclick="const d=regFeeDraft(data.registrations.find(x=>x.id==='${r.id}'));d.open=!d.open;render()">${fd.open ? 'Hide fee request' : 'Prepare fee request'}</button></div>
       ${fd.open ? `<div style="margin-top:10px;padding:10px;background:var(--soft);border:1px solid var(--line);border-radius:8px">
         <b>Fee request calculator</b><div class="hint">Form grade and board are matched to a fee category only when the names match exactly. Check or change the fee details before sending. Sending a request does not record a payment.</div>
@@ -27282,7 +27284,7 @@ function renderRegistrations() {
       <div class="hint">Families fill in the form without logging in. Nothing becomes a student until you press Accept.</div>
       <div class="row-form"><input type="text" readonly value="${REGISTER_URL}" style="min-width:260px;flex:1" onclick="this.select()"><button class="btn-small" onclick="copyText('${REGISTER_URL}', this)">📋 Copy link</button><a class="btn-small" href="register.html" target="_blank" style="text-decoration:none">Open form</a></div>
       <div class="row-form"><input type="tel" placeholder="Parent's mobile" value="${escAttr(regSendTo)}" oninput="regSendTo=this.value" style="width:160px"><button class="btn-small btn-primary" onclick="regSendLink()">📤 Send link on WhatsApp</button></div>
-      <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Prospect fee calculator</summary>
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><h3 style="margin:0 0 8px">Prospect fee calculator</h3>
         <div class="hint">Calculate a fee request for a new student, using the same fee rates and bulk discounts.</div>
         <div class="row-form"><input type="text" value="${esc(prospectName)}" placeholder="Student name" onchange="prospectName=this.value;render()"><input type="tel" value="${esc(prospectMobile)}" placeholder="Parent mobile" onchange="prospectMobile=this.value;render()">
           <select onchange="prospectCatId=this.value;render()"><option value="">Fee category…</option>${activeCategories().map(c=>`<option value="${escAttr(c.id)}" ${String(prospectCatId)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
@@ -27291,7 +27293,7 @@ function renderRegistrations() {
           <label>Classes <input type="number" value="${esc(prospectClasses)}" min="1" step="1" style="width:80px" onchange="prospectClasses=this.value;render()"></label></div>
         ${prospectCatId && Number(prospectClasses)>0 ? `<div class="hint">Before discount: <b>₹${prospectBaseAmount().toFixed(2)}</b> · ${prospectAppliedTier()?`Discount: <b>${prospectAppliedTier().percent}%</b>`:'No bulk discount'} · Total: <b style="color:var(--forest)">₹${prospectFinalAmount().toFixed(2)}</b></div>` : '<div class="hint">Choose a category and enter the number of classes to calculate the fee.</div>'}
         <div class="row-form"><button class="btn-small btn-primary" ${prospectCatId&&Number(prospectClasses)>0?'':'disabled'} onclick="shareProspectQuote()">📤 Share quote</button>${!isMobileDevice()?`<button class="btn-small" ${prospectCatId&&Number(prospectClasses)>0?'':'disabled'} onclick="shareProspectQuote('web')">Web</button>`:''}<button class="btn-small" ${prospectCatId&&Number(prospectClasses)>0?'':'disabled'} onclick="copyProspectQuote()">Copy</button></div>
-      </details>
+      </div>
     </div>`;
   if (!regReady) return linkCard + `<div class="card"><div class="hint" style="color:var(--brick)">The registrations table is not set up yet. Run SQL 67 (67-student-registrations.sql) in Supabase → SQL Editor, then press ↻ Refresh.</div></div>`;
   const all = data.registrations || [];
