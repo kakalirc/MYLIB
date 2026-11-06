@@ -180,7 +180,14 @@ rpc('registration_options').then(function (o) {
     var key = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
     if (gradeIds[key] != null) option.value = gradeIds[key];
   });
-  var b = el('board_id'); (o.boards || []).forEach(function (x) { addOption(b, x.id, x.name); });
+  var b = el('board_id');
+  (o.boards || []).forEach(function (x) {
+    var name = String(x.name || '');
+    var label = name.trim().toLowerCase() === 'not applicable'
+      ? 'Not Applicable / Not Available in list here'
+      : name;
+    addOption(b, x.id, label);
+  });
   var s = el('subjects'); s.innerHTML = '';
   (o.subjects || []).forEach(function (name) {
     var l = document.createElement('label'), c = document.createElement('input');
