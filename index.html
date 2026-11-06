@@ -4905,8 +4905,23 @@ async function addDemoLog() {
     if (wb) { wb.status = 'Scheduled'; wb.demoLogId = inserted.id; wb.scheduledTeacherId = inserted.teacher_id; wb.scheduledDate = inserted.date; wb.scheduledTime = inserted.demo_time || ''; }
     demoLogMsg = 'Demo scheduled ✓ — Wix booking marked Scheduled.';
   } else {
-    const wb = await wixLinkDemo(data.demoLogs[0], { status: 'Scheduled' });
-    demoLogMsg = 'Demo log added.' + (wb ? ' Website booking marked Scheduled.' : '');
+    const dl = data.demoLogs[0];
+    let wb = await wixLinkDemo(dl, { status: 'Scheduled' });
+    if (!wb) {
+      const now = new Date().toISOString();
+      const subj = dl.subjectId ? data.subjects.find(s => s.id === dl.subjectId) : null;
+      const booking = { order_number: 'DEMOREG-' + now.replace(/\D/g, '').slice(0, 14), submitted_at: now,
+        student_name: dl.studentName, phone: phoneKey(dl.parentMobile), subject: subj ? subj.name : null,
+        status: 'Scheduled', source: 'Other', amount: 100, demo_log_id: dl.id,
+        scheduled_teacher_id: dl.teacherId, scheduled_date: dl.date, scheduled_time: dl.demoTime || null };
+      const { error: bookingError } = await sb.from('wix_demo_bookings').insert(booking);
+      if (bookingError) {
+        demoLogMsg = 'Demo log added, but the Demo Bookings card could not be created: ' + bookingError.message;
+      } else {
+        await loadWixBookings();
+        demoLogMsg = 'Demo log added and shown in Demo Bookings ✓';
+      }
+    } else demoLogMsg = 'Demo log added. Website booking marked Scheduled.';
   }
   demoLogDraft = { date: todayStr, teacherId: demoLogDraft.teacherId, gradeId: demoLogDraft.gradeId, subjectId: '', board: '', studentName: '', parentMobile: '', notes: '', demoTime: '' };
   render();
@@ -12666,15 +12681,14 @@ function prospectQuoteText() {
   const tier = prospectAppliedTier();
   const final = prospectFinalAmount();
   const classWord = classes === 1 ? 'class' : 'classes';
-  let msg = `Hi${name ? ' ' + name : ''}! Here is a fee quote from LIB Education.`;
-  msg += ` ${classes} ${prospectType} ${classWord}`;
-  if (cat) msg += ` (${cat.name}, ${prospectMode})`;
-  msg += `: ₹${base.toFixed(0)}`;
-  if (tier) msg += ` with ${tier.percent}% bulk discount = ₹${final.toFixed(0)}`;
-  msg += `.`;
-  if (upiId) msg += ` UPI: ${upiId}.`;
-  if (feeContactMobile) msg += ` Contact: ${feeContactMobile}.`;
-  return msg + '\n\n' + APP_LINK_LINES.join('\n');
+  const lines = [`Hello${name ? ' ' + name : ''},`, '', `Here is the fee quote for ${classes} ${prospectType} ${classWord}${cat ? ` (${cat.name}, ${prospectMode})` : ''}:`, `Fee: ₹${base.toFixed(0)}`];
+  if (tier) lines.push(`Bulk discount (${tier.percent}%): −₹${(base - final).toFixed(0)}`);
+  lines.push(`Total fee: ₹${final.toFixed(0)}`, 'Payment status: Pending', '', 'Payment Options');
+  if (upiId) lines.push(`UPI: ${upiId}`);
+  if (razorpayOn) lines.push(`Online Payment: ${razorpayFeePage}`, 'While making the online payment, please enter:', `Tuition Fee: ${inrText(final)}`, `Student Name: ${name || '[Student name]'}`);
+  if (feeContactMobile) lines.push(`After payment, please share the confirmation screenshot at ${feeContactMobile}.`);
+  lines.push('', 'Thank you,', 'Regards,', 'LIB Admin');
+  return lines.join('\n');
 }
 function shareProspectQuote(how) {
   const msg = prospectQuoteText();
@@ -17238,88 +17252,6 @@ function renderFees() {
       </div>
     </div>
 
-    <div class="card">
-      <h2>📤 Prospect Fee Quote</h2>
-      <div class="hint">Calculate and share a fee quote for a new prospective student — no account needed. Only the final amount goes in the WhatsApp message; the full rate table stays private.</div>
-      <div class="row-form">
-        <label>Name (optional) <input type="text" value="${esc(prospectName)}" placeholder="Prospect's name" style="width:180px" onchange="prospectName=this.value;render()"></label>
-        <label>Mobile (optional) <input type="tel" value="${esc(prospectMobile)}" placeholder="10-digit mobile" style="width:160px" onchange="prospectMobile=this.value;render()"></label>
-      </div>
-      <div class="row-form">
-        <select onchange="prospectCatId=this.value;render()">
-          <option value="">Category…</option>
-          ${activeCategories().map(c=>`<option value="${c.id}" ${prospectCatId===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}
-        </select>
-        <select onchange="prospectType=this.value;render()">
-          ${TYPES.map(ty=>`<option value="${ty}" ${prospectType===ty?'selected':''}>${ty}</option>`).join('')}
-        </select>
-        <select onchange="prospectMode=this.value;render()">
-          ${RATE_MODES.map(md=>`<option value="${md}" ${prospectMode===md?'selected':''}>${md}</option>`).join('')}
-        </select>
-        <label>Classes <input type="number" value="${esc(prospectClasses)}" min="1" step="1" style="width:80px" onchange="prospectClasses=this.value;render()"></label>
-      </div>
-      ${(()=>{
-        if (!prospectCatId || !(Number(prospectClasses) > 0)) return '<div class="hint">Select a category and enter number of classes to see the quote.</div>';
-        const pBase = prospectBaseAmount();
-        const pTier = prospectAppliedTier();
-        const pFinal = prospectFinalAmount();
-        return `
-          <div class="hint" style="font-size:15px">Before discount: <b>₹${pBase.toFixed(2)}</b></div>
-          <div class="hint" style="font-size:15px">${pTier ? `Discount: <b>${pTier.percent}%</b> (${pTier.minClasses}+ classes)` : 'No discount tier reached'}</div>
-          <div class="hint" style="font-size:16px;color:var(--forest)">Quote total: <b>₹${pFinal.toFixed(2)}</b></div>`;
-      })()}
-      <div class="row-form" style="margin-top:8px">
-        <button class="btn-primary" ${prospectCatId && Number(prospectClasses) > 0 ? '' : 'disabled'} onclick="shareProspectQuote()" title="${isMobileDevice() ? '' : 'Open in WhatsApp Desktop'}">📤 Share via WhatsApp</button>${isMobileDevice() ? '' : `
-        <button class="btn-small" ${prospectCatId && Number(prospectClasses) > 0 ? '' : 'disabled'} onclick="shareProspectQuote('web')" title="Open in WhatsApp Web instead">Web</button>`}
-        <button class="btn-small" ${prospectCatId && Number(prospectClasses) > 0 ? '' : 'disabled'} onclick="copyProspectQuote()">Copy</button>
-      </div>
-
-      ${(()=>{
-        if (!prospectQuotes.length) return '<div class="hint" style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">No quotes sent yet — quotes are saved automatically when you share or copy.</div>';
-        const ed = prospectQuoteEditing;
-        const rows = prospectQuotes.map(q => {
-          const dt = q.created_at ? new Date(q.created_at).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
-          const catName = (categories.find(c=>c.id===q.category_id)||{}).name || '—';
-          if (ed && ed.id === q.id) {
-            return `<tr style="background:var(--soft)">
-              <td>${esc(dt)}</td>
-              <td><input type="text" value="${esc(ed.name)}" style="width:110px" oninput="prospectQuoteEditing={...prospectQuoteEditing,name:this.value}"></td>
-              <td><input type="tel" value="${esc(ed.mobile)}" style="width:120px" oninput="prospectQuoteEditing={...prospectQuoteEditing,mobile:this.value}"></td>
-              <td>${esc(catName)} · ${esc(q.type)} · ${esc(q.mode)}</td>
-              <td>${q.classes}</td>
-              <td style="color:var(--forest)"><b>₹${Number(q.final_amount||0).toFixed(0)}</b>${q.discount_percent?` <span class="hint">(${q.discount_percent}% off)</span>`:''}</td>
-              <td><input type="text" value="${esc(ed.notes)}" placeholder="Notes…" style="width:120px" oninput="prospectQuoteEditing={...prospectQuoteEditing,notes:this.value}"></td>
-              <td style="white-space:nowrap">
-                <button class="btn-small btn-primary" onclick="saveProspectQuoteEdit()">Save</button>
-                <button class="btn-small" onclick="prospectQuoteEditing=null;render()">Cancel</button>
-              </td>
-            </tr>`;
-          }
-          return `<tr>
-            <td>${esc(dt)}</td>
-            <td>${esc(q.name||'—')}</td>
-            <td>${q.mobile ? `${esc(q.mobile)}${copyBtnHtml(q.mobile)}` : '<span class="hint">—</span>'}</td>
-            <td>${esc(catName)} · ${esc(q.type)} · ${esc(q.mode)}</td>
-            <td>${q.classes}</td>
-            <td style="color:var(--forest)"><b>₹${Number(q.final_amount||0).toFixed(0)}</b>${q.discount_percent?` <span class="hint">(${q.discount_percent}% off)</span>`:''}</td>
-            <td>${esc(q.notes||'')}</td>
-            <td style="white-space:nowrap">
-              <button class="btn-small" onclick="startEditProspectQuote('${q.id}')">Edit</button>
-              <button class="btn-small" onclick="copyProspectQuoteLog('${q.id}')">Copy</button>
-              <button class="btn-small" title="${isMobileDevice() ? 'Send again on WhatsApp' : 'Send again in WhatsApp Desktop'}" onclick="resendProspectQuote(${JSON.stringify(q).replace(/"/g,'&quot;')})">📤</button>${isMobileDevice() ? '' : `<button class="btn-small" title="Send again in WhatsApp Web" onclick="resendProspectQuote(${JSON.stringify(q).replace(/"/g,'&quot;')},'web')">Web</button>`}
-              <button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="deleteProspectQuote('${q.id}')">Delete</button>
-            </td>
-          </tr>`;
-        }).join('');
-        return `<div style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
-          <div style="font-weight:600;margin-bottom:8px">Quote log (${prospectQuotes.length})</div>
-          <div class="table-scroll"><table>
-            <tr><th>Date</th><th>Name</th><th>Mobile</th><th>Details</th><th>Classes</th><th>Amount</th><th>Notes</th><th></th></tr>
-            ${rows}
-          </table></div>
-        </div>`;
-      })()}
-    </div>
   `;
 }
 
@@ -26933,6 +26865,7 @@ function renderAdminSupport() {
 // to a family with the same mobile), the parent login (mobile) and the student login (student code).
 const REGISTER_URL = 'https://app.libeducation.com/register.html';
 let regReady = true, regShowArchived = false, regFilter = 'New', regMsg = '', regTicked = new Set(), regRejectId = '', regAcceptId = '', regAcceptDraft = {}, regBusy = false, regSendTo = '';
+let regFeeDrafts = {};
 const regDone = {};   // registration id -> { message, phones, studentId, notes } (this session only)
 async function loadRegistrations() {
   if (currentRole !== 'Admin') { data.registrations = []; return; }
@@ -26942,6 +26875,39 @@ async function loadRegistrations() {
   data.registrations = rows || [];
 }
 function regNewCount() { return (data.registrations || []).filter(r => r.status === 'New' && !r.archived).length; }
+function regFeeDraft(r) {
+  if (!regFeeDrafts[r.id]) {
+    const norm = s => String(s || '').trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const grade = regGradeName(r.grade_id), board = regBoardName(r.board_id);
+    const candidates = [grade, grade && board ? `${grade} ${board}` : '', board].filter(Boolean).map(norm);
+    const match = activeCategories().find(c => candidates.includes(norm(c.name)));
+    const type = TYPES.find(x => norm(x) === norm(r.class_type_preference)) || '';
+    const mode = RATE_MODES.find(x => norm(x) === norm(r.mode_preference)) || '';
+    regFeeDrafts[r.id] = { open: false, name: r.student_name || '', mobile: r.parent_mobile || '', categoryId: match ? match.id : '', type, mode, classes: '' };
+  }
+  return regFeeDrafts[r.id];
+}
+function regFeeSet(id, key, value) { const r = (data.registrations || []).find(x => x.id === id); if (r) regFeeDraft(r)[key] = value; render(); }
+function regFeeAmount(d) {
+  const classes = Number(d.classes) || 0;
+  const base = (Number(feeRates[rateKey(d.categoryId, d.type, d.mode)]) || 0) * classes;
+  const tier = classes ? discountTiers.filter(t => classes >= t.minClasses).sort((a,b) => b.minClasses-a.minClasses)[0] : null;
+  return { base, tier, total: tier ? base * (1 - tier.percent / 100) : base };
+}
+function regFeeMessage(r) {
+  const d = regFeeDraft(r), cat = categories.find(c => String(c.id) === String(d.categoryId));
+  const { base, tier, total } = regFeeAmount(d), classes = Number(d.classes) || 0;
+  const lines = [`Hello ${d.name.trim() || r.parent_name || 'Parent'},`, '', `The requested tuition fee for ${d.name.trim() || r.student_name} is for ${classes} ${d.type} ${classes === 1 ? 'class' : 'classes'}${cat ? ` (${cat.name}, ${d.mode})` : ''}.`, `Fee: ₹${base.toFixed(0)}`];
+  if (tier) lines.push(`Bulk discount (${tier.percent}%): −₹${(base-total).toFixed(0)}`);
+  lines.push(`Total fee: ₹${total.toFixed(0)}`, 'Payment status: Pending', '', 'Payment Options');
+  if (upiId) lines.push(`UPI: ${upiId}`);
+  if (razorpayOn) lines.push(`Online Payment: ${razorpayFeePage}`, 'While making the online payment, please enter:', `Tuition Fee: ${inrText(total)}`, `Student Name: ${d.name.trim() || r.student_name}`);
+  if (feeContactMobile) lines.push(`After payment, please share the confirmation screenshot at ${feeContactMobile}.`);
+  lines.push('', 'Thank you,', 'Regards,', 'LIB Admin');
+  return lines.join('\n');
+}
+function regFeeReady(r) { const d = regFeeDraft(r); return !!(phoneKey(d.mobile) && d.categoryId && d.type && d.mode && Number(d.classes)>0 && (upiId || razorpayOn) && Number(regFeeAmount(d).total)>0); }
+function regFeeShare(id, how) { const r=(data.registrations||[]).find(x=>x.id===id); if (!r || !regFeeReady(r)) return; const d=regFeeDraft(r); launchWhatsApp(phoneKey(d.mobile), regFeeMessage(r), how || waHow()); }
 // 'NA' = the family picked "Not applicable" on the form (SQL 77).
 function regGradeName(id) { if (id === 'NA') return 'Not applicable'; const g = grades.find(x => String(x.id) === String(id)); return g ? g.name : ''; }
 function regBoardName(id) { const b = boards.find(x => String(x.id) === String(id)); return b ? b.name : ''; }
@@ -27260,8 +27226,23 @@ function regCardHtml(r) {
   } else if (r.status === 'New' && regRejectId === r.id) {
     action = `<div class="row-form" style="margin-top:10px"><input type="text" id="regRejectReason" placeholder="Reason (optional), e.g. Junk, Not reachable" style="min-width:220px"><button class="btn-small btn-primary" onclick="regRejectOne('${r.id}')">Reject</button><button class="btn-small" onclick="regRejectId='';render()">Cancel</button></div>`;
   } else if (r.status === 'New') {
-    action = `<div class="row-form" style="margin-top:8px"><button class="btn-small btn-primary" onclick="regOpenAccept('${r.id}')">✓ Accept</button><button class="btn-small" onclick="regRejectId='${r.id}';regAcceptId='';render()">✗ Reject</button>
-      <a class="btn-small" href="tel:+91${escAttr(phoneKey(r.parent_mobile))}" style="text-decoration:none">📞 Call</a>${waButtonHtml(phoneKey(r.parent_mobile), '💬 WhatsApp', waText)}</div>`;
+    const fd = regFeeDraft(r), fee = regFeeAmount(fd);
+    const rateExists = fd.categoryId && fd.type && fd.mode && Number(feeRates[rateKey(fd.categoryId, fd.type, fd.mode)]) > 0;
+    action = `<div class="row-form" style="margin-top:8px"><button class="btn-small btn-primary" onclick="regOpenAccept('${r.id}')">✓ Accept</button><button class="btn-small" onclick="regRejectId='${r.id}';render()">✗ Reject</button>
+      <a class="btn-small" href="tel:+91${escAttr(phoneKey(r.parent_mobile))}" style="text-decoration:none">📞 Call</a>${waButtonHtml(phoneKey(r.parent_mobile), '💬 WhatsApp', waText)}
+      <button class="btn-small" onclick="const d=regFeeDraft(data.registrations.find(x=>x.id==='${r.id}'));d.open=!d.open;render()">${fd.open ? 'Hide fee request' : 'Prepare fee request'}</button></div>
+      ${fd.open ? `<div style="margin-top:10px;padding:10px;background:var(--soft);border:1px solid var(--line);border-radius:8px">
+        <b>Fee request calculator</b><div class="hint">Form grade and board are matched to a fee category only when the names match exactly. Check or change the fee details before sending. Sending a request does not record a payment.</div>
+        <div class="row-form"><input type="text" value="${escAttr(fd.name)}" placeholder="Student name" onchange="regFeeSet('${r.id}','name',this.value)">
+          <input type="tel" value="${escAttr(fd.mobile)}" placeholder="Parent mobile" onchange="regFeeSet('${r.id}','mobile',this.value)">
+          <select onchange="regFeeSet('${r.id}','categoryId',this.value)"><option value="">Fee category…</option>${activeCategories().map(c=>`<option value="${escAttr(c.id)}" ${String(fd.categoryId)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+          <select onchange="regFeeSet('${r.id}','type',this.value)"><option value="">Class type…</option>${TYPES.map(x=>`<option value="${x}" ${fd.type===x?'selected':''}>${x}</option>`).join('')}</select>
+          <select onchange="regFeeSet('${r.id}','mode',this.value)"><option value="">Mode…</option>${RATE_MODES.map(x=>`<option value="${x}" ${fd.mode===x?'selected':''}>${x}</option>`).join('')}</select>
+          <label>Classes <input type="number" min="1" step="1" value="${escAttr(fd.classes)}" style="width:80px" onchange="regFeeSet('${r.id}','classes',this.value)"></label></div>
+        ${rateExists && Number(fd.classes)>0 ? `<div class="hint">Before discount: <b>₹${fee.base.toFixed(2)}</b>${fee.tier?` · Discount: <b>${fee.tier.percent}%</b>`:' · No bulk discount'} · Total requested: <b style="color:var(--forest)">₹${fee.total.toFixed(2)}</b></div>` : `<div class="hint">${fd.categoryId && fd.type && fd.mode && Number(fd.classes)>0 ? 'No fee rate is set for this combination.' : 'Choose the fee category, class type, mode and number of classes.'}</div>`}
+        ${!(upiId || razorpayOn) ? '<div class="hint" style="color:var(--brick)">Set up UPI or Razorpay in Fees before sending a payment request.</div>' : ''}
+        <div class="row-form"><button class="btn-small btn-primary" ${regFeeReady(r)?'':'disabled'} onclick="regFeeShare('${r.id}')">📤 Send fee request</button>${!isMobileDevice()?`<button class="btn-small" ${regFeeReady(r)?'':'disabled'} onclick="regFeeShare('${r.id}','web')">Web</button>`:''}<button class="btn-small" ${regFeeReady(r)?'':'disabled'} onclick="copyText(regFeeMessage(data.registrations.find(x=>x.id==='${r.id}')),this)">Copy message</button></div>
+      </div>` : ''}`;
   } else if (r.status === 'Accepted') {
     const demos = st ? regDemoCandidates(r, st.id) : [];
     const demoBlock = demos.length ? `<div style="margin-top:8px;padding:8px;background:#f6f3ea;border:1px solid var(--line);border-radius:6px"><b style="font-size:12px">Possible demo records (${demos.length})</b><div class="hint" style="font-size:11px">Name and contact details suggest a match. Confirm each link individually. Linking does not convert the demo or trigger a bonus.</div>${demos.map(dl=>`<div class="row-form" style="margin-top:5px"><span style="font-size:12px">${esc(dayDate(dl.date))} · ${esc(dl.studentName)} · ${esc(dl.status)}${dl.linkedStudentId===st.id?' · Already linked': ''}</span>${dl.linkedStudentId===st.id?'<span class="hint">Linked</span>':`<button class="btn-small" onclick="regLinkDemo('${r.id}','${dl.id}')">Link this demo</button>`}</div>`).join('')}</div>` : (st ? '<div class="hint" style="margin-top:6px">No matching demo record found. This registration can proceed as a direct admission.</div>' : '');
@@ -27301,6 +27282,16 @@ function renderRegistrations() {
       <div class="hint">Families fill in the form without logging in. Nothing becomes a student until you press Accept.</div>
       <div class="row-form"><input type="text" readonly value="${REGISTER_URL}" style="min-width:260px;flex:1" onclick="this.select()"><button class="btn-small" onclick="copyText('${REGISTER_URL}', this)">📋 Copy link</button><a class="btn-small" href="register.html" target="_blank" style="text-decoration:none">Open form</a></div>
       <div class="row-form"><input type="tel" placeholder="Parent's mobile" value="${escAttr(regSendTo)}" oninput="regSendTo=this.value" style="width:160px"><button class="btn-small btn-primary" onclick="regSendLink()">📤 Send link on WhatsApp</button></div>
+      <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Prospect fee calculator</summary>
+        <div class="hint">Calculate a fee request for a new student, using the same fee rates and bulk discounts.</div>
+        <div class="row-form"><input type="text" value="${esc(prospectName)}" placeholder="Student name" onchange="prospectName=this.value;render()"><input type="tel" value="${esc(prospectMobile)}" placeholder="Parent mobile" onchange="prospectMobile=this.value;render()">
+          <select onchange="prospectCatId=this.value;render()"><option value="">Fee category…</option>${activeCategories().map(c=>`<option value="${escAttr(c.id)}" ${String(prospectCatId)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+          <select onchange="prospectType=this.value;render()"><option value="">Class type…</option>${TYPES.map(x=>`<option value="${x}" ${prospectType===x?'selected':''}>${x}</option>`).join('')}</select>
+          <select onchange="prospectMode=this.value;render()"><option value="">Mode…</option>${RATE_MODES.map(x=>`<option value="${x}" ${prospectMode===x?'selected':''}>${x}</option>`).join('')}</select>
+          <label>Classes <input type="number" value="${esc(prospectClasses)}" min="1" step="1" style="width:80px" onchange="prospectClasses=this.value;render()"></label></div>
+        ${prospectCatId && Number(prospectClasses)>0 ? `<div class="hint">Before discount: <b>₹${prospectBaseAmount().toFixed(2)}</b> · ${prospectAppliedTier()?`Discount: <b>${prospectAppliedTier().percent}%</b>`:'No bulk discount'} · Total: <b style="color:var(--forest)">₹${prospectFinalAmount().toFixed(2)}</b></div>` : '<div class="hint">Choose a category and enter the number of classes to calculate the fee.</div>'}
+        <div class="row-form"><button class="btn-small btn-primary" ${prospectCatId&&Number(prospectClasses)>0?'':'disabled'} onclick="shareProspectQuote()">📤 Share quote</button>${!isMobileDevice()?`<button class="btn-small" ${prospectCatId&&Number(prospectClasses)>0?'':'disabled'} onclick="shareProspectQuote('web')">Web</button>`:''}<button class="btn-small" ${prospectCatId&&Number(prospectClasses)>0?'':'disabled'} onclick="copyProspectQuote()">Copy</button></div>
+      </details>
     </div>`;
   if (!regReady) return linkCard + `<div class="card"><div class="hint" style="color:var(--brick)">The registrations table is not set up yet. Run SQL 67 (67-student-registrations.sql) in Supabase → SQL Editor, then press ↻ Refresh.</div></div>`;
   const all = data.registrations || [];
