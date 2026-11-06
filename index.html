@@ -12719,8 +12719,12 @@ async function saveProspectQuote(msg) {
     final_amount: prospectFinalAmount(),
     message: msg
   };
+  await saveFeeQuoteRecord(row);
+}
+async function saveFeeQuoteRecord(row) {
   const { data, error } = await sb.from('prospect_quotes').insert(row).select().single();
-  if (!error && data) { prospectQuotes.unshift(data); render(); }
+  if (!error && data) { prospectQuotes.unshift(data); render(); return true; }
+  return error || new Error('No saved quote record was returned.');
 }
 async function deleteProspectQuote(id) {
   if (!confirm('Delete this quote record?')) return;
@@ -26910,7 +26914,51 @@ function regFeeMessage(r) {
   return lines.join('\n');
 }
 function regFeeReady(r) { const d = regFeeDraft(r); return !!(phoneKey(d.mobile) && d.categoryId && d.type && d.mode && Number(d.classes)>0 && (upiId || razorpayOn) && Number(regFeeAmount(d).total)>0); }
-function regFeeShare(id, how) { const r=(data.registrations||[]).find(x=>x.id===id); if (!r || !regFeeReady(r)) return; const d=regFeeDraft(r); launchWhatsApp(phoneKey(d.mobile), regFeeMessage(r), how || waHow()); }
+async function regFeeShare(id, how) {
+  const r = (data.registrations || []).find(x => x.id === id);
+  if (!r || !regFeeReady(r)) return;
+  const d = regFeeDraft(r), calc = regFeeAmount(d), msg = regFeeMessage(r);
+  launchWhatsApp(phoneKey(d.mobile), msg, how || waHow());
+  const error = await saveFeeQuoteRecord({
+    name: d.name.trim() || r.student_name || null, mobile: phoneKey(d.mobile) || null,
+    category_id: d.categoryId || null, type: d.type, mode: d.mode,
+    classes: Number(d.classes) || 0, base_amount: calc.base,
+    discount_percent: calc.tier ? calc.tier.percent : null, final_amount: calc.total,
+    message: msg, notes: 'New Registration'
+  });
+  if (error) { regMsg = 'WhatsApp opened, but the fee request could not be saved to the quote history: ' + (error.message || error); render(); }
+}
+function prospectQuoteLogHtml() {
+  if (!prospectQuotes.length) return '<div class="hint" style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px">No quotes sent yet. Quotes are saved here when you share or copy them.</div>';
+  const ed = prospectQuoteEditing;
+  const rows = prospectQuotes.map(q => {
+    const dt = q.created_at ? new Date(q.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+    const catName = (categories.find(c => String(c.id) === String(q.category_id)) || {}).name || '—';
+    if (ed && ed.id === q.id) return `<tr style="background:var(--soft)">
+      <td>${esc(dt)}</td>
+      <td><input type="text" value="${esc(ed.name)}" style="width:110px" oninput="prospectQuoteEditing={...prospectQuoteEditing,name:this.value}"></td>
+      <td><input type="tel" value="${esc(ed.mobile)}" style="width:120px" oninput="prospectQuoteEditing={...prospectQuoteEditing,mobile:this.value}"></td>
+      <td>${esc(catName)} · ${esc(q.type)} · ${esc(q.mode)}</td><td>${q.classes}</td>
+      <td><b>₹${Number(q.final_amount || 0).toLocaleString('en-IN')}</b>${q.discount_percent ? ` <span class="hint">(${q.discount_percent}% off)</span>` : ''}</td>
+      <td><input type="text" value="${esc(ed.notes)}" placeholder="Notes…" style="width:120px" oninput="prospectQuoteEditing={...prospectQuoteEditing,notes:this.value}"></td>
+      <td style="white-space:nowrap"><button class="btn-small btn-primary" onclick="saveProspectQuoteEdit()">Save</button><button class="btn-small" onclick="prospectQuoteEditing=null;render()">Cancel</button></td>
+    </tr>`;
+    return `<tr><td>${esc(dt)}</td><td>${esc(q.name || '—')}</td>
+      <td>${q.mobile ? `${esc(q.mobile)}${copyBtnHtml(q.mobile)}` : '<span class="hint">—</span>'}</td>
+      <td>${esc(catName)} · ${esc(q.type)} · ${esc(q.mode)}</td><td>${q.classes}</td>
+      <td><b>₹${Number(q.final_amount || 0).toLocaleString('en-IN')}</b>${q.discount_percent ? ` <span class="hint">(${q.discount_percent}% off)</span>` : ''}</td>
+      <td>${esc(q.notes || '')}</td><td style="white-space:nowrap">
+        <button class="btn-small" onclick="startEditProspectQuote('${q.id}')">Edit</button>
+        <button class="btn-small" onclick="copyProspectQuoteLog('${q.id}')">Copy</button>
+        <button class="btn-small" title="Send again on WhatsApp" onclick="resendProspectQuote(${JSON.stringify(q).replace(/"/g, '&quot;')})">📤</button>
+        <button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="deleteProspectQuote('${q.id}')">Delete</button>
+      </td></tr>`;
+  }).join('');
+  return `<div style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
+    <div style="font-weight:600;margin-bottom:8px">Saved fee quotes and requests (${prospectQuotes.length})</div>
+    <div class="table-scroll"><table><tr><th>Date</th><th>Name</th><th>Mobile</th><th>Details</th><th>Classes</th><th>Amount</th><th>Notes</th><th></th></tr>${rows}</table></div>
+  </div>`;
+}
 // 'NA' = the family picked "Not applicable" on the form (SQL 77).
 function regGradeName(id) { if (id === 'NA') return 'Not applicable'; const g = grades.find(x => String(x.id) === String(id)); return g ? g.name : ''; }
 function regBoardName(id) { const b = boards.find(x => String(x.id) === String(id)); return b ? b.name : ''; }
@@ -27294,6 +27342,7 @@ function renderRegistrations() {
         ${prospectCatId && Number(prospectClasses)>0 ? `<div class="hint">Before discount: <b>₹${prospectBaseAmount().toFixed(2)}</b> · ${prospectAppliedTier()?`Discount: <b>${prospectAppliedTier().percent}%</b>`:'No bulk discount'} · Total: <b style="color:var(--forest)">₹${prospectFinalAmount().toFixed(2)}</b></div>` : '<div class="hint">Choose a category and enter the number of classes to calculate the fee.</div>'}
         <div class="row-form"><button class="btn-small btn-primary" ${prospectCatId&&Number(prospectClasses)>0?'':'disabled'} onclick="shareProspectQuote()">📤 Share quote</button>${!isMobileDevice()?`<button class="btn-small" ${prospectCatId&&Number(prospectClasses)>0?'':'disabled'} onclick="shareProspectQuote('web')">Web</button>`:''}<button class="btn-small" ${prospectCatId&&Number(prospectClasses)>0?'':'disabled'} onclick="copyProspectQuote()">Copy</button></div>
       </div>
+      ${prospectQuoteLogHtml()}
     </div>`;
   if (!regReady) return linkCard + `<div class="card"><div class="hint" style="color:var(--brick)">The registrations table is not set up yet. Run SQL 67 (67-student-registrations.sql) in Supabase → SQL Editor, then press ↻ Refresh.</div></div>`;
   const all = data.registrations || [];
