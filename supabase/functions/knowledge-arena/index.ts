@@ -105,7 +105,7 @@ Deno.serve(async (req) => {
         availableGradeOptions = [...new Set((grades || []).map((g: any) => String(g.name || "").trim())
           .filter((name: string) => /^(?:[1-9]|1[0-2]|PU)$/i.test(name)))];
       }
-      if (ctx.gradeLabel.trim().toLocaleLowerCase() === "language") {
+      if (isLanguageStudent) {
         const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
           .select("preferred_language_code").eq("user_id", user.id).maybeSingle();
         if (preferenceError) return errorResponse(503, "Could not load your saved language preference.");
@@ -164,8 +164,22 @@ Deno.serve(async (req) => {
       if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
       const gameType = body.game_type;
       if (!validGameType(gameType)) return errorResponse(400, "Invalid game type.");
-      const subject = typeof body.subject === "string" ? body.subject.trim() : "";
-      if (!subject) return errorResponse(400, "Select a subject before loading questions.");
+      let subject = typeof body.subject === "string" ? body.subject.trim() : "";
+      const isLanguageStudent = ctx.gradeLabel.trim().toLocaleLowerCase() === "language";
+      // Enforce game-to-subject routing on the server as well as in the UI.
+      // Quick Quiz may intentionally load across all subjects.
+      if (!isLanguageStudent) {
+        const gameSubjects: Record<string, string> = {
+          word_master: "English",
+          number_quest: "Math",
+          brain_teaser: "Math",
+          science_explorer: "Science",
+          memory_challenge: "Science",
+        };
+        if (gameSubjects[gameType]) subject = gameSubjects[gameType];
+        else if (subject.toLocaleLowerCase() === "all") subject = "";
+      }
+      if (!subject && gameType !== "quick_quiz") return errorResponse(400, "A subject is required for this game.");
       let effectiveGradeLabel = ctx.gradeLabel;
       if (ctx.gradeLabel.trim().toLocaleLowerCase() === "tina student") {
         const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
