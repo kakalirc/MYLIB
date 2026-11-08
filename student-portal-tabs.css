@@ -134,3 +134,9 @@
   .student-portal-section-tab { min-height: 43px; padding: 9px 8px; font-size: 13px; }
   .student-fun-grid { grid-template-columns: 1fr; }
 }
+
+/* Fun Zone cards are full-card navigation links with visible keyboard focus. */
+.student-fun-card { display:block; color:inherit; text-decoration:none; cursor:pointer; transition:border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+.student-fun-card:hover { border-color:#c7ad72; box-shadow:0 5px 18px rgba(38,45,58,.08); transform:translateY(-2px); }
+.student-fun-card:focus-visible { outline:3px solid rgba(201,154,60,.55); outline-offset:3px; }
+.student-fun-card-action { display:inline-block; margin-top:12px; color:#85682b; font-size:11px; font-weight:700; }
