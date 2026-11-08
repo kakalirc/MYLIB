@@ -295,13 +295,13 @@ Deno.serve(async (req) => {
       if (statsError) return errorResponse(503, "Could not load Knowledge Arena leadership data.");
       const userIds = (stats || []).map((x: any) => x.user_id);
       const { data: profiles, error: profileError } = userIds.length
-        ? await db.from("profiles").select("id,linked_student_id").eq("role", "Student").in("id", userIds)
+        ? await db.from("profiles").select("id,linked_student_id").eq("role", "Student").eq("archived", false).not("linked_student_id", "is", null).in("id", userIds)
         : { data: [], error: null };
       if (profileError) return errorResponse(503, "Could not load student profile links.");
       const studentIds = [...new Set((profiles || []).map((x: any) => x.linked_student_id).filter(Boolean))];
       const [{ data: students, error: studentError }, { data: awards, error: awardsError }] = await Promise.all([
         studentIds.length
-          ? db.from("students").select("id,name,student_code,grade_id").in("id", studentIds)
+          ? db.from("students").select("id,name,student_code,grade_id").eq("archived", false).in("id", studentIds)
           : Promise.resolve({ data: [], error: null }),
         userIds.length
           ? db.from("ka_player_achievements").select("user_id,achievement_id").in("user_id", userIds)
@@ -318,7 +318,11 @@ Deno.serve(async (req) => {
       const gradeById = new Map((grades || []).map((x: any) => [x.id, x.name]));
       const awardCounts = new Map<string, number>();
       for (const award of awards || []) awardCounts.set(award.user_id, (awardCounts.get(award.user_id) || 0) + 1);
-      const players = (stats || []).map((x: any, index: number) => {
+      const eligibleStats = (stats || []).filter((x: any) => {
+        const profile = profileByUser.get(x.user_id);
+        return !!(profile?.linked_student_id && studentById.has(profile.linked_student_id));
+      });
+      const players = eligibleStats.map((x: any, index: number) => {
         const profile = profileByUser.get(x.user_id);
         const student = profile?.linked_student_id ? studentById.get(profile.linked_student_id) : null;
         const questions = Number(x.questions_answered || 0);
