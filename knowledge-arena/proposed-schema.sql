@@ -296,7 +296,7 @@ returns setof public.ka_generation_jobs
 language plpgsql
 security definer
 set search_path = public, pg_temp
-as $
+as $$
 declare
   claimed public.ka_generation_jobs;
 begin
@@ -332,7 +332,7 @@ returns uuid
 language plpgsql
 security definer
 set search_path = public, pg_temp
-as $
+as $$
 declare
   question_id uuid;
   option_count integer;
@@ -380,7 +380,7 @@ returns jsonb
 language plpgsql
 security definer
 set search_path = public, pg_temp
-as $
+as $$
 declare
   attempt_id uuid;
   prior public.ka_player_stats;
