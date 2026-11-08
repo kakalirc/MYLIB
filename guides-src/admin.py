@@ -193,6 +193,21 @@ def guide():
         '<b>Danger zone:</b> remove old Audit and Login entries, clear all data, audit logging on or off.',
     ]) + note('Cannot be undone', 'Export a backup before any danger-zone action.', 'warn'))
 
+
+    g.add('knowledgearena', 'Teaching', 'Knowledge Arena content and controls', 'Manage the question supply and availability without changing the existing Question Bank or attendance rewards.', g2(
+        box('Game and subject availability', 'The Knowledge Arena control centre has master switches for games, AI generation and the daily challenge, plus individual game and subject availability controls.'),
+        box('Question generation', 'Queue a job with grade, subject, game, difficulty, language, count and optional topic. Review generation status and published content before relying on it for students.'),
+    ) + g2(
+        box('Daily challenge', 'Publish only when ten suitable Quick Quiz questions are available for each active grade. The challenge is English content and mixes available subjects.'),
+        box('AI budget and reservations', 'Daily and monthly INR limits are shared. Interrupted or uncertain provider calls remain reserved for review; verify actual cost before settling them.'),
+    ) + bullets([
+        'Student game selection is game-specific: Word Master uses English or the selected Language-programme language; Number Quest and Brain Teaser use Mathematics; Science Explorer and Memory Challenge use Science; Quick Quiz follows the selected subject filter, with All meaning no subject restriction.',
+        'Grade selection in Knowledge Arena is a question-matching preference; it does not edit the student’s LIB grade.',
+        'The admin screen is summary-only and does not expose individual answers or question-level student history.',
+        'Knowledge Arena Game XP is separate from attendance XP, levels, badges, streaks and the existing attendance leaderboard.',
+        'A no-published-questions message indicates that eligible published content is unavailable for that game and grade. Check publication, grade labels, subject and game type before changing student settings.',
+    ]) + note('Keep systems separate', 'Do not use the existing Question Bank / Online Assessment tables or workflows as Knowledge Arena storage. Review database and deployment changes separately; the guide does not authorise production changes.', 'warn'))
+
     g.add('quickref', 'Quick reference', 'Quick reference', 'I want to… where do I go?', table(['I want to…', 'Go to'], [
         ['Log a class', 'Class Log'],
         ['Register a new student', 'New registrations (send the form link)'],
