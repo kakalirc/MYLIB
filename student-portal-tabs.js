@@ -10,6 +10,7 @@
   window.__libStudentPortalTabsInstalled = true;
 
   var originalRenderStudentPortal = window.renderStudentPortal;
+  var originalRenderPortalShell = window.renderPortalShell;
   var tabByStudent = Object.create(null);
   var styleId = 'lib-student-portal-tabs-css';
 
@@ -28,16 +29,66 @@
 
   function activeTab() {
     var key = studentKey();
-    return tabByStudent[key] === 'fun' ? 'fun' : 'academics';
+    return tabByStudent[key] === 'fun' || tabByStudent[key] === 'settings' ? tabByStudent[key] : 'academics';
   }
 
   window.setStudentPortalSection = function (tab) {
-    if (tab !== 'academics' && tab !== 'fun') return;
+    if (tab !== 'academics' && tab !== 'fun' && tab !== 'settings') return;
     var key = studentKey();
     if (!key) return;
     tabByStudent[key] = tab;
     window.scrollTo(0, 0);
     if (typeof render === 'function') render();
+  };
+
+
+  function studentSettingsHtml() {
+    return '<section class="student-settings-zone" aria-labelledby="student-settings-heading">'
+      + '<h2 id="student-settings-heading" class="student-settings-title">Account settings</h2>'
+      + '<div class="card"><h2>Change your password</h2>'
+      + (userMsg.changePw ? '<div class="hint" style="color:var(--forest)">' + escapeHtml(userMsg.changePw) + '</div>' : '')
+      + '<div class="narrow-form">'
+      + '<input type="password" autocomplete="current-password" id="curPass" placeholder="Current password">'
+      + '<input type="password" autocomplete="new-password" id="newPass1" placeholder="New password">'
+      + '<input type="password" autocomplete="new-password" id="newPass2" placeholder="Confirm new password">'
+      + '<button class="btn-primary" onclick="changePassword()">Save new password</button>'
+      + '</div></div>' + bioSettingsCardHtml() + '</section>';
+  }
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, function (ch) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+    });
+  }
+
+  if (typeof originalRenderPortalShell === 'function') {
+    window.renderPortalShell = function (bodyHtml) {
+      var result = originalRenderPortalShell.apply(this, arguments);
+      if (typeof currentRole !== 'undefined' && currentRole === 'Student') {
+        Array.prototype.forEach.call(document.querySelectorAll('#app .card'), function (card) {
+          if (card.closest('#student-portal-settings')) return;
+          var heading = card.querySelector('h2');
+          if (!heading) return;
+          var title = heading.textContent.trim().toLowerCase();
+          if (title === 'change your password' || title === 'quick login') card.remove();
+        });
+        Array.prototype.forEach.call(document.querySelectorAll('#app button'), function (button) {
+          if (button.textContent.trim() === 'Change it now') {
+            button.onclick = function () { window.openStudentSettings(); };
+          }
+        });
+      }
+      return result;
+    };
+  }
+
+  window.openStudentSettings = function () {
+    window.setStudentPortalSection('settings');
+    var input = document.getElementById('curPass');
+    if (input) {
+      input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      input.focus();
+    }
   };
 
   function funZoneHtml() {
@@ -72,12 +123,16 @@
     return '<div class="student-portal-section-switcher" role="tablist" aria-label="Student portal sections">'
       + '<button type="button" class="student-portal-section-tab" role="tab" aria-selected="' + (selected === 'academics') + '" aria-controls="student-portal-academics" onclick="setStudentPortalSection(\'academics\')">📚 My Learning</button>'
       + '<button type="button" class="student-portal-section-tab" role="tab" aria-selected="' + (selected === 'fun') + '" aria-controls="student-portal-fun" onclick="setStudentPortalSection(\'fun\')">🎮 Fun Zone</button>'
+      + '<button type="button" class="student-portal-section-tab" role="tab" aria-selected="' + (selected === 'settings') + '" aria-controls="student-portal-settings" onclick="setStudentPortalSection(\'settings\')">⚙️ Settings</button>'
       + '</div>'
       + '<section id="student-portal-academics" role="tabpanel" ' + (selected === 'academics' ? '' : 'hidden') + '>'
       + academicHtml
       + '</section>'
       + '<section id="student-portal-fun" role="tabpanel" ' + (selected === 'fun' ? '' : 'hidden') + '>'
-      + funZoneHtml()
+      + (selected === 'fun' ? funZoneHtml() : '')
+      + '</section>'
+      + '<section id="student-portal-settings" role="tabpanel" ' + (selected === 'settings' ? '' : 'hidden') + '>'
+      + (selected === 'settings' ? studentSettingsHtml() : '')
       + '</section>';
   };
 
