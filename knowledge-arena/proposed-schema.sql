@@ -112,8 +112,8 @@ create table public.ka_generation_jobs (
   model text,
   input_tokens bigint not null default 0,
   output_tokens bigint not null default 0,
-  estimated_cost_usd numeric(12,6) not null default 0,
-  estimated_cost_inr numeric(12,2) not null default 0 check (estimated_cost_inr >= 0),
+  estimated_cost_usd numeric(16,8) not null default 0,
+  estimated_cost_inr numeric(16,6) not null default 0 check (estimated_cost_inr >= 0),
   usd_inr_rate numeric(12,6),
   worker_attempts integer not null default 0 check (worker_attempts >= 0),
   error_code text,
@@ -224,15 +224,16 @@ create table public.ka_ai_usage (
   id uuid primary key default gen_random_uuid(),
   job_id uuid not null references public.ka_generation_jobs(id) on delete restrict,
   status text not null default 'reserved' check (status in ('reserved','settled','review')),
-  reserved_cost_usd numeric(12,6) not null check (reserved_cost_usd >= 0),
-  reserved_cost_inr numeric(12,2) not null check (reserved_cost_inr >= 0),
-  actual_cost_usd numeric(12,6),
-  actual_cost_inr numeric(12,2),
+  reserved_cost_usd numeric(16,8) not null check (reserved_cost_usd >= 0),
+  reserved_cost_inr numeric(16,6) not null check (reserved_cost_inr >= 0),
+  actual_cost_usd numeric(16,8),
+  actual_cost_inr numeric(16,6),
   usd_inr_rate numeric(12,6) not null check (usd_inr_rate > 0),
   input_tokens bigint not null default 0 check (input_tokens >= 0),
   output_tokens bigint not null default 0 check (output_tokens >= 0),
   created_at timestamptz not null default now(),
-  settled_at timestamptz
+  settled_at timestamptz,
+  constraint ka_ai_usage_settled_has_actual_cost check (status <> 'settled' or actual_cost_inr is not null)
 );
 
 create index ka_ai_usage_created_idx on public.ka_ai_usage (created_at desc);
