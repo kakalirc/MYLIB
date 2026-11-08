@@ -405,6 +405,14 @@ begin
          completed_at=now()
    where status='running';
 
+  update public.ka_ai_usage u
+     set status='review'
+   where u.status='reserved'
+     and exists (
+       select 1 from public.ka_generation_jobs j
+       where j.id=u.job_id and j.status='paused' and j.error_code='worker_lease_expired'
+     );
+
   with next_job as (
     select id
     from public.ka_generation_jobs
