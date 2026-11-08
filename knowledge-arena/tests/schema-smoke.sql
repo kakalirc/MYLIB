@@ -1,19 +1,16 @@
 -- Disposable CI-only Knowledge Arena schema smoke test.
 set request.jwt.claim.role = 'service_role';
 
-insert into public.grades(id,name) values
-  ('10000000-0000-0000-0000-000000000001','Class 1'),
-  ('10000000-0000-0000-0000-000000000002','Class 2');
-insert into public.subjects(name) values ('Mathematics'),('Science');
-insert into auth.users(id) values
-  ('20000000-0000-0000-0000-000000000001'),
-  ('20000000-0000-0000-0000-000000000002');
-insert into public.students(id,grade_id) values
-  ('30000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001'),
-  ('30000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000002');
-insert into public.profiles(id,role,linked_student_id) values
-  ('20000000-0000-0000-0000-000000000001','Student','30000000-0000-0000-0000-000000000001'),
-  ('20000000-0000-0000-0000-000000000002','Student','30000000-0000-0000-0000-000000000002');
+insert into public.grades(id,name)
+values ('10000000-0000-0000-0000-000000000002','Class 2');
+insert into auth.users(id)
+values ('20000000-0000-0000-0000-000000000002');
+insert into public.students(id,grade_id) values (
+  '30000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000002'
+);
+insert into public.profiles(id,role,linked_student_id) values (
+  '20000000-0000-0000-0000-000000000002','Student','30000000-0000-0000-0000-000000000002'
+);
 
 update public.ka_settings set daily_challenge_enabled=true, games_enabled=true where id=1;
 
