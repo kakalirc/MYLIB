@@ -112,6 +112,9 @@ create table public.ka_generation_jobs (
   input_tokens bigint not null default 0,
   output_tokens bigint not null default 0,
   estimated_cost_usd numeric(12,6) not null default 0,
+  estimated_cost_inr numeric(12,2) not null default 0 check (estimated_cost_inr >= 0),
+  usd_inr_rate numeric(12,6),
+  worker_attempts integer not null default 0 check (worker_attempts >= 0),
   error_code text,
   error_summary text,
   started_at timestamptz,
@@ -202,10 +205,13 @@ create table public.ka_settings (
   games_enabled boolean not null default true,
   disabled_game_types text[] not null default '{}'::text[],
   disabled_subjects text[] not null default '{}'::text[],
-  daily_ai_budget_usd numeric(10,2) not null default 5 check (daily_ai_budget_usd >= 0),
-  monthly_ai_budget_usd numeric(10,2) not null default 50 check (monthly_ai_budget_usd >= 0),
+  daily_ai_budget_inr numeric(12,2) not null default 100 check (daily_ai_budget_inr >= 0),
+  monthly_ai_budget_inr numeric(12,2) not null default 1000 check (monthly_ai_budget_inr >= 0),
+  worker_lease_until timestamptz,
   updated_at timestamptz not null default now(),
-  updated_by uuid
+  updated_by uuid,
+  constraint ka_settings_daily_budget_not_above_monthly
+    check (daily_ai_budget_inr <= monthly_ai_budget_inr)
 );
 
 insert into public.ka_settings (id) values (1) on conflict (id) do nothing;
@@ -310,13 +316,34 @@ returns setof public.ka_generation_jobs
 language plpgsql
 security definer
 set search_path = public, pg_temp
-as $$
+as $
 declare
   claimed public.ka_generation_jobs;
+  lease_id smallint;
 begin
   if coalesce(auth.role(),'') <> 'service_role' then
     raise exception 'Not authorised';
   end if;
+
+  -- The singleton settings row serialises all workers before they inspect
+  -- shared daily/monthly spend or make a paid provider call.
+  update public.ka_settings
+     set worker_lease_until=now() + interval '10 minutes'
+   where id=1 and (worker_lease_until is null or worker_lease_until <= now())
+  returning id into lease_id;
+  if lease_id is null then
+    return;
+  end if;
+
+  -- A crashed worker leaves its job in running. After the lease has expired,
+  -- pause that job for Admin review rather than silently charging a retry.
+  update public.ka_generation_jobs
+     set status='paused',
+         error_code='worker_lease_expired',
+         error_summary='Paused after the worker lease expired. Review usage before resuming.',
+         completed_at=now()
+   where status='running' and started_at < now() - interval '15 minutes';
+
   with next_job as (
     select id
     from public.ka_generation_jobs
@@ -326,16 +353,25 @@ begin
     for update skip locked
   )
   update public.ka_generation_jobs j
-     set status='running', started_at=now(), error_code=null, error_summary=null
+     set status='running',
+         started_at=now(),
+         worker_attempts=worker_attempts+1,
+         error_code=null,
+         error_summary=null,
+         completed_at=null
     from next_job
    where j.id=next_job.id
   returning j.* into claimed;
+
   if claimed.id is not null then
     return next claimed;
   end if;
+
+  -- No work was found; do not hold the singleton lease unnecessarily.
+  update public.ka_settings set worker_lease_until=null where id=1;
   return;
 end;
-$$;
+$;
 
 create or replace function public.ka_store_generated_question(
   p_job_id uuid,
