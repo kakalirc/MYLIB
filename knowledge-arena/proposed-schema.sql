@@ -43,7 +43,25 @@ begin
   ) then
     raise exception 'Preflight failed: public.profiles.linked_student_id is missing.';
   end if;
-end $$;
+  if to_regclass('public.students') is null
+     or to_regclass('public.grades') is null
+     or to_regclass('public.subjects') is null then
+    raise exception 'Preflight failed: students, grades and subjects tables are required.';
+  end if;
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='students' and column_name='grade_id'
+  ) or not exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='grades' and column_name in ('id','name')
+    group by table_name having count(distinct column_name)=2
+  ) or not exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='subjects' and column_name='name'
+  ) then
+    raise exception 'Preflight failed: required student grade or subject columns are missing.';
+  end if;
+end $;
 
 create table public.ka_questions (
   id uuid primary key default gen_random_uuid(),
