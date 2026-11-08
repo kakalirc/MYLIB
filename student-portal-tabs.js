@@ -76,4 +76,12 @@
       + funZoneHtml()
       + '</section>';
   };
+
+  // If a restored session finished rendering before this file loaded, apply the tabs once now.
+  try {
+    if (typeof isLoggedIn !== 'undefined' && isLoggedIn && typeof loaded !== 'undefined' && loaded
+        && typeof currentRole !== 'undefined' && currentRole === 'Student' && typeof render === 'function') {
+      render();
+    }
+  } catch (e) {}
 })();
