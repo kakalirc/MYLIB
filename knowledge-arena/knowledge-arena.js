@@ -269,18 +269,22 @@
   }
 
   function renderPreviewLeaderboard() {
-    $("leaderboard-rows").innerHTML = [
+    const previewRows = [
       ["1","Preview Player A","860"],["2","Preview Player B","740"],["3","You","0"],["4","Preview Player C","510"]
     ].map((r) => '<div class="leader-row"><b class="rank">' + r[0] + '</b><span>' + r[1] + '</span><b>' + r[2] + '</b></div>').join("");
+    $("leaderboard-rows").innerHTML = previewRows;
+    $("achievement-leaderboard-rows").innerHTML = previewRows;
   }
   async function loadLeaderboard() {
     const data = await api("get_leaderboard");
     leaderboard = data.leaderboard || [];
-    $("leaderboard-rows").innerHTML = leaderboard.length ? leaderboard.map((r) =>
+    const rows = leaderboard.length ? leaderboard.map((r) =>
       '<div class="leader-row ' + (r.is_me ? "you" : "") + '"><b class="rank">' + r.rank +
       '</b><span>' + escapeHtml(r.display_name) + (r.is_me ? "<small>You</small>" : "") +
       '</span><b>' + Number(r.game_xp || 0).toLocaleString("en-IN") + '</b></div>'
     ).join("") : '<p class="muted">No scores yet. Be the first to play!</p>';
+    $("leaderboard-rows").innerHTML = rows;
+    $("achievement-leaderboard-rows").innerHTML = rows;
   }
 
   function prepareAdminLayout() {
@@ -301,7 +305,7 @@
     $("results").classList.add("hidden");
     document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
     if (name === "daily" && role === "Student") loadDailyChallenge();
-    if (name === "leaderboard" && role === "Student" && !previewMode) loadLeaderboard().catch((e) => note(e.message, "warning"));
+    if ((name === "leaderboard" || name === "achievements") && role === "Student" && !previewMode) loadLeaderboard().catch((e) => note(e.message, "warning"));
   }
 
   async function startGame(game, isDaily) {
