@@ -287,6 +287,72 @@ Deno.serve(async (req) => {
       return json(200, { summary: await adminSummary(db) });
     }
 
+    if (action === "get_admin_leadership") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const { data: stats, error: statsError } = await db.from("ka_player_stats")
+        .select("user_id,game_xp,games_played,questions_answered,correct_answers,current_streak,best_streak,last_played_on")
+        .order("game_xp", { ascending: false }).order("games_played", { ascending: false }).limit(100);
+      if (statsError) return errorResponse(503, "Could not load Knowledge Arena leadership data.");
+      const userIds = (stats || []).map((x: any) => x.user_id);
+      const { data: profiles, error: profileError } = userIds.length
+        ? await db.from("profiles").select("id,linked_student_id").eq("role", "Student").in("id", userIds)
+        : { data: [], error: null };
+      if (profileError) return errorResponse(503, "Could not load student profile links.");
+      const studentIds = [...new Set((profiles || []).map((x: any) => x.linked_student_id).filter(Boolean))];
+      const [{ data: students, error: studentError }, { data: awards, error: awardsError }] = await Promise.all([
+        studentIds.length
+          ? db.from("students").select("id,name,student_code,grade_id").in("id", studentIds)
+          : Promise.resolve({ data: [], error: null }),
+        userIds.length
+          ? db.from("ka_player_achievements").select("user_id,achievement_id").in("user_id", userIds)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (studentError || awardsError) return errorResponse(503, "Could not load student leadership details.");
+      const gradeIds = [...new Set((students || []).map((x: any) => x.grade_id).filter(Boolean))];
+      const { data: grades, error: gradeError } = gradeIds.length
+        ? await db.from("grades").select("id,name").in("id", gradeIds)
+        : { data: [], error: null };
+      if (gradeError) return errorResponse(503, "Could not load student grade labels.");
+      const profileByUser = new Map((profiles || []).map((x: any) => [x.id, x]));
+      const studentById = new Map((students || []).map((x: any) => [x.id, x]));
+      const gradeById = new Map((grades || []).map((x: any) => [x.id, x.name]));
+      const awardCounts = new Map<string, number>();
+      for (const award of awards || []) awardCounts.set(award.user_id, (awardCounts.get(award.user_id) || 0) + 1);
+      const players = (stats || []).map((x: any, index: number) => {
+        const profile = profileByUser.get(x.user_id);
+        const student = profile?.linked_student_id ? studentById.get(profile.linked_student_id) : null;
+        const questions = Number(x.questions_answered || 0);
+        return {
+          rank: index + 1,
+          student_name: student?.name || "Linked student",
+          student_code: student?.student_code || "",
+          grade_label: student?.grade_id ? gradeById.get(student.grade_id) || "Grade not set" : "Grade not set",
+          game_xp: Number(x.game_xp || 0),
+          game_level: Math.floor(Number(x.game_xp || 0) / 100) + 1,
+          games_played: Number(x.games_played || 0),
+          questions_answered: questions,
+          correct_answers: Number(x.correct_answers || 0),
+          accuracy_percent: questions ? Math.round((Number(x.correct_answers || 0) / questions) * 1000) / 10 : 0,
+          current_streak: Number(x.current_streak || 0),
+          best_streak: Number(x.best_streak || 0),
+          achievements_earned: awardCounts.get(x.user_id) || 0,
+          last_played_on: x.last_played_on || null,
+        };
+      });
+      return json(200, {
+        summary: {
+          game_players: players.length,
+          game_xp_total: players.reduce((n: number, x: any) => n + x.game_xp, 0),
+          game_achievements_total: players.reduce((n: number, x: any) => n + x.achievements_earned, 0),
+        },
+        players,
+        attendance_rewards: {
+          status: "not_integrated",
+          message: "Attendance XP, levels, badges, streaks and attendance leaderboard remain in the existing LIB attendance system. This dashboard does not recalculate or modify those rewards.",
+        },
+      });
+    }
+
     if (action === "get_admin_options") {
       if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
       const [{ data: grades, error: gradeError }, { data: subjects, error: subjectError }] = await Promise.all([
