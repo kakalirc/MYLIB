@@ -102,8 +102,8 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
     const dayStart = indiaDayStartIso(today);
     const monthStart = indiaDayStartIso(indiaYear + "-" + indiaMonth + "-01");
     const [dayResult, monthResult] = await Promise.all([
-      db.from("ka_generation_jobs").select("estimated_cost_inr").gte("created_at", dayStart),
-      db.from("ka_generation_jobs").select("estimated_cost_inr").gte("created_at", monthStart),
+      db.from("ka_generation_jobs").select("estimated_cost_inr").gte("started_at", dayStart),
+      db.from("ka_generation_jobs").select("estimated_cost_inr").gte("started_at", monthStart),
     ]);
     if (dayResult.error || monthResult.error) throw new Error("Could not calculate shared AI budget usage.");
     const daySpent = (dayResult.data || []).reduce((n: number, x: any) => n + safeNumber(x.estimated_cost_inr), 0);
