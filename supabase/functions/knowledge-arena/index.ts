@@ -78,6 +78,7 @@ Deno.serve(async (req) => {
       const gameType = body.game_type;
       if (!validGameType(gameType)) return errorResponse(400, "Invalid game type.");
       const subject = typeof body.subject === "string" ? body.subject.trim() : "";
+      if (!subject) return errorResponse(400, "Select a subject before loading questions.");
       const difficulty = body.difficulty === undefined ? "" : String(body.difficulty);
       if (difficulty && !["easy", "medium", "hard"].includes(difficulty)) return errorResponse(400, "Invalid difficulty.");
       const { data: settings } = await db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle();
