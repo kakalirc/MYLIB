@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#101d3a">
+  <title>LIB Knowledge Arena</title>
+  <link rel="stylesheet" href="./knowledge-arena.css">
+  <link rel="stylesheet" href="./knowledge-arena-live.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="../"><span class="brand-mark">LIB</span><span>Knowledge Arena<small>LEARN · PLAY · COMPETE</small></span></a>
+    <nav id="main-nav" aria-label="Main navigation">
+      <button class="nav-btn active" data-view="play">Play</button>
+      <button class="nav-btn" data-view="daily">Daily challenge</button>
+      <button class="nav-btn" data-view="progress">My progress</button>
+      <button class="nav-btn" data-view="achievements">Achievements</button>
+      <button class="nav-btn" data-view="leaderboard">Leaderboard</button>
+      <button class="nav-btn hidden" id="admin-nav" data-view="admin">Admin</button>
+    </nav>
+    <span class="demo-pill" id="connection-status">CONNECTING</span>
+  </header>
+
+  <main>
+    <section id="auth-gate" class="gate-card hidden">
+      <div class="gate-symbol">🔐</div>
+      <h1>Open Knowledge Arena from My LIB</h1>
+      <p>Please sign in to your LIB account first. Knowledge Arena uses the same secure student login.</p>
+      <a class="primary" href="../">Go to My LIB <span>→</span></a>
+    </section>
+
+    <section id="access-gate" class="gate-card hidden">
+      <div class="gate-symbol">🛡️</div>
+      <h1>Access not available</h1>
+      <p id="access-message">Knowledge Arena is available to eligible LIB student accounts and authorised administrators.</p>
+      <a class="primary" href="../">Return to My LIB <span>→</span></a>
+    </section>
+
+    <section id="arena-shell" class="hidden">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">YOUR NEXT QUESTION IS WAITING</p>
+          <h1>Make learning<br><em>an adventure.</em></h1>
+          <p id="welcome-line">Build knowledge, sharpen your thinking and celebrate every improvement.</p>
+          <button class="primary" id="start-featured">Start a quick quiz <span>→</span></button>
+        </div>
+        <div class="hero-score">
+          <div class="orbit">✦</div>
+          <span class="muted">YOUR GAME XP</span>
+          <strong id="hero-xp">0</strong>
+          <span class="level" id="hero-level">LEVEL 1 · BEGINNER</span>
+          <div class="progress"><i id="hero-progress" style="width:0%"></i></div>
+          <small id="hero-next-level">100 XP to the next level</small>
+        </div>
+      </section>
+
+      <div id="connection-note" class="preview-note hidden" role="status"></div>
+
+      <section id="view-play" class="view">
+        <div class="section-head">
+          <div><p class="eyebrow">CHOOSE YOUR ADVENTURE</p><h2>Play a game</h2></div>
+          <span class="muted" id="grade-label">Unlimited practice</span>
+        </div>
+        <div class="arena-subject-row">
+          <label for="subject-select">Choose a subject</label>
+          <select id="subject-select" aria-label="Choose a subject"><option value="">Loading subjects…</option></select>
+          <label for="language-select">Question language</label>
+          <select id="language-select" aria-label="Question language">
+            <option value="en">English</option><option value="hi">Hindi</option>
+            <option value="kn">Kannada</option><option value="sa">Sanskrit</option>
+          </select>
+        </div>
+        <div class="filters" id="filters">
+          <button class="filter active" data-filter="all">All games</button>
+          <button class="filter" data-filter="academic">Academic</button>
+          <button class="filter" data-filter="fun">Knowledge &amp; fun</button>
+        </div>
+        <div class="game-grid">
+          <article class="game-card" data-kind="academic"><div class="game-icon blue">Aa</div><span class="tag">LANGUAGE</span><h3>Word Master</h3><p>Vocabulary, spelling and word puzzles.</p><button class="text-btn launch" data-game="word_master">Play now →</button></article>
+          <article class="game-card" data-kind="academic"><div class="game-icon gold">∑</div><span class="tag">MATHEMATICS</span><h3>Number Quest</h3><p>Patterns, calculations and brain training.</p><button class="text-btn launch" data-game="number_quest">Play now →</button></article>
+          <article class="game-card" data-kind="academic"><div class="game-icon mint">⚛</div><span class="tag">SCIENCE</span><h3>Science Explorer</h3><p>Discover how the world works.</p><button class="text-btn launch" data-game="science_explorer">Play now →</button></article>
+          <article class="game-card" data-kind="fun"><div class="game-icon pink">?</div><span class="tag">GENERAL KNOWLEDGE</span><h3>Quick Quiz</h3><p>A mixed quiz to test what you know.</p><button class="text-btn launch" data-game="quick_quiz">Play now →</button></article>
+          <article class="game-card" data-kind="fun"><div class="game-icon violet">◇</div><span class="tag">LOGIC</span><h3>Brain Teaser</h3><p>Reasoning, riddles and clever challenges.</p><button class="text-btn launch" data-game="brain_teaser">Play now →</button></article>
+          <article class="game-card" data-kind="fun"><div class="game-icon orange">◉</div><span class="tag">MEMORY</span><h3>Memory Challenge</h3><p>Study a sequence, then test your recall.</p><button class="text-btn launch" data-game="memory_challenge">Play now →</button></article>
+        </div>
+      </section>
+
+      <section id="view-daily" class="view hidden">
+        <div class="section-head"><div><p class="eyebrow">A FRESH CHALLENGE EACH DAY</p><h2>Daily challenge</h2></div><span class="tag">10 QUESTIONS</span></div>
+        <div class="daily-card">
+          <div class="daily-symbol">✦</div>
+          <div><h3 id="daily-title">Today's Knowledge Mix</h3><p id="daily-description">Ten English Quick Quiz questions selected for your grade, with a mix of available subjects.</p><div class="daily-meta"><span>10 questions</span><span>Unlimited attempts</span><span>Game XP is separate from attendance XP</span></div></div>
+          <button class="primary" id="start-daily">Take challenge →</button>
+        </div>
+        <p id="daily-message" class="muted daily-message" role="status"></p>
+      </section>
+
+      <section id="view-progress" class="view hidden">
+        <div class="section-head"><div><p class="eyebrow">YOUR GAME JOURNEY</p><h2>Game XP &amp; levels</h2></div><span class="tag">SEPARATE FROM ATTENDANCE XP</span></div>
+        <div class="progress-overview panel">
+          <div class="progress-level-copy"><span class="muted">TOTAL GAME XP</span><strong id="progress-total-xp">0</strong><b id="progress-level-name">LEVEL 1 · BEGINNER</b></div>
+          <div class="progress-level-track"><div class="progress"><i id="progress-level-bar" style="width:0%"></i></div><small id="progress-next-level">100 XP to the next level</small></div>
+        </div>
+        <div class="metric-grid progress-metrics">
+          <article class="metric"><small>Games played</small><strong id="progress-games-played">0</strong></article>
+          <article class="metric"><small>Questions answered</small><strong id="progress-questions">0</strong></article>
+          <article class="metric"><small>Correct answers</small><strong id="progress-correct">0</strong></article>
+          <article class="metric"><small>Overall accuracy</small><strong id="progress-accuracy">0%</strong></article>
+          <article class="metric"><small>Current streak</small><strong id="progress-current-streak">0</strong></article>
+          <article class="metric"><small>Best streak</small><strong id="progress-best-streak">0</strong></article>
+        </div>
+        <p class="muted progress-footnote">Game XP is earned in Knowledge Arena only. It does not change your class attendance XP, levels, badges or attendance leaderboard.</p>
+      </section>
+      <section id="view-achievements" class="view hidden">
+        <div class="section-head"><div><p class="eyebrow">EVERY STEP COUNTS</p><h2>Badges &amp; leaderboard</h2></div></div>
+        <h3 class="subsection-title">My badges</h3>
+        <div class="achievement-grid" id="achievement-grid"></div>
+        <div class="section-head leaderboard-subhead"><div><h3>Knowledge Arena leaderboard</h3><p class="muted">Compare Game XP with other LIB students.</p></div></div>
+        <div class="panel">
+          <div class="leader-row header"><span>RANK</span><span>STUDENT</span><span>GAME XP</span></div>
+          <div id="achievement-leaderboard-rows"><p class="muted">Loading leaderboard…</p></div>
+        </div>
+      </section>
+
+      <section id="view-leaderboard" class="view hidden">
+        <div class="section-head"><div><p class="eyebrow">CELEBRATING PROGRESS</p><h2>Leaderboard</h2></div><span class="muted">All LIB students · Game XP</span></div>
+        <div class="panel">
+          <div class="leader-row header"><span>RANK</span><span>STUDENT</span><span>GAME XP</span></div>
+          <div id="leaderboard-rows"><p class="muted">Loading leaderboard…</p></div>
+        </div>
+      </section>
+
+      <section id="view-admin" class="view hidden">
+        <div class="section-head"><div><p class="eyebrow">ADMINISTRATOR VIEW</p><h2>Knowledge Arena control centre</h2></div><span class="tag">ADMIN ONLY</span></div>
+        <p class="muted admin-note">Summary-level reporting only. No individual question, answer, or question-level history is shown here.</p>
+
+        <div class="panel admin-panel leadership-panel">
+          <div class="admin-panel-head"><div><h3>Student Leadership</h3><p class="muted">A read-only overview of Knowledge Arena achievements, kept separate from existing attendance rewards.</p></div><button class="btn-secondary" id="refresh-leadership">Refresh</button></div>
+          <div class="metric-grid leadership-metrics" id="leadership-metrics"><article class="metric"><small>Game players</small><strong>—</strong></article><article class="metric"><small>Total Game XP</small><strong>—</strong></article><article class="metric"><small>Game achievements</small><strong>—</strong></article></div>
+          <div class="leadership-section-head"><h4>Knowledge Arena — Game Rewards</h4><span class="tag">GAME XP ONLY</span></div>
+          <div class="leadership-table-wrap" id="leadership-game-leaders"><p class="muted">Loading student game progress…</p></div>
+          <div class="leadership-section-head"><h4>LIB Attendance Rewards</h4><span class="tag">EXISTING SYSTEM</span></div>
+          <div class="leadership-attendance" id="leadership-attendance"><strong>Attendance rewards remain separate.</strong><p class="muted">The existing LIB attendance XP, levels, badges, streaks and attendance leaderboard are not recalculated or modified here. Their authoritative read-only data source has not yet been connected to this dashboard.</p></div>
+          <p class="admin-feedback" id="leadership-feedback" role="status"></p>
+        </div>
+
+        <div class="metric-grid" id="admin-metrics"></div>
+
+        <div class="panel admin-panel">
+          <h3>Platform controls</h3>
+          <div class="admin-toggle-grid">
+            <label><input type="checkbox" id="admin-games-enabled"> Games enabled</label>
+            <label><input type="checkbox" id="admin-generation-enabled"> AI question generation enabled</label>
+            <label><input type="checkbox" id="admin-daily-enabled"> Daily challenge enabled</label>
+          </div>
+          <div class="admin-disable-grid">
+            <div><h4>Disable individual games</h4><div id="admin-game-switches" class="admin-check-list"></div></div>
+            <div><h4>Disable subjects</h4><div id="admin-subject-switches" class="admin-check-list"></div></div>
+          </div>
+          <p class="muted">Disabling games blocks new attempts for those game types. Disabling a subject removes its questions from student practice and daily challenges.</p>
+          <button class="btn-secondary" id="save-platform-controls">Save platform controls</button>
+          <button class="btn-secondary" id="save-content-controls">Save game and subject availability</button>
+          <span class="admin-feedback" id="content-feedback" role="status"></span>
+          <span class="admin-feedback" id="platform-feedback" role="status"></span>
+        </div>
+
+        <div class="panel admin-panel">
+          <h3>Shared AI budget</h3>
+          <p>One combined budget for all students and all Knowledge Arena AI generation. Costs are tracked in INR using the configured exchange rate.</p>
+          <div class="admin-budget-grid">
+            <label>Daily limit (₹)<input id="admin-daily-budget" type="number" min="0" step="1" value="100"></label>
+            <label>Monthly limit (₹)<input id="admin-monthly-budget" type="number" min="0" step="1" value="1000"></label>
+          </div>
+          <button class="btn-secondary" id="save-ai-budgets">Save AI budgets</button>
+          <span class="admin-feedback" id="budget-feedback" role="status"></span>
+        </div>
+
+        <div class="panel admin-panel">
+          <div class="admin-panel-head"><h3>Publish today's daily challenge</h3><button class="btn-secondary" id="publish-daily">Publish 10 questions per grade</button></div>
+          <p>Publishes only when ten suitable questions are available for each active grade. Students across grades remain on one common Game XP leaderboard.</p>
+          <span class="admin-feedback" id="daily-publish-feedback" role="status"></span>
+        </div>
+
+        <div class="panel admin-panel">
+          <h3>Queue AI question generation</h3>
+          <div class="admin-queue-grid">
+            <label>Grade / class<select id="queue-grade"></select></label>
+            <label>Subject<select id="queue-subject"></select></label>
+            <label>Game<select id="queue-game"><option value="quick_quiz" selected>Quick Quiz</option><option value="word_master">Word Master</option><option value="number_quest">Number Quest</option><option value="science_explorer">Science Explorer</option><option value="brain_teaser">Brain Teaser</option><option value="memory_challenge">Memory Challenge</option></select></label>
+            <label>Difficulty<select id="queue-difficulty"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option></select></label>
+            <label>Question language<select id="queue-language"><option value="en">English</option><option value="hi">Hindi</option><option value="kn">Kannada</option><option value="sa">Sanskrit</option></select></label>
+            <label>Number of questions<input id="queue-count" type="number" min="1" max="20" value="10"></label>
+            <label>Topic (optional)<input id="queue-topic" type="text" maxlength="120" placeholder="Use subject name if blank"></label>
+          </div>
+          <button class="btn-secondary" id="queue-generation">Add generation job</button>
+          <span class="admin-feedback" id="queue-feedback" role="status"></span>
+        </div>
+
+        <div class="panel admin-panel">
+          <div class="admin-panel-head"><h3>Recent generation jobs</h3><button class="text-btn" id="refresh-jobs">Refresh</button></div>
+          <div id="admin-jobs"><p class="muted">Loading jobs…</p></div>
+        </div>
+
+        <div class="panel admin-panel">
+          <h3>AI usage reservations requiring review</h3>
+          <p>Interrupted or uncertain provider calls remain reserved against the shared budget. Confirm the actual provider cost before settling a reservation; the default value remains the conservative reserved amount.</p>
+          <div id="admin-usage-reviews"><p class="muted">Loading AI usage reviews…</p></div>
+        </div>
+
+        <div class="panel admin-panel">
+          <h3>Attendance gamification (read-only integration)</h3>
+          <p>Attendance XP, levels, badges, streaks and the existing attendance leaderboard remain separate. This Knowledge Arena page does not recalculate or modify attendance rewards.</p>
+          <div class="status-line"><span class="status-dot amber"></span> Existing attendance summary integration remains a separate follow-up.</div>
+        </div>
+      </section>
+
+      <section id="quiz" class="quiz-panel hidden" aria-live="polite">
+        <div class="quiz-top"><button class="text-btn" id="quit-quiz">← Exit game</button><span id="quiz-count">QUESTION 1 OF 10</span></div>
+        <div class="quiz-progress"><i id="quiz-progress"></i></div>
+        <p class="eyebrow" id="quiz-category">GENERAL KNOWLEDGE</p>
+        <div id="memory-instruction" class="memory-instruction hidden">Memorise this carefully. Your options will appear in a moment.</div>
+        <h2 id="quiz-question">Loading question…</h2>
+        <div id="answers" class="answer-list"></div>
+        <p id="quiz-feedback" class="feedback" aria-live="polite"></p>
+        <button class="primary hidden" id="next-question">Next question →</button>
+      </section>
+
+      <section id="results" class="results hidden">
+        <div class="result-star">✦</div><p class="eyebrow">CHALLENGE COMPLETE</p>
+        <h2 id="result-title">Well played!</h2><strong id="result-score">0 / 10</strong>
+        <p id="result-message">Every game is a chance to learn.</p>
+        <div id="result-review" class="result-review"></div>
+        <button class="primary" id="back-to-games">Back to games</button>
+      </section>
+    </section>
+  </main>
+
+  <footer>LIB Education <span>Knowledge Arena · Game XP is separate from attendance rewards</span></footer>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="./knowledge-arena.js"></script>
+</body>
+</html>
