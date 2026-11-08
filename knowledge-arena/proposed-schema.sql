@@ -328,7 +328,7 @@ begin
   -- The singleton settings row serialises all workers before they inspect
   -- shared daily/monthly spend or make a paid provider call.
   update public.ka_settings
-     set worker_lease_until=now() + interval '10 minutes'
+     set worker_lease_until=now() + interval '30 minutes'
    where id=1 and (worker_lease_until is null or worker_lease_until <= now())
   returning id into lease_id;
   if lease_id is null then
@@ -342,7 +342,7 @@ begin
          error_code='worker_lease_expired',
          error_summary='Paused after the worker lease expired. Review usage before resuming.',
          completed_at=now()
-   where status='running' and started_at < now() - interval '15 minutes';
+   where status='running' and started_at < now() - interval '35 minutes';
 
   with next_job as (
     select id
