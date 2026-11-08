@@ -40,7 +40,7 @@
   };
 
   function funZoneHtml() {
-    var arenaUrl = new URL('knowledge-arena/knowledge-arena.html', document.baseURI).href;
+    var arenaUrl = new URL('knowledge-arena/knowledge-arena.html?view=student', document.baseURI).href;
     return '<section class="student-fun-zone" aria-labelledby="student-fun-heading">'
       + '<div class="student-fun-hero">'
       + '<p class="student-fun-eyebrow">A space for curiosity and play</p>'
