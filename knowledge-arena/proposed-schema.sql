@@ -363,13 +363,14 @@ begin
     return;
   end if;
 
-  -- A job is paused for Admin review only after its lease has expired.
+  -- Once a new worker acquires the expired singleton lease, any still-running
+  -- job belongs to the previous worker and must be paused before another is claimed.
   update public.ka_generation_jobs
      set status='paused',
          error_code='worker_lease_expired',
-         error_summary='Paused after the worker lease expired. Review reserved AI usage before resuming.',
+         error_summary='Paused after the previous worker lease expired. Review reserved AI usage before resuming.',
          completed_at=now()
-   where status='running' and started_at < now() - interval '11 minutes';
+   where status='running';
 
   with next_job as (
     select id
@@ -453,7 +454,6 @@ declare
   grade_row record;
   question_ids uuid[];
   challenge_id uuid;
-  target_grade text;
   published_grades text[] := '{}'::text[];
   skipped_grades text[] := '{}'::text[];
   disabled_game_types text[] := '{}'::text[];
@@ -481,7 +481,6 @@ begin
     where p.role='Student' and p.linked_student_id is not null
     order by 1
   loop
-    target_grade := grade_row.grade_label;
     select array_agg(picked.id order by picked.priority, picked.subject_rank, picked.tie_break)
       into question_ids
     from (
@@ -496,7 +495,9 @@ begin
                  order by md5(q.id::text || p_challenge_date::text)
                ) as subject_rank
         from public.ka_questions q
-        where q.status='published' and q.game_type='quick_quiz' and q.grade_label=target_grade
+        where q.status='published' and q.game_type='quick_quiz' and q.grade_label=grade_row.grade_label
+          and not (q.game_type = any(disabled_game_types))
+          and not (q.subject = any(disabled_subjects))
       ) candidates
       order by case when candidates.subject_rank <= 2 then 0 else 1 end,
                candidates.subject_rank,
@@ -504,30 +505,6 @@ begin
       limit 10
     ) picked;
 
-    if coalesce(cardinality(question_ids),0) <> 10 and target_grade <> 'General' then
-      target_grade := 'General';
-      select array_agg(picked.id order by picked.priority, picked.subject_rank, picked.tie_break)
-        into question_ids
-      from (
-        select candidates.id,
-               case when candidates.subject_rank <= 2 then 0 else 1 end as priority,
-               candidates.subject_rank,
-               md5(candidates.id::text || p_challenge_date::text) as tie_break
-        from (
-          select q.id, q.subject,
-                 row_number() over (
-                   partition by q.subject
-                   order by md5(q.id::text || p_challenge_date::text)
-                 ) as subject_rank
-          from public.ka_questions q
-          where q.status='published' and q.game_type='quick_quiz' and q.grade_label='General'
-        ) candidates
-        order by case when candidates.subject_rank <= 2 then 0 else 1 end,
-                 candidates.subject_rank,
-                 md5(candidates.id::text || p_challenge_date::text)
-        limit 10
-      ) picked;
-    end if;
 
     if coalesce(cardinality(question_ids),0) <> 10 then
       skipped_grades := array_append(skipped_grades,grade_row.grade_label);
@@ -855,11 +832,11 @@ grant execute on function public.ka_admin_summary() to authenticated;
 commit;
 
 -- IMPORTANT REVIEW ITEMS BEFORE THIS DRAFT CAN BE PROMOTED TO A MIGRATION:
--- 1. Confirm actual profiles.role values and that Student is the exact role label.
--- 2. Confirm linked_student_id is populated for every student login.
--- 3. Confirm profiles.username is safe to show on the common leaderboard.
--- 4. Review whether the common leaderboard should expose display names or aliases.
--- 5. Finalise grade/class targeting and daily challenge scoring/XP rules.
--- 6. Add server-side API and generation workers before granting any write path.
--- 7. Test all RLS as Student, Admin, Teacher, and unauthenticated users in staging.
--- 8. Verify that the migration changes only the new ka_* objects.
+-- 1. Re-run the preflight against the exact production schema and verify no ka_* objects exist.
+-- 2. Confirm role labels, linked-student coverage, grade names and subject names.
+-- 3. Confirm the pseudonymous leaderboard policy and the 100-XP daily cap.
+-- 4. Verify worker token lease, heartbeat/recovery and reservation-ledger behaviour.
+-- 5. Test grade-specific daily challenge publication, including the <10-question skip case.
+-- 6. Review all RLS/grants as Student, Admin, Teacher and unauthenticated users.
+-- 7. Confirm only new ka_* objects are created or granted; do not change existing LIB grants.
+-- 8. Keep generation and daily challenge switches disabled for initial schema installation.
