@@ -635,16 +635,23 @@
     $("admin-monthly-budget").value = settings.monthly_ai_budget_inr == null ? 1000 : settings.monthly_ai_budget_inr;
     const grades = adminOptions && adminOptions.grades ? adminOptions.grades : a.grades || [];
     const subjects = adminOptions && adminOptions.subjects ? adminOptions.subjects : a.subjects || [];
+    // The catalogue can contain the same subject once per grade/language offering.
+    // Platform subject controls are global, so render each normalized subject only once.
+    const uniqueSubjects = [...new Map(subjects
+      .map((subject) => String(subject || "").trim())
+      .filter(Boolean)
+      .map((subject) => [subject.toLocaleLowerCase(), subject])).values()]
+      .sort((left, right) => left.localeCompare(right));
     $("queue-grade").innerHTML = [...new Set(["General", ...grades])].map((x) => '<option value="' + escapeHtml(x) + '">' + escapeHtml(x) + '</option>').join("");
-    $("queue-subject").innerHTML = subjects.map((x) => '<option value="' + escapeHtml(x) + '">' + escapeHtml(x) + '</option>').join("");
+    $("queue-subject").innerHTML = uniqueSubjects.map((x) => '<option value="' + escapeHtml(x) + '">' + escapeHtml(x) + '</option>').join("");
     const disabledGames = new Set(settings.disabled_game_types || []);
-    const disabledSubjects = new Set(settings.disabled_subjects || []);
+    const disabledSubjects = new Set((settings.disabled_subjects || []).map((subject) => String(subject || "").trim().toLocaleLowerCase()));
     const gameTypes = adminOptions && adminOptions.game_types ? adminOptions.game_types : Object.keys(GAME_NAMES);
     $("admin-game-switches").innerHTML = gameTypes.map((id) =>
       '<label><input type="checkbox" data-disable-game="' + escapeHtml(id) + '" ' + (disabledGames.has(id) ? 'checked' : '') + '> ' + escapeHtml(GAME_NAMES[id] || id) + '</label>'
     ).join("");
-    $("admin-subject-switches").innerHTML = subjects.map((subject) =>
-      '<label><input type="checkbox" data-disable-subject="' + escapeHtml(subject) + '" ' + (disabledSubjects.has(subject) ? 'checked' : '') + '> ' + escapeHtml(subject) + '</label>'
+    $("admin-subject-switches").innerHTML = uniqueSubjects.map((subject) =>
+      '<label><input type="checkbox" data-disable-subject="' + escapeHtml(subject) + '" ' + (disabledSubjects.has(subject.toLocaleLowerCase()) ? 'checked' : '') + '> ' + escapeHtml(subject) + '</label>'
     ).join("");
     renderJobs();
     renderUsageReviews();
