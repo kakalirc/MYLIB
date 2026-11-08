@@ -6,7 +6,9 @@ on:
       - "supabase/functions/knowledge-arena/**"
       - "supabase/functions/knowledge-arena-worker/**"
       - "supabase/functions/_shared/knowledge-arena.ts"
-      - "knowledge-arena/proposed-schema.sql"
+      - "knowledge-arena/**"
+      - "student-portal-tabs.js"
+      - "student-portal-tabs.css"
       - ".github/workflows/knowledge-arena-check.yml"
   push:
     branches:
@@ -15,7 +17,9 @@ on:
       - "supabase/functions/knowledge-arena/**"
       - "supabase/functions/knowledge-arena-worker/**"
       - "supabase/functions/_shared/knowledge-arena.ts"
-      - "knowledge-arena/proposed-schema.sql"
+      - "knowledge-arena/**"
+      - "student-portal-tabs.js"
+      - "student-portal-tabs.css"
       - ".github/workflows/knowledge-arena-check.yml"
 
 permissions:
@@ -32,7 +36,11 @@ jobs:
         uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - name: Type check student/Admin API
+      - name: Type check Student/Admin API
         run: deno check supabase/functions/knowledge-arena/index.ts
       - name: Type check generation worker
         run: deno check supabase/functions/knowledge-arena-worker/index.ts
+      - name: Parse browser JavaScript
+        run: |
+          node --check knowledge-arena/knowledge-arena.js
+          node --check student-portal-tabs.js
