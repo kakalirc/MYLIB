@@ -1,5 +1,9 @@
 (() => {
   const $ = (id) => document.getElementById(id);
+  if (new URLSearchParams(window.location.search).get('view') === 'student') {
+    const adminNav = document.querySelector('.nav-btn[data-view="admin"]');
+    if (adminNav) adminNav.remove();
+  }
   const views = ['play','daily','achievements','leaderboard','admin'];
   let currentGame = 'Quick Quiz', questions = [], index = 0, score = 0, answered = false, dailyMode = false, xp = 120;
   const bank = [
