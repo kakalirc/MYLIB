@@ -127,5 +127,11 @@ begin
   if has_table_privilege('authenticated','public.ka_questions','INSERT') then
     raise exception 'Authenticated role must not insert questions directly.';
   end if;
+  if not has_table_privilege('service_role','public.ka_ai_usage','INSERT') then
+    raise exception 'Service role must be able to reserve AI usage.';
+  end if;
+  if not has_table_privilege('service_role','public.ka_generation_jobs','UPDATE') then
+    raise exception 'Service role must be able to update generation jobs.';
+  end if;
 end
 $$;
