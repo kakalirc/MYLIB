@@ -4,13 +4,6 @@ const MODEL = Deno.env.get("KA_ANTHROPIC_MODEL") || "claude-haiku-4-5";
 const MAX_BATCH = 20;
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type, x-ka-worker-secret", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 
-function constantTimeEqual(a: string, b: string) {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
 async function anthropic(apiKey: string, system: string, prompt: string, maxTokens: number) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -78,11 +71,15 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
   }
   if (!settings.generation_enabled) return { skipped: "generation_paused" };
 
-  const inputRate = Number(Deno.env.get("KA_INPUT_USD_PER_MILLION"));
-  const outputRate = Number(Deno.env.get("KA_OUTPUT_USD_PER_MILLION"));
-  const usdInrRate = Number(Deno.env.get("KA_USD_INR_RATE"));
+  const { data: pricing, error: pricingError } = await db.from("ka_settings")
+    .select("ai_input_usd_per_million,ai_output_usd_per_million,usd_inr_rate")
+    .eq("id", 1).maybeSingle();
+  if (pricingError || !pricing) throw new Error("AI pricing and FX configuration is unavailable; generation stopped safely.");
+  const inputRate = Number(pricing.ai_input_usd_per_million);
+  const outputRate = Number(pricing.ai_output_usd_per_million);
+  const usdInrRate = Number(pricing.usd_inr_rate);
   if (![inputRate, outputRate, usdInrRate].every(Number.isFinite) || inputRate <= 0 || outputRate <= 0 || usdInrRate <= 0) {
-    throw new Error("AI token prices and KA_USD_INR_RATE are not configured; generation stopped safely.");
+    throw new Error("AI token prices and USD/INR rate are invalid; generation stopped safely.");
   }
   const { data: ai, error: aiError } = await db.from("ai_settings").select("api_key,master_enabled").eq("id", 1).maybeSingle();
   if (aiError || !ai?.api_key || ai.master_enabled === false) throw new Error("AI is unavailable or disabled in LIB AI Settings.");
@@ -302,11 +299,12 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return errorResponse(405, "Use POST.");
-  const expected = Deno.env.get("KA_WORKER_SECRET") || "";
   const supplied = req.headers.get("x-ka-worker-secret") || "";
-  if (!expected || !constantTimeEqual(expected, supplied)) return errorResponse(401, "Worker authentication failed.");
+  if (!supplied) return errorResponse(401, "Worker authentication failed.");
   try {
     const db = adminClient();
+    const { data: authorised, error: authError } = await db.rpc("ka_verify_worker_secret", { p_supplied: supplied });
+    if (authError || authorised !== true) return errorResponse(401, "Worker authentication failed.");
     let requestBody: Record<string, unknown> = {};
     try { requestBody = await req.json(); } catch { requestBody = {}; }
     if (requestBody.action === "publish_daily_challenges") {
