@@ -312,7 +312,7 @@
       const subject = $("subject-select").value;
       if (!subject) { note("Please choose a subject first.", "warning"); return; }
       try {
-        const data = await api("get_questions", { game_type: game, subject, limit: 10 });
+        const data = await api("get_questions", { game_type: game, subject, language_code: $("language-select").value, limit: 10 });
         currentQuestions = (data.questions || []).sort(() => Math.random() - 0.5);
         if (!currentQuestions.length) {
           note("There are no published questions for " + GAME_NAMES[game] + " in " + subject + " yet. Please try another subject or return later.", "info");
