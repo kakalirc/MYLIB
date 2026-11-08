@@ -316,7 +316,13 @@ Deno.serve(async (req) => {
         patch.daily_ai_budget_inr = daily; patch.monthly_ai_budget_inr = monthly;
       } else if (control === "set_disabled_game_types" || control === "set_disabled_subjects") {
         if (!Array.isArray(body.values) || body.values.some((x) => typeof x !== "string" || x.length > 100)) return errorResponse(400, "values must be a list of strings.");
-        patch[control === "set_disabled_game_types" ? "disabled_game_types" : "disabled_subjects"] = [...new Set(body.values as string[])];
+        const values = [...new Set(body.values as string[])];
+        if (control === "set_disabled_game_types" && values.some((x) => !validGameType(x))) return errorResponse(400, "One or more game types are invalid.");
+        if (control === "set_disabled_subjects" && values.length) {
+          const { data: knownSubjects, error: subjectError } = await db.from("subjects").select("name").in("name", values);
+          if (subjectError || (knownSubjects || []).length !== values.length) return errorResponse(400, "One or more subjects are invalid.");
+        }
+        patch[control === "set_disabled_game_types" ? "disabled_game_types" : "disabled_subjects"] = values;
       } else if (control === "pause_job" || control === "resume_job") {
         if (typeof body.job_id !== "string") return errorResponse(400, "job_id is required.");
         const targetStatus = control === "pause_job" ? "paused" : "queued";
