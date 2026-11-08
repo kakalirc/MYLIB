@@ -281,13 +281,9 @@ using (
 create policy ka_player_achievements_owner_read on public.ka_player_achievements
 for select to authenticated using (user_id=auth.uid());
 
-grant select on public.ka_questions to authenticated;
-grant select on public.ka_attempts to authenticated;
-grant select on public.ka_daily_challenges to authenticated;
-grant select on public.ka_daily_challenge_items to authenticated;
-grant select on public.ka_player_stats to authenticated;
-grant select on public.ka_achievements to authenticated;
-grant select on public.ka_player_achievements to authenticated;
+-- Browser clients use the authenticated Edge Function API only. Do not grant
+-- direct table reads: this prevents bypassing game/subject switches and keeps
+-- the question/attempt surface behind one authorization and validation layer.
 
 
 -- Trusted worker-only RPCs. These are deliberately unavailable to browser roles.
