@@ -1,0 +1,38 @@
+.hidden{display:none!important}
+.gate-card{max-width:620px;margin:9vh auto;background:#fff;border:1px solid var(--line);border-radius:20px;padding:36px;text-align:center;box-shadow:0 12px 36px #101d3a0d}
+.gate-symbol{font-size:36px;margin-bottom:12px}.gate-card h1{font:800 26px Manrope;margin:0 0 12px;color:var(--navy)}.gate-card p{color:var(--muted);line-height:1.6;margin:0 0 22px}
+.gate-card .primary{display:inline-block;text-decoration:none}
+#connection-status[data-tone=success]{color:#26734e;border-color:#b8ddc9;background:#effaf3}
+#connection-status[data-tone=warning]{color:#8a641b;border-color:#ead9ad;background:#fff9e9}
+#connection-status[data-tone=danger]{color:#a33b31;border-color:#e7c0bc;background:#fff2f0}
+#connection-note[data-tone=warning]{background:#fff8e8;border-color:#eddaa8;color:#73591f}
+#connection-note[data-tone=danger]{background:#fff2f0;border-color:#edc4bf;color:#8e3830}
+.arena-subject-row{display:flex;align-items:center;gap:12px;margin:0 0 16px;padding:13px 15px;background:#fff;border:1px solid var(--line);border-radius:12px}
+.arena-subject-row label{font-size:12px;font-weight:700;color:#5f6b80;white-space:nowrap}
+.arena-subject-row select,.admin-queue-grid select,.admin-budget-grid input,.admin-queue-grid input{width:100%;min-width:0;border:1px solid #dce3ee;border-radius:8px;background:#fff;padding:10px 11px;color:var(--ink);font:500 13px 'DM Sans',sans-serif}
+.arena-subject-row select{max-width:320px}
+.admin-panel{margin-top:16px;padding:20px}
+.admin-panel h3{font:700 16px Manrope;margin:0 0 12px;color:var(--navy)}
+.admin-panel p{line-height:1.6}
+.admin-toggle-grid,.admin-budget-grid,.admin-queue-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px;margin:14px 0}
+.admin-toggle-grid label{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:#43516a}
+.admin-toggle-grid input{width:17px;height:17px;accent-color:#4165c4}
+.admin-budget-grid{grid-template-columns:repeat(2,minmax(0,1fr));max-width:620px}
+.admin-budget-grid label,.admin-queue-grid label{display:flex;flex-direction:column;gap:6px;font-size:11px;font-weight:700;color:#64718a}
+.admin-queue-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+.btn-secondary{border:1px solid #cbd5e5;border-radius:9px;background:#f7f9fd;color:#344c82;padding:10px 14px;font:700 12px 'DM Sans',sans-serif;cursor:pointer}
+.btn-secondary:hover{background:#edf2ff}
+.admin-feedback{display:inline-block;margin-left:10px;color:#5b6b82;font-size:11px}
+.admin-panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.admin-job-list{display:grid;gap:8px;margin-top:12px}
+.admin-job{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#fbfcff}
+.admin-job b,.admin-job small{display:block}.admin-job b{font-size:12px;color:#34415a}.admin-job small{font-size:10px;color:#77849a;margin-top:4px}.admin-job .job-error{color:#a34a40}
+.job-actions{display:flex;gap:8px;flex-shrink:0}
+.daily-message{min-height:18px;margin-top:12px}
+.memory-instruction{padding:10px 13px;border-radius:9px;background:#fff4d9;color:#805f1e;font-size:12px;font-weight:700;margin:0 0 12px}
+.answer.selected{border-color:#547de9;background:#edf2ff}
+.result-review{max-width:620px;margin:18px auto;text-align:left}
+.result-review-item{padding:12px 14px;border:1px solid var(--line);border-radius:10px;margin:8px 0;background:#fbfcff}
+.result-review-item b{font-size:12px;color:#3e5d9c}.result-review-item p{font-size:11px;line-height:1.5;margin:6px 0 0}
+@media(max-width:760px){.admin-toggle-grid,.admin-queue-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-budget-grid{grid-template-columns:1fr}}
+@media(max-width:560px){.gate-card{margin:6vh 0;padding:26px 18px}.arena-subject-row{align-items:flex-start;flex-direction:column}.arena-subject-row select{max-width:none}.admin-toggle-grid,.admin-queue-grid{grid-template-columns:1fr}.admin-panel-head{align-items:flex-start;flex-direction:column}.admin-feedback{display:block;margin:10px 0 0}.admin-job{align-items:flex-start}.leader-row{grid-template-columns:48px 1fr 76px}}
