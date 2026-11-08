@@ -24,7 +24,8 @@
     {subject:"Geography",prompt:"Which imaginary line divides Earth into Northern and Southern Hemispheres?",options:["Prime Meridian","Equator","Tropic of Cancer","Arctic Circle"],correct_option:1,explanation:"The Equator is at 0 degrees latitude."}
   ];
 
-  let client = null, session = null, role = "", gradeLabel = "", lockedOut = false;
+  let client = null, session = null, role = "", gradeLabel = "", assignedGradeLabel = "", lockedOut = false;
+  const LANGUAGE_OPTIONS = { en: "English", hi: "Hindi", kn: "Kannada", sa: "Sanskrit" };
   let previewMode = false, previewReason = "";
   let catalog = null, progress = null, leaderboard = [], dailyChallenge = null;
   let currentView = "play", currentGame = "quick_quiz", currentQuestions = [];
@@ -100,6 +101,7 @@
       games: Object.keys(GAME_NAMES).map((id) => ({ id, name: GAME_NAMES[id] })),
       subjects: ["General Knowledge","Science","Mathematics","Language","Geography","Logic"],
       grade_label: "Preview",
+      preferred_language_code: "en",
       progress: { game_xp: 0, games_played: 0, questions_answered: 0, correct_answers: 0, current_streak: 0, best_streak: 0 }
     };
     progress = { stats: catalog.progress, achievements: [] };
@@ -154,6 +156,7 @@
       const context = await api("get_context");
       role = context.role || "";
       gradeLabel = context.grade_label || "";
+      assignedGradeLabel = gradeLabel;
       if (role !== "Student" && role !== "Admin") {
         showGate("access", "Only linked LIB student accounts and authorised administrators can use Knowledge Arena.");
         setStatus("ACCESS DENIED", "danger");
@@ -198,8 +201,11 @@
     setStatus("CONNECTING", "neutral");
     try {
       catalog = await api("get_catalog");
+      if (catalog.grade_label) gradeLabel = catalog.grade_label;
       progress = await api("get_my_progress");
       populateSubjects();
+      configureLanguageChoice();
+      configureTinaGradeChoice();
       const enabledGames = new Set((catalog.games || []).map((game) => game.id));
       document.querySelectorAll(".game-card").forEach((card) => {
         const launch = card.querySelector(".launch");
@@ -223,12 +229,75 @@
     }
   }
 
+  function configureTinaGradeChoice() {
+    const isTinaStudent = assignedGradeLabel.trim().toLocaleLowerCase() === "tina student";
+    $("tina-grade-choice").classList.toggle("hidden", !isTinaStudent);
+    if (!isTinaStudent) return;
+    const select = $("tina-grade-select");
+    const options = Array.isArray(catalog?.available_grade_options) ? catalog.available_grade_options : [];
+    select.innerHTML = '<option value="">Select your grade</option>' + options.map((name) =>
+      '<option value="' + escapeHtml(name) + '">' + escapeHtml(name) + '</option>').join("");
+    select.value = catalog?.selected_grade_label || "";
+    $("academic-subject-choice").classList.toggle("hidden", !select.value);
+    $("language-subject-choice").classList.add("hidden");
+    if (!select.value) note("Please select your school grade before starting a game.", "info");
+  }
+
+  async function saveTinaGradePreference() {
+    if (assignedGradeLabel.trim().toLocaleLowerCase() !== "tina student" || previewMode) return;
+    const select = $("tina-grade-select");
+    const previous = catalog?.selected_grade_label || "";
+    select.disabled = true;
+    try {
+      const result = await api("set_grade_preference", { grade_label: select.value });
+      catalog.selected_grade_label = result.grade_label;
+      catalog.grade_label = result.grade_label;
+      gradeLabel = result.grade_label;
+      $("academic-subject-choice").classList.remove("hidden");
+      $("grade-label").textContent = "Your selected grade: " + gradeLabel;
+      $("welcome-line").textContent = "Your selected grade: " + gradeLabel + ". Learn, play and build your own Game XP.";
+      note("Your grade is saved as " + gradeLabel + ". You can change it any time.", "success");
+    } catch (error) {
+      select.value = previous;
+      note("Could not save your grade: " + error.message, "warning");
+    } finally { select.disabled = false; }
+  }
+
+  function configureLanguageChoice() {
+    const isLanguageStudent = gradeLabel.trim().toLocaleLowerCase() === "language";
+    $("academic-subject-choice").classList.toggle("hidden", isLanguageStudent);
+    $("language-subject-choice").classList.toggle("hidden", !isLanguageStudent);
+    if (isLanguageStudent) {
+      $("language-select").value = LANGUAGE_OPTIONS[catalog?.preferred_language_code] ? catalog.preferred_language_code : "en";
+    }
+  }
+
+  async function savePreferredLanguage() {
+    if (gradeLabel.trim().toLocaleLowerCase() !== "language" || previewMode) return;
+    const select = $("language-select");
+    const previous = catalog?.preferred_language_code || "en";
+    select.disabled = true;
+    try {
+      const result = await api("set_language_preference", { language_code: select.value });
+      catalog.preferred_language_code = result.language_code;
+      note("Your preferred language is saved as " + LANGUAGE_OPTIONS[result.language_code] + ".", "success");
+    } catch (error) {
+      select.value = previous;
+      note("Could not save your language preference: " + error.message, "warning");
+    } finally { select.disabled = false; }
+  }
+
   function populateSubjects() {
     const select = $("subject-select");
     if (!select) return;
-    const subjects = catalog && catalog.subjects ? catalog.subjects : [];
-    select.innerHTML = subjects.length
-      ? subjects.map((name) => '<option value="' + escapeHtml(name) + '">' + escapeHtml(name) + '</option>').join("")
+    const subjects = catalog && Array.isArray(catalog.subjects) ? catalog.subjects : [];
+    // Protect the dropdown from duplicate subject rows and case/spacing variants.
+    const uniqueSubjects = [...new Map(subjects
+      .map((name) => String(name || "").trim())
+      .filter(Boolean)
+      .map((name) => [name.toLocaleLowerCase(), name])).values()];
+    select.innerHTML = uniqueSubjects.length
+      ? uniqueSubjects.map((name) => '<option value="' + escapeHtml(name) + '">' + escapeHtml(name) + '</option>').join("")
       : '<option value="">No subjects available</option>';
   }
 
@@ -333,10 +402,15 @@
       challengeId = dailyChallenge.challenge.id;
       currentGame = "quick_quiz";
     } else {
-      const subject = $("subject-select").value;
-      if (!subject) { note("Please choose a subject first.", "warning"); return; }
+      if (assignedGradeLabel.trim().toLocaleLowerCase() === "tina student" && !catalog?.selected_grade_label) {
+        note("Please select your school grade first.", "warning"); return;
+      }
+      const isLanguageStudent = assignedGradeLabel.trim().toLocaleLowerCase() === "language";
+      const languageCode = isLanguageStudent ? $("language-select").value : "en";
+      const subject = isLanguageStudent ? LANGUAGE_OPTIONS[languageCode] : $("subject-select").value;
+      if (!subject) { note(isLanguageStudent ? "Please choose a language first." : "Please choose a subject first.", "warning"); return; }
       try {
-        const data = await api("get_questions", { game_type: game, subject, language_code: $("language-select").value, limit: 10 });
+        const data = await api("get_questions", { game_type: game, subject, language_code: languageCode, limit: 10 });
         currentQuestions = (data.questions || []).sort(() => Math.random() - 0.5);
         if (!currentQuestions.length) {
           note("There are no published questions for " + GAME_NAMES[game] + " in " + subject + " yet. Please try another subject or return later.", "info");
@@ -757,6 +831,8 @@
     document.querySelectorAll(".game-card").forEach((card) => card.classList.toggle("hidden",
       button.dataset.filter !== "all" && card.dataset.kind !== button.dataset.filter));
   });
+  $("language-select").addEventListener("change", savePreferredLanguage);
+  $("tina-grade-select").addEventListener("change", saveTinaGradePreference);
   $("start-featured").addEventListener("click", () => startGame("quick_quiz", false));
   $("start-daily").addEventListener("click", () => startGame("quick_quiz", true));
   $("quit-quiz").addEventListener("click", () => {

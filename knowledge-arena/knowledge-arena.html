@@ -62,14 +62,24 @@
           <div><p class="eyebrow">CHOOSE YOUR ADVENTURE</p><h2>Play a game</h2></div>
           <span class="muted" id="grade-label">Unlimited practice</span>
         </div>
+        <div id="tina-grade-choice" class="subject-choice hidden">
+          <label for="tina-grade-select">Choose your school grade</label>
+          <select id="tina-grade-select" aria-label="Choose your school grade"><option value="">Select your grade</option></select>
+          <small class="muted">We’ll use this grade to choose suitable questions. Your choice is saved for next time.</small>
+        </div>
         <div class="arena-subject-row">
-          <label for="subject-select">Choose a subject</label>
-          <select id="subject-select" aria-label="Choose a subject"><option value="">Loading subjects…</option></select>
-          <label for="language-select">Question language</label>
-          <select id="language-select" aria-label="Question language">
-            <option value="en">English</option><option value="hi">Hindi</option>
-            <option value="kn">Kannada</option><option value="sa">Sanskrit</option>
-          </select>
+          <div id="academic-subject-choice" class="subject-choice">
+            <label for="subject-select">Choose a subject</label>
+            <select id="subject-select" aria-label="Choose a subject"><option value="">Loading subjects…</option></select>
+          </div>
+          <div id="language-subject-choice" class="subject-choice hidden">
+            <label for="language-select">Choose your language</label>
+            <select id="language-select" aria-label="Choose your language">
+              <option value="en">English</option><option value="hi">Hindi</option>
+              <option value="kn">Kannada</option><option value="sa">Sanskrit</option>
+            </select>
+            <small class="muted">Your choice is saved automatically for your next visit.</small>
+          </div>
         </div>
         <div class="filters" id="filters">
           <button class="filter active" data-filter="all">All games</button>
