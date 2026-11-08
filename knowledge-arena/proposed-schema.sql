@@ -52,6 +52,18 @@ begin
      or to_regclass('public.subjects') is null then
     raise exception 'Preflight failed: students, grades and subjects tables are required.';
   end if;
+  if not exists (select 1 from public.profiles where role='Student') then
+    raise exception 'Preflight failed: no exact Student role records were found.';
+  end if;
+  if exists (
+    select 1 from public.profiles p
+    where p.role='Student'
+      and (p.linked_student_id is null or not exists (
+        select 1 from public.students st where st.id=p.linked_student_id
+      ))
+  ) then
+    raise exception 'Preflight failed: one or more Student profiles have no linked student record.';
+  end if;
   if not exists (
     select 1 from information_schema.columns
     where table_schema='public' and table_name='students' and column_name='id' and udt_name='uuid'
