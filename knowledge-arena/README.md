@@ -53,3 +53,14 @@ The SQL still requires review against the live schema and an explicitly approved
 
 ## Fun Zone navigation
 The four Fun Zone cards are full-card links into the matching Knowledge Arena views: Daily Challenges, Games & Brain Teasers, Game XP & Levels (My Progress), and Badges & Leaderboard. The badges view includes both the student's achievement list and the pseudonymous Game XP leaderboard. Deep links are handled after the existing LIB session and role checks; they do not bypass authentication.
+
+## Production rollout snapshot (8 November 2026)
+
+- Applied migrations: `20261108150233_knowledge_arena_initial`, `20261108150300_knowledge_arena_rpc_execute_lockdown`, and `20261108150439_knowledge_arena_worker_schedule_and_pricing`.
+- Deployed Edge Functions: `knowledge-arena` (JWT required) and `knowledge-arena-worker` (JWT disabled; guarded by a Vault-backed worker secret verified by a service-role-only RPC).
+- Worker pricing is stored in the private `ka_settings` row: Claude Haiku 4.5 standard API input $1/MTok, output $5/MTok; USD/INR 94.1402 from the RBI rate as of 6 November 2026. These values must be reviewed periodically.
+- A `pg_cron` job named `knowledge-arena-worker` invokes the worker every five minutes through `pg_net`. The worker secret is generated and stored in Supabase Vault; it is not committed to this repository.
+- The existing LIB AI Settings API key is present and enabled. The worker continues to read it server-side from `public.ai_settings`; it is not exposed to the browser.
+- Production switches remain `games_enabled=true`, `generation_enabled=false`, and `daily_challenge_enabled=false`. No questions or daily challenges have been published, and student access has not been activated.
+- Existing Question Bank, Online Assessment and attendance-gamification objects/calculations were not modified.
+- Admin Student Leadership attendance-rewards integration is still outstanding; do not substitute the Knowledge Arena leaderboard for the existing attendance leaderboard.
