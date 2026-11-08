@@ -250,6 +250,11 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
     const totalCostUsd = priorCostUsd + actualCostUsd;
     const totalCostInr = priorCostInr + actualCostInr;
     const status = published === job.requested_count ? "completed" : published > 0 ? "partial" : "failed";
+    if (settings.daily_challenge_enabled && published > 0) {
+      assertLease();
+      const { error: challengeError } = await db.rpc("ka_publish_daily_challenges", { p_challenge_date: indiaDate() });
+      if (challengeError) console.warn("Post-generation daily challenge publication did not complete", challengeError);
+    }
     assertLease();
     await updateJob(db, job.id, {
       status, generated_count: generated, validated_count: validated, published_count: published,
