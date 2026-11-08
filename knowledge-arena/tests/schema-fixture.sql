@@ -46,3 +46,16 @@ create table public.subjects (
 create or replace function public.my_role()
 returns text language sql stable
 as $$ select coalesce(current_setting('request.jwt.claim.role', true),'') $$;
+
+-- Minimal baseline data required by the schema preflight.
+insert into public.grades(id,name)
+values ('10000000-0000-0000-0000-000000000001','Class 1');
+insert into public.subjects(name) values ('Mathematics'),('Science');
+insert into auth.users(id)
+values ('20000000-0000-0000-0000-000000000001');
+insert into public.students(id,grade_id) values (
+  '30000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001'
+);
+insert into public.profiles(id,role,linked_student_id) values (
+  '20000000-0000-0000-0000-000000000001','Student','30000000-0000-0000-0000-000000000001'
+);
