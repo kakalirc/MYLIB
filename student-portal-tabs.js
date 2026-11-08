@@ -98,7 +98,7 @@
       + '<p class="student-fun-eyebrow">A space for curiosity and play</p>'
       + '<h2 id="student-fun-heading">Welcome to Fun Zone!</h2>'
       + '<p>Take a break from your regular lessons. Explore quizzes, brain teasers, memory challenges and daily knowledge games. Your game rewards will be separate from your attendance rewards.</p>'
-      + '<a class="student-fun-launch" href="' + arenaUrl + '" target="_blank" rel="noopener">Enter Knowledge Arena <span aria-hidden="true">↗</span></a>'
+      + '<a class="student-fun-launch" href="' + arenaUrl + '">Enter Knowledge Arena <span aria-hidden="true">→</span></a>'
       + '</div>'
       + '<div class="student-fun-grid">'
       + '<article class="student-fun-card"><div class="student-fun-card-icon" aria-hidden="true">🎯</div><h3>Daily Challenges</h3><p>Try a fresh mix of questions and build a regular play habit.</p></article>'
