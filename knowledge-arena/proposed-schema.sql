@@ -303,16 +303,19 @@ begin
   if coalesce(auth.role(),'') <> 'service_role' then
     raise exception 'Not authorised';
   end if;
-  update public.ka_generation_jobs
+  with next_job as (
+    select id
+    from public.ka_generation_jobs
+    where status='queued'
+    order by created_at
+    limit 1
+    for update skip locked
+  )
+  update public.ka_generation_jobs j
      set status='running', started_at=now(), error_code=null, error_summary=null
-   where id=(
-     select id from public.ka_generation_jobs
-      where status='queued'
-      order by created_at
-      for update skip locked
-      limit 1
-   )
-  returning * into claimed;
+    from next_job
+   where j.id=next_job.id
+  returning j.* into claimed;
   if claimed.id is not null then
     return next claimed;
   end if;
