@@ -132,6 +132,7 @@ alter table public.ka_questions
 create table public.ka_attempts (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
+  client_attempt_id uuid not null,
   game_type text not null check (game_type in ('word_master','number_quest','science_explorer','quick_quiz','brain_teaser','memory_challenge')),
   subject text,
   grade_label text,
@@ -142,7 +143,8 @@ create table public.ka_attempts (
   xp_awarded integer not null default 0 check (xp_awarded >= 0),
   duration_seconds integer check (duration_seconds is null or duration_seconds >= 0),
   completed_at timestamptz not null default now(),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  constraint ka_attempts_client_id_unique unique (user_id,client_attempt_id)
 );
 
 create table public.ka_daily_challenges (
@@ -624,6 +626,7 @@ $$;
 
 create or replace function public.ka_record_attempt(
   p_user_id uuid,
+  p_client_attempt_id uuid,
   p_game_type text,
   p_subject text,
   p_grade_label text,
@@ -643,6 +646,7 @@ set search_path = public, pg_temp
 as $$
 declare
   attempt_id uuid;
+  existing_attempt public.ka_attempts;
   prior public.ka_player_stats;
   next_streak integer;
   xp_used bigint := 0;
@@ -660,13 +664,26 @@ begin
   ) then
     raise exception 'Student account not eligible';
   end if;
+  if p_client_attempt_id is null then
+    raise exception 'Client attempt ID is required';
+  end if;
   if p_question_count < 1 or p_correct_count < 0 or p_correct_count > p_question_count
      or p_accuracy < 0 or p_accuracy > 100 or p_requested_xp < 0 or p_daily_xp_cap < 0 then
     raise exception 'Invalid attempt totals';
   end if;
 
-  -- Serialise attempts per player so concurrent submissions cannot exceed the daily XP cap.
+  -- Serialise attempts per player. The same client attempt ID can only award XP once,
+  -- including when the browser retries after a network timeout.
   perform pg_advisory_xact_lock(hashtextextended(p_user_id::text, 0));
+  select * into existing_attempt from public.ka_attempts
+  where user_id=p_user_id and client_attempt_id=p_client_attempt_id;
+  if found then
+    return jsonb_build_object(
+      'attempt_id',existing_attempt.id,
+      'xp_awarded',existing_attempt.xp_awarded,
+      'duplicate',true
+    );
+  end if;
   select coalesce(sum(a.xp_awarded),0)::bigint into xp_used
   from public.ka_attempts a
   where a.user_id=p_user_id
@@ -686,10 +703,10 @@ begin
   end if;
 
   insert into public.ka_attempts (
-    user_id, game_type, subject, grade_label, challenge_id,
+    user_id, client_attempt_id, game_type, subject, grade_label, challenge_id,
     question_count, correct_count, accuracy, xp_awarded, duration_seconds
   ) values (
-    p_user_id, p_game_type, p_subject, p_grade_label, p_challenge_id,
+    p_user_id, p_client_attempt_id, p_game_type, p_subject, p_grade_label, p_challenge_id,
     p_question_count, p_correct_count, p_accuracy, awarded_xp, p_duration_seconds
   ) returning id into attempt_id;
 
@@ -856,13 +873,13 @@ grant select on public.ka_questions, public.ka_daily_challenges,
   public.ka_daily_challenge_items, public.ka_player_stats, public.ka_achievements,
   public.ka_player_achievements, public.ka_attempts to authenticated;
 revoke all on function public.ka_store_generated_question(uuid,jsonb,smallint) from public, anon, authenticated;
-revoke all on function public.ka_record_attempt(uuid,text,text,text,uuid,integer,integer,numeric,integer,integer,integer,date) from public, anon, authenticated;
+revoke all on function public.ka_record_attempt(uuid,uuid,text,text,text,uuid,integer,integer,numeric,integer,integer,integer,date) from public, anon, authenticated;
 grant execute on function public.ka_claim_generation_job(uuid) to service_role;
 grant execute on function public.ka_renew_worker_lease(uuid) to service_role;
 grant execute on function public.ka_release_worker_lease(uuid) to service_role;
 grant execute on function public.ka_publish_daily_challenges(date) to service_role;
 grant execute on function public.ka_store_generated_question(uuid,jsonb,smallint) to service_role;
-grant execute on function public.ka_record_attempt(uuid,text,text,text,uuid,integer,integer,numeric,integer,integer,integer,date) to service_role;
+grant execute on function public.ka_record_attempt(uuid,uuid,text,text,text,uuid,integer,integer,numeric,integer,integer,integer,date) to service_role;
 
 revoke all on function public.ka_get_leaderboard(integer) from public;
 revoke all on function public.ka_admin_summary() from public;
