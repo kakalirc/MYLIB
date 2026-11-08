@@ -170,7 +170,7 @@
         $("admin-nav").classList.add("hidden");
         await loadStudent();
         const requested = new URLSearchParams(location.search).get("view");
-        showView(requested === "daily" ? "daily" : "play");
+        showView(["daily","progress","achievements","leaderboard"].includes(requested) ? requested : "play");
       }
     } catch (error) {
       if (error.status === 401) {
@@ -244,6 +244,19 @@
     $("hero-level").textContent = "LEVEL " + info.level + " · " + (info.level >= 10 ? "MASTER" : info.level >= 5 ? "CHAMPION" : info.level >= 2 ? "EXPLORER" : "BEGINNER");
     $("hero-progress").style.width = info.into + "%";
     $("hero-next-level").textContent = info.remaining + " XP to the next level";
+    const stats = progress && progress.stats ? progress.stats : {};
+    const answered = Math.max(0, Number(stats.questions_answered || 0));
+    const correct = Math.max(0, Number(stats.correct_answers || 0));
+    $("progress-total-xp").textContent = xp.toLocaleString("en-IN");
+    $("progress-level-name").textContent = $("hero-level").textContent;
+    $("progress-level-bar").style.width = info.into + "%";
+    $("progress-next-level").textContent = info.remaining + " XP to the next level";
+    $("progress-games-played").textContent = Number(stats.games_played || 0).toLocaleString("en-IN");
+    $("progress-questions").textContent = answered.toLocaleString("en-IN");
+    $("progress-correct").textContent = correct.toLocaleString("en-IN");
+    $("progress-accuracy").textContent = (answered ? Math.round(correct / answered * 100) : 0) + "%";
+    $("progress-current-streak").textContent = Number(stats.current_streak || 0).toLocaleString("en-IN");
+    $("progress-best-streak").textContent = Number(stats.best_streak || 0).toLocaleString("en-IN");
   }
 
   function renderAchievements() {
@@ -280,7 +293,7 @@
   function showView(name) {
     if (name === "admin" && role !== "Admin" && role !== "AdminPreview") return;
     currentView = name;
-    ["play","daily","achievements","leaderboard","admin"].forEach((v) => {
+    ["play","daily","progress","achievements","leaderboard","admin"].forEach((v) => {
       const section = $("view-" + v);
       if (section) section.classList.toggle("hidden", v !== name);
     });
