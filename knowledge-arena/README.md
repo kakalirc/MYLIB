@@ -13,15 +13,16 @@ This is an interactive front-end prototype only. It uses sample questions, sampl
 The Admin overview is a display of the intended summary-only reporting boundary. Its metrics are intentionally placeholders. The existing attendance gamification values must later be read from the current attendance implementation without duplicating or changing its calculations.
 
 ## Production work still required
-1. Inspect the live application authentication, role model, student identity mapping, Supabase schema, and existing attendance XP/level/badge/streak functions.
-2. Add and review database migrations with row-level security for question bank, game sessions, validated attempts, game XP, achievements, daily challenges, aggregate reporting, and automation logs.
-3. Implement server-side score validation and award logic; do not trust client-submitted score or XP values.
-4. Implement AI generation, independent validation, duplicate checks, age/class/subject/difficulty tagging, provenance, review/expiry metadata, retry handling, cost caps, and safe automatic publication.
-5. Implement scheduled question-bank replenishment and daily challenge publication.
-6. Replace sample content with class-appropriate content and implement the agreed game formats.
-7. Connect student identity and subscription-independent access for all LIB login holders.
-8. Add Admin summary reporting for Knowledge Arena and a separate read-only view of existing attendance gamification.
-9. Test with non-production users, verify permissions/RLS, and deploy through the existing hosting pipeline.
+1. Inspect the actual Supabase database schema and live application: tables, columns, constraints, indexes, relationships, views, RPCs, triggers, RLS policies, authentication, roles, student identity mapping, and existing attendance XP/level/badge/streak functions.
+2. Map every Knowledge Arena requirement to existing tables, columns, views, and functions. Reuse and extend existing structures where suitable; do not create a new table if an existing one can safely support the requirement.
+3. Only if the schema audit proves a requirement cannot be supported by any existing structure, propose the smallest necessary schema addition for discussion and approval before writing or applying a migration. No database table has been created by this prototype.
+4. Implement server-side score validation and award logic; do not trust client-submitted score or XP values.
+5. Implement AI generation, independent validation, duplicate checks, age/class/subject/difficulty tagging, provenance, review/expiry metadata, retry handling, cost caps, and safe automatic publication using the agreed data model.
+6. Implement scheduled question-bank replenishment and daily challenge publication.
+7. Replace sample content with class-appropriate content and implement the agreed game formats.
+8. Connect student identity and subscription-independent access for all LIB login holders.
+9. Add Admin summary reporting for Knowledge Arena and a separate read-only view of existing attendance gamification.
+10. Test with non-production users, verify permissions/RLS, and deploy through the existing hosting pipeline.
 
 ## Non-negotiable compatibility constraints
 - Do not replace or rewrite the existing `index.html`.
