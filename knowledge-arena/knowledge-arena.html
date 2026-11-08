@@ -134,6 +134,17 @@
       <section id="view-admin" class="view hidden">
         <div class="section-head"><div><p class="eyebrow">ADMINISTRATOR VIEW</p><h2>Knowledge Arena control centre</h2></div><span class="tag">ADMIN ONLY</span></div>
         <p class="muted admin-note">Summary-level reporting only. No individual question, answer, or question-level history is shown here.</p>
+
+        <div class="panel admin-panel leadership-panel">
+          <div class="admin-panel-head"><div><h3>Student Leadership</h3><p class="muted">A read-only overview of Knowledge Arena achievements, kept separate from existing attendance rewards.</p></div><button class="btn-secondary" id="refresh-leadership">Refresh</button></div>
+          <div class="metric-grid leadership-metrics" id="leadership-metrics"><article class="metric"><small>Game players</small><strong>—</strong></article><article class="metric"><small>Total Game XP</small><strong>—</strong></article><article class="metric"><small>Game achievements</small><strong>—</strong></article></div>
+          <div class="leadership-section-head"><h4>Knowledge Arena — Game Rewards</h4><span class="tag">GAME XP ONLY</span></div>
+          <div class="leadership-table-wrap" id="leadership-game-leaders"><p class="muted">Loading student game progress…</p></div>
+          <div class="leadership-section-head"><h4>LIB Attendance Rewards</h4><span class="tag">EXISTING SYSTEM</span></div>
+          <div class="leadership-attendance" id="leadership-attendance"><strong>Attendance rewards remain separate.</strong><p class="muted">The existing LIB attendance XP, levels, badges, streaks and attendance leaderboard are not recalculated or modified here. Their authoritative read-only data source has not yet been connected to this dashboard.</p></div>
+          <p class="admin-feedback" id="leadership-feedback" role="status"></p>
+        </div>
+
         <div class="metric-grid" id="admin-metrics"></div>
 
         <div class="panel admin-panel">
