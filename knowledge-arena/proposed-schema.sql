@@ -329,7 +329,7 @@ begin
     raise exception 'Not authorised';
   end if;
   option_count := jsonb_array_length(coalesce(p_question->'options','[]'::jsonb));
-  if option_count < 2 or option_count > 6 or p_correct_option < 0 or p_correct_option >= option_count then
+  if option_count < 2 or option_count > 6 or p_correct_option is null or p_correct_option < 0 or p_correct_option >= option_count then
     raise exception 'Invalid answer key or options';
   end if;
   insert into public.ka_questions (
