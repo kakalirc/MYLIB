@@ -86,6 +86,22 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
     await updateJob(db, job.id, { status: "failed", error_code: "batch_too_large", error_summary: "Batch exceeds worker safety limit.", completed_at: new Date().toISOString() });
     return { job_id: job.id, status: "failed" };
   }
+  // Conservative preflight budget reservation: if a worst-case batch could exceed
+  // either remaining budget, pause it before making any paid provider call.
+  const remaining = Math.min(
+    safeNumber(settings.daily_ai_budget_usd) - daySpent,
+    safeNumber(settings.monthly_ai_budget_usd) - monthSpent,
+  );
+  const estimatedInputTokens = job.requested_count * 1200 + 1800;
+  const estimatedOutputTokens = 6000 + job.requested_count * 900;
+  const estimatedMaxCost = (estimatedInputTokens * inputRate + estimatedOutputTokens * outputRate) / 1000000;
+  if (estimatedMaxCost > remaining) {
+    await updateJob(db, job.id, {
+      status: "paused", error_code: "budget_preflight",
+      error_summary: "Paused before AI call: estimated maximum batch cost exceeds remaining daily or monthly budget.",
+    });
+    return { job_id: job.id, status: "paused", reason: "budget_preflight", estimated_max_cost_usd: estimatedMaxCost };
+  }
 
   let generated = 0, validated = 0, published = 0, rejected = 0, inputTokens = 0, outputTokens = 0;
   try {
