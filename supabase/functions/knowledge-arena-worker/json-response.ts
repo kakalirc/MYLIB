@@ -1,9 +1,8 @@
 /**
  * Extract exactly one JSON value from an AI response.
  *
- * The provider may wrap JSON in Markdown fences or short explanatory prose.
- * This scanner finds a complete balanced JSON root without being confused by
- * braces/brackets inside quoted strings or escaped quotes.
+ * Allows Markdown fences or brief prose around the payload. The scanner
+ * balances nested objects/arrays and ignores delimiters inside JSON strings.
  */
 export function parseJsonResponse(text: string): unknown {
   if (typeof text !== "string" || !text.trim()) {
@@ -12,14 +11,17 @@ export function parseJsonResponse(text: string): unknown {
 
   const source = text.replace(/^\uFEFF/, "").trim();
   const parsed: unknown[] = [];
+  let searchFrom = 0;
 
-  for (let start = 0; start < source.length; start++) {
-    const opener = source[start];
-    if (opener !== "{" && opener !== "[") continue;
+  while (searchFrom < source.length) {
+    let start = searchFrom;
+    while (start < source.length && source[start] !== "{" && source[start] !== "[") start++;
+    if (start >= source.length) break;
 
     const stack: string[] = [];
     let inString = false;
     let escaped = false;
+    let completedAt = -1;
 
     for (let cursor = start; cursor < source.length; cursor++) {
       const char = source[cursor];
@@ -33,25 +35,29 @@ export function parseJsonResponse(text: string): unknown {
 
       if (char === '"') {
         inString = true;
-        continue;
-      }
-      if (char === "{" || char === "[") {
+      } else if (char === "{" || char === "[") {
         stack.push(char);
-        continue;
-      }
-      if (char === "}" || char === "]") {
+      } else if (char === "}" || char === "]") {
         const expected = char === "}" ? "{" : "[";
         if (stack.pop() !== expected) break;
         if (stack.length === 0) {
-          const candidate = source.slice(start, cursor + 1);
-          try {
-            parsed.push(JSON.parse(candidate));
-          } catch {
-            // Keep scanning: a prose example may precede the actual JSON.
-          }
+          completedAt = cursor;
           break;
         }
       }
+    }
+
+    if (completedAt >= start) {
+      try {
+        parsed.push(JSON.parse(source.slice(start, completedAt + 1)));
+        searchFrom = completedAt + 1;
+      } catch {
+        // The opening delimiter may belong to prose or an invalid example.
+        // Advance one character so a later, valid root can still be found.
+        searchFrom = start + 1;
+      }
+    } else {
+      searchFrom = start + 1;
     }
   }
 
