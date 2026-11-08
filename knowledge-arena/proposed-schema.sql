@@ -9,18 +9,21 @@ begin;
 
 do $$
 begin
-  if to_regclass('public.ka_questions') is not null
-     or to_regclass('public.ka_question_keys') is not null
-     or to_regclass('public.ka_generation_jobs') is not null
-     or to_regclass('public.ka_attempts') is not null
-     or to_regclass('public.ka_daily_challenges') is not null
-     or to_regclass('public.ka_daily_challenge_items') is not null
-     or to_regclass('public.ka_player_stats') is not null
-     or to_regclass('public.ka_achievements') is not null
-     or to_regclass('public.ka_player_achievements') is not null
-     or to_regclass('public.ka_settings') is not null
-     or to_regclass('public.ka_ai_usage') is not null then
-    raise exception 'A Knowledge Arena table name already exists. Stop and inspect before proceeding.';
+  if exists (
+      select 1 from pg_class c
+      where c.relnamespace='public'::regnamespace and left(c.relname,3)='ka_'
+    ) or exists (
+      select 1 from pg_proc p
+      where p.pronamespace='public'::regnamespace and left(p.proname,3)='ka_'
+    ) or exists (
+      select 1 from pg_type t
+      where t.typnamespace='public'::regnamespace and left(t.typname,3)='ka_'
+    ) or exists (
+      select 1 from pg_trigger tr
+      join pg_class c on c.oid=tr.tgrelid
+      where c.relnamespace='public'::regnamespace and left(tr.tgname,3)='ka_'
+    ) then
+    raise exception 'A Knowledge Arena object name already exists. Stop and inspect before proceeding.';
   end if;
 
   if not exists (
@@ -48,6 +51,21 @@ begin
      or to_regclass('public.grades') is null
      or to_regclass('public.subjects') is null then
     raise exception 'Preflight failed: students, grades and subjects tables are required.';
+  end if;
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='students' and column_name='id' and udt_name='uuid'
+  ) or not exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='students' and column_name='grade_id' and udt_name='uuid'
+  ) or not exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='grades' and column_name='id' and udt_name='uuid'
+  ) or not exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='profiles' and column_name='linked_student_id' and udt_name='uuid'
+  ) then
+    raise exception 'Preflight failed: student/profile/grade identifiers must use the expected uuid types.';
   end if;
   if not exists (
     select 1 from information_schema.columns
