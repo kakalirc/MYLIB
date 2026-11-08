@@ -46,3 +46,8 @@
 
 .game-card.game-disabled{opacity:.52;filter:grayscale(.35)}
 .game-card .launch:disabled{cursor:not-allowed;color:#8c96a6}
+
+.usage-review-action{display:flex;align-items:flex-end;gap:8px;flex-shrink:0}
+.usage-review-action label{display:flex;flex-direction:column;gap:5px;font-size:10px;font-weight:700;color:#64718a}
+.usage-review-action input{width:112px;min-width:0;border:1px solid #dce3ee;border-radius:8px;padding:9px;color:var(--ink);font:500 12px 'DM Sans',sans-serif}
+@media(max-width:700px){.usage-review-action{align-items:stretch;flex-direction:column}.usage-review-action input{width:100%}}
