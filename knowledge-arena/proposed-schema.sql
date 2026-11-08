@@ -283,13 +283,23 @@ returns table (
   game_xp bigint,
   games_played bigint
 )
-language sql
+language plpgsql
 stable
 security definer
 set search_path = public, pg_temp
 as $$
+begin
+  if coalesce(public.my_role(),'') <> 'Student'
+     or not exists (
+       select 1 from public.profiles p
+       where p.id=auth.uid() and p.role='Student' and p.linked_student_id is not null
+     ) then
+    raise exception 'Not authorised';
+  end if;
+
+  return query
   select row_number() over (order by s.game_xp desc, s.games_played desc, s.user_id) as rank,
-         coalesce(p.username, 'Student')::text as display_name,
+         ('Player-' || upper(substr(md5(s.user_id::text),1,5)))::text as display_name,
          s.game_xp,
          s.games_played
   from public.ka_player_stats s
@@ -297,6 +307,7 @@ as $$
   where p.role='Student' and p.linked_student_id is not null
   order by s.game_xp desc, s.games_played desc, s.user_id
   limit least(greatest(coalesce(p_limit,50),1),100);
+end;
 $$;
 
 create or replace function public.ka_admin_summary()
