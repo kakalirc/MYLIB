@@ -109,11 +109,12 @@ Deno.serve(async (req) => {
       const ctx = await studentContext(db, profile);
       if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
       const today = indiaDate();
-      const { data: dailySettings } = await db.from("ka_settings").select("daily_challenge_enabled").eq("id", 1).maybeSingle();
+      const { data: dailySettings } = await db.from("ka_settings")
+        .select("daily_challenge_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle();
       if (!dailySettings?.daily_challenge_enabled) return json(200, { challenge: null, paused: true });
       const { data: challenge, error } = await db.from("ka_daily_challenges")
-        .select("id,challenge_date,title,description,status")
-        .eq("challenge_date", today).eq("status", "published").maybeSingle();
+        .select("id,challenge_date,grade_label,title,description,status")
+        .eq("challenge_date", today).eq("grade_label", ctx.gradeLabel).eq("status", "published").maybeSingle();
       if (error) return errorResponse(503, "Could not load today's challenge.");
       if (!challenge) return json(200, { challenge: null });
       const { data: items, error: itemError } = await db.from("ka_daily_challenge_items")
@@ -121,7 +122,10 @@ Deno.serve(async (req) => {
         .eq("challenge_id", challenge.id).order("sort_order");
       if (itemError) return errorResponse(503, "Could not load today's challenge questions.");
       const questions = (items || []).map((x: { question: any }) => x.question)
-        .filter((q: any) => q && (q.grade_label === ctx.gradeLabel || q.grade_label === "General"));
+        .filter((q: any) => q && q.grade_label === ctx.gradeLabel &&
+          !(dailySettings.disabled_game_types || []).includes(q.game_type) &&
+          !(dailySettings.disabled_subjects || []).includes(q.subject));
+      if (questions.length !== 10) return json(200, { challenge: null, questions: [], unavailable: true });
       return json(200, { challenge, questions });
     }
 
@@ -178,12 +182,12 @@ Deno.serve(async (req) => {
       const requestedXp = Math.floor(correctCount * perCorrect + (correctCount === questionCount ? completionBonus : 0));
       if (challengeId) {
         const { data: challenge, error: challengeError } = await db.from("ka_daily_challenges")
-          .select("id,status,challenge_date").eq("id", challengeId).eq("status", "published").maybeSingle();
-        if (challengeError || !challenge || challenge.challenge_date !== today) return errorResponse(400, "Daily challenge is not active.");
+          .select("id,status,challenge_date,grade_label").eq("id", challengeId).eq("status", "published").maybeSingle();
+        if (challengeError || !challenge || challenge.challenge_date !== today || challenge.grade_label !== ctx.gradeLabel) return errorResponse(400, "Daily challenge is not active for this grade.");
         const { data: challengeItems, error: challengeItemsError } = await db.from("ka_daily_challenge_items")
           .select("question_id,question:ka_questions(grade_label)").eq("challenge_id", challengeId);
         const eligibleItems = (challengeItems || []).filter((x: any) => x.question &&
-          (x.question.grade_label === ctx.gradeLabel || x.question.grade_label === "General"));
+          x.question.grade_label === ctx.gradeLabel);
         if (challengeItemsError || !challengeItems || ids.length !== eligibleItems.length || ids.some((id) => !eligibleItems.some((x: any) => x.question_id === id))) {
           return errorResponse(400, "Attempt includes questions outside today's challenge.");
         }
@@ -222,12 +226,20 @@ Deno.serve(async (req) => {
     if (action === "get_my_progress") {
       const ctx = await studentContext(db, profile);
       if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
-      const [{ data: stats }, { data: achievements, error }] = await Promise.all([
+      const [{ data: stats, error: statsError }, { data: awards, error: awardsError }, { data: allAchievements, error: allError }] = await Promise.all([
         db.from("ka_player_stats").select("game_xp,games_played,questions_answered,correct_answers,current_streak,best_streak,last_played_on,updated_at").eq("user_id", user.id).maybeSingle(),
-        db.from("ka_player_achievements").select("awarded_at,achievement:ka_achievements(code,title,description,icon)").eq("user_id", user.id).order("awarded_at", { ascending: false }),
+        db.from("ka_player_achievements").select("awarded_at,achievement:ka_achievements(code)").eq("user_id", user.id).order("awarded_at", { ascending: false }),
+        db.from("ka_achievements").select("code,title,description,icon,rule").eq("active", true).order("sort_order"),
       ]);
-      if (error) return errorResponse(503, "Could not load achievements.");
-      return json(200, { stats: stats || null, achievements: achievements || [] });
+      if (statsError || awardsError || allError) return errorResponse(503, "Could not load achievements.");
+      const unlocked = new Map((awards || []).map((x: any) => [x.achievement?.code, x.awarded_at]));
+      return json(200, {
+        stats: stats || null,
+        achievements: (allAchievements || []).map((x: any) => ({
+          code: x.code, title: x.title, description: x.description, icon: x.icon,
+          unlocked: unlocked.has(x.code), awarded_at: unlocked.get(x.code) || null,
+        })),
+      });
     }
 
     if (action === "get_leaderboard") {
@@ -247,6 +259,20 @@ Deno.serve(async (req) => {
       return json(200, { summary: await adminSummary(db) });
     }
 
+    if (action === "get_admin_options") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const [{ data: grades, error: gradeError }, { data: subjects, error: subjectError }] = await Promise.all([
+        db.from("grades").select("name").order("name"),
+        db.from("subjects").select("name").order("name"),
+      ]);
+      if (gradeError || subjectError) return errorResponse(503, "Could not load grade and subject options.");
+      return json(200, {
+        grades: [...new Set(["General", ...(grades || []).map((x: any) => String(x.name))])],
+        subjects: (subjects || []).map((x: any) => String(x.name)),
+        game_types: ["word_master","number_quest","science_explorer","quick_quiz","brain_teaser","memory_challenge"],
+      });
+    }
+
     if (action === "get_admin_jobs") {
       if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
       const { data, error } = await db.from("ka_generation_jobs")
@@ -259,6 +285,11 @@ Deno.serve(async (req) => {
     if (action === "admin_control") {
       if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
       const control = String(body.control || "");
+      if (control === "publish_daily_challenge") {
+        const { data: result, error: publishError } = await db.rpc("ka_publish_daily_challenges", { p_challenge_date: indiaDate() });
+        if (publishError) return errorResponse(503, "Could not publish today's daily challenge.");
+        return json(200, { publication: result });
+      }
       const { data: current, error: currentError } = await db.from("ka_settings").select("*").eq("id", 1).maybeSingle();
       if (currentError || !current) return errorResponse(503, "Knowledge Arena settings are not initialised.");
       let patch: Record<string, unknown> = { updated_at: new Date().toISOString(), updated_by: user.id };
