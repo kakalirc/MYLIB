@@ -24,6 +24,12 @@ The Admin overview is a display of the intended summary-only reporting boundary.
 9. Add Admin summary reporting for Knowledge Arena and a separate read-only view of existing attendance gamification.
 10. Test with non-production users, verify permissions/RLS, and deploy through the existing hosting pipeline.
 
+## Explicit separation from the exam Question Bank and Online Assessment
+- The existing LIB Question Bank and Online Assessment system is reserved for exam practice and must be left alone.
+- Knowledge Arena must have its own independent game-question lifecycle, question storage, attempts, scoring, and reporting. Do not read from, write to, extend, or alter any `qb_*` table, function, view, policy, trigger, or assessment workflow.
+- The existing assessment system is not a source of Knowledge Arena questions, even if some of its tables appear technically reusable.
+- Any new Knowledge Arena persistence must first be designed against the complete non-assessment schema. Reuse suitable non-`qb_*` structures only where doing so is safe and does not couple the Arena to exam practice. If dedicated storage is needed, present the minimal proposed schema for approval before creating anything.
+
 ## Non-negotiable compatibility constraints
 - Do not replace or rewrite the existing `index.html`.
 - Existing student dashboard, attendance, teacher/admin workflows, and attendance gamification must remain unchanged.
