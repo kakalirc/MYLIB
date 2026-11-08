@@ -10,7 +10,7 @@ Student/Admin API. All requests are POST JSON and require a valid Supabase user 
 Actions:
 - `get_context` — authenticate and return Student/Admin role; Student grade is resolved from the linked LIB student record.
 - `get_catalog`, `get_questions`, `get_daily_challenge`, `submit_attempt`, `get_my_progress`, `get_leaderboard`.
-- `get_admin_summary`, `get_admin_options`, `get_admin_jobs`, `admin_control`.
+- `get_admin_summary`, `get_admin_options`, `get_admin_jobs`, `get_admin_usage_reviews`, `admin_control` (including Admin-reviewed settlement of unsettled AI usage).
 
 Student access checks the exact LIB role `Student` and a linked student record. Subscription status is not checked. A linked student without a grade uses the `General` content band. Admin actions require the exact Admin role. Admin reports are aggregate-only.
 
