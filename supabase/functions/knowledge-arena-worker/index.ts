@@ -25,9 +25,14 @@ async function anthropic(apiKey: string, system: string, prompt: string, maxToke
 
 function parseJson(text: string): any {
   const cleaned = text.trim().replace(/^\`\`\`(?:json)?/i, "").replace(/\`\`\`$/, "").trim();
-  const first = cleaned.indexOf("[") >= 0 ? cleaned.indexOf("[") : cleaned.indexOf("{");
-  const last = cleaned.lastIndexOf("]") >= 0 ? cleaned.lastIndexOf("]") + 1 : cleaned.lastIndexOf("}") + 1;
-  if (first < 0 || last <= first) throw new Error("AI response was not valid JSON.");
+  const firstArray = cleaned.indexOf("[");
+  const firstObject = cleaned.indexOf("{");
+  const first = firstArray < 0 ? firstObject : firstObject < 0 ? firstArray : Math.min(firstArray, firstObject);
+  if (first < 0) throw new Error("AI response was not valid JSON.");
+  const opener = cleaned[first];
+  const closer = opener === "[" ? "]" : "}";
+  const last = cleaned.lastIndexOf(closer) + 1;
+  if (last <= first) throw new Error("AI response was not valid JSON.");
   return JSON.parse(cleaned.slice(first, last));
 }
 
