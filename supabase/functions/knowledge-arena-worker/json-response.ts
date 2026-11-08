@@ -22,6 +22,7 @@ export function parseJsonResponse(text: string): unknown {
     let inString = false;
     let escaped = false;
     let completedAt = -1;
+    let mismatchedDelimiter = false;
 
     for (let cursor = start; cursor < source.length; cursor++) {
       const char = source[cursor];
@@ -39,7 +40,10 @@ export function parseJsonResponse(text: string): unknown {
         stack.push(char);
       } else if (char === "}" || char === "]") {
         const expected = char === "}" ? "{" : "[";
-        if (stack.pop() !== expected) break;
+        if (stack.pop() !== expected) {
+          mismatchedDelimiter = true;
+          break;
+        }
         if (stack.length === 0) {
           completedAt = cursor;
           break;
@@ -47,17 +51,18 @@ export function parseJsonResponse(text: string): unknown {
       }
     }
 
-    if (completedAt >= start) {
-      try {
-        parsed.push(JSON.parse(source.slice(start, completedAt + 1)));
-        searchFrom = completedAt + 1;
-      } catch {
-        // The opening delimiter may belong to prose or an invalid example.
-        // Advance one character so a later, valid root can still be found.
-        searchFrom = start + 1;
-      }
-    } else {
-      searchFrom = start + 1;
+    // Do not salvage an inner object from a truncated outer array/object.
+    if (completedAt < start || mismatchedDelimiter) {
+      throw new Error("AI response did not contain a complete valid JSON value.");
+    }
+
+    try {
+      parsed.push(JSON.parse(source.slice(start, completedAt + 1)));
+      searchFrom = completedAt + 1;
+    } catch {
+      // This balanced block may be an inline prose example. Skip the whole
+      // block, rather than parsing a nested fragment from inside it.
+      searchFrom = completedAt + 1;
     }
   }
 
