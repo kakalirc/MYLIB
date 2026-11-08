@@ -71,8 +71,6 @@
           link.id = 'libKnowledgeArenaAdminLink';
           link.className = 'btn-small';
           link.href = new URL('knowledge-arena/knowledge-arena.html?view=admin', document.baseURI).href;
-          link.target = '_blank';
-          link.rel = 'noopener';
           link.textContent = 'Knowledge Arena';
           var who = topbar.querySelector('.who');
           if (who) who.insertAdjacentElement('afterend', link);
