@@ -590,6 +590,7 @@
       const p = result.publication || {};
       feedback.textContent = p.paused ? "Daily challenges are disabled." :
         "Published for: " + ((p.published_grades || []).join(", ") || "none") +
+        ". Already published: " + ((p.already_published_grades || []).join(", ") || "none") +
         ". Not ready for: " + ((p.skipped_grades || []).join(", ") || "none") + ".";
       await refreshAdmin();
     } catch (error) { feedback.textContent = error.message; }
