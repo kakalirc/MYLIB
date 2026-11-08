@@ -39,7 +39,9 @@ export async function studentContext(db: SupabaseClient, profile: { linked_stude
   if (!student.grade_id) return { studentId: student.id as string, gradeId: null, gradeLabel: "General" };
   const { data: grade, error: gradeError } = await db.from("grades")
     .select("id, name").eq("id", student.grade_id).maybeSingle();
-  if (gradeError || !grade?.name) return { studentId: student.id as string, gradeId: student.grade_id as number | string, gradeLabel: "General" };
+  // A configured grade that cannot be resolved must fail closed, not silently
+  // grant access to the General content band.
+  if (gradeError || !grade?.name) return null;
   return { studentId: student.id as string, gradeId: grade.id as number | string, gradeLabel: grade.name as string };
 }
 
