@@ -1,4 +1,4 @@
-import { adminClient, authenticate, errorResponse, indiaDate, indiaDayStartIso, json, studentContext, validGameType, safeNumber } from "../_shared/knowledge-arena.ts";
+import { adminClient, authenticate, corsHeaders, errorResponse, indiaDate, indiaDayStartIso, json, studentContext, validGameType, safeNumber } from "../_shared/knowledge-arena.ts";
 
 const MAX_QUESTIONS_PER_ATTEMPT = 30;
 
@@ -36,7 +36,7 @@ async function adminSummary(db: ReturnType<typeof adminClient>) {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: (await import("../_shared/knowledge-arena.ts")).corsHeaders });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return errorResponse(405, "Use POST.");
   try {
     const auth = await authenticate(req);
@@ -134,7 +134,13 @@ Deno.serve(async (req) => {
       if (questionError || !questions || questions.length !== ids.length) return errorResponse(400, "One or more questions are unavailable.");
       if (questions.some((q: any) => q.game_type !== gameType)) return errorResponse(400, "Questions do not match the selected game.");
       const subjectSet = new Set(questions.map((q: any) => q.subject));
-      if (subjectSet.size !== 1) return errorResponse(400, "An attempt must contain questions from one subject.");
+      const challengeId = typeof body.challenge_id === "string" ? body.challenge_id : null;
+      if (!challengeId && subjectSet.size !== 1) return errorResponse(400, "A practice attempt must contain questions from one subject.");
+      const { data: gameSettings } = await db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle();
+      if (!gameSettings?.games_enabled || (gameSettings.disabled_game_types || []).includes(gameType) ||
+          questions.some((q: any) => (gameSettings.disabled_subjects || []).includes(q.subject))) {
+        return errorResponse(423, "This game or subject is currently unavailable.");
+      }
       const { data: keys, error: keyError } = await db.from("ka_question_keys")
         .select("question_id,correct_option").in("question_id", ids);
       if (keyError || !keys || keys.length !== ids.length) return errorResponse(503, "Answer validation is unavailable.");
@@ -161,14 +167,13 @@ Deno.serve(async (req) => {
       const xpUsed = (todayAttempts || []).reduce((n: number, x: { xp_awarded: number }) => n + safeNumber(x.xp_awarded), 0);
       const rawXp = correctCount * perCorrect + (correctCount === questionCount ? completionBonus : 0);
       const xpAwarded = Math.max(0, Math.min(rawXp, dailyCap - xpUsed));
-      const challengeId = typeof body.challenge_id === "string" ? body.challenge_id : null;
       if (challengeId) {
         const { data: challenge, error: challengeError } = await db.from("ka_daily_challenges")
           .select("id,status,challenge_date").eq("id", challengeId).eq("status", "published").maybeSingle();
         if (challengeError || !challenge || challenge.challenge_date !== today) return errorResponse(400, "Daily challenge is not active.");
         const { data: challengeItems, error: challengeItemsError } = await db.from("ka_daily_challenge_items")
           .select("question_id").eq("challenge_id", challengeId);
-        if (challengeItemsError || !challengeItems || ids.some((id) => !challengeItems.some((x: any) => x.question_id === id))) {
+        if (challengeItemsError || !challengeItems || ids.length !== challengeItems.length || ids.some((id) => !challengeItems.some((x: any) => x.question_id === id))) {
           return errorResponse(400, "Attempt includes questions outside today's challenge.");
         }
       }
@@ -177,7 +182,7 @@ Deno.serve(async (req) => {
       const { data: saved, error: saveError } = await db.rpc("ka_record_attempt", {
         p_user_id: user.id,
         p_game_type: gameType,
-        p_subject: questions[0].subject,
+        p_subject: subjectSet.size === 1 ? questions[0].subject : "Mixed",
         p_grade_label: ctx.gradeLabel,
         p_challenge_id: challengeId,
         p_question_count: questionCount,
