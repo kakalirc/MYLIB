@@ -17,12 +17,12 @@ The student UI is now wired to the authenticated Knowledge Arena API contract. I
 
 If the Edge Function or isolated schema is not yet deployed, the UI falls back to a clearly labelled sample preview. Preview scores are never submitted or persisted. The live student experience loads published grade-matched questions, submits selected option indexes for server-side evaluation, then refreshes saved Game XP, achievements and the common leaderboard. Correct answers remain server-side until the attempt is submitted.
 
-The Admin screen includes summary-only metrics, switches for games/generation/daily challenges, shared INR budget controls, generation job queue/pause/resume and a daily challenge publish action. It does not show individual questions, selected answers or question-level history.
+The Admin screen includes summary-only metrics, master switches for games/generation/daily challenges, individual game and subject availability controls, shared INR budget controls, generation job queue/pause/resume and a daily challenge publish action. It does not show individual questions, selected answers or question-level history.
 
 The schema remains a design artifact only. No production table, policy, function, trigger, setting, secret or schedule has been changed. Neither Edge Function has been deployed. No PR merge or production deployment has occurred.
 
 ## Database design and safeguards
-The proposed model uses a dedicated `ka_*` namespace for question content, private answer keys, generation jobs, an auditable AI usage ledger, aggregate attempts, grade-specific daily challenges, player statistics, achievements and settings. Individual selected answers are evaluated in trusted server code and are not persisted.
+The proposed model uses a dedicated `ka_*` namespace for question content, private answer keys, generation jobs, an auditable AI usage ledger, aggregate attempts, grade-specific daily challenges, player statistics, achievements and settings. Individual selected answers are evaluated in trusted server code and are not persisted. Each game attempt has a client-generated idempotency ID, so a retry after a network timeout cannot award duplicate Game XP.
 
 The schema:
 - Includes preflight checks for required LIB profile/student/grade/subject structures and refuses to proceed if any `ka_*` object already exists.
@@ -37,7 +37,7 @@ The SQL still requires review against the live schema and an explicitly approved
 ## Game rules
 - All LIB student logins are eligible regardless of subscription status.
 - Daily challenge: ten Quick Quiz questions per active grade per India-local day, mixed across available subjects, with unlimited attempts.
-- Daily challenge questions are grade-specific. If fewer than ten suitable published questions exist for a grade, that grade's challenge is not published.
+- Daily challenge questions use the Quick Quiz game type and mix available subjects. Exact-grade questions are preferred; a complete General set is used when a grade has fewer than ten suitable questions. If neither set has ten questions, that grade's challenge is not published.
 - Game XP is separate from attendance XP: 5 XP per correct answer, 10 XP perfect-attempt bonus, and 100 XP daily cap per student.
 - Level display uses 100 Game XP per level as the current UI convention.
 - Leaderboard is common across all student grades and uses pseudonymous player labels.
