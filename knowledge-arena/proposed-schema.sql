@@ -456,6 +456,8 @@ declare
   target_grade text;
   published_grades text[] := '{}'::text[];
   skipped_grades text[] := '{}'::text[];
+  disabled_game_types text[] := '{}'::text[];
+  disabled_subjects text[] := '{}'::text[];
 begin
   if coalesce(auth.role(),'') <> 'service_role' then
     raise exception 'Not authorised';
@@ -463,7 +465,11 @@ begin
   if p_challenge_date is distinct from (now() at time zone 'Asia/Kolkata')::date then
     raise exception 'Only the current India-local date can be published';
   end if;
-  if not exists (select 1 from public.ka_settings where id=1 and daily_challenge_enabled=true) then
+  select coalesce(s.disabled_game_types,'{}'::text[]), coalesce(s.disabled_subjects,'{}'::text[])
+    into disabled_game_types, disabled_subjects
+  from public.ka_settings s
+  where s.id=1 and s.daily_challenge_enabled=true and s.games_enabled=true;
+  if not found then
     return jsonb_build_object('published_grades',published_grades,'skipped_grades',skipped_grades,'paused',true);
   end if;
 
