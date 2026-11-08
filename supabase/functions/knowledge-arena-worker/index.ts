@@ -67,8 +67,14 @@ async function releaseWorkerLease(db: ReturnType<typeof adminClient>, leaseToken
 
 async function runOneJob(db: ReturnType<typeof adminClient>) {
   const { data: settings, error: settingsError } = await db.from("ka_settings")
-    .select("generation_enabled,daily_ai_budget_inr,monthly_ai_budget_inr").eq("id", 1).maybeSingle();
+    .select("generation_enabled,daily_challenge_enabled,daily_ai_budget_inr,monthly_ai_budget_inr").eq("id", 1).maybeSingle();
   if (settingsError || !settings) throw new Error("Knowledge Arena settings are not initialised.");
+  // Daily challenge publication uses already-published content and does not
+  // require AI generation. The RPC is idempotent for each India-local date.
+  if (settings.daily_challenge_enabled) {
+    const { error: challengeError } = await db.rpc("ka_publish_daily_challenges", { p_challenge_date: indiaDate() });
+    if (challengeError) console.warn("Daily challenge publication did not complete", challengeError);
+  }
   if (!settings.generation_enabled) return { skipped: "generation_paused" };
 
   const inputRate = Number(Deno.env.get("KA_INPUT_USD_PER_MILLION"));
