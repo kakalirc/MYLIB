@@ -229,7 +229,7 @@ using (
     left join public.grades g on g.id=st.grade_id
     where p.id=auth.uid() and p.role='Student'
       and p.linked_student_id is not null
-      and grade_label=coalesce(g.name,'General')
+      and (grade_label=coalesce(g.name,'General') or grade_label='General')
   )
 );
 
@@ -261,7 +261,7 @@ using (
     join public.ka_questions q on q.id=question_id
     where d.id=challenge_id and d.status='published'
       and p.role='Student' and p.linked_student_id is not null
-      and q.grade_label=coalesce(g.name,'General')
+      and (q.grade_label=coalesce(g.name,'General') or q.grade_label='General')
   )
 );
 
