@@ -422,6 +422,7 @@
       const payload = {
         client_attempt_id: clientAttemptId,
         game_type: currentGame,
+        client_attempt_id: clientAttemptId,
         answers: currentAnswers,
         duration_seconds: Math.max(0, Math.round((Date.now() - gameStartedAt) / 1000))
       };
