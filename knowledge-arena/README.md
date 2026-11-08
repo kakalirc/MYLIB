@@ -1,45 +1,64 @@
-# LIB Knowledge Arena — isolated build
+# LIB Knowledge Arena
 
-This directory is deliberately separate from the existing `index.html`.
+A separate learning-games area for LIB students. It is integrated with the existing My LIB login but keeps its Game XP, progress, achievements and leaderboard separate from attendance rewards.
 
-## Current files
-- `knowledge-arena.html`: responsive student/admin preview shell and sample game UI.
-- `knowledge-arena.css`: isolated styles.
-- `knowledge-arena.js`: client-side sample quiz flow.
-- `proposed-schema.sql`: isolated database design draft. It is **not** in the Supabase migrations directory and must not be applied as-is.
-- `BACKEND-CONTRACT.md`: API, scoring, security and AI-worker contract.
-- `EDGE-FUNCTIONS.md`: Edge Function actions, configuration, deployment sequence and known blockers.
-- `supabase/functions/knowledge-arena/index.ts`: isolated student/Admin API Edge Function.
-- `supabase/functions/knowledge-arena-worker/index.ts`: one-job-per-run AI MCQ generation worker.
-- `supabase/functions/_shared/knowledge-arena.ts`: shared server-side authentication and utility functions.
+## Current implementation
 
-## Current status
-The Knowledge Arena front end remains an interactive prototype using sample questions, sample leaderboard rows, and browser-memory XP. It is not connected to LIB authentication, Supabase, student records, attendance gamification, AI question generation, scheduled challenges, or persistent scoring. The Student Login now has separate **My Learning** and **Fun Zone** sections; Fun Zone opens this prototype in student mode.
+- `knowledge-arena.html`: responsive Student and Admin application shell.
+- `knowledge-arena.js`: authenticated API client, game sessions, result review, daily challenge, progress, leaderboard, Admin controls and non-persistent preview fallback.
+- `knowledge-arena.css` and `knowledge-arena-live.css`: isolated styling.
+- `proposed-schema.sql`: isolated Knowledge Arena database design. It is outside `supabase/migrations` and has **not** been applied.
+- `BACKEND-CONTRACT.md`: API, security, scoring and worker contract.
+- `EDGE-FUNCTIONS.md`: function actions, configuration and controlled rollout.
+- `supabase/functions/knowledge-arena/index.ts`: authenticated Student/Admin API.
+- `supabase/functions/knowledge-arena-worker/index.ts`: one-job-per-invocation AI generation worker.
+- `supabase/functions/_shared/knowledge-arena.ts`: shared authentication and utility functions.
+- `student-portal-tabs.js` and `student-portal-tabs.css`: separate My Learning, Fun Zone and Settings navigation.
 
-The proposed schema is a design artifact only. No database table has been created. No live Supabase object, policy, function, trigger, or setting has been changed.
+## Student experience
 
-The API and worker source code is now committed, but neither Edge Function has been deployed. No secrets have been configured and no schedule has been created. The API is not yet connected to the front-end prototype. See `EDGE-FUNCTIONS.md` for required configuration, deployment sequence, and the remaining product decisions.
+- Uses the existing My LIB Supabase login session; no second password is required.
+- Student access requires the exact LIB `Student` role and a linked student record. Subscription status is not checked.
+- Games retrieve published questions through the authenticated API. Answer keys stay server-side.
+- Attempts are evaluated server-side. Only aggregate attempt totals are saved; individual selected answers are not stored.
+- Game XP is 5 per correct answer, plus 10 for a perfect attempt, capped at 100 Game XP per student per India-local day.
+- Progress, achievements and a common pseudonymous leaderboard are API-backed.
+- Memory Challenge uses a short recall round: the student studies the prompt for six seconds before answering.
+- If the API/schema is not ready, the page clearly enters preview mode with sample questions. Preview scores and XP are never saved.
 
-## Database design
-The proposed model uses a dedicated `ka_*` namespace for question content, private answer keys, generation jobs, aggregate attempts, daily challenges, player statistics, achievements and settings. Individual answers are evaluated in trusted server code and are not persisted. This protects the Admin summary-only requirement and reduces sensitive answer-history exposure.
+## Daily challenge
 
-The SQL includes preflight checks and explicit RLS policies, but it still requires review against the complete live schema and confirmation of the exact Student role value, linked student mapping, leaderboard display policy, grade mapping, and game scoring rules. Do not apply this draft to production.
+- One common competition group and leaderboard across LIB students.
+- A separate ten-question Quick Quiz set is published for each active grade band.
+- Questions are selected across available subjects. Exact-grade content is preferred; the General set is used only when a grade has fewer than ten suitable questions.
+- The Admin can publish today's challenge manually. The worker also attempts publication on each invocation when Daily Challenge is enabled.
+- A scheduled worker invocation is not configured yet, so automatic daily publication will begin only after the controlled deployment and scheduling steps.
 
-## Current backend scope and limitations
-- Student API supports catalog, grade-filtered MCQ retrieval, attempt submission with server-side answer checking, aggregate progress, pseudonymous leaderboard, summary-only Admin reporting and Admin controls.
-- Attempt storage contains only aggregate counts and XP; individual selected answers are not persisted.
-- The generation worker processes one queued batch per invocation, serialises workers with a database lease, reserves a conservative preflight estimate, enforces shared India-local budgets of ₹100/day and ₹1,000/month by default, uses server-side AI credentials and applies structural, duplicate and second-pass AI validation. Admin budget updates are supported by the API; a connected Admin settings UI remains outstanding.
-- Game XP defaults are 5 XP per correct answer, a 10 XP perfect-attempt bonus, and a 100 XP per-student daily cap. These apply only to Knowledge Arena Game XP, not attendance XP.
-- Daily challenge retrieval exists. The approved initial challenge design is 10 questions per day, a mix from available subjects, grade-appropriate questions, and one common competition group; automatic creation/publication is not implemented yet.
-- The first generation pipeline uses MCQ content for all listed game categories; the distinct Memory Challenge interaction is not yet implemented.
-- Leaderboard display is pseudonymous until the display-name policy is approved.
+## Admin controls
 
-## Compatibility constraints
-- Existing LIB Question Bank and Online Assessment remain completely outside the Knowledge Arena design.
-- Do not read from, write to, extend, or alter any existing exam/assessment table, function, view, policy, trigger, or workflow.
-- The Student Login integration adds only an external script reference to `index.html`; navigation logic and styles live in `student-portal-tabs.js` and `student-portal-tabs.css`. No existing attendance, teacher/admin workflow, or attendance-gamification calculation is changed.
-- Attendance XP, levels, badges, streaks and leaderboard calculations must be reused as-is for the separate Admin attendance view; do not duplicate their calculation.
-- Knowledge Arena Game XP, levels, badges, streaks and leaderboard remain separate.
-- All students with a LIB login can access the Arena regardless of subscription status.
-- Admin Knowledge Arena reporting is aggregate-only and does not expose questions, answers or question-by-question history.
-- No merge, production migration, or deployment is authorised by this branch build.
+- Aggregate player, game, published-question, accuracy and AI-spend metrics.
+- Shared daily and monthly AI budget limits, defaulting to ₹100/day and ₹1,000/month across all students.
+- Master controls for games, AI generation and daily challenges.
+- Queue generation jobs and pause/resume queued jobs.
+- Publish today's daily challenge.
+- No student answer history, individual Q&A, or question-level reporting is exposed.
+- Existing attendance gamification remains separate. The read-only Admin attendance summary integration is still outstanding.
+
+## AI generation and cost controls
+
+- Anthropic Messages API; provider credentials remain server-side and are read from the existing LIB AI settings.
+- Shared INR budget accounting uses the configured USD/INR conversion rate and provider token prices. The worker fails closed if any required price/rate is missing.
+- A singleton tokenised database lease with heartbeat prevents concurrent workers from overspending the shared budget.
+- A conservative preflight reservation is recorded before paid calls; completed usage is settled and uncertain failures remain reserved for review.
+- Generated questions undergo structural checks, duplicate checks and an independent AI validation pass. This is a quality filter, not a guarantee of factual correctness.
+
+## Production status and safety boundaries
+
+The Student/Admin UI and backend source are committed to `feature/knowledge-arena`. The Supabase schema is still design-only. Neither Edge Function is deployed; no production SQL, secrets, schedules or settings have been changed. The feature is not enabled for live student use.
+
+There is no separate test database. The rollout plan is controlled production testing in small steps after code review and an explicit approval for each production operation. This branch does not merge itself.
+
+- Existing LIB Question Bank and Online Assessment are completely outside this feature. No `qb_*` object is read, written, called, extended or modified.
+- Existing attendance XP, badges, streaks and leaderboard calculations are unchanged.
+- No teacher workflows or unrelated Admin workflows are changed.
+- No production migration, Edge Function deployment, secret configuration, schedule creation or student-access activation has occurred.
