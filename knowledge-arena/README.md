@@ -13,7 +13,7 @@ The Knowledge Arena is a separate student activity area, entered from **My LIB â
 - `student-portal-tabs.js`, `student-portal-tabs.css`: separate My Learning, Fun Zone and Settings navigation in Student Login.
 
 ## Current status
-The student UI is now wired to the authenticated Knowledge Arena API contract. It reuses the existing Supabase browser session for the same origin and responds to My LIB cross-tab logout. Student requests are authenticated and checked against the exact LIB Student role and linked student record. The Admin view is available only to an authenticated Admin role.
+The student UI is now wired to the authenticated Knowledge Arena API contract. It reuses the existing Supabase browser session for the same origin and responds to My LIB cross-tab logout. Student requests are authenticated and checked against the exact LIB Student role and linked student record. Practice and Admin generation support English, Hindi, Kannada and Sanskrit; the common daily challenge is English Quick Quiz content. The Admin view is available only to an authenticated Admin role.
 
 If the Edge Function or isolated schema is not yet deployed, the UI falls back to a clearly labelled sample preview. Preview scores are never submitted or persisted. The live student experience loads published grade-matched questions, submits selected option indexes for server-side evaluation, then refreshes saved Game XP, achievements and the common leaderboard. Correct answers remain server-side until the attempt is submitted.
 
