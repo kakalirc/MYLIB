@@ -273,7 +273,7 @@ Deno.serve(async (req) => {
         const gradeLabel = String(body.grade_label || "").trim();
         const subject = String(body.subject || "").trim();
         if (!["easy", "medium", "hard"].includes(difficulty) || requestedCount < 1 || requestedCount > 20 || !gradeLabel || !subject) return errorResponse(400, "Provide grade, subject, valid difficulty and 1–20 questions.");
-        if (!(current.disabled_game_types || []).includes(gameType) === false || (current.disabled_subjects || []).includes(subject)) return errorResponse(423, "This game or subject is disabled.");
+        if ((current.disabled_game_types || []).includes(gameType) || (current.disabled_subjects || []).includes(subject)) return errorResponse(423, "This game or subject is disabled.");
         if (gradeLabel !== "General") {
           const { data: grade } = await db.from("grades").select("name").eq("name", gradeLabel).maybeSingle();
           if (!grade) return errorResponse(400, "Unknown grade label.");
