@@ -85,7 +85,7 @@ Deno.serve(async (req) => {
       if (subject && (settings.disabled_subjects || []).includes(subject)) return errorResponse(423, "This subject is currently unavailable.");
       let query = db.from("ka_questions")
         .select("id,subject,topic,grade_label,language_code,difficulty,game_type,prompt,options")
-        .eq("status", "published").eq("grade_label", ctx.gradeLabel).eq("game_type", gameType)
+        .eq("status", "published").in("grade_label", [ctx.gradeLabel, "General"]).eq("game_type", gameType)
         .order("created_at", { ascending: false }).limit(Math.min(Math.max(safeNumber(body.limit, 10), 1), 20));
       if (subject) query = query.eq("subject", subject);
       if (difficulty) query = query.eq("difficulty", difficulty);
@@ -133,7 +133,7 @@ Deno.serve(async (req) => {
       const ids = [...seen];
       const { data: questions, error: questionError } = await db.from("ka_questions")
         .select("id,subject,topic,grade_label,difficulty,game_type,prompt,options,explanation")
-        .in("id", ids).eq("status", "published").eq("grade_label", ctx.gradeLabel);
+        .in("id", ids).eq("status", "published").in("grade_label", [ctx.gradeLabel, "General"]);
       if (questionError || !questions || questions.length !== ids.length) return errorResponse(400, "One or more questions are unavailable.");
       if (questions.some((q: any) => q.game_type !== gameType)) return errorResponse(400, "Questions do not match the selected game.");
       const subjectSet = new Set(questions.map((q: any) => q.subject));
