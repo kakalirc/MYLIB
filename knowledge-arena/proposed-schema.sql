@@ -321,7 +321,7 @@ begin
   end if;
   return;
 end;
-$;
+$$;
 
 create or replace function public.ka_store_generated_question(
   p_job_id uuid,
@@ -360,7 +360,7 @@ begin
   values (question_id, p_correct_option);
   return question_id;
 end;
-$;
+$$;
 
 create or replace function public.ka_record_attempt(
   p_user_id uuid,
@@ -488,7 +488,7 @@ begin
     'best_streak',updated_stats.best_streak
   );
 end;
-$;
+$$;
 
 insert into public.ka_achievements(code,title,description,icon,rule,sort_order) values
  ('first_game','First Steps','Complete your first Knowledge Arena game','🚀','{"metric":"games_played","operator":"gte","target":1}',1),
