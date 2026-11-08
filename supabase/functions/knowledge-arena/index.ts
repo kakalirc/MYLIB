@@ -135,7 +135,7 @@ Deno.serve(async (req) => {
         .eq("challenge_id", challenge.id).order("sort_order");
       if (itemError) return errorResponse(503, "Could not load today's challenge questions.");
       const questions = (items || []).map((x: { question: any }) => x.question)
-        .filter((q: any) => q && (q.grade_label === ctx.gradeLabel || q.grade_label === "General") &&
+        .filter((q: any) => q && q.grade_label === ctx.gradeLabel &&
           !(dailySettings.disabled_game_types || []).includes(q.game_type) &&
           !(dailySettings.disabled_subjects || []).includes(q.subject));
       if (questions.length !== 10) return json(200, { challenge: null, questions: [], unavailable: true });
@@ -164,7 +164,7 @@ Deno.serve(async (req) => {
         .in("id", ids).eq("status", "published").in("grade_label", [ctx.gradeLabel, "General"]);
       if (questionError || !questions || questions.length !== ids.length) return errorResponse(400, "One or more questions are unavailable.");
       const challengeId = typeof body.challenge_id === "string" ? body.challenge_id : null;
-      if (!challengeId && questions.some((q: any) => q.game_type !== gameType)) return errorResponse(400, "Questions do not match the selected game.");
+      if (questions.some((q: any) => q.game_type !== gameType)) return errorResponse(400, "Questions do not match the selected game.");
       const subjectSet = new Set(questions.map((q: any) => q.subject));
       if (!challengeId && subjectSet.size !== 1) return errorResponse(400, "A practice attempt must contain questions from one subject.");
       const { data: gameSettings } = await db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle();
@@ -201,7 +201,7 @@ Deno.serve(async (req) => {
         const { data: challengeItems, error: challengeItemsError } = await db.from("ka_daily_challenge_items")
           .select("question_id,question:ka_questions(grade_label)").eq("challenge_id", challengeId);
         const eligibleItems = (challengeItems || []).filter((x: any) => x.question &&
-          (x.question.grade_label === ctx.gradeLabel || x.question.grade_label === "General"));
+          x.question.grade_label === ctx.gradeLabel);
         if (challengeItemsError || !challengeItems || ids.length !== eligibleItems.length || ids.some((id) => !eligibleItems.some((x: any) => x.question_id === id))) {
           return errorResponse(400, "Attempt includes questions outside today's challenge.");
         }
