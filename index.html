@@ -15900,6 +15900,108 @@ function renewalRows(teacherId) {
 function countStudentsNeedingRenewal(teacherId) {
   return new Set(renewalRows(teacherId).map(r => r.studentId)).size;
 }
+function attendanceRewardMetrics(student) {
+  const sessions = data.sessions.filter(s => s.studentId === student.id);
+  const present = sessions.filter(s => s.status === 'Present');
+  const classes = present.reduce((sum, s) => sum + (Number(s.count) || 0), 0);
+  const xp = classes * 10;
+  const level = XP_LEVELS.find(l => xp >= l.min && xp <= l.max) || XP_LEVELS[XP_LEVELS.length - 1];
+  const nextLevel = level.lv === XP_LEVELS.length ? null : XP_LEVELS[level.lv];
+  const classesToNext = nextLevel ? Math.max(0, Math.ceil((nextLevel.min - xp) / 10)) : 0;
+
+  const badges = [];
+  if (classes >= 100) badges.push('🌟 Century Club');
+  else if (classes >= 50) badges.push('💎 Gold Student');
+  if (subjectsForStudent(student.id).length >= 2) badges.push('🎵 All-Rounder');
+  const firstDate = present.map(s => s.date).sort()[0];
+  if (firstDate && Math.round((new Date(todayStr) - new Date(firstDate)) / 86400000) >= 180) badges.push('🏅 Veteran');
+
+  const monthMap = {};
+  sessions.forEach(s => {
+    const month = String(s.date || '').slice(0, 7);
+    if (!month) return;
+    if (!monthMap[month]) monthMap[month] = { present: 0, absent: 0 };
+    if (s.status === 'Present') monthMap[month].present += Number(s.count) || 0;
+    else monthMap[month].absent++;
+  });
+  if (Object.keys(monthMap).some(month => monthMap[month].absent === 0 && monthMap[month].present >= 8)) badges.push('🎯 Perfect Month');
+  const yr = Number(todayStr.slice(0, 4)), moCur = Number(todayStr.slice(5, 7));
+  const last2 = [1, 2].map(i => { let m = moCur - i, y = yr; if (m <= 0) { m += 12; y--; } return y + '-' + (m < 10 ? '0' : '') + m; });
+  if (last2.every(month => (monthMap[month] || { present: 0 }).present >= 8)) badges.push('📅 Consistent');
+
+  const presentDates = [...new Set(present.map(s => s.date))].filter(Boolean).sort().reverse();
+  let streak = 0;
+  if (presentDates.length) {
+    const latestGap = Math.round((new Date(todayStr) - new Date(presentDates[0])) / 86400000);
+    if (latestGap <= 2) {
+      for (let i = 0; i < presentDates.length; i++) {
+        if (i === 0) { streak = 1; continue; }
+        const gap = Math.round((new Date(presentDates[i - 1]) - new Date(presentDates[i])) / 86400000);
+        if (gap <= 2) streak++; else break;
+      }
+    }
+  }
+  const milestones = [10, 25, 50, 100, 200, 500];
+  const milestone = milestones.filter(m => classes >= m).pop() || 0;
+  return { classes, xp, level, nextLevel, classesToNext, badges, streak: streak >= 3 ? streak : 0, milestone };
+}
+
+function filterAttendanceRewardRows(value) {
+  const q = String(value || '').trim().toLowerCase();
+  document.querySelectorAll('[data-attendance-reward-row]').forEach(row => {
+    row.style.display = !q || row.getAttribute('data-attendance-reward-row').includes(q) ? '' : 'none';
+  });
+}
+
+function renderAttendanceRewardsMonitor() {
+  const students = data.students.filter(s => !s.archived).map(student => ({
+    student, reward: attendanceRewardMetrics(student)
+  })).sort((a, b) => b.reward.xp - a.reward.xp || studentNameWithCode(a.student.id).localeCompare(studentNameWithCode(b.student.id)));
+  const totalXp = students.reduce((sum, row) => sum + row.reward.xp, 0);
+  const explorerPlus = students.filter(row => row.reward.level.lv >= 2).length;
+  const activeRewards = students.filter(row => row.reward.classes > 0).length;
+  const levelCounts = XP_LEVELS.map(level => ({ level, count: students.filter(row => row.reward.level.lv === level.lv).length }));
+  const levelCards = levelCounts.map(item => `<div class="stat-card"><div class="num">${item.count}</div><div class="label">${item.level.emoji} ${item.level.name}</div></div>`).join('');
+  const rows = students.map(({ student, reward }) => {
+    const name = studentNameWithCode(student.id);
+    const next = reward.nextLevel ? `${reward.classesToNext} class${reward.classesToNext === 1 ? '' : 'es'} to ${reward.nextLevel.name}` : 'Maximum level';
+    const badgeText = reward.badges.length ? reward.badges.join(' · ') : '—';
+    const searchable = (name + ' ' + reward.level.name + ' ' + badgeText).toLowerCase().replace(/"/g, '&quot;');
+    return `<tr data-attendance-reward-row="${esc(searchable)}">
+      <td><b>${esc(name)}</b></td>
+      <td style="text-align:right">${reward.classes.toLocaleString()}</td>
+      <td style="text-align:right"><b>${reward.xp.toLocaleString()}</b></td>
+      <td>${reward.level.emoji} Level ${reward.level.lv} · ${reward.level.name}</td>
+      <td>${esc(next)}</td>
+      <td>${esc(badgeText)}</td>
+      <td style="text-align:right">${reward.streak ? '🔥 ' + reward.streak : '—'}</td>
+      <td style="text-align:right">${reward.milestone || '—'}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="card">
+    <div class="row-form" style="justify-content:space-between;align-items:center">
+      <div><h2 style="margin:0">Attendance XP &amp; Levels</h2><div class="hint">Read-only monitoring using the same class-attendance XP, level and badge rules shown in the student portal. 10 XP per attended class.</div></div>
+      <button class="btn-small" onclick="refreshAllData()">↻ Refresh data</button>
+    </div>
+    <div class="stat-grid" style="margin:14px 0">
+      <div class="stat-card"><div class="num">${students.length}</div><div class="label">Active students</div></div>
+      <div class="stat-card"><div class="num">${activeRewards}</div><div class="label">Students with attendance</div></div>
+      <div class="stat-card"><div class="num">${totalXp.toLocaleString()}</div><div class="label">Total attendance XP</div></div>
+      <div class="stat-card"><div class="num">${explorerPlus}</div><div class="label">Explorer level or above</div></div>
+    </div>
+    <h3>Level distribution</h3>
+    <div class="stat-grid" style="margin-bottom:16px">${levelCards}</div>
+    <div class="row-form" style="margin-bottom:12px">
+      <input type="search" placeholder="Search student, level or badge…" oninput="filterAttendanceRewardRows(this.value)" style="max-width:360px">
+    </div>
+    <div class="table-scroll"><table>
+      <thead><tr><th>Student</th><th style="text-align:right">Classes</th><th style="text-align:right">XP</th><th>Level</th><th>Next level</th><th>Badges</th><th style="text-align:right">Current streak</th><th style="text-align:right">Latest milestone</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="8" class="empty">No active students found.</td></tr>'}</tbody>
+    </table></div>
+    <div class="hint" style="margin-top:10px">This report does not award or modify XP. It reads the same Present class records used by the student portal. Current streak follows the student display rule (up to a two-day gap and shown from three classes onward).</div>
+  </div>`;
+}
+
 function renderDashboard() {
   const todaysClasses = data.sessions.filter(s=>s.date===todayStr).reduce((a,s)=>a+s.count,0);
   const pendingFeeRequests = data.subscriptions.filter(s=>s.kind==='Request').length;
@@ -27408,6 +27510,7 @@ function render() {
     ]},
     { label: 'People', tabs: [
       ['students', 'Students & Subscriptions'],
+      ['attendancerewards', 'Attendance XP & Levels'],
       ['onboarding', 'Student Onboarding & Communication'],
       ['setup', 'Teachers & Subjects'],
       ['parents', 'Parents'],
@@ -27473,6 +27576,7 @@ function render() {
   else if (currentTab === 'knowledgearena') body = `<div class="card" style="padding:0;overflow:hidden"><iframe src="knowledge-arena/knowledge-arena.html?view=admin" title="Knowledge Arena Admin" style="display:block;width:100%;height:calc(100vh - 150px);min-height:680px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
   else if (currentTab === 'setup') body = renderSetup();
   else if (currentTab === 'students') body = renderStudents();
+  else if (currentTab === 'attendancerewards') body = renderAttendanceRewardsMonitor();
   else if (currentTab === 'onboarding') body = renderStudentOnboarding();
   else if (currentTab === 'fees') body = renderFees();
   else if (currentTab === 'rebuildclasses') body = renderNewSubscriptionClasses() + renderRebuildPendingClasses();
