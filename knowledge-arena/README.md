@@ -30,13 +30,13 @@ The schema:
 - Revokes privileges only on the new `ka_*` tables. It does not change grants on existing LIB tables.
 - Uses a token-owned worker lease with renewal/release RPCs so an expired worker cannot clear a newer worker's lease.
 - Records preflight AI cost reservations in `ka_ai_usage`; unsettled reservations remain counted against the shared budget for Admin review.
-- Publishes exactly ten grade-specific daily questions per active grade only when a full set exists. Students across all grades remain on one common Game XP leaderboard.
+- Publishes exactly ten Quick Quiz questions per active grade, preferring exact-grade content and using a complete General set when needed. Students across all grades remain on one common Game XP leaderboard.
 
 The SQL still requires review against the live schema and an explicitly approved production application. Do not apply this draft automatically.
 
 ## Game rules
 - All LIB student logins are eligible regardless of subscription status.
-- Daily challenge: ten English Quick Quiz questions per active grade per India-local day, mixed across available subjects, with unlimited attempts.
+- Daily challenge: ten English Quick Quiz questions per active grade per India-local day, mixed across available subjects; a complete General set is used if the exact grade lacks ten suitable questions. Attempts are unlimited.
 - Daily challenge questions use the Quick Quiz game type and mix available subjects. Exact-grade questions are preferred; a complete General set is used when a grade has fewer than ten suitable questions. If neither set has ten questions, that grade's challenge is not published.
 - Game XP is separate from attendance XP: 5 XP per correct answer, 10 XP perfect-attempt bonus, and 100 XP daily cap per student.
 - Level display uses 100 Game XP per level as the current UI convention.
