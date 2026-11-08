@@ -678,6 +678,7 @@
         subject: $("queue-subject").value,
         game_type: $("queue-game").value,
         difficulty: $("queue-difficulty").value,
+        language_code: $("queue-language").value,
         requested_count: count,
         topic: $("queue-topic").value.trim()
       });
