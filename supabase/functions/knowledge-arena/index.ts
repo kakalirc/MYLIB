@@ -208,8 +208,13 @@ Deno.serve(async (req) => {
       }
       const duration = body.duration_seconds === undefined ? null : safeNumber(body.duration_seconds, -1);
       if (duration !== null && (duration < 0 || duration > 86400)) return errorResponse(400, "Invalid attempt duration.");
+      const clientAttemptId = String(body.client_attempt_id || "");
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clientAttemptId)) {
+        return errorResponse(400, "A valid client attempt ID is required.");
+      }
       const { data: saved, error: saveError } = await db.rpc("ka_record_attempt", {
         p_user_id: user.id,
+        p_client_attempt_id: clientAttemptId,
         p_game_type: gameType,
         p_subject: subjectSet.size === 1 ? questions[0].subject : "Mixed",
         p_grade_label: ctx.gradeLabel,
