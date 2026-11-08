@@ -453,6 +453,7 @@ declare
   grade_row record;
   question_ids uuid[];
   challenge_id uuid;
+  target_grade text;
   published_grades text[] := '{}'::text[];
   skipped_grades text[] := '{}'::text[];
 begin
@@ -474,6 +475,7 @@ begin
     where p.role='Student' and p.linked_student_id is not null
     order by 1
   loop
+    target_grade := grade_row.grade_label;
     select array_agg(picked.id order by picked.priority, picked.subject_rank, picked.tie_break)
       into question_ids
     from (
@@ -488,13 +490,38 @@ begin
                  order by md5(q.id::text || p_challenge_date::text)
                ) as subject_rank
         from public.ka_questions q
-        where q.status='published' and q.grade_label=grade_row.grade_label
+        where q.status='published' and q.game_type='quick_quiz' and q.grade_label=target_grade
       ) candidates
       order by case when candidates.subject_rank <= 2 then 0 else 1 end,
                candidates.subject_rank,
                md5(candidates.id::text || p_challenge_date::text)
       limit 10
     ) picked;
+
+    if coalesce(cardinality(question_ids),0) <> 10 and target_grade <> 'General' then
+      target_grade := 'General';
+      select array_agg(picked.id order by picked.priority, picked.subject_rank, picked.tie_break)
+        into question_ids
+      from (
+        select candidates.id,
+               case when candidates.subject_rank <= 2 then 0 else 1 end as priority,
+               candidates.subject_rank,
+               md5(candidates.id::text || p_challenge_date::text) as tie_break
+        from (
+          select q.id, q.subject,
+                 row_number() over (
+                   partition by q.subject
+                   order by md5(q.id::text || p_challenge_date::text)
+                 ) as subject_rank
+          from public.ka_questions q
+          where q.status='published' and q.game_type='quick_quiz' and q.grade_label='General'
+        ) candidates
+        order by case when candidates.subject_rank <= 2 then 0 else 1 end,
+                 candidates.subject_rank,
+                 md5(candidates.id::text || p_challenge_date::text)
+        limit 10
+      ) picked;
+    end if;
 
     if coalesce(cardinality(question_ids),0) <> 10 then
       skipped_grades := array_append(skipped_grades,grade_row.grade_label);
@@ -506,7 +533,7 @@ begin
       challenge_date,grade_label,title,description,status,published_at
     ) values (
       p_challenge_date,grade_row.grade_label,'Today''s Knowledge Mix',
-      'Ten questions selected from the published Knowledge Arena question pool.','published',now()
+      'Ten Quick Quiz questions selected across available subjects for your grade band.','published',now()
     )
     on conflict (challenge_date,grade_label) do nothing
     returning id into challenge_id;
