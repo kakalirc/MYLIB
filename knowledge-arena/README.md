@@ -36,7 +36,7 @@ The SQL still requires review against the live schema and an explicitly approved
 
 ## Game rules
 - All LIB student logins are eligible regardless of subscription status.
-- Daily challenge: ten Quick Quiz questions per active grade per India-local day, mixed across available subjects, with unlimited attempts.
+- Daily challenge: ten English Quick Quiz questions per active grade per India-local day, mixed across available subjects, with unlimited attempts.
 - Daily challenge questions use the Quick Quiz game type and mix available subjects. Exact-grade questions are preferred; a complete General set is used when a grade has fewer than ten suitable questions. If neither set has ten questions, that grade's challenge is not published.
 - Game XP is separate from attendance XP: 5 XP per correct answer, 10 XP perfect-attempt bonus, and 100 XP daily cap per student.
 - Level display uses 100 Game XP per level as the current UI convention.
