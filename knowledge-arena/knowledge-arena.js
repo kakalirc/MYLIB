@@ -30,7 +30,7 @@
   let currentView = "play", currentGame = "quick_quiz", currentQuestions = [];
   let currentAnswers = [], currentIndex = 0, currentScore = 0, challengeId = null, clientAttemptId = null;
   let gameStartedAt = 0, memoryTimer = null, memoryRevealed = false;
-  let adminSummary = null, adminOptions = null, adminJobs = [];
+  let adminSummary = null, adminOptions = null, adminJobs = [], adminUsageReviews = [];
 
   function setStatus(label, tone) {
     const el = $("connection-status");
@@ -490,6 +490,7 @@
     };
     adminOptions = { grades: adminSummary.grades, subjects: adminSummary.subjects };
     adminJobs = [];
+    adminUsageReviews = [];
     renderAdmin();
     disableAdminPreviewControls();
     if (message) note("Admin preview only: " + message + " Controls are disabled until the authenticated API and schema are deployed.", "warning");
@@ -499,12 +500,13 @@
   async function loadAdmin() {
     setStatus("ADMIN", "success");
     try {
-      const [summary, options, jobs] = await Promise.all([
-        api("get_admin_summary"), api("get_admin_options"), api("get_admin_jobs")
+      const [summary, options, jobs, usage] = await Promise.all([
+        api("get_admin_summary"), api("get_admin_options"), api("get_admin_jobs"), api("get_admin_usage_reviews")
       ]);
       adminSummary = summary.summary;
       adminOptions = options;
       adminJobs = jobs.jobs || [];
+      adminUsageReviews = usage.reviews || [];
       renderAdmin();
     } catch (error) {
       usePreview("Admin API/database setup is pending: " + error.message);
@@ -521,7 +523,7 @@
       ["Games today",a.games_played_today],["Published questions",a.question_bank_published],
       ["Average accuracy (30d)",a.average_accuracy_30d == null ? "—" : a.average_accuracy_30d + "%"],
       ["AI spend today",money(a.ai_cost_inr_today)],["AI spend this month",money(a.ai_cost_inr_month)],
-      ["Generation failures (24h)",a.generation_failures_24h]
+      ["Reserved for review",money(a.ai_cost_inr_reserved_today)],["Generation failures (24h)",a.generation_failures_24h]
     ].map((m) => '<article class="metric"><small>' + m[0] + '</small><strong>' + (m[1] == null ? "—" : m[1]) + '</strong></article>').join("");
     $("admin-games-enabled").checked = !!settings.games_enabled;
     $("admin-generation-enabled").checked = !!settings.generation_enabled;
@@ -542,6 +544,7 @@
       '<label><input type="checkbox" data-disable-subject="' + escapeHtml(subject) + '" ' + (disabledSubjects.has(subject) ? 'checked' : '') + '> ' + escapeHtml(subject) + '</label>'
     ).join("");
     renderJobs();
+    renderUsageReviews();
   }
 
   function renderJobs() {
@@ -561,10 +564,47 @@
     });
   }
 
+  function renderUsageReviews() {
+    if (!adminUsageReviews.length) {
+      $("admin-usage-reviews").innerHTML = '<p class="muted">No AI usage reservations require review.</p>';
+      return;
+    }
+    $("admin-usage-reviews").innerHTML = '<div class="admin-job-list">' + adminUsageReviews.map((row) => {
+      const job = row.job || {};
+      const defaultCost = row.actual_cost_inr != null && Number(row.actual_cost_inr) > 0
+        ? Number(row.actual_cost_inr) : Number(row.reserved_cost_inr || 0);
+      return '<div class="admin-job usage-review"><div><b>' + escapeHtml(job.subject || "Generation batch") +
+        ' · ' + escapeHtml(job.grade_label || "—") + '</b><small>' +
+        escapeHtml(GAME_NAMES[job.game_type] || job.game_type || "—") + ' · Reserved ' + money(row.reserved_cost_inr) +
+        ' · Observed ' + money(row.actual_cost_inr) + ' · ' + Number(row.input_tokens || 0) + ' input / ' +
+        Number(row.output_tokens || 0) + ' output tokens</small><small>Created ' + escapeHtml(row.created_at || "") +
+        ' · Job ' + escapeHtml(job.status || "unknown") + '</small></div><div class="usage-review-action">' +
+        '<label>Confirmed actual cost (₹)<input type="number" min="0" step="0.01" id="usage-cost-' + row.id +
+        '" value="' + defaultCost + '"></label><button class="btn-secondary" data-usage-settle="' + row.id +
+        '">Confirm &amp; settle</button></div></div>';
+    }).join("") + '</div>';
+    $("admin-usage-reviews").querySelectorAll("[data-usage-settle]").forEach((button) => {
+      button.addEventListener("click", () => settleUsage(button.dataset.usageSettle));
+    });
+  }
+
+  async function settleUsage(usageId) {
+    const input = $("usage-cost-" + usageId);
+    const actualCost = Number(input && input.value);
+    if (!Number.isFinite(actualCost) || actualCost < 0) { alert("Enter a valid confirmed INR cost."); return; }
+    try {
+      await api("admin_control", { control: "resolve_usage_review", usage_id: usageId, actual_cost_inr: actualCost });
+      await refreshAdmin();
+    } catch (error) { alert(error.message); }
+  }
+
   async function refreshAdmin() {
-    const [summary, jobs] = await Promise.all([api("get_admin_summary"), api("get_admin_jobs")]);
+    const [summary, jobs, usage] = await Promise.all([
+      api("get_admin_summary"), api("get_admin_jobs"), api("get_admin_usage_reviews")
+    ]);
     adminSummary = summary.summary;
     adminJobs = jobs.jobs || [];
+    adminUsageReviews = usage.reviews || [];
     renderAdmin();
   }
   async function updateJob(action, jobId) {
