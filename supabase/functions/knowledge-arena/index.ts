@@ -105,7 +105,7 @@ Deno.serve(async (req) => {
         availableGradeOptions = [...new Set((grades || []).map((g: any) => String(g.name || "").trim())
           .filter((name: string) => /^(?:[1-9]|1[0-2]|PU)$/i.test(name)))];
       }
-      if (isLanguageStudent) {
+      if (ctx.gradeLabel.trim().toLocaleLowerCase() === "language") {
         const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
           .select("preferred_language_code").eq("user_id", user.id).maybeSingle();
         if (preferenceError) return errorResponse(503, "Could not load your saved language preference.");
@@ -192,7 +192,7 @@ Deno.serve(async (req) => {
       let languageCode = body.language_code === undefined ? "" : String(body.language_code);
       if (difficulty && !["easy", "medium", "hard"].includes(difficulty)) return errorResponse(400, "Invalid difficulty.");
       if (languageCode && !["en","hi","kn","sa","fr"].includes(languageCode)) return errorResponse(400, "Invalid question language.");
-      if (ctx.gradeLabel.trim().toLocaleLowerCase() === "language") {
+      if (isLanguageStudent) {
         const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
           .select("preferred_language_code").eq("user_id", user.id).maybeSingle();
         if (preferenceError) return errorResponse(503, "Could not verify your saved language preference.");
