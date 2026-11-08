@@ -914,6 +914,10 @@ revoke all on public.ka_questions, public.ka_question_keys, public.ka_generation
 grant select on public.ka_questions, public.ka_daily_challenges,
   public.ka_daily_challenge_items, public.ka_player_stats, public.ka_achievements,
   public.ka_player_achievements, public.ka_attempts to authenticated;
+grant all on public.ka_questions, public.ka_question_keys, public.ka_generation_jobs,
+  public.ka_attempts, public.ka_daily_challenges, public.ka_daily_challenge_items,
+  public.ka_player_stats, public.ka_achievements, public.ka_player_achievements,
+  public.ka_settings, public.ka_ai_usage to service_role;
 revoke all on function public.ka_store_generated_question(uuid,jsonb,smallint) from public, anon, authenticated;
 revoke all on function public.ka_record_attempt(uuid,uuid,text,text,text,uuid,integer,integer,numeric,integer,integer,integer,date) from public, anon, authenticated;
 grant execute on function public.ka_claim_generation_job(uuid) to service_role;
