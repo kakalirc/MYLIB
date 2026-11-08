@@ -25,6 +25,7 @@
   ];
 
   let client = null, session = null, role = "", gradeLabel = "", lockedOut = false;
+  const LANGUAGE_OPTIONS = { en: "English", hi: "Hindi", kn: "Kannada", sa: "Sanskrit" };
   let previewMode = false, previewReason = "";
   let catalog = null, progress = null, leaderboard = [], dailyChallenge = null;
   let currentView = "play", currentGame = "quick_quiz", currentQuestions = [];
@@ -100,6 +101,7 @@
       games: Object.keys(GAME_NAMES).map((id) => ({ id, name: GAME_NAMES[id] })),
       subjects: ["General Knowledge","Science","Mathematics","Language","Geography","Logic"],
       grade_label: "Preview",
+      preferred_language_code: "en",
       progress: { game_xp: 0, games_played: 0, questions_answered: 0, correct_answers: 0, current_streak: 0, best_streak: 0 }
     };
     progress = { stats: catalog.progress, achievements: [] };
@@ -200,6 +202,7 @@
       catalog = await api("get_catalog");
       progress = await api("get_my_progress");
       populateSubjects();
+      configureLanguageChoice();
       const enabledGames = new Set((catalog.games || []).map((game) => game.id));
       document.querySelectorAll(".game-card").forEach((card) => {
         const launch = card.querySelector(".launch");
@@ -221,6 +224,30 @@
       if (error.status === 403) throw error;
       usePreview(error.message || "The Knowledge Arena database or API is still being prepared.");
     }
+  }
+
+  function configureLanguageChoice() {
+    const isLanguageStudent = gradeLabel.trim().toLocaleLowerCase() === "language";
+    $("academic-subject-choice").classList.toggle("hidden", isLanguageStudent);
+    $("language-subject-choice").classList.toggle("hidden", !isLanguageStudent);
+    if (isLanguageStudent) {
+      $("language-select").value = LANGUAGE_OPTIONS[catalog?.preferred_language_code] ? catalog.preferred_language_code : "en";
+    }
+  }
+
+  async function savePreferredLanguage() {
+    if (gradeLabel.trim().toLocaleLowerCase() !== "language" || previewMode) return;
+    const select = $("language-select");
+    const previous = catalog?.preferred_language_code || "en";
+    select.disabled = true;
+    try {
+      const result = await api("set_language_preference", { language_code: select.value });
+      catalog.preferred_language_code = result.language_code;
+      note("Your preferred language is saved as " + LANGUAGE_OPTIONS[result.language_code] + ".", "success");
+    } catch (error) {
+      select.value = previous;
+      note("Could not save your language preference: " + error.message, "warning");
+    } finally { select.disabled = false; }
   }
 
   function populateSubjects() {
@@ -338,10 +365,12 @@
       challengeId = dailyChallenge.challenge.id;
       currentGame = "quick_quiz";
     } else {
-      const subject = $("subject-select").value;
-      if (!subject) { note("Please choose a subject first.", "warning"); return; }
+      const isLanguageStudent = gradeLabel.trim().toLocaleLowerCase() === "language";
+      const languageCode = isLanguageStudent ? $("language-select").value : "en";
+      const subject = isLanguageStudent ? LANGUAGE_OPTIONS[languageCode] : $("subject-select").value;
+      if (!subject) { note(isLanguageStudent ? "Please choose a language first." : "Please choose a subject first.", "warning"); return; }
       try {
-        const data = await api("get_questions", { game_type: game, subject, language_code: $("language-select").value, limit: 10 });
+        const data = await api("get_questions", { game_type: game, subject, language_code: languageCode, limit: 10 });
         currentQuestions = (data.questions || []).sort(() => Math.random() - 0.5);
         if (!currentQuestions.length) {
           note("There are no published questions for " + GAME_NAMES[game] + " in " + subject + " yet. Please try another subject or return later.", "info");
@@ -762,6 +791,7 @@
     document.querySelectorAll(".game-card").forEach((card) => card.classList.toggle("hidden",
       button.dataset.filter !== "all" && card.dataset.kind !== button.dataset.filter));
   });
+  $("language-select").addEventListener("change", savePreferredLanguage);
   $("start-featured").addEventListener("click", () => startGame("quick_quiz", false));
   $("start-daily").addEventListener("click", () => startGame("quick_quiz", true));
   $("quit-quiz").addEventListener("click", () => {
