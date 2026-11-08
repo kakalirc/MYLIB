@@ -116,6 +116,7 @@ Deno.serve(async (req) => {
       let query = db.from("ka_questions")
         .select("id,subject,topic,grade_label,language_code,difficulty,game_type,prompt,options")
         .eq("status", "published").in("grade_label", [ctx.gradeLabel, "General"]).eq("game_type", gameType)
+        .or("expires_at.is.null,expires_at.gt." + new Date().toISOString())
         .order("created_at", { ascending: false }).limit(Math.min(Math.max(safeNumber(body.limit, 10), 1), 20));
       if (subject) query = query.eq("subject", subject);
       if (difficulty) query = query.eq("difficulty", difficulty);
@@ -138,11 +139,11 @@ Deno.serve(async (req) => {
       if (error) return errorResponse(503, "Could not load today's challenge.");
       if (!challenge) return json(200, { challenge: null });
       const { data: items, error: itemError } = await db.from("ka_daily_challenge_items")
-        .select("sort_order,question:ka_questions(id,subject,topic,grade_label,language_code,difficulty,game_type,status,prompt,options)")
+        .select("sort_order,question:ka_questions(id,subject,topic,grade_label,language_code,difficulty,game_type,status,expires_at,prompt,options)")
         .eq("challenge_id", challenge.id).order("sort_order");
       if (itemError) return errorResponse(503, "Could not load today's challenge questions.");
       const questions = (items || []).map((x: { question: any }) => x.question)
-        .filter((q: any) => q && q.status === "published" && q.grade_label === ctx.gradeLabel &&
+        .filter((q: any) => q && q.status === "published" && (!q.expires_at || Date.parse(q.expires_at) > Date.now()) && q.grade_label === ctx.gradeLabel &&
           !(dailySettings.disabled_game_types || []).includes(q.game_type) &&
           !(dailySettings.disabled_subjects || []).includes(q.subject));
       if (questions.length !== 10) return json(200, { challenge: null, questions: [], unavailable: true });
@@ -168,7 +169,8 @@ Deno.serve(async (req) => {
       const ids = [...seen];
       const { data: questions, error: questionError } = await db.from("ka_questions")
         .select("id,subject,topic,grade_label,difficulty,game_type,prompt,options,explanation")
-        .in("id", ids).eq("status", "published").in("grade_label", [ctx.gradeLabel, "General"]);
+        .in("id", ids).eq("status", "published").in("grade_label", [ctx.gradeLabel, "General"])
+        .or("expires_at.is.null,expires_at.gt." + new Date().toISOString());
       if (questionError || !questions || questions.length !== ids.length) return errorResponse(400, "One or more questions are unavailable.");
       const challengeId = typeof body.challenge_id === "string" ? body.challenge_id : null;
       if (questions.some((q: any) => q.game_type !== gameType)) return errorResponse(400, "Questions do not match the selected game.");
