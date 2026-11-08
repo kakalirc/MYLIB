@@ -59,12 +59,15 @@
   }
 
   window.renderStudentPortal = function () {
-    var academicHtml = originalRenderStudentPortal.apply(this, arguments);
+    var selected = activeTab();
 
     // Keep the existing full-screen practice-paper experience unchanged.
-    try { if (typeof spOpen !== 'undefined' && spOpen) return academicHtml; } catch (e) {}
+    try {
+      if (typeof spOpen !== 'undefined' && spOpen) return originalRenderStudentPortal.apply(this, arguments);
+    } catch (e) {}
 
-    var selected = activeTab();
+    // Avoid loading academic-only widgets (such as the attendance leaderboard) while Fun Zone is open.
+    var academicHtml = selected === 'academics' ? originalRenderStudentPortal.apply(this, arguments) : '';
     return '<div class="student-portal-section-switcher" role="tablist" aria-label="Student portal sections">'
       + '<button type="button" class="student-portal-section-tab" role="tab" aria-selected="' + (selected === 'academics') + '" aria-controls="student-portal-academics" onclick="setStudentPortalSection(\'academics\')">📚 My Learning</button>'
       + '<button type="button" class="student-portal-section-tab" role="tab" aria-selected="' + (selected === 'fun') + '" aria-controls="student-portal-fun" onclick="setStudentPortalSection(\'fun\')">🎮 Fun Zone</button>'
