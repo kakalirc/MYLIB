@@ -227,7 +227,7 @@
       $('admin-nav').classList.remove('hidden');
       $('hero-score').classList.add('hidden');
       $('grade-label').textContent='Administrative controls and shared service health';
-      $('hero h1').innerHTML='Knowledge Arena<br><em>control centre.</em>';
+      document.querySelector('.hero h1').innerHTML='Knowledge Arena<br><em>control centre.</em>';
       showView('admin');
     }else if(isStudent&&!studentView){
       try{await api('get_admin_summary');$('admin-nav').classList.remove('hidden');}
