@@ -106,7 +106,7 @@
       + '<article class="student-fun-card"><div class="student-fun-card-icon" aria-hidden="true">⭐</div><h3>Game XP & Levels</h3><p>Earn Knowledge Arena XP as you play. These rewards are independent of class attendance XP.</p></article>'
       + '<article class="student-fun-card"><div class="student-fun-card-icon" aria-hidden="true">🏆</div><h3>Badges & Leaderboard</h3><p>Celebrate game achievements and compare progress on the Knowledge Arena leaderboard.</p></article>'
       + '</div>'
-      + '<div class="student-fun-preview-note"><b>Preview status:</b> Knowledge Arena currently opens an interactive prototype with sample questions and browser-only scores. It is not yet connected to student accounts or live saved progress.</div>'
+      + '<div class="student-fun-preview-note"><b>Knowledge Arena:</b> Opens with your existing LIB login. Live scores and Game XP are saved to your student account when the Knowledge Arena service is enabled; preview-mode scores are never saved.</div>'
       + '</section>';
   }
 
