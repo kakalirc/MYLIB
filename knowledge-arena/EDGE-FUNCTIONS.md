@@ -26,7 +26,7 @@ One-job-per-invocation AI generation worker. It also accepts `{"action":"publish
 5. Reads the Anthropic key server-side from existing `ai_settings` using service role. It does not call or modify the existing `ai-proxy`.
 6. Generates evergreen MCQs, checks structure/metadata/duplicates and runs a second AI validation pass.
 7. Publishes question prompts/options and private answer keys atomically through `ka_store_generated_question()`.
-8. Can publish ten grade-specific questions per active grade when a full set is available. This action is idempotent for a given India-local date.
+8. Can publish ten English Quick Quiz questions per active grade when a full set is available. This action is idempotent for a given India-local date.
 
 The second AI pass is a quality filter, not a guarantee of factual correctness. The initial generator avoids current affairs and time-sensitive questions.
 
