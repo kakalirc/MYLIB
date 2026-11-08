@@ -135,7 +135,7 @@ Deno.serve(async (req) => {
         .eq("challenge_id", challenge.id).order("sort_order");
       if (itemError) return errorResponse(503, "Could not load today's challenge questions.");
       const questions = (items || []).map((x: { question: any }) => x.question)
-        .filter((q: any) => q && q.grade_label === ctx.gradeLabel &&
+        .filter((q: any) => q && (q.grade_label === ctx.gradeLabel || q.grade_label === "General") &&
           !(dailySettings.disabled_game_types || []).includes(q.game_type) &&
           !(dailySettings.disabled_subjects || []).includes(q.subject));
       if (questions.length !== 10) return json(200, { challenge: null, questions: [], unavailable: true });
@@ -200,7 +200,7 @@ Deno.serve(async (req) => {
         const { data: challengeItems, error: challengeItemsError } = await db.from("ka_daily_challenge_items")
           .select("question_id,question:ka_questions(grade_label)").eq("challenge_id", challengeId);
         const eligibleItems = (challengeItems || []).filter((x: any) => x.question &&
-          x.question.grade_label === ctx.gradeLabel);
+          (x.question.grade_label === ctx.gradeLabel || x.question.grade_label === "General"));
         if (challengeItemsError || !challengeItems || ids.length !== eligibleItems.length || ids.some((id) => !eligibleItems.some((x: any) => x.question_id === id))) {
           return errorResponse(400, "Attempt includes questions outside today's challenge.");
         }
