@@ -181,7 +181,15 @@
         setStatus("ACCESS DENIED", "danger");
       } else {
         showShell();
-        usePreview(error.message || "The Knowledge Arena API is not deployed yet.");
+        const requestedView = new URLSearchParams(location.search).get("view");
+        if (requestedView === "admin") {
+          role = "AdminPreview";
+          $("admin-nav").classList.remove("hidden");
+          usePreview(error.message || "The Knowledge Arena API is not deployed yet.");
+          renderAdminPreview(error.message || "The Knowledge Arena API is not deployed yet.");
+        } else {
+          usePreview(error.message || "The Knowledge Arena API is not deployed yet.");
+        }
       }
     }
   }
@@ -263,7 +271,7 @@
   }
 
   function showView(name) {
-    if (name === "admin" && role !== "Admin") return;
+    if (name === "admin" && role !== "Admin" && role !== "AdminPreview") return;
     currentView = name;
     ["play","daily","achievements","leaderboard","admin"].forEach((v) => {
       const section = $("view-" + v);
@@ -463,6 +471,29 @@
     }
   }
 
+  function disableAdminPreviewControls() {
+    document.querySelectorAll("#view-admin button, #view-admin input, #view-admin select").forEach((control) => {
+      control.disabled = true;
+    });
+  }
+
+  function renderAdminPreview(message) {
+    adminSummary = {
+      registered_players: "—", active_players_today: "—", games_played_today: "—",
+      question_bank_published: "—", average_accuracy_30d: "—",
+      ai_cost_inr_today: 0, ai_cost_inr_month: 0, generation_failures_24h: "—",
+      automation: { games_enabled: true, generation_enabled: false, daily_challenge_enabled: false,
+        daily_ai_budget_inr: 100, monthly_ai_budget_inr: 1000 },
+      grades: ["General","Class 1","Class 2"], subjects: ["Mathematics","Science","English"]
+    };
+    adminOptions = { grades: adminSummary.grades, subjects: adminSummary.subjects };
+    adminJobs = [];
+    renderAdmin();
+    disableAdminPreviewControls();
+    if (message) note("Admin preview only: " + message + " Controls are disabled until the authenticated API and schema are deployed.", "warning");
+    showView("admin");
+  }
+
   async function loadAdmin() {
     setStatus("ADMIN", "success");
     try {
@@ -476,9 +507,7 @@
     } catch (error) {
       usePreview("Admin API/database setup is pending: " + error.message);
       $("admin-nav").classList.remove("hidden");
-      $("view-admin").classList.remove("hidden");
-      $("view-play").classList.add("hidden");
-      $("admin-metrics").innerHTML = '<p class="muted">Admin metrics will appear when the Knowledge Arena backend is deployed and the isolated schema is installed.</p>';
+      renderAdminPreview(error.message);
     }
   }
 
