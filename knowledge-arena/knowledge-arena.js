@@ -24,7 +24,7 @@
     {subject:"Geography",prompt:"Which imaginary line divides Earth into Northern and Southern Hemispheres?",options:["Prime Meridian","Equator","Tropic of Cancer","Arctic Circle"],correct_option:1,explanation:"The Equator is at 0 degrees latitude."}
   ];
 
-  let client = null, session = null, role = "", gradeLabel = "";
+  let client = null, session = null, role = "", gradeLabel = "", lockedOut = false;
   let previewMode = false, previewReason = "";
   let catalog = null, progress = null, leaderboard = [], dailyChallenge = null;
   let currentView = "play", currentGame = "quick_quiz", currentQuestions = [];
@@ -67,6 +67,7 @@
   }
 
   async function api(action, payload = {}) {
+    if (lockedOut) throw new Error("This tab has been signed out. Please sign in again through My LIB.");
     const { data: authData, error: authError } = await client.auth.getSession();
     if (authError || !authData.session) throw new Error("Your LIB login has expired. Please sign in again.");
     session = authData.session;
@@ -115,6 +116,14 @@
       return;
     }
     client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    let tabWasLoggedOut = false;
+    try { tabWasLoggedOut = sessionStorage.getItem("lib_tab_logged_out") === "1"; } catch (e) {}
+    if (tabWasLoggedOut) {
+      lockedOut = true;
+      setStatus("SIGNED OUT", "warning");
+      showGate("auth");
+      return;
+    }
     const { data, error } = await client.auth.getSession();
     if (error || !data.session) {
       setStatus("SIGN IN REQUIRED", "warning");
@@ -124,15 +133,20 @@
     session = data.session;
     client.auth.onAuthStateChange((event) => {
       if (event === "SIGNED_OUT") {
+        lockedOut = true;
         showGate("auth");
         setStatus("SIGNED OUT", "warning");
       }
     });
     window.addEventListener("storage", (event) => {
-      if (event.key === "lib_cross_tab_logout" && event.newValue) {
-        client.auth.getSession().then(({ data: latest }) => {
-          if (!latest.session) { showGate("auth"); setStatus("SIGNED OUT", "warning"); }
-        });
+      if (event.key !== "lib_cross_tab_logout" || !event.newValue) return;
+      let signal = null;
+      try { signal = JSON.parse(event.newValue); } catch (e) {}
+      if (!signal || !signal.userId || signal.userId === session?.user?.id) {
+        lockedOut = true;
+        try { sessionStorage.setItem("lib_tab_logged_out", "1"); } catch (e) {}
+        showGate("auth");
+        setStatus("SIGNED OUT", "warning");
       }
     });
 
@@ -276,7 +290,7 @@
       }
       currentQuestions = dailyChallenge.questions;
       challengeId = dailyChallenge.challenge.id;
-      currentGame = currentQuestions[0].game_type || "quick_quiz";
+      currentGame = "quick_quiz";
     } else {
       const subject = $("subject-select").value;
       if (!subject) { note("Please choose a subject first.", "warning"); return; }
@@ -395,8 +409,10 @@
       $("result-review").innerHTML = currentQuestions.map((q, i) => {
         const item = feedback.get(q.id);
         if (!item) return "";
+        const correctAnswer = q.options && q.options[item.correct_option] ? q.options[item.correct_option] : "";
         return '<div class="result-review-item"><b>' + (i + 1) + '. ' + (item.correct ? "Correct" : "Incorrect") +
-          '</b><p>' + escapeHtml(item.explanation || "") + '</p></div>';
+          '</b>' + (!item.correct && correctAnswer ? '<p><strong>Correct answer:</strong> ' + escapeHtml(correctAnswer) + '</p>' : '') +
+          '<p>' + escapeHtml(item.explanation || "") + '</p></div>';
       }).join("");
       $("quiz").classList.add("hidden");
       $("results").classList.remove("hidden");
