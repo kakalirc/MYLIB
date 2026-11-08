@@ -169,7 +169,7 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       return { job_id: job.id, status: "paused", reason: "budget_preflight", estimated_max_cost_inr: estimatedMaxCostInr };
     }
     reservedCostInr = estimatedMaxCostInr;
-    reservedCostUsd = estimatedMaxCostUsd;
+    reservedCostUsd = estimatedMaxCostUsd * 1.5;
     const { data: usage, error: usageError } = await db.from("ka_ai_usage").insert({
       job_id: job.id, status: "reserved",
       reserved_cost_usd: reservedCostUsd, reserved_cost_inr: reservedCostInr,
@@ -301,6 +301,13 @@ Deno.serve(async (req) => {
   if (!expected || !constantTimeEqual(expected, supplied)) return errorResponse(401, "Worker authentication failed.");
   try {
     const db = adminClient();
+    let requestBody: Record<string, unknown> = {};
+    try { requestBody = await req.json(); } catch { requestBody = {}; }
+    if (requestBody.action === "publish_daily_challenges") {
+      const { data, error } = await db.rpc("ka_publish_daily_challenges", { p_challenge_date: indiaDate() });
+      if (error) throw new Error("Could not publish grade-specific daily challenges.");
+      return json(200, { publication: data });
+    }
     const result = await runOneJob(db);
     return json(200, result);
   } catch (e) {
