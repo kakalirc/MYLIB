@@ -17,7 +17,7 @@ The student UI is now wired to the authenticated Knowledge Arena API contract. I
 
 If the Edge Function or isolated schema is not yet deployed, the UI falls back to a clearly labelled sample preview. Preview scores are never submitted or persisted. The live student experience loads published grade-matched questions, submits selected option indexes for server-side evaluation, then refreshes saved Game XP, achievements and the common leaderboard. Correct answers remain server-side until the attempt is submitted.
 
-The Admin screen includes summary-only metrics, master switches for games/generation/daily challenges, individual game and subject availability controls, shared INR budget controls, generation job queue/pause/resume and a daily challenge publish action. It does not show individual questions, selected answers or question-level history.
+The Admin screen includes summary-only metrics, master switches for games/generation/daily challenges, individual game and subject availability controls, shared INR budget controls, generation job queue/pause/resume, daily challenge publication and Admin review of unsettled AI cost reservations. It does not show individual questions, selected answers or question-level history.
 
 The schema remains a design artifact only. No production table, policy, function, trigger, setting, secret or schedule has been changed. Neither Edge Function has been deployed. No PR merge or production deployment has occurred.
 
