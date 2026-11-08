@@ -455,8 +455,10 @@ declare
   grade_row record;
   question_ids uuid[];
   challenge_id uuid;
+  target_grade text;
   published_grades text[] := '{}'::text[];
   skipped_grades text[] := '{}'::text[];
+  already_published_grades text[] := '{}'::text[];
   disabled_game_types text[] := '{}'::text[];
   disabled_subjects text[] := '{}'::text[];
 begin
@@ -470,8 +472,9 @@ begin
     into disabled_game_types, disabled_subjects
   from public.ka_settings s
   where s.id=1 and s.daily_challenge_enabled=true and s.games_enabled=true;
-  if not found then
-    return jsonb_build_object('published_grades',published_grades,'skipped_grades',skipped_grades,'paused',true);
+  if not found or 'quick_quiz'=any(disabled_game_types) then
+    return jsonb_build_object('published_grades',published_grades,'skipped_grades',skipped_grades,
+      'already_published_grades',already_published_grades,'paused',true);
   end if;
 
   for grade_row in
@@ -482,6 +485,15 @@ begin
     where p.role='Student' and p.linked_student_id is not null
     order by 1
   loop
+    if exists (
+      select 1 from public.ka_daily_challenges d
+      where d.challenge_date=p_challenge_date and d.grade_label=grade_row.grade_label and d.status='published'
+    ) then
+      already_published_grades := array_append(already_published_grades,grade_row.grade_label);
+      continue;
+    end if;
+
+    target_grade := grade_row.grade_label;
     select array_agg(picked.id order by picked.priority, picked.subject_rank, picked.tie_break)
       into question_ids
     from (
@@ -496,8 +508,7 @@ begin
                  order by md5(q.id::text || p_challenge_date::text)
                ) as subject_rank
         from public.ka_questions q
-        where q.status='published' and q.game_type='quick_quiz' and q.grade_label=grade_row.grade_label
-          and not (q.game_type = any(disabled_game_types))
+        where q.status='published' and q.game_type='quick_quiz' and q.grade_label=target_grade
           and not (q.subject = any(disabled_subjects))
       ) candidates
       order by case when candidates.subject_rank <= 2 then 0 else 1 end,
@@ -506,6 +517,33 @@ begin
       limit 10
     ) picked;
 
+    -- Use a complete General set only when the exact grade does not have ten
+    -- suitable Quick Quiz questions. Never mix the two grade bands.
+    if coalesce(cardinality(question_ids),0) <> 10 and target_grade <> 'General' then
+      target_grade := 'General';
+      select array_agg(picked.id order by picked.priority, picked.subject_rank, picked.tie_break)
+        into question_ids
+      from (
+        select candidates.id,
+               case when candidates.subject_rank <= 2 then 0 else 1 end as priority,
+               candidates.subject_rank,
+               md5(candidates.id::text || p_challenge_date::text) as tie_break
+        from (
+          select q.id, q.subject,
+                 row_number() over (
+                   partition by q.subject
+                   order by md5(q.id::text || p_challenge_date::text)
+                 ) as subject_rank
+          from public.ka_questions q
+          where q.status='published' and q.game_type='quick_quiz' and q.grade_label='General'
+            and not (q.subject = any(disabled_subjects))
+        ) candidates
+        order by case when candidates.subject_rank <= 2 then 0 else 1 end,
+                 candidates.subject_rank,
+                 md5(candidates.id::text || p_challenge_date::text)
+        limit 10
+      ) picked;
+    end if;
 
     if coalesce(cardinality(question_ids),0) <> 10 then
       skipped_grades := array_append(skipped_grades,grade_row.grade_label);
@@ -523,7 +561,7 @@ begin
     returning id into challenge_id;
 
     if challenge_id is null then
-      skipped_grades := array_append(skipped_grades,grade_row.grade_label);
+      already_published_grades := array_append(already_published_grades,grade_row.grade_label);
       continue;
     end if;
 
@@ -537,6 +575,7 @@ begin
   return jsonb_build_object(
     'published_grades',published_grades,
     'skipped_grades',skipped_grades,
+    'already_published_grades',already_published_grades,
     'published_count',cardinality(published_grades),
     'skipped_count',cardinality(skipped_grades),
     'paused',false
