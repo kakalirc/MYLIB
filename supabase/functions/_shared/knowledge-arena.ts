@@ -35,10 +35,11 @@ export async function studentContext(db: SupabaseClient, profile: { linked_stude
   if (profile.role !== "Student" || !profile.linked_student_id) return null;
   const { data: student, error } = await db.from("students")
     .select("id, grade_id").eq("id", profile.linked_student_id).maybeSingle();
-  if (error || !student?.grade_id) return null;
+  if (error || !student) return null;
+  if (!student.grade_id) return { studentId: student.id as string, gradeId: null, gradeLabel: "General" };
   const { data: grade, error: gradeError } = await db.from("grades")
     .select("id, name").eq("id", student.grade_id).maybeSingle();
-  if (gradeError || !grade?.name) return null;
+  if (gradeError || !grade?.name) return { studentId: student.id as string, gradeId: student.grade_id as number | string, gradeLabel: "General" };
   return { studentId: student.id as string, gradeId: grade.id as number | string, gradeLabel: grade.name as string };
 }
 
