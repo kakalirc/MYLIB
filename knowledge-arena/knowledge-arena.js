@@ -192,6 +192,15 @@
       catalog = await api("get_catalog");
       progress = await api("get_my_progress");
       populateSubjects();
+      const enabledGames = new Set((catalog.games || []).map((game) => game.id));
+      document.querySelectorAll(".game-card").forEach((card) => {
+        const launch = card.querySelector(".launch");
+        if (!launch) return;
+        const enabled = enabledGames.has(launch.dataset.game);
+        card.classList.toggle("game-disabled", !enabled);
+        launch.disabled = !enabled;
+        if (!enabled) launch.textContent = "Temporarily unavailable";
+      });
       renderProgress();
       renderAchievements();
       await loadLeaderboard();
