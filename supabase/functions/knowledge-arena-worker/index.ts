@@ -16,6 +16,7 @@ async function anthropic(apiKey: string, system: string, prompt: string, maxToke
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages: [{ role: "user", content: prompt }] }),
+    signal: AbortSignal.timeout(5 * 60 * 1000),
   });
   const data = await response.json();
   if (!response.ok || data.error) throw new Error(data.error?.message || "AI provider request failed.");
