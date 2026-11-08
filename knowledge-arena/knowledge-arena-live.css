@@ -53,3 +53,26 @@
 @media(max-width:700px){.usage-review-action{align-items:stretch;flex-direction:column}.usage-review-action input{width:100%}}
 
 .progress-overview{display:grid;grid-template-columns:minmax(180px,.8fr) minmax(240px,1.2fr);gap:24px;align-items:center;margin:18px 0;padding:22px}.progress-level-copy span,.progress-level-copy strong,.progress-level-copy b{display:block}.progress-level-copy strong{font-size:36px;line-height:1.2;color:var(--navy);margin:5px 0}.progress-level-copy b{font-size:11px;letter-spacing:.7px;color:#6d7890}.progress-level-track .progress{height:10px;border-radius:20px;overflow:hidden}.progress-level-track .progress i{display:block;height:100%;border-radius:20px;background:#d6a83d}.progress-level-track small{display:block;margin-top:9px;color:var(--muted);font-size:11px}.progress-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}.progress-footnote{font-size:11px;line-height:1.6;margin-top:14px}@media(max-width:600px){.progress-overview{grid-template-columns:1fr;gap:16px}.progress-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Read-only Student Leadership dashboard; attendance rewards remain a separate source. */
+.leadership-panel{border-color:#d9e1ef;background:#fff}
+.leadership-panel>.admin-panel-head{align-items:flex-start}
+.leadership-panel>.admin-panel-head>div{min-width:0}
+.leadership-panel>.admin-panel-head h3{margin-bottom:5px}
+.leadership-panel>.admin-panel-head p{margin:0;font-size:12px}
+.leadership-metrics{margin:14px 0 20px}
+.leadership-section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:20px 0 10px}
+.leadership-section-head h4{font:700 13px Manrope;color:var(--navy);margin:0}
+.leadership-table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+.leadership-table{min-width:850px}
+.leadership-row{display:grid;grid-template-columns:48px minmax(150px,1.5fr) minmax(95px,1fr) minmax(110px,1fr) 60px 80px 60px 90px;align-items:center;gap:10px;padding:11px 12px;border-bottom:1px solid #edf0f5;font-size:11px;color:#46536b}
+.leadership-row:last-child{border-bottom:0}
+.leadership-row>span:nth-child(2){min-width:0}
+.leadership-row b,.leadership-row small{display:block}
+.leadership-row b{font-size:11px;color:#263653}
+.leadership-row small{font-size:9px;color:#8792a5;margin-top:3px}
+.leadership-header{background:#f7f9fc;font-size:9px;font-weight:800;letter-spacing:.05em;color:#7a879b}
+.leadership-attendance{padding:14px 16px;border:1px solid #eadfca;background:#fffaf0;border-radius:10px}
+.leadership-attendance strong{font-size:12px;color:#5c4b2d}
+.leadership-attendance p{margin:6px 0 0;font-size:11px;line-height:1.55}
+@media(max-width:760px){.leadership-panel>.admin-panel-head{flex-direction:column}.leadership-panel>.admin-panel-head .btn-secondary{align-self:flex-start}}
