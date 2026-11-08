@@ -94,6 +94,17 @@ def guide():
         box('Certificate of Achievement', ['Ask the admin on Chat, Support or WhatsApp', 'The admin sends you the PDF']),
     ) + note('Photo needed', 'Your child’s photo must be uploaded first: neither the ID card nor the certificate can be made without it.', 'warn'))
 
+
+    g.add('knowledgearena', 'Learning', 'Knowledge Arena', 'A supervised way for your child to practise with games and daily challenges.', g2(
+        box('Games and subjects', 'Each game follows its own subject: Word Master uses English (or the selected language for a Language programme); Number Quest and Brain Teaser use Mathematics; Science Explorer and Memory Challenge use Science. Quick Quiz follows the selected subject filter; All includes all available subjects.'),
+        box('Grade selection', 'If your child is asked to choose a school grade, this is a Knowledge Arena question-selection preference. It does not change the student grade recorded in the LIB profile.'),
+    ) + bullets([
+        'The daily challenge contains ten English Quick Quiz questions for the selected grade when enough suitable published questions are available. Attempts are unlimited.',
+        'Game XP, levels, achievements and the game leaderboard are separate from attendance XP and attendance rewards.',
+        'Game XP is awarded for correct answers, with a perfect-attempt bonus and a daily cap.',
+        'If no published questions are available for a game and grade, try another game or return later. This is not a fee or subscription restriction.',
+    ]) + note('Parent view', 'Use your child’s Knowledge Arena screen to view their own progress. Parent access does not allow you to answer a challenge on the child’s behalf.', 'tip'))
+
     g.add('quickref', 'Quick reference', 'Quick reference', 'I want to… where do I go?', table(['I want to…', 'Go to'], [
         ['See attendance', 'Attendance, by month'],
         ['See classes left', 'Stats and Subscription report'],
