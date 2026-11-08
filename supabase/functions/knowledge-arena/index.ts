@@ -151,7 +151,7 @@ Deno.serve(async (req) => {
       if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
       if (ctx.gradeLabel.trim().toLocaleLowerCase() !== "language") return errorResponse(403, "Language preference is available only to Language-category students.");
       const languageCode = String(body.language_code || "");
-      if (!["en", "hi", "kn", "sa"].includes(languageCode)) return errorResponse(400, "Choose English, Hindi, Kannada or Sanskrit.");
+      if (!["en", "hi", "kn", "sa", "fr"].includes(languageCode)) return errorResponse(400, "Choose English, Hindi, Kannada, Sanskrit or French.");
       const { error } = await db.from("ka_student_preferences").upsert({
         user_id: user.id, preferred_language_code: languageCode, updated_at: new Date().toISOString(),
       }, { onConflict: "user_id" });
@@ -177,13 +177,13 @@ Deno.serve(async (req) => {
       const difficulty = body.difficulty === undefined ? "" : String(body.difficulty);
       let languageCode = body.language_code === undefined ? "" : String(body.language_code);
       if (difficulty && !["easy", "medium", "hard"].includes(difficulty)) return errorResponse(400, "Invalid difficulty.");
-      if (languageCode && !["en","hi","kn","sa"].includes(languageCode)) return errorResponse(400, "Invalid question language.");
+      if (languageCode && !["en","hi","kn","sa","fr"].includes(languageCode)) return errorResponse(400, "Invalid question language.");
       if (ctx.gradeLabel.trim().toLocaleLowerCase() === "language") {
         const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
           .select("preferred_language_code").eq("user_id", user.id).maybeSingle();
         if (preferenceError) return errorResponse(503, "Could not verify your saved language preference.");
         const savedCode = preference?.preferred_language_code || "en";
-        const languageNames: Record<string, string> = { en: "English", hi: "Hindi", kn: "Kannada", sa: "Sanskrit" };
+        const languageNames: Record<string, string> = { en: "English", hi: "Hindi", kn: "Kannada", sa: "Sanskrit", fr: "French" };
         if (languageCode && languageCode !== savedCode) return errorResponse(403, "Your selected language does not match your saved preference.");
         if (subject !== languageNames[savedCode]) return errorResponse(403, "Choose your saved language before starting Word Master.");
         languageCode = savedCode;
@@ -542,7 +542,7 @@ Deno.serve(async (req) => {
         const gradeLabel = String(body.grade_label || "").trim();
         const subject = String(body.subject || "").trim();
         const languageCode = String(body.language_code || "en");
-        if (!["easy", "medium", "hard"].includes(difficulty) || !["en","hi","kn","sa"].includes(languageCode) || requestedCount < 1 || requestedCount > 20 || !gradeLabel || !subject) return errorResponse(400, "Provide grade, subject, supported language, valid difficulty and 1–20 questions.");
+        if (!["easy", "medium", "hard"].includes(difficulty) || !["en","hi","kn","sa","fr"].includes(languageCode) || requestedCount < 1 || requestedCount > 20 || !gradeLabel || !subject) return errorResponse(400, "Provide grade, subject, supported language, valid difficulty and 1–20 questions.");
         if ((current.disabled_game_types || []).includes(gameType) || (current.disabled_subjects || []).includes(subject)) return errorResponse(423, "This game or subject is disabled.");
         if (gradeLabel !== "General") {
           const { data: grade } = await db.from("grades").select("name").eq("name", gradeLabel).maybeSingle();

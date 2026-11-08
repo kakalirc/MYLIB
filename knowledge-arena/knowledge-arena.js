@@ -25,7 +25,7 @@
   ];
 
   let client = null, session = null, role = "", gradeLabel = "", assignedGradeLabel = "", lockedOut = false;
-  const LANGUAGE_OPTIONS = { en: "English", hi: "Hindi", kn: "Kannada", sa: "Sanskrit" };
+  const LANGUAGE_OPTIONS = { en: "English", hi: "Hindi", kn: "Kannada", sa: "Sanskrit", fr: "French" };
   let previewMode = false, previewReason = "";
   let catalog = null, progress = null, leaderboard = [], dailyChallenge = null;
   let currentView = "play", currentGame = "quick_quiz", currentQuestions = [];
@@ -406,8 +406,9 @@
         note("Please select your school grade first.", "warning"); return;
       }
       const isLanguageStudent = assignedGradeLabel.trim().toLocaleLowerCase() === "language";
-      const languageCode = isLanguageStudent ? $("language-select").value : "en";
-      const subject = isLanguageStudent ? LANGUAGE_OPTIONS[languageCode] : $("subject-select").value;
+      const selectedSubject = $("subject-select").value;
+      const languageCode = isLanguageStudent ? $("language-select").value : (selectedSubject.toLocaleLowerCase() === "french" ? "fr" : "en");
+      const subject = isLanguageStudent ? LANGUAGE_OPTIONS[languageCode] : selectedSubject;
       if (!subject) { note(isLanguageStudent ? "Please choose a language first." : "Please choose a subject first.", "warning"); return; }
       try {
         const data = await api("get_questions", { game_type: game, subject, language_code: languageCode, limit: 10 });
