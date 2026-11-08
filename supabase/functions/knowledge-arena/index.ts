@@ -159,17 +159,12 @@ Deno.serve(async (req) => {
       const accuracy = Math.round((correctCount / questionCount) * 10000) / 100;
       const perCorrect = Number(Deno.env.get("KA_XP_PER_CORRECT"));
       const completionBonus = Number(Deno.env.get("KA_PERFECT_ATTEMPT_BONUS"));
-      const dailyCap = Number(Deno.env.get("KA_DAILY_XP_CAP"));
+      const dailyCap = Math.floor(Number(Deno.env.get("KA_DAILY_XP_CAP")));
       if (![perCorrect, completionBonus, dailyCap].every(Number.isFinite) || perCorrect < 0 || completionBonus < 0 || dailyCap < 0) {
         return errorResponse(503, "Game XP policy has not been configured by Admin.");
       }
       const today = indiaDate();
-      const { data: todayAttempts, error: xpError } = await db.from("ka_attempts")
-        .select("xp_awarded").eq("user_id", user.id).gte("completed_at", indiaDayStartIso(today));
-      if (xpError) return errorResponse(503, "Could not verify today's XP limit.");
-      const xpUsed = (todayAttempts || []).reduce((n: number, x: { xp_awarded: number }) => n + safeNumber(x.xp_awarded), 0);
-      const rawXp = correctCount * perCorrect + (correctCount === questionCount ? completionBonus : 0);
-      const xpAwarded = Math.max(0, Math.min(rawXp, dailyCap - xpUsed));
+      const requestedXp = Math.floor(correctCount * perCorrect + (correctCount === questionCount ? completionBonus : 0));
       if (challengeId) {
         const { data: challenge, error: challengeError } = await db.from("ka_daily_challenges")
           .select("id,status,challenge_date").eq("id", challengeId).eq("status", "published").maybeSingle();
@@ -193,7 +188,8 @@ Deno.serve(async (req) => {
         p_question_count: questionCount,
         p_correct_count: correctCount,
         p_accuracy: accuracy,
-        p_xp_awarded: Math.floor(xpAwarded),
+        p_requested_xp: requestedXp,
+        p_daily_xp_cap: dailyCap,
         p_duration_seconds: duration,
         p_played_on: today,
       });
@@ -206,7 +202,7 @@ Deno.serve(async (req) => {
         question_count: questionCount,
         correct_count: correctCount,
         accuracy,
-        xp_awarded: Math.floor(xpAwarded),
+        xp_awarded: safeNumber(saved?.xp_awarded),
         xp_daily_cap: dailyCap,
         feedback: results,
       });
