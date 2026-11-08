@@ -226,9 +226,14 @@
   function populateSubjects() {
     const select = $("subject-select");
     if (!select) return;
-    const subjects = catalog && catalog.subjects ? catalog.subjects : [];
-    select.innerHTML = subjects.length
-      ? subjects.map((name) => '<option value="' + escapeHtml(name) + '">' + escapeHtml(name) + '</option>').join("")
+    const subjects = catalog && Array.isArray(catalog.subjects) ? catalog.subjects : [];
+    // Protect the dropdown from duplicate subject rows and case/spacing variants.
+    const uniqueSubjects = [...new Map(subjects
+      .map((name) => String(name || "").trim())
+      .filter(Boolean)
+      .map((name) => [name.toLocaleLowerCase(), name])).values()];
+    select.innerHTML = uniqueSubjects.length
+      ? uniqueSubjects.map((name) => '<option value="' + escapeHtml(name) + '">' + escapeHtml(name) + '</option>').join("")
       : '<option value="">No subjects available</option>';
   }
 
