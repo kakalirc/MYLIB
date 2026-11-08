@@ -1,4 +1,4 @@
-import { adminClient, errorResponse, json, safeNumber } from "../_shared/knowledge-arena.ts";
+import { adminClient, errorResponse, json, safeNumber, indiaDate, indiaDayStartIso } from "../_shared/knowledge-arena.ts";
 
 const MODEL = Deno.env.get("KA_ANTHROPIC_MODEL") || "claude-haiku-4-5";
 const MAX_BATCH = 20;
@@ -70,12 +70,14 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
   const { data: ai, error: aiError } = await db.from("ai_settings").select("api_key,master_enabled").eq("id", 1).maybeSingle();
   if (aiError || !ai?.api_key || ai.master_enabled === false) throw new Error("AI is unavailable or disabled in LIB AI Settings.");
 
-  const now = new Date();
-  const dayStart = new Date(now); dayStart.setUTCHours(0, 0, 0, 0);
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  // Budget windows follow the India-local calendar day and month used by LIB.
+  const today = indiaDate();
+  const [indiaYear, indiaMonth] = today.split("-");
+  const dayStart = indiaDayStartIso(today);
+  const monthStart = indiaDayStartIso(`${indiaYear}-${indiaMonth}-01`);
   const [{ data: dayJobs }, { data: monthJobs }] = await Promise.all([
-    db.from("ka_generation_jobs").select("estimated_cost_usd").gte("created_at", dayStart.toISOString()),
-    db.from("ka_generation_jobs").select("estimated_cost_usd").gte("created_at", monthStart.toISOString()),
+    db.from("ka_generation_jobs").select("estimated_cost_usd").gte("created_at", dayStart),
+    db.from("ka_generation_jobs").select("estimated_cost_usd").gte("created_at", monthStart),
   ]);
   const daySpent = (dayJobs || []).reduce((n: number, x: any) => n + safeNumber(x.estimated_cost_usd), 0);
   const monthSpent = (monthJobs || []).reduce((n: number, x: any) => n + safeNumber(x.estimated_cost_usd), 0);
