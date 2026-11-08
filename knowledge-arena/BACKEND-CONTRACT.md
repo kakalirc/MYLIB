@@ -41,7 +41,7 @@ Status: implementation code is prepared on `feature/knowledge-arena`; no live ba
 
 ## Approved defaults and product behaviour
 
-- Daily challenge: ten English Quick Quiz questions per active grade per India-local day; mixed subjects; all students share the same overall Game XP leaderboard. A grade is skipped unless ten suitable published questions are available.
+- Daily challenge: ten English Quick Quiz questions per active grade per India-local day; mixed subjects; all students share the same overall Game XP leaderboard. Exact-grade questions are preferred; if fewer than ten suitable questions exist, a complete General set is used. A grade is skipped only if neither set has ten suitable published questions.
 - Game XP: 5 per correct answer, 10 perfect-attempt bonus, 100 XP/student/India-local day cap.
 - Memory Challenge: a recall-first interaction using a generated sequence/prompt before options are revealed.
 - Level display: current UI convention is 100 Game XP per level.
