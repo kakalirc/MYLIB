@@ -115,8 +115,14 @@
             <label><input type="checkbox" id="admin-generation-enabled"> AI question generation enabled</label>
             <label><input type="checkbox" id="admin-daily-enabled"> Daily challenge enabled</label>
           </div>
-          <p class="muted">Disabling games blocks new games. Disabling generation pauses AI jobs but students can continue using published questions.</p>
+          <div class="admin-disable-grid">
+            <div><h4>Disable individual games</h4><div id="admin-game-switches" class="admin-check-list"></div></div>
+            <div><h4>Disable subjects</h4><div id="admin-subject-switches" class="admin-check-list"></div></div>
+          </div>
+          <p class="muted">Disabling games blocks new attempts for those game types. Disabling a subject removes its questions from student practice and daily challenges.</p>
           <button class="btn-secondary" id="save-platform-controls">Save platform controls</button>
+          <button class="btn-secondary" id="save-content-controls">Save game and subject availability</button>
+          <span class="admin-feedback" id="content-feedback" role="status"></span>
           <span class="admin-feedback" id="platform-feedback" role="status"></span>
         </div>
 
