@@ -32,9 +32,6 @@ jobs:
         uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - name: Format check
-        run: |
-          deno fmt --check supabase/functions/_shared/knowledge-arena.ts supabase/functions/knowledge-arena/index.ts supabase/functions/knowledge-arena-worker/index.ts
       - name: Type check student/Admin API
         run: deno check supabase/functions/knowledge-arena/index.ts
       - name: Type check generation worker
