@@ -22,7 +22,7 @@ Student access checks the exact LIB role `Student` and a linked student record. 
 ### `knowledge-arena-worker`
 One-job-per-invocation scheduled generation worker. It:
 1. Requires a separate `x-ka-worker-secret`.
-2. Checks `ka_settings.generation_enabled` and the daily/monthly AI budget.
+2. Acquires the singleton worker lease, claims one queued job, and checks the shared India-local daily/monthly INR budgets before any paid AI call. Defaults are ₹100 per day and ₹1,000 per month across all students.
 3. Claims one queued job atomically using `ka_claim_generation_job()`.
 4. Reads the Anthropic key server-side from existing `ai_settings` using the service role. It does not call or modify the existing `ai-proxy`.
 5. Generates evergreen MCQs, runs structural checks, checks duplicates and asks a second AI pass to reject doubtful/ambiguous content.
@@ -41,12 +41,13 @@ Knowledge Arena secrets/configuration:
 - `KA_WORKER_SECRET` — long, random secret for the worker endpoint.
 - `KA_INPUT_USD_PER_MILLION` — current provider input-token price for the selected model.
 - `KA_OUTPUT_USD_PER_MILLION` — current provider output-token price for the selected model.
+- `KA_USD_INR_RATE` — current USD-to-INR conversion rate. The worker fails closed if token prices or this rate are missing; it records the rate used on each generation job.
 - `KA_ANTHROPIC_MODEL` — optional; defaults to `claude-haiku-4-5`.
-- `KA_XP_PER_CORRECT` — not set by this build; requires an approved XP policy.
-- `KA_PERFECT_ATTEMPT_BONUS` — not set by this build; requires an approved XP policy.
-- `KA_DAILY_XP_CAP` — not set by this build; requires an approved replay/anti-farming policy.
+- `KA_XP_PER_CORRECT` — optional; defaults to 5.
+- `KA_PERFECT_ATTEMPT_BONUS` — optional; defaults to 10.
+- `KA_DAILY_XP_CAP` — optional; defaults to 100 XP per student per India-local day.
 
-The worker fails closed if provider token prices are missing. The student API refuses to save attempts until the three XP settings are configured. Do not guess these values.
+The worker fails closed if provider token prices or the USD/INR rate are missing. The student API uses the approved XP defaults above when optional XP environment values are not supplied.
 
 The worker endpoint is protected both by the Supabase Edge gateway JWT verification and `KA_WORKER_SECRET`. A scheduler must send an authorised service-role bearer token plus the separate worker-secret header. Store both securely; never put them in browser code.
 
@@ -58,7 +59,7 @@ There is no separate test database available. The agreed approach is to validate
 2. Obtain a current production backup and inspect the live schema/readiness. Confirm exact role labels, grade mapping, table columns, existing grants and policies, and that no `ka_*` objects already exist.
 3. Review and approve `knowledge-arena/proposed-schema.sql`. Apply only the new `ka_*` objects in one transaction, with generation and daily challenges disabled. Stop on any preflight mismatch.
 4. Verify the created objects, RLS, grants, function privileges and protected-system boundary before proceeding.
-5. Configure only the required server-side secrets and exact current model token prices. Do not configure XP values until the XP/replay policy is approved.
+5. Configure only the required server-side secrets, exact current model token prices and `KA_USD_INR_RATE`. The approved XP defaults are already in the API; optional overrides can be set deliberately.
 6. Deploy the API and worker with generation still disabled. Verify Student, Admin, Teacher and unauthenticated access, including students without an active subscription and students without a grade.
 7. Run a small, explicitly approved generation pilot with a strict budget ceiling. Do not schedule recurring generation until the pilot is reviewed.
 8. Test attempts, answer-key isolation, aggregate-only Admin reporting, XP limits and leaderboard behaviour using designated accounts.
@@ -68,10 +69,10 @@ Each production step requires explicit approval before execution. No database mi
 
 ## Deliberately not implemented / decisions still required
 
-- Daily challenge creation/publication is not automated yet. The challenge length, subject mix, and how the common all-student competition group should handle different grade bands must be agreed first. The API can read and score a published challenge.
+- Daily challenge creation/publication is not automated yet; the approved initial challenge is 10 questions/day with a grade-appropriate subject mix. The approved initial challenge is 10 questions/day, mixed across available subjects, grade-appropriate, with one common competition group. Automated creation/publication still needs implementation. The API can read and score a published challenge.
 - All six game types currently use the MCQ data contract. The distinct interaction mechanic for Memory Challenge is not implemented.
 - Leaderboard names are pseudonymous ("Player 1", etc.) pending approval of a public display-name policy.
-- Game XP rate, perfect-attempt bonus, daily XP cap, streak rules and level thresholds are not hard-coded.
+- Game XP defaults are 5 per correct answer, 10 for a perfect attempt, and 100 XP per student per India-local day. Streak and level display rules still need end-to-end validation.
 - Attendance gamification is not changed. The separate Admin attendance-gamification visibility requirement still needs a read-only integration with the existing attendance calculations.
 - The current front-end prototype is not yet connected to these functions.
 
