@@ -63,4 +63,8 @@ The four Fun Zone cards are full-card links into the matching Knowledge Arena vi
 - The existing LIB AI Settings API key is present and enabled. The worker continues to read it server-side from `public.ai_settings`; it is not exposed to the browser.
 - Production switches remain `games_enabled=true`, `generation_enabled=false`, and `daily_challenge_enabled=false`. No questions or daily challenges have been published, and student access has not been activated.
 - Existing Question Bank, Online Assessment and attendance-gamification objects/calculations were not modified.
-- Admin Student Leadership attendance-rewards integration is still outstanding; do not substitute the Knowledge Arena leaderboard for the existing attendance leaderboard.
+- Admin Student Leadership dashboard now includes read-only Knowledge Arena rankings, levels, Game XP, accuracy, game streaks and achievements. The attendance rewards section remains clearly separate and is not yet wired to the authoritative attendance-rewards source; no attendance calculations are duplicated or modified.
+- Initial Quick Quiz content generation has been queued for active grade bands 5–10 and Language. The AI worker is running within the existing ₹100/day and ₹1,000/month shared limits. Each question is independently validated before publication; rejected or ambiguous questions are not published.
+- Until other game content is generated and verified, Word Master, Number Quest, Science Explorer, Brain Teaser and Memory Challenge are disabled. Quick Quiz is currently enabled, with Science/English subject content only.
+- Daily challenge publishing is enabled but only publishes a grade-specific challenge after at least ten approved questions are available for that grade.
+- Student portal access remains on draft PR #158 and has not been merged or activated in the production My LIB navigation.
