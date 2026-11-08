@@ -8193,8 +8193,14 @@ async function refreshAllData(silent) {
     refreshMsg = 'Could not refresh: ' + (e && e.message ? e.message : 'unknown error');
   } finally {
     isRefreshing = false;
-    render();
-    if (refreshMsg) refreshMsgTimer = setTimeout(() => { refreshMsg = ''; refreshMsgTimer = null; render(); }, 4000);
+    // Knowledge Arena is hosted in an iframe. Re-rendering the parent app after
+    // a silent background refresh replaces that iframe and restarts the arena.
+    // Keep the embedded page mounted; explicit/manual refreshes still render.
+    const keepKnowledgeArenaMounted = silent && currentTab === 'knowledgearena';
+    if (!keepKnowledgeArenaMounted) {
+      render();
+      if (refreshMsg) refreshMsgTimer = setTimeout(() => { refreshMsg = ''; refreshMsgTimer = null; render(); }, 4000);
+    }
   }
 }
 // Only auto-refresh when nobody's in the middle of an edit flow with unsaved typed
