@@ -36,6 +36,7 @@
     var key = studentKey();
     if (!key) return;
     tabByStudent[key] = tab;
+    window.scrollTo(0, 0);
     if (typeof render === 'function') render();
   };
 
