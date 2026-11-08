@@ -50,6 +50,10 @@ declare
   claimed record;
   duplicate_rejected boolean := false;
   repeat_publication jsonb;
+  first_attempt jsonb;
+  duplicate_attempt jsonb;
+  second_attempt jsonb;
+  player_xp integer;
   renewed boolean;
   released boolean;
   queued_job uuid;
@@ -108,6 +112,34 @@ begin
 
   select public.ka_release_worker_lease(lease_token) into released;
   if released is not true then raise exception 'Worker lease owner could not release its lease.'; end if;
+
+  first_attempt := public.ka_record_attempt(
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000001',
+    'quick_quiz','Mathematics','Class 1',null,10,10,100,60,100,90,
+    (now() at time zone 'Asia/Kolkata')::date
+  );
+  duplicate_attempt := public.ka_record_attempt(
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000001',
+    'quick_quiz','Mathematics','Class 1',null,10,10,100,60,100,90,
+    (now() at time zone 'Asia/Kolkata')::date
+  );
+  second_attempt := public.ka_record_attempt(
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000002',
+    'quick_quiz','Mathematics','Class 1',null,10,10,100,60,100,90,
+    (now() at time zone 'Asia/Kolkata')::date
+  );
+  if (first_attempt->>'xp_awarded')::integer <> 60
+     or (duplicate_attempt->>'duplicate')::boolean is distinct from true
+     or (duplicate_attempt->>'xp_awarded')::integer <> 60
+     or (second_attempt->>'xp_awarded')::integer <> 40 then
+    raise exception 'Attempt idempotency or daily XP cap failed.';
+  end if;
+  select game_xp into player_xp from public.ka_player_stats
+  where user_id='20000000-0000-0000-0000-000000000001';
+  if player_xp <> 100 then raise exception 'Daily XP cap should keep total at 100, got %', player_xp; end if;
 
   if has_table_privilege('authenticated','public.ka_question_keys','SELECT') then
     raise exception 'Authenticated role must not read private answer keys.';
