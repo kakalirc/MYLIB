@@ -92,6 +92,13 @@ Deno.serve(async (req) => {
       ]);
       if (settingsError || subjectsError) return errorResponse(503, "Knowledge Arena is not configured yet.");
       if (!settings) return errorResponse(503, "Knowledge Arena database setup is pending.");
+      let preferredLanguageCode: string | null = null;
+      if (ctx.gradeLabel.trim().toLocaleLowerCase() === "language") {
+        const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
+          .select("preferred_language_code").eq("user_id", user.id).maybeSingle();
+        if (preferenceError) return errorResponse(503, "Could not load your saved language preference.");
+        preferredLanguageCode = preference?.preferred_language_code || "en";
+      }
       return json(200, {
         games_enabled: settings.games_enabled,
         games: [
@@ -105,7 +112,21 @@ Deno.serve(async (req) => {
         subjects: uniqueSubjectNames(subjects).filter((s) => !(settings.disabled_subjects || []).includes(s)),
         progress: stats || { game_xp: 0, games_played: 0, questions_answered: 0, correct_answers: 0, current_streak: 0, best_streak: 0 },
         grade_label: ctx.gradeLabel,
+        preferred_language_code: preferredLanguageCode,
       });
+    }
+
+    if (action === "set_language_preference") {
+      const ctx = await studentContext(db, profile);
+      if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
+      if (ctx.gradeLabel.trim().toLocaleLowerCase() !== "language") return errorResponse(403, "Language preference is available only to Language-category students.");
+      const languageCode = String(body.language_code || "");
+      if (!["en", "hi", "kn", "sa"].includes(languageCode)) return errorResponse(400, "Choose English, Hindi, Kannada or Sanskrit.");
+      const { error } = await db.from("ka_student_preferences").upsert({
+        user_id: user.id, preferred_language_code: languageCode, updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id" });
+      if (error) return errorResponse(503, "Could not save your language preference.");
+      return json(200, { language_code: languageCode });
     }
 
     if (action === "get_questions") {
@@ -116,9 +137,19 @@ Deno.serve(async (req) => {
       const subject = typeof body.subject === "string" ? body.subject.trim() : "";
       if (!subject) return errorResponse(400, "Select a subject before loading questions.");
       const difficulty = body.difficulty === undefined ? "" : String(body.difficulty);
-      const languageCode = body.language_code === undefined ? "" : String(body.language_code);
+      let languageCode = body.language_code === undefined ? "" : String(body.language_code);
       if (difficulty && !["easy", "medium", "hard"].includes(difficulty)) return errorResponse(400, "Invalid difficulty.");
       if (languageCode && !["en","hi","kn","sa"].includes(languageCode)) return errorResponse(400, "Invalid question language.");
+      if (ctx.gradeLabel.trim().toLocaleLowerCase() === "language") {
+        const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
+          .select("preferred_language_code").eq("user_id", user.id).maybeSingle();
+        if (preferenceError) return errorResponse(503, "Could not verify your saved language preference.");
+        const savedCode = preference?.preferred_language_code || "en";
+        const languageNames: Record<string, string> = { en: "English", hi: "Hindi", kn: "Kannada", sa: "Sanskrit" };
+        if (languageCode && languageCode !== savedCode) return errorResponse(403, "Your selected language does not match your saved preference.");
+        if (subject !== languageNames[savedCode]) return errorResponse(403, "Choose your saved language before starting Word Master.");
+        languageCode = savedCode;
+      }
       const { data: settings } = await db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle();
       if (!settings?.games_enabled || (settings.disabled_game_types || []).includes(gameType)) return errorResponse(423, "This game is currently unavailable.");
       if (subject && (settings.disabled_subjects || []).includes(subject)) return errorResponse(423, "This subject is currently unavailable.");
