@@ -57,6 +57,8 @@ declare
   renewed boolean;
   released boolean;
   queued_job uuid;
+  observed_lease_token uuid;
+  observed_lease_until timestamptz;
 begin
   begin
     insert into public.ka_questions(
@@ -104,8 +106,17 @@ begin
     raise exception 'Worker failed to claim the queued generation job.';
   end if;
 
+  select worker_lease_token, worker_lease_until
+    into observed_lease_token, observed_lease_until
+  from public.ka_settings where id=1;
+  if observed_lease_token is distinct from lease_token then
+    raise exception 'Worker lease token mismatch before renewal. Expected %, observed %.', lease_token, observed_lease_token;
+  end if;
+  if observed_lease_until is null or observed_lease_until <= now() then
+    raise exception 'Worker lease expired before renewal. Expiry %, transaction time %.', observed_lease_until, now();
+  end if;
   select public.ka_renew_worker_lease(lease_token) into renewed;
-  if renewed is not true then raise exception 'Worker lease renewal failed.'; end if;
+  if renewed is not true then raise exception 'Worker lease renewal failed despite matching, unexpired token.'; end if;
 
   select public.ka_release_worker_lease(gen_random_uuid()) into released;
   if released is not false then raise exception 'A non-owner released the worker lease.'; end if;
