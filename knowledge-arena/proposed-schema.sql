@@ -371,7 +371,8 @@ create or replace function public.ka_record_attempt(
   p_question_count integer,
   p_correct_count integer,
   p_accuracy numeric,
-  p_xp_awarded integer,
+  p_requested_xp integer,
+  p_daily_xp_cap integer,
   p_duration_seconds integer,
   p_played_on date
 )
@@ -384,6 +385,8 @@ declare
   attempt_id uuid;
   prior public.ka_player_stats;
   next_streak integer;
+  xp_used bigint := 0;
+  awarded_xp integer := 0;
   updated_stats public.ka_player_stats;
   achievement record;
   metric_value numeric;
@@ -398,9 +401,18 @@ begin
     raise exception 'Student account not eligible';
   end if;
   if p_question_count < 1 or p_correct_count < 0 or p_correct_count > p_question_count
-     or p_accuracy < 0 or p_accuracy > 100 or p_xp_awarded < 0 then
+     or p_accuracy < 0 or p_accuracy > 100 or p_requested_xp < 0 or p_daily_xp_cap < 0 then
     raise exception 'Invalid attempt totals';
   end if;
+
+  -- Serialise attempts per player so concurrent submissions cannot exceed the daily XP cap.
+  perform pg_advisory_xact_lock(hashtextextended(p_user_id::text, 0));
+  select coalesce(sum(a.xp_awarded),0)::bigint into xp_used
+  from public.ka_attempts a
+  where a.user_id=p_user_id
+    and a.completed_at >= (p_played_on::timestamp at time zone 'Asia/Kolkata')
+    and a.completed_at < ((p_played_on+1)::timestamp at time zone 'Asia/Kolkata');
+  awarded_xp := greatest(0, least(p_requested_xp, p_daily_xp_cap - xp_used::integer));
 
   select * into prior from public.ka_player_stats where user_id=p_user_id for update;
   if not found then
@@ -418,14 +430,14 @@ begin
     question_count, correct_count, accuracy, xp_awarded, duration_seconds
   ) values (
     p_user_id, p_game_type, p_subject, p_grade_label, p_challenge_id,
-    p_question_count, p_correct_count, p_accuracy, p_xp_awarded, p_duration_seconds
+    p_question_count, p_correct_count, p_accuracy, awarded_xp, p_duration_seconds
   ) returning id into attempt_id;
 
   insert into public.ka_player_stats (
     user_id, game_xp, games_played, questions_answered, correct_answers,
     current_streak, best_streak, last_played_on, updated_at
   ) values (
-    p_user_id, p_xp_awarded, 1, p_question_count, p_correct_count,
+    p_user_id, awarded_xp, 1, p_question_count, p_correct_count,
     next_streak, next_streak, p_played_on, now()
   )
   on conflict (user_id) do update set
@@ -467,6 +479,7 @@ begin
 
   return jsonb_build_object(
     'attempt_id',attempt_id,
+    'xp_awarded',awarded_xp,
     'game_xp',updated_stats.game_xp,
     'games_played',updated_stats.games_played,
     'questions_answered',updated_stats.questions_answered,
@@ -566,10 +579,10 @@ $$;
 
 revoke all on function public.ka_claim_generation_job() from public, anon, authenticated;
 revoke all on function public.ka_store_generated_question(uuid,jsonb,smallint) from public, anon, authenticated;
-revoke all on function public.ka_record_attempt(uuid,text,text,text,uuid,integer,integer,numeric,integer,integer,date) from public, anon, authenticated;
+revoke all on function public.ka_record_attempt(uuid,text,text,text,uuid,integer,integer,numeric,integer,integer,integer,date) from public, anon, authenticated;
 grant execute on function public.ka_claim_generation_job() to service_role;
 grant execute on function public.ka_store_generated_question(uuid,jsonb,smallint) to service_role;
-grant execute on function public.ka_record_attempt(uuid,text,text,text,uuid,integer,integer,numeric,integer,integer,date) to service_role;
+grant execute on function public.ka_record_attempt(uuid,text,text,text,uuid,integer,integer,numeric,integer,integer,integer,date) to service_role;
 
 revoke all on function public.ka_get_leaderboard(integer) from public;
 revoke all on function public.ka_admin_summary() from public;
