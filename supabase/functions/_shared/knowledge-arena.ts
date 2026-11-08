@@ -20,7 +20,7 @@ export function adminClient(): SupabaseClient {
 }
 
 export async function authenticate(req: Request) {
-  const jwt = (req.headers.get("Authorization") || "").replace(/^Bearer\\s+/i, "");
+  const jwt = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
   if (!jwt) return { error: "Login required.", status: 401 as const };
   const db = adminClient();
   const { data, error } = await db.auth.getUser(jwt);
