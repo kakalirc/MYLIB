@@ -119,6 +119,16 @@
   font-size: 11.5px;
   line-height: 1.55;
 }
+.student-settings-zone {
+  display: grid;
+  gap: 14px;
+}
+.student-settings-title {
+  margin: 4px 0 0;
+  color: var(--ink);
+  font: 700 22px 'Zilla Slab', serif;
+}
+.student-portal-section-tab { min-width: 0; }
 @media (max-width: 560px) {
   .student-portal-section-switcher { gap: 5px; margin-bottom: 14px; }
   .student-portal-section-tab { min-height: 43px; padding: 9px 8px; font-size: 13px; }
