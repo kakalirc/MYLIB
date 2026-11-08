@@ -131,6 +131,20 @@ def guide():
         'Ask the admin on Chat, Support or WhatsApp. They’ll send you the PDF.',
     ]))
 
+
+    g.add('knowledgearena', 'Fun Zone', 'Knowledge Arena: games and daily challenge', 'Practice independently with grade-matched questions. Game XP is separate from attendance rewards.', g2(
+        box('Choose your grade', 'If the app asks you to choose a school grade, select the grade you currently study in. This saved Knowledge Arena preference is used to select questions; it does not change your LIB student profile or school record.'),
+        box('Choose a subject', 'The subject selector is a general filter, not a restriction that should hide unrelated games. Each game uses its own subject: Word Master uses English (or your selected language in a Language programme); Number Quest and Brain Teaser use Mathematics; Science Explorer and Memory Challenge use Science.'),
+    ) + g2(
+        box('Quick Quiz', 'Quick Quiz follows the subject filter. Choose All to allow questions from all available subjects, or choose one subject to focus the quiz.'),
+        box('Daily challenge', 'A fresh set of ten English Quick Quiz questions is published for your grade each India-local day when enough suitable questions are available. Attempts are unlimited.'),
+    ) + h3('Game XP and progress') + bullets([
+        'You earn 5 Game XP for each correct answer, plus a 10 XP perfect-attempt bonus. A daily cap applies.',
+        'Game XP, levels, achievements and the game leaderboard are separate from attendance XP, attendance badges and attendance streaks.',
+        'Memory Challenge gives you a short time to study a sequence before the answer choices appear.',
+        'Questions are selected from published content for your saved grade, with General questions used only where the published question rules allow it. If no eligible questions are available, try another game or return later.',
+    ]) + note('Need help?', 'Use the Help / instructions area on the Knowledge Arena screen before starting a game. If a game reports that no published questions are available, this is a content-availability message; it does not mean your login or subscription is invalid.', 'tip'))
+
     g.add('quickref', 'Quick reference', 'Quick reference', 'I want to… where do I go?', table(['I want to…', 'Go to'], [
         ['See classes left', 'Stats at the top of the home screen'],
         ['See today’s class', 'Today’s class card'],

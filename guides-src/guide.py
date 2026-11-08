@@ -56,7 +56,7 @@ b, strong { font-weight: 650; }
 
 /* sections */
 .section { break-before: page; position: relative; }
-.mk { position: absolute; left: 0; top: 0; font-size: 2px; color: #fff; }
+.mk { position: absolute; left: 0; top: 0; font-size: 6px; line-height: 1; color: #fff; }
 .kicker { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2.2mm; }
 .kicker .k { color: var(--orange); font-weight: 700; letter-spacing: .16em; font-size: 7pt; text-transform: uppercase; }
 .kicker .k .new { background: var(--orange); color: #fff; letter-spacing: .08em; border-radius: 3px; padding: .3mm 1.4mm; margin-left: 1.5mm; font-size: 6.4pt; }

@@ -68,3 +68,13 @@ The four Fun Zone cards are full-card links into the matching Knowledge Arena vi
 - Until other game content is generated and verified, Word Master, Number Quest, Science Explorer, Brain Teaser and Memory Challenge are disabled. Quick Quiz is currently enabled, with Science/English subject content only.
 - Daily challenge publishing is enabled but only publishes a grade-specific challenge after at least ten approved questions are available for that grade.
 - Student portal access remains on draft PR #158 and has not been merged or activated in the production My LIB navigation.
+
+
+## Student-facing game and subject help
+The Play screen includes a collapsible **How do the games and subjects work?** help panel. It explains the game-to-subject mapping, the Quick Quiz All filter, grade preference, daily challenge, Game XP separation and the no-published-content message. The panel is static, accessible native disclosure content and does not trigger a page reload or backend request.
+
+- Word Master: English, or the selected language for a Language-category student.
+- Number Quest and Brain Teaser: Mathematics.
+- Science Explorer and Memory Challenge: Science.
+- Quick Quiz: selected subject; All means no subject restriction.
+- A Knowledge Arena grade preference does not modify the LIB student profile grade.

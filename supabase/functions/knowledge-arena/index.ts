@@ -164,8 +164,22 @@ Deno.serve(async (req) => {
       if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
       const gameType = body.game_type;
       if (!validGameType(gameType)) return errorResponse(400, "Invalid game type.");
-      const subject = typeof body.subject === "string" ? body.subject.trim() : "";
-      if (!subject) return errorResponse(400, "Select a subject before loading questions.");
+      let subject = typeof body.subject === "string" ? body.subject.trim() : "";
+      const isLanguageStudent = ctx.gradeLabel.trim().toLocaleLowerCase() === "language";
+      // Enforce game-to-subject routing on the server as well as in the UI.
+      // Quick Quiz may intentionally load across all subjects.
+      if (!isLanguageStudent) {
+        const gameSubjects: Record<string, string> = {
+          word_master: "English",
+          number_quest: "Math",
+          brain_teaser: "Math",
+          science_explorer: "Science",
+          memory_challenge: "Science",
+        };
+        if (gameSubjects[gameType]) subject = gameSubjects[gameType];
+        else if (subject.toLocaleLowerCase() === "all") subject = "";
+      }
+      if (!subject && gameType !== "quick_quiz") return errorResponse(400, "A subject is required for this game.");
       let effectiveGradeLabel = ctx.gradeLabel;
       if (ctx.gradeLabel.trim().toLocaleLowerCase() === "tina student") {
         const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
@@ -178,7 +192,7 @@ Deno.serve(async (req) => {
       let languageCode = body.language_code === undefined ? "" : String(body.language_code);
       if (difficulty && !["easy", "medium", "hard"].includes(difficulty)) return errorResponse(400, "Invalid difficulty.");
       if (languageCode && !["en","hi","kn","sa","fr"].includes(languageCode)) return errorResponse(400, "Invalid question language.");
-      if (ctx.gradeLabel.trim().toLocaleLowerCase() === "language") {
+      if (isLanguageStudent) {
         const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
           .select("preferred_language_code").eq("user_id", user.id).maybeSingle();
         if (preferenceError) return errorResponse(503, "Could not verify your saved language preference.");

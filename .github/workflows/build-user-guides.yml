@@ -1,0 +1,50 @@
+name: Build user guide PDFs
+
+on:
+  pull_request:
+    paths:
+      - "guides-src/**"
+      - ".github/workflows/build-user-guides.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build-guides:
+    name: Regenerate and commit role-based PDF guides
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out pull request branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install PDF build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y poppler-utils
+          python -m pip install --upgrade pip
+          python -m pip install pypdf
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Regenerate all four guides
+        run: python guides-src/build.py
+      - name: Commit updated PDFs to this PR branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add guide-teacher.pdf guide-student.pdf guide-parent.pdf guide-admin.pdf
+          if git diff --cached --quiet; then
+            echo "PDF guides are already up to date."
+            exit 0
+          fi
+          git commit -m "docs: regenerate role-based PDF guides"
+          git push origin "HEAD:${{ github.head_ref }}"
