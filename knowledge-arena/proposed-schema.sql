@@ -103,6 +103,7 @@ create table public.ka_questions (
   difficulty text not null check (difficulty in ('easy','medium','hard')),
   game_type text not null check (game_type in ('word_master','number_quest','science_explorer','quick_quiz','brain_teaser','memory_challenge')),
   prompt text not null,
+  prompt_hash text generated always as (md5(lower(regexp_replace(btrim(prompt), '[[:space:]]+', ' ', 'g')))) stored,
   options jsonb not null check (jsonb_typeof(options)='array' and jsonb_array_length(options) between 2 and 6),
   explanation text not null,
   source_reference text,
@@ -114,7 +115,8 @@ create table public.ka_questions (
   created_at timestamptz not null default now(),
   published_at timestamptz,
   expires_at timestamptz,
-  constraint ka_questions_published_has_date check (status <> 'published' or published_at is not null)
+  constraint ka_questions_published_has_date check (status <> 'published' or published_at is not null),
+  constraint ka_questions_deduplicate unique (grade_label, subject, language_code, game_type, prompt_hash)
 );
 
 -- Answer keys are isolated from the student-readable question content.
