@@ -223,8 +223,13 @@ for select to authenticated
 using (
   status='published'
   and exists (
-    select 1 from public.profiles p
-    where p.id=auth.uid() and p.role='Student' and p.linked_student_id is not null
+    select 1
+    from public.profiles p
+    join public.students st on st.id=p.linked_student_id
+    left join public.grades g on g.id=st.grade_id
+    where p.id=auth.uid() and p.role='Student'
+      and p.linked_student_id is not null
+      and grade_label=coalesce(g.name,'General')
   )
 );
 
@@ -251,8 +256,12 @@ using (
     select 1
     from public.ka_daily_challenges d
     join public.profiles p on p.id=auth.uid()
+    join public.students st on st.id=p.linked_student_id
+    left join public.grades g on g.id=st.grade_id
+    join public.ka_questions q on q.id=question_id
     where d.id=challenge_id and d.status='published'
       and p.role='Student' and p.linked_student_id is not null
+      and q.grade_label=coalesce(g.name,'General')
   )
 );
 
