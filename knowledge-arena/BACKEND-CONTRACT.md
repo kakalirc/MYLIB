@@ -33,14 +33,14 @@ Status: implementation specification for the isolated Knowledge Arena branch. No
 - Runs independent validation and deduplication before publishing.
 - Inserts question prompts/options into `ka_questions` and answer indexes into `ka_question_keys` in one transaction.
 - Publishes only questions that pass validation; failed batches remain quarantined and alert Admin through summary status.
-- Enforces daily/monthly AI budgets and a kill switch.
+- Enforces shared India-local AI budgets across all students: ₹100/day and ₹1,000/month by default, configurable by Admin through `admin_control`. Uses a singleton database worker lease, preflight reservation with a 50% safety margin, INR accounting and a recorded USD/INR rate.
 - Never reads from or writes to any exam/assessment data.
 
 ## Unresolved policy choices (do not silently assume)
 
 - Grade/age bands and how grade progression is mapped to game difficulty.
-- Exact daily challenge length and subject mix.
-- XP formula, replay XP eligibility, streak definition, and level thresholds.
+- Initial daily challenge defaults: 10 questions, mixed from available subjects, grade-appropriate content, common competition group. Automated creation/publication remains to be implemented.
+- Approved XP defaults: 5 per correct answer, 10 perfect-attempt bonus, 100 XP daily cap per student. Attendance XP remains a separate system.
 - Whether leaderboard is all-time only or also weekly/monthly.
 - Whether leaderboard display uses LIB username or a student-friendly alias.
 - Supported languages and content distribution by language.
