@@ -14,8 +14,8 @@ async function adminSummary(db: ReturnType<typeof adminClient>) {
     db.from("ka_attempts").select("user_id").gte("completed_at", sinceToday).limit(10000),
     db.from("ka_questions").select("id", { count: "exact", head: true }).eq("status", "published"),
     db.from("ka_attempts").select("accuracy").gte("completed_at", since30d).limit(10000),
-    db.from("ka_generation_jobs").select("status,estimated_cost_inr,created_at").gte("created_at", since24h),
-    db.from("ka_generation_jobs").select("status,estimated_cost_inr,created_at").gte("created_at", since30d),
+    db.from("ka_generation_jobs").select("status,estimated_cost_inr,started_at").gte("started_at", since24h),
+    db.from("ka_generation_jobs").select("status,estimated_cost_inr,started_at").gte("started_at", since30d),
     db.from("ka_settings").select("generation_enabled,daily_challenge_enabled,games_enabled,disabled_game_types,disabled_subjects,daily_ai_budget_inr,monthly_ai_budget_inr").eq("id", 1).maybeSingle(),
   ]);
   const errors = [players, attempts, active, questions, accuracies, jobs24, jobs30, settings].filter(x => x.error);
