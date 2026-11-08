@@ -93,6 +93,18 @@ Deno.serve(async (req) => {
       if (settingsError || subjectsError) return errorResponse(503, "Knowledge Arena is not configured yet.");
       if (!settings) return errorResponse(503, "Knowledge Arena database setup is pending.");
       let preferredLanguageCode: string | null = null;
+      let selectedGradeLabel: string | null = null;
+      let availableGradeOptions: string[] = [];
+      if (ctx.gradeLabel.trim().toLocaleLowerCase() === "tina student") {
+        const [{ data: preference, error: preferenceError }, { data: grades, error: gradesError }] = await Promise.all([
+          db.from("ka_student_preferences").select("selected_grade_label").eq("user_id", user.id).maybeSingle(),
+          db.from("grades").select("name").eq("archived", false).order("sort_order"),
+        ]);
+        if (preferenceError || gradesError) return errorResponse(503, "Could not load your grade options.");
+        selectedGradeLabel = preference?.selected_grade_label || null;
+        availableGradeOptions = [...new Set((grades || []).map((g: any) => String(g.name || "").trim())
+          .filter((name: string) => /^(?:[1-9]|1[0-2]|PU)$/i.test(name)))];
+      }
       if (ctx.gradeLabel.trim().toLocaleLowerCase() === "language") {
         const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
           .select("preferred_language_code").eq("user_id", user.id).maybeSingle();
@@ -111,9 +123,27 @@ Deno.serve(async (req) => {
         ].filter((g) => settings.games_enabled && !(settings.disabled_game_types || []).includes(g.id)),
         subjects: uniqueSubjectNames(subjects).filter((s) => !(settings.disabled_subjects || []).includes(s)),
         progress: stats || { game_xp: 0, games_played: 0, questions_answered: 0, correct_answers: 0, current_streak: 0, best_streak: 0 },
-        grade_label: ctx.gradeLabel,
+        grade_label: selectedGradeLabel || ctx.gradeLabel,
+        assigned_grade_label: ctx.gradeLabel,
+        selected_grade_label: selectedGradeLabel,
+        available_grade_options: availableGradeOptions,
         preferred_language_code: preferredLanguageCode,
       });
+    }
+
+    if (action === "set_grade_preference") {
+      const ctx = await studentContext(db, profile);
+      if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
+      if (ctx.gradeLabel.trim().toLocaleLowerCase() !== "tina student") return errorResponse(403, "Grade selection is available only to Tina Student accounts.");
+      const requestedGrade = String(body.grade_label || "").trim();
+      if (!/^(?:[1-9]|1[0-2]|PU)$/i.test(requestedGrade)) return errorResponse(400, "Choose a school grade from 1 to 12 or PU.");
+      const { data: knownGrade, error: gradeError } = await db.from("grades").select("name").eq("name", requestedGrade).eq("archived", false).maybeSingle();
+      if (gradeError || !knownGrade) return errorResponse(400, "That grade is not available in Grade Setup.");
+      const { error } = await db.from("ka_student_preferences").upsert({
+        user_id: user.id, selected_grade_label: knownGrade.name, updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id" });
+      if (error) return errorResponse(503, "Could not save your grade preference.");
+      return json(200, { grade_label: knownGrade.name });
     }
 
     if (action === "set_language_preference") {
@@ -136,6 +166,14 @@ Deno.serve(async (req) => {
       if (!validGameType(gameType)) return errorResponse(400, "Invalid game type.");
       const subject = typeof body.subject === "string" ? body.subject.trim() : "";
       if (!subject) return errorResponse(400, "Select a subject before loading questions.");
+      let effectiveGradeLabel = ctx.gradeLabel;
+      if (ctx.gradeLabel.trim().toLocaleLowerCase() === "tina student") {
+        const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
+          .select("selected_grade_label").eq("user_id", user.id).maybeSingle();
+        if (preferenceError) return errorResponse(503, "Could not verify your saved grade.");
+        if (!preference?.selected_grade_label) return errorResponse(400, "Please select your school grade first.");
+        effectiveGradeLabel = preference.selected_grade_label;
+      }
       const difficulty = body.difficulty === undefined ? "" : String(body.difficulty);
       let languageCode = body.language_code === undefined ? "" : String(body.language_code);
       if (difficulty && !["easy", "medium", "hard"].includes(difficulty)) return errorResponse(400, "Invalid difficulty.");
@@ -155,7 +193,7 @@ Deno.serve(async (req) => {
       if (subject && (settings.disabled_subjects || []).includes(subject)) return errorResponse(423, "This subject is currently unavailable.");
       let query = db.from("ka_questions")
         .select("id,subject,topic,grade_label,language_code,difficulty,game_type,prompt,options")
-        .eq("status", "published").in("grade_label", [ctx.gradeLabel, "General"]).eq("game_type", gameType)
+        .eq("status", "published").in("grade_label", [effectiveGradeLabel, "General"]).eq("game_type", gameType)
         .or("expires_at.is.null,expires_at.gt." + new Date().toISOString())
         .order("created_at", { ascending: false }).limit(Math.min(Math.max(safeNumber(body.limit, 10), 1), 20));
       if (subject) query = query.eq("subject", subject);
@@ -163,7 +201,7 @@ Deno.serve(async (req) => {
       if (languageCode) query = query.eq("language_code", languageCode);
       const { data, error } = await query;
       if (error) return errorResponse(503, "Could not load questions.");
-      return json(200, { questions: data || [], grade_label: ctx.gradeLabel });
+      return json(200, { questions: data || [], grade_label: effectiveGradeLabel });
     }
 
     if (action === "get_daily_challenge") {
@@ -207,9 +245,17 @@ Deno.serve(async (req) => {
         seen.add(item.question_id);
       }
       const ids = [...seen];
+      let effectiveGradeLabel = ctx.gradeLabel;
+      if (ctx.gradeLabel.trim().toLocaleLowerCase() === "tina student") {
+        const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
+          .select("selected_grade_label").eq("user_id", user.id).maybeSingle();
+        if (preferenceError) return errorResponse(503, "Could not verify your saved grade.");
+        if (!preference?.selected_grade_label) return errorResponse(400, "Please select your school grade first.");
+        effectiveGradeLabel = preference.selected_grade_label;
+      }
       const { data: questions, error: questionError } = await db.from("ka_questions")
         .select("id,subject,topic,grade_label,difficulty,game_type,prompt,options,explanation")
-        .in("id", ids).eq("status", "published").in("grade_label", [ctx.gradeLabel, "General"])
+        .in("id", ids).eq("status", "published").in("grade_label", [effectiveGradeLabel, "General"])
         .or("expires_at.is.null,expires_at.gt." + new Date().toISOString());
       if (questionError || !questions || questions.length !== ids.length) return errorResponse(400, "One or more questions are unavailable.");
       const challengeId = typeof body.challenge_id === "string" ? body.challenge_id : null;
@@ -266,7 +312,7 @@ Deno.serve(async (req) => {
         p_client_attempt_id: clientAttemptId,
         p_game_type: gameType,
         p_subject: subjectSet.size === 1 ? questions[0].subject : "Mixed",
-        p_grade_label: ctx.gradeLabel,
+        p_grade_label: effectiveGradeLabel,
         p_challenge_id: challengeId,
         p_question_count: questionCount,
         p_correct_count: correctCount,
