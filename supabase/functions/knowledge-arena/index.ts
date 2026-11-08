@@ -59,6 +59,16 @@ Deno.serve(async (req) => {
     try { body = await req.json(); } catch { return errorResponse(400, "Invalid JSON request."); }
     const action = String(body.action || "");
 
+    if (action === "get_context") {
+      if (profile.role === "Admin") return json(200, { role: "Admin" });
+      if (profile.role === "Student") {
+        const ctx = await studentContext(db, profile);
+        if (!ctx) return errorResponse(403, "A linked LIB student record is required.");
+        return json(200, { role: "Student", grade_label: ctx.gradeLabel });
+      }
+      return errorResponse(403, "Knowledge Arena is available only to LIB Students and Admins.");
+    }
+
     if (action === "get_catalog") {
       const ctx = await studentContext(db, profile);
       if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
