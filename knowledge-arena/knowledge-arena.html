@@ -14,6 +14,7 @@
     <nav id="main-nav" aria-label="Main navigation">
       <button class="nav-btn active" data-view="play">Play</button>
       <button class="nav-btn" data-view="daily">Daily challenge</button>
+      <button class="nav-btn" data-view="progress">My progress</button>
       <button class="nav-btn" data-view="achievements">Achievements</button>
       <button class="nav-btn" data-view="leaderboard">Leaderboard</button>
       <button class="nav-btn hidden" id="admin-nav" data-view="admin">Admin</button>
@@ -95,6 +96,22 @@
         <p id="daily-message" class="muted daily-message" role="status"></p>
       </section>
 
+      <section id="view-progress" class="view hidden">
+        <div class="section-head"><div><p class="eyebrow">YOUR GAME JOURNEY</p><h2>Game XP &amp; levels</h2></div><span class="tag">SEPARATE FROM ATTENDANCE XP</span></div>
+        <div class="progress-overview panel">
+          <div class="progress-level-copy"><span class="muted">TOTAL GAME XP</span><strong id="progress-total-xp">0</strong><b id="progress-level-name">LEVEL 1 · BEGINNER</b></div>
+          <div class="progress-level-track"><div class="progress"><i id="progress-level-bar" style="width:0%"></i></div><small id="progress-next-level">100 XP to the next level</small></div>
+        </div>
+        <div class="metric-grid progress-metrics">
+          <article class="metric"><small>Games played</small><strong id="progress-games-played">0</strong></article>
+          <article class="metric"><small>Questions answered</small><strong id="progress-questions">0</strong></article>
+          <article class="metric"><small>Correct answers</small><strong id="progress-correct">0</strong></article>
+          <article class="metric"><small>Overall accuracy</small><strong id="progress-accuracy">0%</strong></article>
+          <article class="metric"><small>Current streak</small><strong id="progress-current-streak">0</strong></article>
+          <article class="metric"><small>Best streak</small><strong id="progress-best-streak">0</strong></article>
+        </div>
+        <p class="muted progress-footnote">Game XP is earned in Knowledge Arena only. It does not change your class attendance XP, levels, badges or attendance leaderboard.</p>
+      </section>
       <section id="view-achievements" class="view hidden">
         <div class="section-head"><div><p class="eyebrow">EVERY STEP COUNTS</p><h2>My achievements</h2></div></div>
         <div class="achievement-grid" id="achievement-grid"></div>
