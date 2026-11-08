@@ -79,6 +79,8 @@ jobs:
         run: deno check supabase/functions/knowledge-arena/index.ts
       - name: Type check generation worker
         run: deno check supabase/functions/knowledge-arena-worker/index.ts
+      - name: Test AI JSON response parsing and malformed-output handling
+        run: deno test supabase/functions/knowledge-arena-worker/json-response_test.ts
       - name: Parse browser JavaScript
         run: |
           node --check knowledge-arena/knowledge-arena.js
