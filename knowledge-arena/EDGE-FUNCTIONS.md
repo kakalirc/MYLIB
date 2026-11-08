@@ -52,7 +52,7 @@ Never put service-role keys, worker secrets or Anthropic credentials in browser 
 
 - A worker invocation with no action processes one queued generation job.
 - A daily scheduler can invoke the same worker with `{"action":"publish_daily_challenges"}` once per India-local day, using the service-role bearer token and `KA_WORKER_SECRET` stored securely in the scheduler.
-- The daily publish function creates one grade-specific challenge per active grade, each with exactly ten questions. If a grade lacks ten published questions, that grade is skipped and reported. The competition leaderboard remains common across grades.
+- The daily publish function creates one grade-specific challenge per active grade, each with exactly ten Quick Quiz questions. It prefers exact-grade questions and uses a complete General set when that grade has fewer than ten suitable questions. A grade is skipped only if neither set has ten suitable questions. The competition leaderboard remains common across grades.
 - No cron schedule, Vault secret, worker secret or recurring invocation has been configured.
 
 ## Production rollout (not performed)
