@@ -2,6 +2,15 @@ import { adminClient, authenticate, corsHeaders, errorResponse, indiaDate, india
 
 const MAX_QUESTIONS_PER_ATTEMPT = 30;
 
+function uniqueSubjectNames(rows: Array<{ name: unknown }> | null | undefined): string[] {
+  const names = new Map<string, string>();
+  for (const row of rows || []) {
+    const name = String(row?.name ?? "").trim();
+    if (name && !names.has(name.toLocaleLowerCase())) names.set(name.toLocaleLowerCase(), name);
+  }
+  return [...names.values()].sort((a, b) => a.localeCompare(b));
+}
+
 async function adminSummary(db: ReturnType<typeof adminClient>) {
   const today = indiaDate();
   const sinceToday = indiaDayStartIso(today);
@@ -46,7 +55,7 @@ async function adminSummary(db: ReturnType<typeof adminClient>) {
     ai_cost_inr_30d: usageCost(usage30.data || []),
     ai_cost_inr_reserved_today: usageReserved(usageToday.data || []),
     ai_cost_inr_reserved_month: usageReserved(usageMonth.data || []),
-    subjects: (subjects.data || []).map((x: { name: string }) => x.name),
+    subjects: uniqueSubjectNames(subjects.data),
     grades: (grades.data || []).map((x: { name: string }) => x.name),
     automation: settings.data || null,
   };
@@ -93,7 +102,7 @@ Deno.serve(async (req) => {
           { id: "brain_teaser", name: "Brain Teaser", category: "fun" },
           { id: "memory_challenge", name: "Memory Challenge", category: "fun" },
         ].filter((g) => settings.games_enabled && !(settings.disabled_game_types || []).includes(g.id)),
-        subjects: (subjects || []).map((s: { name: string }) => s.name).filter((s: string) => !(settings.disabled_subjects || []).includes(s)),
+        subjects: uniqueSubjectNames(subjects).filter((s) => !(settings.disabled_subjects || []).includes(s)),
         progress: stats || { game_xp: 0, games_played: 0, questions_answered: 0, correct_answers: 0, current_streak: 0, best_streak: 0 },
         grade_label: ctx.gradeLabel,
       });
@@ -366,7 +375,7 @@ Deno.serve(async (req) => {
       if (gradeError || subjectError) return errorResponse(503, "Could not load grade and subject options.");
       return json(200, {
         grades: [...new Set(["General", ...(grades || []).map((x: any) => String(x.name))])],
-        subjects: (subjects || []).map((x: any) => String(x.name)),
+        subjects: uniqueSubjectNames(subjects),
         game_types: ["word_master","number_quest","science_explorer","quick_quiz","brain_teaser","memory_challenge"],
       });
     }
