@@ -27421,6 +27421,9 @@ function render() {
       ['homework', 'Homework'],
       ['qbmonitoring', 'Question Bank Monitoring'],
     ]},
+    { label: 'Learning', tabs: [
+      ['knowledgearena', 'Knowledge Arena'],
+    ]},
     { label: 'System', tabs: [
       ['users', 'Settings'],
       ['admins', 'Manage Admins'],
@@ -27467,6 +27470,7 @@ function render() {
 
   let body = '';
   if (currentTab === 'dashboard') body = renderDashboard();
+  else if (currentTab === 'knowledgearena') body = `<div class="card" style="padding:0;overflow:hidden"><iframe src="knowledge-arena/knowledge-arena.html?view=admin" title="Knowledge Arena Admin" style="display:block;width:100%;height:calc(100vh - 150px);min-height:680px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
   else if (currentTab === 'setup') body = renderSetup();
   else if (currentTab === 'students') body = renderStudents();
   else if (currentTab === 'onboarding') body = renderStudentOnboarding();
