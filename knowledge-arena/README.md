@@ -1,64 +1,52 @@
-# LIB Knowledge Arena
+# LIB Knowledge Arena — isolated build
 
-A separate learning-games area for LIB students. It is integrated with the existing My LIB login but keeps its Game XP, progress, achievements and leaderboard separate from attendance rewards.
+The Knowledge Arena is a separate student activity area, entered from **My LIB → Fun Zone**. It is deliberately isolated from the existing Question Bank, Online Assessment and attendance reward calculations.
 
-## Current implementation
+## Current files
+- `knowledge-arena.html`, `knowledge-arena.css`, `knowledge-arena-live.css`, `knowledge-arena.js`: responsive student and Admin screens, Supabase session reuse, authenticated API client, quiz flow, memory recall interaction, Game XP/achievements/leaderboard and Admin controls.
+- `proposed-schema.sql`: isolated database design draft. It is **not** in the Supabase migrations directory and has not been applied.
+- `BACKEND-CONTRACT.md`: API, scoring, security and AI-worker contract.
+- `EDGE-FUNCTIONS.md`: Edge Function actions, configuration, deployment sequence and outstanding rollout gates.
+- `supabase/functions/knowledge-arena/index.ts`: isolated Student/Admin API Edge Function.
+- `supabase/functions/knowledge-arena-worker/index.ts`: one-job-per-run AI generation worker and scheduled daily-challenge publication action.
+- `supabase/functions/_shared/knowledge-arena.ts`: shared server-side authentication and utility functions.
+- `student-portal-tabs.js`, `student-portal-tabs.css`: separate My Learning, Fun Zone and Settings navigation in Student Login.
 
-- `knowledge-arena.html`: responsive Student and Admin application shell.
-- `knowledge-arena.js`: authenticated API client, game sessions, result review, daily challenge, progress, leaderboard, Admin controls and non-persistent preview fallback.
-- `knowledge-arena.css` and `knowledge-arena-live.css`: isolated styling.
-- `proposed-schema.sql`: isolated Knowledge Arena database design. It is outside `supabase/migrations` and has **not** been applied.
-- `BACKEND-CONTRACT.md`: API, security, scoring and worker contract.
-- `EDGE-FUNCTIONS.md`: function actions, configuration and controlled rollout.
-- `supabase/functions/knowledge-arena/index.ts`: authenticated Student/Admin API.
-- `supabase/functions/knowledge-arena-worker/index.ts`: one-job-per-invocation AI generation worker.
-- `supabase/functions/_shared/knowledge-arena.ts`: shared authentication and utility functions.
-- `student-portal-tabs.js` and `student-portal-tabs.css`: separate My Learning, Fun Zone and Settings navigation.
+## Current status
+The student UI is now wired to the authenticated Knowledge Arena API contract. It reuses the existing Supabase browser session for the same origin and responds to My LIB cross-tab logout. Student requests are authenticated and checked against the exact LIB Student role and linked student record. The Admin view is available only to an authenticated Admin role.
 
-## Student experience
+If the Edge Function or isolated schema is not yet deployed, the UI falls back to a clearly labelled sample preview. Preview scores are never submitted or persisted. The live student experience loads published grade-matched questions, submits selected option indexes for server-side evaluation, then refreshes saved Game XP, achievements and the common leaderboard. Correct answers remain server-side until the attempt is submitted.
 
-- Uses the existing My LIB Supabase login session; no second password is required.
-- Student access requires the exact LIB `Student` role and a linked student record. Subscription status is not checked.
-- Games retrieve published questions through the authenticated API. Answer keys stay server-side.
-- Attempts are evaluated server-side. Only aggregate attempt totals are saved; individual selected answers are not stored.
-- Game XP is 5 per correct answer, plus 10 for a perfect attempt, capped at 100 Game XP per student per India-local day.
-- Progress, achievements and a common pseudonymous leaderboard are API-backed.
-- Memory Challenge uses a short recall round: the student studies the prompt for six seconds before answering.
-- If the API/schema is not ready, the page clearly enters preview mode with sample questions. Preview scores and XP are never saved.
+The Admin screen includes summary-only metrics, switches for games/generation/daily challenges, shared INR budget controls, generation job queue/pause/resume and a daily challenge publish action. It does not show individual questions, selected answers or question-level history.
 
-## Daily challenge
+The schema remains a design artifact only. No production table, policy, function, trigger, setting, secret or schedule has been changed. Neither Edge Function has been deployed. No PR merge or production deployment has occurred.
 
-- One common competition group and leaderboard across LIB students.
-- A separate ten-question Quick Quiz set is published for each active grade band.
-- Questions are selected across available subjects. Exact-grade content is preferred; the General set is used only when a grade has fewer than ten suitable questions.
-- The Admin can publish today's challenge manually. The worker also attempts publication on each invocation when Daily Challenge is enabled.
-- A scheduled worker invocation is not configured yet, so automatic daily publication will begin only after the controlled deployment and scheduling steps.
+## Database design and safeguards
+The proposed model uses a dedicated `ka_*` namespace for question content, private answer keys, generation jobs, an auditable AI usage ledger, aggregate attempts, grade-specific daily challenges, player statistics, achievements and settings. Individual selected answers are evaluated in trusted server code and are not persisted.
 
-## Admin controls
+The schema:
+- Includes preflight checks for required LIB profile/student/grade/subject structures and refuses to proceed if any `ka_*` object already exists.
+- Grants browser roles only the limited read access required by student screens, with RLS; answer keys, jobs, settings and AI usage remain server-only.
+- Revokes privileges only on the new `ka_*` tables. It does not change grants on existing LIB tables.
+- Uses a token-owned worker lease with renewal/release RPCs so an expired worker cannot clear a newer worker's lease.
+- Records preflight AI cost reservations in `ka_ai_usage`; unsettled reservations remain counted against the shared budget for Admin review.
+- Publishes exactly ten grade-specific daily questions per active grade only when a full set exists. Students across all grades remain on one common Game XP leaderboard.
 
-- Aggregate player, game, published-question, accuracy and AI-spend metrics.
-- Shared daily and monthly AI budget limits, defaulting to ₹100/day and ₹1,000/month across all students.
-- Master controls for games, AI generation and daily challenges.
-- Queue generation jobs and pause/resume queued jobs.
-- Publish today's daily challenge.
-- No student answer history, individual Q&A, or question-level reporting is exposed.
-- Existing attendance gamification remains separate. The read-only Admin attendance summary integration is still outstanding.
+The SQL still requires review against the live schema and an explicitly approved production application. Do not apply this draft automatically.
 
-## AI generation and cost controls
+## Game rules
+- All LIB student logins are eligible regardless of subscription status.
+- Daily challenge: ten questions per active grade per India-local day, mixed across available subjects, with unlimited attempts.
+- Daily challenge questions are grade-specific. If fewer than ten suitable published questions exist for a grade, that grade's challenge is not published.
+- Game XP is separate from attendance XP: 5 XP per correct answer, 10 XP perfect-attempt bonus, and 100 XP daily cap per student.
+- Level display uses 100 Game XP per level as the current UI convention.
+- Leaderboard is common across all student grades and uses pseudonymous player labels.
+- Memory Challenge has a recall mechanic: students study a generated sequence/prompt briefly before answer options appear. Its content is still validated and scored through the server-side MCQ contract.
 
-- Anthropic Messages API; provider credentials remain server-side and are read from the existing LIB AI settings.
-- Shared INR budget accounting uses the configured USD/INR conversion rate and provider token prices. The worker fails closed if any required price/rate is missing.
-- A singleton tokenised database lease with heartbeat prevents concurrent workers from overspending the shared budget.
-- A conservative preflight reservation is recorded before paid calls; completed usage is settled and uncertain failures remain reserved for review.
-- Generated questions undergo structural checks, duplicate checks and an independent AI validation pass. This is a quality filter, not a guarantee of factual correctness.
-
-## Production status and safety boundaries
-
-The Student/Admin UI and backend source are committed to `feature/knowledge-arena`. The Supabase schema is still design-only. Neither Edge Function is deployed; no production SQL, secrets, schedules or settings have been changed. The feature is not enabled for live student use.
-
-There is no separate test database. The rollout plan is controlled production testing in small steps after code review and an explicit approval for each production operation. This branch does not merge itself.
-
-- Existing LIB Question Bank and Online Assessment are completely outside this feature. No `qb_*` object is read, written, called, extended or modified.
-- Existing attendance XP, badges, streaks and leaderboard calculations are unchanged.
-- No teacher workflows or unrelated Admin workflows are changed.
-- No production migration, Edge Function deployment, secret configuration, schedule creation or student-access activation has occurred.
+## Compatibility constraints
+- Existing LIB Question Bank and Online Assessment remain completely outside this feature. Do not read, write, extend, or alter any `qb_*` object or exam workflow.
+- Attendance XP, levels, badges, streaks and leaderboard calculations remain unchanged. Knowledge Arena Game XP is a separate system.
+- Teacher and Parent workflows are unchanged.
+- Student Login navigation is implemented in separate JS/CSS files; `index.html` has only the external script reference required to load them.
+- Admin reporting is aggregate-only; no student-level attempt drill-down or question-level data is exposed.
+- No PR merge, production migration, Edge Function deployment, secret configuration, scheduler or student access activation has occurred.
