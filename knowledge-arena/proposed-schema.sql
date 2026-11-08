@@ -18,7 +18,8 @@ begin
      or to_regclass('public.ka_player_stats') is not null
      or to_regclass('public.ka_achievements') is not null
      or to_regclass('public.ka_player_achievements') is not null
-     or to_regclass('public.ka_settings') is not null then
+     or to_regclass('public.ka_settings') is not null
+     or to_regclass('public.ka_ai_usage') is not null then
     raise exception 'A Knowledge Arena table name already exists. Stop and inspect before proceeding.';
   end if;
 
@@ -146,12 +147,14 @@ create table public.ka_attempts (
 
 create table public.ka_daily_challenges (
   id uuid primary key default gen_random_uuid(),
-  challenge_date date not null unique,
+  challenge_date date not null,
+  grade_label text not null,
   title text not null,
   description text,
   status text not null default 'draft' check (status in ('draft','published','paused','expired')),
   created_at timestamptz not null default now(),
-  published_at timestamptz
+  published_at timestamptz,
+  constraint ka_daily_challenges_date_grade_unique unique (challenge_date, grade_label)
 );
 
 alter table public.ka_attempts
@@ -208,6 +211,7 @@ create table public.ka_settings (
   daily_ai_budget_inr numeric(12,2) not null default 100 check (daily_ai_budget_inr >= 0),
   monthly_ai_budget_inr numeric(12,2) not null default 1000 check (monthly_ai_budget_inr >= 0),
   worker_lease_until timestamptz,
+  worker_lease_token uuid,
   updated_at timestamptz not null default now(),
   updated_by uuid,
   constraint ka_settings_daily_budget_not_above_monthly
@@ -215,6 +219,24 @@ create table public.ka_settings (
 );
 
 insert into public.ka_settings (id) values (1) on conflict (id) do nothing;
+
+create table public.ka_ai_usage (
+  id uuid primary key default gen_random_uuid(),
+  job_id uuid not null references public.ka_generation_jobs(id) on delete restrict,
+  status text not null default 'reserved' check (status in ('reserved','settled','review')),
+  reserved_cost_usd numeric(12,6) not null check (reserved_cost_usd >= 0),
+  reserved_cost_inr numeric(12,2) not null check (reserved_cost_inr >= 0),
+  actual_cost_usd numeric(12,6),
+  actual_cost_inr numeric(12,2),
+  usd_inr_rate numeric(12,6) not null check (usd_inr_rate > 0),
+  input_tokens bigint not null default 0 check (input_tokens >= 0),
+  output_tokens bigint not null default 0 check (output_tokens >= 0),
+  created_at timestamptz not null default now(),
+  settled_at timestamptz
+);
+
+create index ka_ai_usage_created_idx on public.ka_ai_usage (created_at desc);
+create index ka_ai_usage_job_idx on public.ka_ai_usage (job_id, created_at desc);
 
 create index ka_questions_student_feed_idx
   on public.ka_questions (grade_label, subject, game_type, status, difficulty);
@@ -239,6 +261,7 @@ alter table public.ka_player_stats enable row level security;
 alter table public.ka_achievements enable row level security;
 alter table public.ka_player_achievements enable row level security;
 alter table public.ka_settings enable row level security;
+alter table public.ka_ai_usage enable row level security;
 
 -- Only authenticated student accounts with a linked LIB student record can read
 -- published game prompts/options. Admin and teacher accounts do not get question text.
@@ -269,7 +292,10 @@ using (
   status='published'
   and exists (
     select 1 from public.profiles p
+    join public.students st on st.id=p.linked_student_id
+    left join public.grades g on g.id=st.grade_id
     where p.id=auth.uid() and p.role='Student' and p.linked_student_id is not null
+      and ka_daily_challenges.grade_label=coalesce(g.name,'General')
   )
 );
 
@@ -285,10 +311,12 @@ using (
     join public.ka_questions q on q.id=question_id
     where d.id=challenge_id and d.status='published'
       and p.role='Student' and p.linked_student_id is not null
-      and (q.grade_label=coalesce(g.name,'General') or q.grade_label='General')
+      and d.grade_label=coalesce(g.name,'General')
+      and q.grade_label=d.grade_label
   )
 );
 
+-- The AI usage ledger contains cost and token accounting only. It is private to the worker.
 create policy ka_player_stats_owner_read on public.ka_player_stats
 for select to authenticated using (user_id=auth.uid());
 
@@ -311,38 +339,37 @@ for select to authenticated using (user_id=auth.uid());
 
 
 -- Trusted worker-only RPCs. These are deliberately unavailable to browser roles.
-create or replace function public.ka_claim_generation_job()
+create or replace function public.ka_claim_generation_job(p_lease_token uuid)
 returns setof public.ka_generation_jobs
 language plpgsql
 security definer
 set search_path = public, pg_temp
-as $
+as $$
 declare
   claimed public.ka_generation_jobs;
   lease_id smallint;
 begin
-  if coalesce(auth.role(),'') <> 'service_role' then
+  if coalesce(auth.role(),'') <> 'service_role' or p_lease_token is null then
     raise exception 'Not authorised';
   end if;
 
-  -- The singleton settings row serialises all workers before they inspect
-  -- shared daily/monthly spend or make a paid provider call.
+  -- The singleton settings row serialises budget reservations and paid provider calls.
   update public.ka_settings
-     set worker_lease_until=now() + interval '30 minutes'
+     set worker_lease_until=now() + interval '10 minutes',
+         worker_lease_token=p_lease_token
    where id=1 and (worker_lease_until is null or worker_lease_until <= now())
   returning id into lease_id;
   if lease_id is null then
     return;
   end if;
 
-  -- A crashed worker leaves its job in running. After the lease has expired,
-  -- pause that job for Admin review rather than silently charging a retry.
+  -- A job is paused for Admin review only after its lease has expired.
   update public.ka_generation_jobs
      set status='paused',
          error_code='worker_lease_expired',
-         error_summary='Paused after the worker lease expired. Review usage before resuming.',
+         error_summary='Paused after the worker lease expired. Review reserved AI usage before resuming.',
          completed_at=now()
-   where status='running' and started_at < now() - interval '35 minutes';
+   where status='running' and started_at < now() - interval '11 minutes';
 
   with next_job as (
     select id
@@ -367,11 +394,144 @@ begin
     return next claimed;
   end if;
 
-  -- No work was found; do not hold the singleton lease unnecessarily.
-  update public.ka_settings set worker_lease_until=null where id=1;
+  update public.ka_settings
+     set worker_lease_until=null, worker_lease_token=null
+   where id=1 and worker_lease_token=p_lease_token;
   return;
 end;
-$;
+$$;
+
+create or replace function public.ka_renew_worker_lease(p_lease_token uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  changed integer;
+begin
+  if coalesce(auth.role(),'') <> 'service_role' or p_lease_token is null then
+    raise exception 'Not authorised';
+  end if;
+  update public.ka_settings
+     set worker_lease_until=now() + interval '10 minutes'
+   where id=1 and worker_lease_token=p_lease_token and worker_lease_until > now();
+  get diagnostics changed = row_count;
+  return changed=1;
+end;
+$$;
+
+create or replace function public.ka_release_worker_lease(p_lease_token uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  changed integer;
+begin
+  if coalesce(auth.role(),'') <> 'service_role' or p_lease_token is null then
+    raise exception 'Not authorised';
+  end if;
+  update public.ka_settings
+     set worker_lease_until=null, worker_lease_token=null
+   where id=1 and worker_lease_token=p_lease_token;
+  get diagnostics changed = row_count;
+  return changed=1;
+end;
+$$;
+
+-- Publish a common daily challenge for every active grade band. Each grade gets
+-- exactly ten questions; the competition leaderboard remains common across grades.
+create or replace function public.ka_publish_daily_challenges(p_challenge_date date)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  grade_row record;
+  question_ids uuid[];
+  challenge_id uuid;
+  published_grades text[] := '{}'::text[];
+  skipped_grades text[] := '{}'::text[];
+begin
+  if coalesce(auth.role(),'') <> 'service_role' then
+    raise exception 'Not authorised';
+  end if;
+  if p_challenge_date is distinct from (now() at time zone 'Asia/Kolkata')::date then
+    raise exception 'Only the current India-local date can be published';
+  end if;
+  if not exists (select 1 from public.ka_settings where id=1 and daily_challenge_enabled=true) then
+    return jsonb_build_object('published_grades',published_grades,'skipped_grades',skipped_grades,'paused',true);
+  end if;
+
+  for grade_row in
+    select distinct coalesce(g.name,'General') as grade_label
+    from public.profiles p
+    join public.students st on st.id=p.linked_student_id
+    left join public.grades g on g.id=st.grade_id
+    where p.role='Student' and p.linked_student_id is not null
+    order by 1
+  loop
+    select array_agg(picked.id order by picked.priority, picked.subject_rank, picked.tie_break)
+      into question_ids
+    from (
+      select candidates.id,
+             case when candidates.subject_rank <= 2 then 0 else 1 end as priority,
+             candidates.subject_rank,
+             md5(candidates.id::text || p_challenge_date::text) as tie_break
+      from (
+        select q.id, q.subject,
+               row_number() over (
+                 partition by q.subject
+                 order by md5(q.id::text || p_challenge_date::text)
+               ) as subject_rank
+        from public.ka_questions q
+        where q.status='published' and q.grade_label=grade_row.grade_label
+      ) candidates
+      order by case when candidates.subject_rank <= 2 then 0 else 1 end,
+               candidates.subject_rank,
+               md5(candidates.id::text || p_challenge_date::text)
+      limit 10
+    ) picked;
+
+    if coalesce(cardinality(question_ids),0) <> 10 then
+      skipped_grades := array_append(skipped_grades,grade_row.grade_label);
+      continue;
+    end if;
+
+    challenge_id := null;
+    insert into public.ka_daily_challenges(
+      challenge_date,grade_label,title,description,status,published_at
+    ) values (
+      p_challenge_date,grade_row.grade_label,'Today''s Knowledge Mix',
+      'Ten questions selected from the published Knowledge Arena question pool.','published',now()
+    )
+    on conflict (challenge_date,grade_label) do nothing
+    returning id into challenge_id;
+
+    if challenge_id is null then
+      skipped_grades := array_append(skipped_grades,grade_row.grade_label);
+      continue;
+    end if;
+
+    insert into public.ka_daily_challenge_items(challenge_id,question_id,sort_order)
+    select challenge_id, u.question_id, u.ordinality::integer
+    from unnest(question_ids) with ordinality as u(question_id,ordinality);
+
+    published_grades := array_append(published_grades,grade_row.grade_label);
+  end loop;
+
+  return jsonb_build_object(
+    'published_grades',published_grades,
+    'skipped_grades',skipped_grades,
+    'published_count',cardinality(published_grades),
+    'skipped_count',cardinality(skipped_grades),
+    'paused',false
+  );
+end;
+$$;
 
 create or replace function public.ka_store_generated_question(
   p_job_id uuid,
@@ -593,6 +753,7 @@ set search_path = public, pg_temp
 as $$
 declare
   result jsonb;
+  day_start timestamptz := ((now() at time zone 'Asia/Kolkata')::date::timestamp at time zone 'Asia/Kolkata');
 begin
   if coalesce(public.my_role(),'') <> 'Admin' then
     raise exception 'Not authorised';
@@ -604,33 +765,47 @@ begin
        where p.role='Student' and p.linked_student_id is not null),
     'active_players_today',
       (select count(distinct a.user_id) from public.ka_attempts a
-       where a.completed_at >= date_trunc('day', now())),
+       where a.completed_at >= day_start),
     'games_played_today',
       (select count(*) from public.ka_attempts a
-       where a.completed_at >= date_trunc('day', now())),
+       where a.completed_at >= day_start),
     'question_bank_published',
       (select count(*) from public.ka_questions q where q.status='published'),
-    'average_accuracy',
-      (select round(avg(a.accuracy),2) from public.ka_attempts a),
+    'average_accuracy_30d',
+      (select round(avg(a.accuracy),2) from public.ka_attempts a
+       where a.completed_at >= now()-interval '30 days'),
     'generation_jobs_24h',
       (select count(*) from public.ka_generation_jobs j
        where j.created_at >= now()-interval '24 hours'),
     'generation_failures_24h',
       (select count(*) from public.ka_generation_jobs j
        where j.created_at >= now()-interval '24 hours' and j.status='failed'),
-    'ai_cost_usd_30d',
-      (select coalesce(sum(j.estimated_cost_usd),0) from public.ka_generation_jobs j
-       where j.created_at >= now()-interval '30 days')
+    'ai_cost_inr_24h',
+      (select coalesce(sum(case when u.status='settled' then u.actual_cost_inr else u.reserved_cost_inr end),0)
+       from public.ka_ai_usage u where u.created_at >= now()-interval '24 hours'),
+    'ai_cost_inr_30d',
+      (select coalesce(sum(case when u.status='settled' then u.actual_cost_inr else u.reserved_cost_inr end),0)
+       from public.ka_ai_usage u where u.created_at >= now()-interval '30 days')
   ) into result;
 
   return result;
 end;
 $$;
 
-revoke all on function public.ka_claim_generation_job() from public, anon, authenticated;
+revoke all on function public.ka_claim_generation_job(uuid) from public, anon, authenticated;
+revoke all on function public.ka_renew_worker_lease(uuid) from public, anon, authenticated;
+revoke all on function public.ka_release_worker_lease(uuid) from public, anon, authenticated;
+revoke all on function public.ka_publish_daily_challenges(date) from public, anon, authenticated;
+revoke all on all tables in schema public from anon, authenticated;
+grant select on public.ka_questions to authenticated;
+grant select on public.ka_daily_challenges, public.ka_daily_challenge_items, public.ka_player_stats, public.ka_achievements, public.ka_player_achievements, public.ka_attempts to authenticated;
+revoke all on public.ka_question_keys, public.ka_generation_jobs, public.ka_settings, public.ka_ai_usage from anon, authenticated;
 revoke all on function public.ka_store_generated_question(uuid,jsonb,smallint) from public, anon, authenticated;
 revoke all on function public.ka_record_attempt(uuid,text,text,text,uuid,integer,integer,numeric,integer,integer,integer,date) from public, anon, authenticated;
-grant execute on function public.ka_claim_generation_job() to service_role;
+grant execute on function public.ka_claim_generation_job(uuid) to service_role;
+grant execute on function public.ka_renew_worker_lease(uuid) to service_role;
+grant execute on function public.ka_release_worker_lease(uuid) to service_role;
+grant execute on function public.ka_publish_daily_challenges(date) to service_role;
 grant execute on function public.ka_store_generated_question(uuid,jsonb,smallint) to service_role;
 grant execute on function public.ka_record_attempt(uuid,text,text,text,uuid,integer,integer,numeric,integer,integer,integer,date) to service_role;
 
