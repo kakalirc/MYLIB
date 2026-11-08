@@ -105,19 +105,19 @@
   };
 
   function funZoneHtml() {
-    var arenaUrl = new URL('knowledge-arena/knowledge-arena.html?view=student', document.baseURI).href;
+    var arenaUrl = new URL('knowledge-arena/knowledge-arena.html', document.baseURI).href;
     return '<section class="student-fun-zone" aria-labelledby="student-fun-heading">'
       + '<div class="student-fun-hero">'
       + '<p class="student-fun-eyebrow">A space for curiosity and play</p>'
       + '<h2 id="student-fun-heading">Welcome to Fun Zone!</h2>'
       + '<p>Take a break from your regular lessons. Explore quizzes, brain teasers, memory challenges and daily knowledge games. Your game rewards will be separate from your attendance rewards.</p>'
-      + '<a class="student-fun-launch" href="' + arenaUrl + '">Enter Knowledge Arena <span aria-hidden="true">→</span></a>'
+      + '<a class="student-fun-launch" href="' + arenaUrl + '?view=play">Enter Knowledge Arena <span aria-hidden="true">→</span></a>'
       + '</div>'
       + '<div class="student-fun-grid">'
       + '<a class="student-fun-card" href="' + arenaUrl + '?view=daily"><div class="student-fun-card-icon" aria-hidden="true">🎯</div><h3>Daily Challenges</h3><p>Try a fresh mix of questions and build a regular play habit.</p><span class="student-fun-card-action">Explore challenges →</span></a>'
       + '<a class="student-fun-card" href="' + arenaUrl + '?view=play"><div class="student-fun-card-icon" aria-hidden="true">🧩</div><h3>Games &amp; Brain Teasers</h3><p>Explore language, maths, science, general knowledge, logic and memory games.</p><span class="student-fun-card-action">Choose a game →</span></a>'
       + '<a class="student-fun-card" href="' + arenaUrl + '?view=progress"><div class="student-fun-card-icon" aria-hidden="true">⭐</div><h3>Game XP &amp; Levels</h3><p>Earn Knowledge Arena XP as you play. These rewards are independent of class attendance XP.</p><span class="student-fun-card-action">View my progress →</span></a>'
-      + '<a class="student-fun-card" href="' + arenaUrl + '?view=achievements"><div class="student-fun-card-icon" aria-hidden="true">🏆</div><h3>Badges &amp; Leaderboard</h3><p>Celebrate game achievements and compare progress on the Knowledge Arena leaderboard.</p><span class="student-fun-card-action">View achievements →</span></a>'
+      + '<a class="student-fun-card" href="' + arenaUrl + '?view=achievements"><div class="student-fun-card-icon" aria-hidden="true">🏆</div><h3>Badges &amp; Leaderboard</h3><p>Celebrate game achievements and compare progress on the Knowledge Arena leaderboard.</p><span class="student-fun-card-action">View badges &amp; leaderboard →</span></a>'
       + '</div>'
       + '<div class="student-fun-preview-note"><b>Knowledge Arena:</b> Opens with your existing LIB login. Live scores and Game XP are saved to your student account when the Knowledge Arena service is enabled; preview-mode scores are never saved.</div>'
       + '</section>';
