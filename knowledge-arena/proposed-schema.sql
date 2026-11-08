@@ -438,6 +438,7 @@ begin
 
   if claimed.id is not null then
     return next claimed;
+    return;
   end if;
 
   update public.ka_settings
