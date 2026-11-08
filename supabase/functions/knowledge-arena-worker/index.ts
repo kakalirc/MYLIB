@@ -56,16 +56,22 @@ async function updateJob(db: ReturnType<typeof adminClient>, id: string, patch: 
   if (error) throw new Error("Could not update generation job state.");
 }
 
+async function releaseWorkerLease(db: ReturnType<typeof adminClient>) {
+  const { error } = await db.from("ka_settings").update({ worker_lease_until: null }).eq("id", 1);
+  if (error) console.error("Could not release Knowledge Arena worker lease", error);
+}
+
 async function runOneJob(db: ReturnType<typeof adminClient>) {
   const { data: settings, error: settingsError } = await db.from("ka_settings")
-    .select("generation_enabled,daily_ai_budget_usd,monthly_ai_budget_usd").eq("id", 1).maybeSingle();
+    .select("generation_enabled,daily_ai_budget_inr,monthly_ai_budget_inr").eq("id", 1).maybeSingle();
   if (settingsError || !settings) throw new Error("Knowledge Arena settings are not initialised.");
   if (!settings.generation_enabled) return { skipped: "generation_paused" };
 
   const inputRate = Number(Deno.env.get("KA_INPUT_USD_PER_MILLION"));
   const outputRate = Number(Deno.env.get("KA_OUTPUT_USD_PER_MILLION"));
-  if (![inputRate, outputRate].every(Number.isFinite) || inputRate <= 0 || outputRate <= 0) {
-    throw new Error("AI token pricing environment variables are not configured; generation stopped safely.");
+  const usdInrRate = Number(Deno.env.get("KA_USD_INR_RATE"));
+  if (![inputRate, outputRate, usdInrRate].every(Number.isFinite) || inputRate <= 0 || outputRate <= 0 || usdInrRate <= 0) {
+    throw new Error("AI token prices and KA_USD_INR_RATE are not configured; generation stopped safely.");
   }
   const { data: ai, error: aiError } = await db.from("ai_settings").select("api_key,master_enabled").eq("id", 1).maybeSingle();
   if (aiError || !ai?.api_key || ai.master_enabled === false) throw new Error("AI is unavailable or disabled in LIB AI Settings.");
@@ -76,19 +82,21 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
   const dayStart = indiaDayStartIso(today);
   const monthStart = indiaDayStartIso(`${indiaYear}-${indiaMonth}-01`);
   const [{ data: dayJobs }, { data: monthJobs }] = await Promise.all([
-    db.from("ka_generation_jobs").select("estimated_cost_usd").gte("created_at", dayStart),
-    db.from("ka_generation_jobs").select("estimated_cost_usd").gte("created_at", monthStart),
+    db.from("ka_generation_jobs").select("estimated_cost_inr").gte("created_at", dayStart),
+    db.from("ka_generation_jobs").select("estimated_cost_inr").gte("created_at", monthStart),
   ]);
-  const daySpent = (dayJobs || []).reduce((n: number, x: any) => n + safeNumber(x.estimated_cost_usd), 0);
+  const daySpent = (dayJobs || []).reduce((n: number, x: any) => n + safeNumber(x.estimated_cost_inr), 0);
   const monthSpent = (monthJobs || []).reduce((n: number, x: any) => n + safeNumber(x.estimated_cost_usd), 0);
-  if (daySpent >= safeNumber(settings.daily_ai_budget_usd) || monthSpent >= safeNumber(settings.monthly_ai_budget_usd)) {
-    return { skipped: "ai_budget_reached" };
+  if (daySpent >= safeNumber(settings.daily_ai_budget_inr, 100) || monthSpent >= safeNumber(settings.monthly_ai_budget_inr, 1000)) {
+    await updateJob(db, job.id, { status: "paused", error_code: "ai_budget_reached", error_summary: "Paused: shared India-local daily or monthly INR budget reached." });
+    await releaseWorkerLease(db);
+    return { job_id: job.id, status: "paused", reason: "ai_budget_reached", daily_spent_inr: daySpent, monthly_spent_inr: monthSpent };
   }
 
   const { data: claimed, error: claimError } = await db.rpc("ka_claim_generation_job");
   if (claimError) throw new Error("Could not claim a generation job. Apply the reviewed Knowledge Arena schema first.");
   const job = Array.isArray(claimed) ? claimed[0] : claimed;
-  if (!job) return { skipped: "no_queued_jobs" };
+  if (!job) return { skipped: "no_queued_jobs_or_worker_lease_active" };
   if (job.requested_count > MAX_BATCH) {
     await updateJob(db, job.id, { status: "failed", error_code: "batch_too_large", error_summary: "Batch exceeds worker safety limit.", completed_at: new Date().toISOString() });
     return { job_id: job.id, status: "failed" };
@@ -101,13 +109,15 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
   );
   const estimatedInputTokens = job.requested_count * 1200 + 1800;
   const estimatedOutputTokens = 6000 + job.requested_count * 900;
-  const estimatedMaxCost = (estimatedInputTokens * inputRate + estimatedOutputTokens * outputRate) / 1000000;
-  if (estimatedMaxCost > remaining) {
+  const estimatedMaxCostUsd = (estimatedInputTokens * inputRate + estimatedOutputTokens * outputRate) / 1000000;
+  const estimatedMaxCostInr = estimatedMaxCostUsd * usdInrRate * 1.5;
+  if (estimatedMaxCostInr > remaining) {
     await updateJob(db, job.id, {
       status: "paused", error_code: "budget_preflight",
-      error_summary: "Paused before AI call: estimated maximum batch cost exceeds remaining daily or monthly budget.",
+      error_summary: "Paused before AI call: conservative estimated batch cost exceeds remaining daily or monthly INR budget.",
     });
-    return { job_id: job.id, status: "paused", reason: "budget_preflight", estimated_max_cost_usd: estimatedMaxCost };
+    await releaseWorkerLease(db);
+    return { job_id: job.id, status: "paused", reason: "budget_preflight", estimated_max_cost_inr: estimatedMaxCostInr };
   }
 
   let generated = 0, validated = 0, published = 0, rejected = 0, inputTokens = 0, outputTokens = 0;
@@ -166,18 +176,20 @@ ${JSON.stringify(q)}`;
     await updateJob(db, job.id, {
       status, generated_count: generated, validated_count: validated, published_count: published,
       rejected_count: rejected, model: MODEL, input_tokens: inputTokens, output_tokens: outputTokens,
-      estimated_cost_usd: cost, completed_at: new Date().toISOString(),
+      estimated_cost_usd: cost, estimated_cost_inr: cost * usdInrRate, usd_inr_rate: usdInrRate, completed_at: new Date().toISOString(),
       ...(published ? {} : { error_code: "no_questions_published", error_summary: "No candidate passed structural, duplicate and independent AI validation." }),
     });
-    return { job_id: job.id, status, generated, validated, published, rejected, estimated_cost_usd: cost };
+    await releaseWorkerLease(db);
+    return { job_id: job.id, status, generated, validated, published, rejected, estimated_cost_inr: cost * usdInrRate };
   } catch (e) {
     const cost = (inputTokens * inputRate + outputTokens * outputRate) / 1000000;
     await updateJob(db, job.id, {
       status: "failed", generated_count: generated, validated_count: validated, published_count: published,
       rejected_count: rejected, model: MODEL, input_tokens: inputTokens, output_tokens: outputTokens,
-      estimated_cost_usd: cost, completed_at: new Date().toISOString(),
+      estimated_cost_usd: cost, estimated_cost_inr: cost * usdInrRate, usd_inr_rate: usdInrRate, completed_at: new Date().toISOString(),
       error_code: "generation_failed", error_summary: String((e as Error).message || e).slice(0, 500),
     });
+    await releaseWorkerLease(db);
     throw e;
   }
 }
