@@ -45,9 +45,13 @@ function validateShape(q: any, job: any) {
   if (!Number.isInteger(q.correct_option) || q.correct_option < 0 || q.correct_option >= q.options.length) return "invalid correct option index";
   if (new Set(q.options.map((x: string) => x.trim().toLowerCase())).size !== q.options.length) return "duplicate options";
   if (typeof q.explanation !== "string" || q.explanation.trim().length < 8 || q.explanation.length > 900) return "invalid explanation";
+  if (q.options.length !== 4) return "exactly four options are required";
   if (typeof q.topic !== "string" || !q.topic.trim()) return "missing topic";
-  if (q.options.length < 2) return "insufficient options";
   if (q.subject && q.subject !== job.subject) return "subject mismatch";
+  if (q.grade_label && q.grade_label !== job.grade_label) return "grade mismatch";
+  if (q.game_type && q.game_type !== job.game_type) return "game type mismatch";
+  if (q.language_code && q.language_code !== job.language_code) return "language mismatch";
+  if (q.difficulty && q.difficulty !== job.difficulty) return "difficulty mismatch";
   return null;
 }
 
@@ -56,9 +60,9 @@ async function updateJob(db: ReturnType<typeof adminClient>, id: string, patch: 
   if (error) throw new Error("Could not update generation job state.");
 }
 
-async function releaseWorkerLease(db: ReturnType<typeof adminClient>) {
-  const { error } = await db.from("ka_settings").update({ worker_lease_until: null }).eq("id", 1);
-  if (error) console.error("Could not release Knowledge Arena worker lease", error);
+async function releaseWorkerLease(db: ReturnType<typeof adminClient>, leaseToken: string) {
+  const { data, error } = await db.rpc("ka_release_worker_lease", { p_lease_token: leaseToken });
+  if (error || data !== true) console.error("Knowledge Arena worker lease was not released by its owner", error);
 }
 
 async function runOneJob(db: ReturnType<typeof adminClient>) {
@@ -78,14 +82,37 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
 
   // The database RPC takes a singleton lease before claiming a job. Only one worker
   // can reserve shared budget or call the provider at a time.
-  const { data: claimed, error: claimError } = await db.rpc("ka_claim_generation_job");
+  const leaseToken = crypto.randomUUID();
+  const { data: claimed, error: claimError } = await db.rpc("ka_claim_generation_job", { p_lease_token: leaseToken });
   if (claimError) throw new Error("Could not claim a generation job. Apply the reviewed Knowledge Arena schema first.");
   const job = Array.isArray(claimed) ? claimed[0] : claimed;
   if (!job) return { skipped: "no_queued_jobs_or_worker_lease_active" };
 
   let generated = 0, validated = 0, published = 0, rejected = 0, inputTokens = 0, outputTokens = 0;
+  let usageId: string | null = null;
+  let reservedCostInr = 0, reservedCostUsd = 0;
+  let leaseLost = false, heartbeatBusy = false;
   const priorCostInr = safeNumber(job.estimated_cost_inr);
   const priorCostUsd = safeNumber(job.estimated_cost_usd);
+  const heartbeat = setInterval(async () => {
+    if (heartbeatBusy || leaseLost) return;
+    heartbeatBusy = true;
+    try {
+      const { data, error } = await db.rpc("ka_renew_worker_lease", { p_lease_token: leaseToken });
+      if (error || data !== true) {
+        leaseLost = true;
+        console.error("Knowledge Arena worker lease renewal failed", error);
+      }
+    } catch (error) {
+      leaseLost = true;
+      console.error("Knowledge Arena worker lease renewal failed", error);
+    } finally {
+      heartbeatBusy = false;
+    }
+  }, 45_000);
+  const assertLease = () => {
+    if (leaseLost) throw new Error("Worker lease lost; stopped before making further AI calls.");
+  };
 
   try {
     if (job.requested_count > MAX_BATCH) {
@@ -102,12 +129,13 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
     const dayStart = indiaDayStartIso(today);
     const monthStart = indiaDayStartIso(indiaYear + "-" + indiaMonth + "-01");
     const [dayResult, monthResult] = await Promise.all([
-      db.from("ka_generation_jobs").select("estimated_cost_inr").gte("started_at", dayStart),
-      db.from("ka_generation_jobs").select("estimated_cost_inr").gte("started_at", monthStart),
+      db.from("ka_ai_usage").select("status,reserved_cost_inr,actual_cost_inr").gte("created_at", dayStart),
+      db.from("ka_ai_usage").select("status,reserved_cost_inr,actual_cost_inr").gte("created_at", monthStart),
     ]);
     if (dayResult.error || monthResult.error) throw new Error("Could not calculate shared AI budget usage.");
-    const daySpent = (dayResult.data || []).reduce((n: number, x: any) => n + safeNumber(x.estimated_cost_inr), 0);
-    const monthSpent = (monthResult.data || []).reduce((n: number, x: any) => n + safeNumber(x.estimated_cost_inr), 0);
+    const effectiveCost = (x: any) => x.status === "settled" ? safeNumber(x.actual_cost_inr) : safeNumber(x.reserved_cost_inr);
+    const daySpent = (dayResult.data || []).reduce((n: number, x: any) => n + effectiveCost(x), 0);
+    const monthSpent = (monthResult.data || []).reduce((n: number, x: any) => n + effectiveCost(x), 0);
     const dailyBudget = safeNumber(settings.daily_ai_budget_inr, 100);
     const monthlyBudget = safeNumber(settings.monthly_ai_budget_inr, 1000);
 
@@ -134,9 +162,18 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       });
       return { job_id: job.id, status: "paused", reason: "budget_preflight", estimated_max_cost_inr: estimatedMaxCostInr };
     }
+    reservedCostInr = estimatedMaxCostInr;
+    reservedCostUsd = estimatedMaxCostUsd;
+    const { data: usage, error: usageError } = await db.from("ka_ai_usage").insert({
+      job_id: job.id, status: "reserved",
+      reserved_cost_usd: reservedCostUsd, reserved_cost_inr: reservedCostInr,
+      usd_inr_rate: usdInrRate,
+    }).select("id").single();
+    if (usageError || !usage?.id) throw new Error("Could not reserve shared AI budget before the provider call.");
+    usageId = usage.id;
     await updateJob(db, job.id, {
-      estimated_cost_inr: priorCostInr + estimatedMaxCostInr,
-      estimated_cost_usd: priorCostUsd + estimatedMaxCostUsd,
+      estimated_cost_inr: priorCostInr + reservedCostInr,
+      estimated_cost_usd: priorCostUsd + reservedCostUsd,
       usd_inr_rate: usdInrRate,
     });
 
@@ -156,8 +193,13 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       + "- Do not include current affairs or time-sensitive facts.\n"
       + "- Avoid duplicate or near-duplicate questions.\n"
       + "- Keep explanation clear and educational.\n"
+      + (job.game_type === "memory_challenge"
+        ? "- Memory Challenge: create a short sequence, pattern, set of facts or visualisable detail in the prompt, then ask one recall question about it. The student will study the prompt briefly before answering.\n"
+        : "")
       + "- Do not include markdown or prose outside the JSON array.";
+    assertLease();
     const generatedResponse = await anthropic(ai.api_key, system, prompt, 6000);
+    assertLease();
     inputTokens += generatedResponse.inputTokens;
     outputTokens += generatedResponse.outputTokens;
     const candidates = parseJson(generatedResponse.text);
@@ -173,7 +215,9 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       if (shapeIssue || !normalized || seen.has(normalized)) { rejected++; continue; }
       const validatorPrompt = "Independently check this MCQ for factual correctness, unambiguous wording, grade suitability, exactly one correct option, and whether the explanation supports the answer. Do not rewrite it. If you cannot confidently verify it from stable, well-established knowledge, reject it. Return JSON only: {\"approved\":boolean,\"issues\":[string]}.\nQuestion JSON:\n"
         + JSON.stringify(q);
+      assertLease();
       const validation = await anthropic(ai.api_key, "You are a strict independent educational content auditor. Reject doubtful, ambiguous, inaccurate, or unsuitable questions. Do not approve merely because the supplied answer claims to be correct.", validatorPrompt, 900);
+      assertLease();
       inputTokens += validation.inputTokens;
       outputTokens += validation.outputTokens;
       const verdict = parseJson(validation.text);
@@ -185,6 +229,7 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
         prompt: q.prompt.trim(), options: q.options, explanation: q.explanation.trim(),
         source_reference: null,
       };
+      assertLease();
       const { error: storeError } = await db.rpc("ka_store_generated_question", {
         p_job_id: job.id, p_question: payload, p_correct_option: q.correct_option,
       });
@@ -199,28 +244,46 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
     const totalCostUsd = priorCostUsd + actualCostUsd;
     const totalCostInr = priorCostInr + actualCostInr;
     const status = published === job.requested_count ? "completed" : published > 0 ? "partial" : "failed";
+    assertLease();
     await updateJob(db, job.id, {
       status, generated_count: generated, validated_count: validated, published_count: published,
       rejected_count: rejected, model: MODEL, input_tokens: inputTokens, output_tokens: outputTokens,
-      estimated_cost_usd: totalCostUsd, estimated_cost_inr: totalCostInr, usd_inr_rate: usdInrRate,
+      estimated_cost_usd: totalCostUsd, estimated_cost_inr: priorCostInr + actualCostInr, usd_inr_rate: usdInrRate,
       completed_at: new Date().toISOString(),
       ...(published ? {} : { error_code: "no_questions_published", error_summary: "No candidate passed structural, duplicate and independent AI validation." }),
     });
-    return { job_id: job.id, status, generated, validated, published, rejected, estimated_cost_inr: totalCostInr };
+    if (usageId) {
+      const { error: settleError } = await db.from("ka_ai_usage").update({
+        status: "settled", actual_cost_usd: actualCostUsd, actual_cost_inr: actualCostInr,
+        input_tokens: inputTokens, output_tokens: outputTokens, settled_at: new Date().toISOString(),
+      }).eq("id", usageId);
+      if (settleError) throw new Error("AI usage was not settled; its reservation remains charged against the budget.");
+    }
+    return { job_id: job.id, status, generated, validated, published, rejected, estimated_cost_inr: priorCostInr + actualCostInr };
   } catch (e) {
-    const actualCostUsd = (inputTokens * inputRate + outputTokens * outputRate) / 1000000;
-    const totalCostUsd = priorCostUsd + actualCostUsd;
-    const totalCostInr = priorCostInr + actualCostUsd * usdInrRate;
-    await updateJob(db, job.id, {
-      status: "failed", generated_count: generated, validated_count: validated, published_count: published,
-      rejected_count: rejected, model: MODEL, input_tokens: inputTokens, output_tokens: outputTokens,
-      estimated_cost_usd: totalCostUsd, estimated_cost_inr: totalCostInr, usd_inr_rate: usdInrRate,
-      completed_at: new Date().toISOString(),
-      error_code: "generation_failed", error_summary: String((e as Error).message || e).slice(0, 500),
-    });
+    const observedCostUsd = (inputTokens * inputRate + outputTokens * outputRate) / 1000000;
+    if (usageId) {
+      const { error: reviewError } = await db.from("ka_ai_usage").update({
+        status: "review", actual_cost_usd: observedCostUsd,
+        actual_cost_inr: observedCostUsd * usdInrRate,
+        input_tokens: inputTokens, output_tokens: outputTokens,
+      }).eq("id", usageId);
+      if (reviewError) console.error("Could not mark AI reservation for review", reviewError);
+    }
+    if (!leaseLost) {
+      await updateJob(db, job.id, {
+        status: "failed", generated_count: generated, validated_count: validated, published_count: published,
+        rejected_count: rejected, model: MODEL, input_tokens: inputTokens, output_tokens: outputTokens,
+        estimated_cost_usd: priorCostUsd + (usageId ? reservedCostUsd : 0),
+        estimated_cost_inr: priorCostInr + (usageId ? reservedCostInr : 0),
+        usd_inr_rate: usdInrRate, completed_at: new Date().toISOString(),
+        error_code: "generation_failed", error_summary: String((e as Error).message || e).slice(0, 500),
+      });
+    }
     throw e;
   } finally {
-    await releaseWorkerLease(db);
+    clearInterval(heartbeat);
+    await releaseWorkerLease(db, leaseToken);
   }
 }
 
