@@ -14,9 +14,9 @@ async function adminSummary(db: ReturnType<typeof adminClient>) {
     db.from("ka_attempts").select("user_id").gte("completed_at", sinceToday).limit(10000),
     db.from("ka_questions").select("id", { count: "exact", head: true }).eq("status", "published"),
     db.from("ka_attempts").select("accuracy").gte("completed_at", since30d).limit(10000),
-    db.from("ka_generation_jobs").select("status,estimated_cost_usd,created_at").gte("created_at", since24h),
+    db.from("ka_generation_jobs").select("status,estimated_cost_inr,created_at").gte("created_at", since24h),
     db.from("ka_generation_jobs").select("status,estimated_cost_usd,created_at").gte("created_at", since30d),
-    db.from("ka_settings").select("generation_enabled,daily_challenge_enabled,games_enabled,disabled_game_types,disabled_subjects,daily_ai_budget_usd,monthly_ai_budget_usd").eq("id", 1).maybeSingle(),
+    db.from("ka_settings").select("generation_enabled,daily_challenge_enabled,games_enabled,disabled_game_types,disabled_subjects,daily_ai_budget_inr,monthly_ai_budget_inr").eq("id", 1).maybeSingle(),
   ]);
   const errors = [players, attempts, active, questions, accuracies, jobs24, jobs30, settings].filter(x => x.error);
   if (errors.length) throw new Error("Could not load the Knowledge Arena summary.");
@@ -30,7 +30,7 @@ async function adminSummary(db: ReturnType<typeof adminClient>) {
     average_accuracy_30d: average === null ? null : Math.round(average * 100) / 100,
     generation_jobs_24h: (jobs24.data || []).length,
     generation_failures_24h: (jobs24.data || []).filter((x: { status: string }) => x.status === "failed").length,
-    ai_cost_usd_30d: (jobs30.data || []).reduce((n: number, x: { estimated_cost_usd: number }) => n + safeNumber(x.estimated_cost_usd), 0),
+    ai_cost_inr_30d: (jobs30.data || []).reduce((n: number, x: { estimated_cost_inr: number }) => n + safeNumber(x.estimated_cost_inr), 0),
     automation: settings.data || null,
   };
 }
@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return errorResponse(405, "Use POST.");
   try {
     const auth = await authenticate(req);
-    if ("error" in auth) return errorResponse(auth.status, auth.error);
+    if ("error" in auth) return errorResponse(auth.status ?? 401, auth.error);
     const { db, user, profile } = auth;
     let body: Record<string, unknown>;
     try { body = await req.json(); } catch { return errorResponse(400, "Invalid JSON request."); }
@@ -158,9 +158,9 @@ Deno.serve(async (req) => {
       const correctCount = results.filter((x) => x.correct).length;
       const questionCount = results.length;
       const accuracy = Math.round((correctCount / questionCount) * 10000) / 100;
-      const perCorrect = Number(Deno.env.get("KA_XP_PER_CORRECT"));
-      const completionBonus = Number(Deno.env.get("KA_PERFECT_ATTEMPT_BONUS"));
-      const dailyCap = Math.floor(Number(Deno.env.get("KA_DAILY_XP_CAP")));
+      const perCorrect = safeNumber(Deno.env.get("KA_XP_PER_CORRECT"), 5);
+      const completionBonus = safeNumber(Deno.env.get("KA_PERFECT_ATTEMPT_BONUS"), 10);
+      const dailyCap = Math.floor(safeNumber(Deno.env.get("KA_DAILY_XP_CAP"), 100));
       if (![perCorrect, completionBonus, dailyCap].every(Number.isFinite) || perCorrect < 0 || completionBonus < 0 || dailyCap < 0) {
         return errorResponse(503, "Game XP policy has not been configured by Admin.");
       }
@@ -247,9 +247,9 @@ Deno.serve(async (req) => {
         if (typeof body.enabled !== "boolean") return errorResponse(400, "enabled must be true or false.");
         patch[control.replace("set_", "")] = body.enabled;
       } else if (control === "set_ai_budgets") {
-        const daily = safeNumber(body.daily_ai_budget_usd, -1), monthly = safeNumber(body.monthly_ai_budget_usd, -1);
-        if (daily < 0 || monthly < 0 || daily > 10000 || monthly > 100000) return errorResponse(400, "AI budget values are invalid.");
-        patch.daily_ai_budget_usd = daily; patch.monthly_ai_budget_usd = monthly;
+        const daily = safeNumber(body.daily_ai_budget_inr, -1), monthly = safeNumber(body.monthly_ai_budget_inr, -1);
+        if (daily < 0 || monthly < 0 || daily > 100000 || monthly > 1000000 || daily > monthly) return errorResponse(400, "AI budgets must be non-negative INR amounts, within supported maximums, and daily cannot exceed monthly.");
+        patch.daily_ai_budget_inr = daily; patch.monthly_ai_budget_inr = monthly;
       } else if (control === "set_disabled_game_types" || control === "set_disabled_subjects") {
         if (!Array.isArray(body.values) || body.values.some((x) => typeof x !== "string" || x.length > 100)) return errorResponse(400, "values must be a list of strings.");
         patch[control === "set_disabled_game_types" ? "disabled_game_types" : "disabled_subjects"] = [...new Set(body.values as string[])];
