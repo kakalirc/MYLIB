@@ -50,17 +50,21 @@ The worker fails closed if provider token prices are missing. The student API re
 
 The worker endpoint is protected both by the Supabase Edge gateway JWT verification and `KA_WORKER_SECRET`. A scheduler must send an authorised service-role bearer token plus the separate worker-secret header. Store both securely; never put them in browser code.
 
-## Deployment sequence (not performed)
+## Controlled production rollout (not performed)
 
-1. Review and approve `knowledge-arena/proposed-schema.sql`.
-2. Apply it only to a non-production Supabase project first; inspect created objects and RLS.
-3. Configure secrets and exact current model token prices.
-4. Deploy `knowledge-arena` and `knowledge-arena-worker`.
-5. Test as Student, Admin, Teacher and unauthenticated user; test a student with no active subscription and a student with no grade.
-6. Configure a scheduler to invoke the worker at the agreed cadence. No schedule is included or enabled by this commit.
-7. Enable `generation_enabled` only after the budget, quality and operational checks pass.
-8. Configure XP variables only after the XP/replay policy is approved.
-9. Connect the student UI after API contract and test results are accepted.
+There is no separate test database available. The agreed approach is to validate the isolated implementation and then test on production in small, explicitly approved steps. This is not permission to make production changes automatically.
+
+1. Reconcile this branch with the current `main` branch and complete code review; do not merge while the branch is diverged.
+2. Obtain a current production backup and inspect the live schema/readiness. Confirm exact role labels, grade mapping, table columns, existing grants and policies, and that no `ka_*` objects already exist.
+3. Review and approve `knowledge-arena/proposed-schema.sql`. Apply only the new `ka_*` objects in one transaction, with generation and daily challenges disabled. Stop on any preflight mismatch.
+4. Verify the created objects, RLS, grants, function privileges and protected-system boundary before proceeding.
+5. Configure only the required server-side secrets and exact current model token prices. Do not configure XP values until the XP/replay policy is approved.
+6. Deploy the API and worker with generation still disabled. Verify Student, Admin, Teacher and unauthenticated access, including students without an active subscription and students without a grade.
+7. Run a small, explicitly approved generation pilot with a strict budget ceiling. Do not schedule recurring generation until the pilot is reviewed.
+8. Test attempts, answer-key isolation, aggregate-only Admin reporting, XP limits and leaderboard behaviour using designated accounts.
+9. Connect the student UI only after the API and production pilot are accepted. Enable broader student access only after a separate approval.
+
+Each production step requires explicit approval before execution. No database migration, secret change, Edge Function deployment, scheduler, or student-facing enablement is performed by this code change.
 
 ## Deliberately not implemented / decisions still required
 
