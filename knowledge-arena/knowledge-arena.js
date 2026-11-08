@@ -24,7 +24,7 @@
     {subject:"Geography",prompt:"Which imaginary line divides Earth into Northern and Southern Hemispheres?",options:["Prime Meridian","Equator","Tropic of Cancer","Arctic Circle"],correct_option:1,explanation:"The Equator is at 0 degrees latitude."}
   ];
 
-  let client = null, session = null, role = "", gradeLabel = "", lockedOut = false;
+  let client = null, session = null, role = "", gradeLabel = "", assignedGradeLabel = "", lockedOut = false;
   const LANGUAGE_OPTIONS = { en: "English", hi: "Hindi", kn: "Kannada", sa: "Sanskrit" };
   let previewMode = false, previewReason = "";
   let catalog = null, progress = null, leaderboard = [], dailyChallenge = null;
@@ -156,6 +156,7 @@
       const context = await api("get_context");
       role = context.role || "";
       gradeLabel = context.grade_label || "";
+      assignedGradeLabel = gradeLabel;
       if (role !== "Student" && role !== "Admin") {
         showGate("access", "Only linked LIB student accounts and authorised administrators can use Knowledge Arena.");
         setStatus("ACCESS DENIED", "danger");
@@ -200,9 +201,11 @@
     setStatus("CONNECTING", "neutral");
     try {
       catalog = await api("get_catalog");
+      if (catalog.grade_label) gradeLabel = catalog.grade_label;
       progress = await api("get_my_progress");
       populateSubjects();
       configureLanguageChoice();
+      configureTinaGradeChoice();
       const enabledGames = new Set((catalog.games || []).map((game) => game.id));
       document.querySelectorAll(".game-card").forEach((card) => {
         const launch = card.querySelector(".launch");
@@ -224,6 +227,40 @@
       if (error.status === 403) throw error;
       usePreview(error.message || "The Knowledge Arena database or API is still being prepared.");
     }
+  }
+
+  function configureTinaGradeChoice() {
+    const isTinaStudent = assignedGradeLabel.trim().toLocaleLowerCase() === "tina student";
+    $("tina-grade-choice").classList.toggle("hidden", !isTinaStudent);
+    if (!isTinaStudent) return;
+    const select = $("tina-grade-select");
+    const options = Array.isArray(catalog?.available_grade_options) ? catalog.available_grade_options : [];
+    select.innerHTML = '<option value="">Select your grade</option>' + options.map((name) =>
+      '<option value="' + escapeHtml(name) + '">' + escapeHtml(name) + '</option>').join("");
+    select.value = catalog?.selected_grade_label || "";
+    $("academic-subject-choice").classList.toggle("hidden", !select.value);
+    $("language-subject-choice").classList.add("hidden");
+    if (!select.value) note("Please select your school grade before starting a game.", "info");
+  }
+
+  async function saveTinaGradePreference() {
+    if (assignedGradeLabel.trim().toLocaleLowerCase() !== "tina student" || previewMode) return;
+    const select = $("tina-grade-select");
+    const previous = catalog?.selected_grade_label || "";
+    select.disabled = true;
+    try {
+      const result = await api("set_grade_preference", { grade_label: select.value });
+      catalog.selected_grade_label = result.grade_label;
+      catalog.grade_label = result.grade_label;
+      gradeLabel = result.grade_label;
+      $("academic-subject-choice").classList.remove("hidden");
+      $("grade-label").textContent = "Your selected grade: " + gradeLabel;
+      $("welcome-line").textContent = "Your selected grade: " + gradeLabel + ". Learn, play and build your own Game XP.";
+      note("Your grade is saved as " + gradeLabel + ". You can change it any time.", "success");
+    } catch (error) {
+      select.value = previous;
+      note("Could not save your grade: " + error.message, "warning");
+    } finally { select.disabled = false; }
   }
 
   function configureLanguageChoice() {
@@ -365,7 +402,10 @@
       challengeId = dailyChallenge.challenge.id;
       currentGame = "quick_quiz";
     } else {
-      const isLanguageStudent = gradeLabel.trim().toLocaleLowerCase() === "language";
+      if (assignedGradeLabel.trim().toLocaleLowerCase() === "tina student" && !catalog?.selected_grade_label) {
+        note("Please select your school grade first.", "warning"); return;
+      }
+      const isLanguageStudent = assignedGradeLabel.trim().toLocaleLowerCase() === "language";
       const languageCode = isLanguageStudent ? $("language-select").value : "en";
       const subject = isLanguageStudent ? LANGUAGE_OPTIONS[languageCode] : $("subject-select").value;
       if (!subject) { note(isLanguageStudent ? "Please choose a language first." : "Please choose a subject first.", "warning"); return; }
@@ -792,6 +832,7 @@
       button.dataset.filter !== "all" && card.dataset.kind !== button.dataset.filter));
   });
   $("language-select").addEventListener("change", savePreferredLanguage);
+  $("tina-grade-select").addEventListener("change", saveTinaGradePreference);
   $("start-featured").addEventListener("click", () => startGame("quick_quiz", false));
   $("start-daily").addEventListener("click", () => startGame("quick_quiz", true));
   $("quit-quiz").addEventListener("click", () => {
