@@ -18,7 +18,7 @@ Status: implementation code is prepared on `feature/knowledge-arena`; no live ba
 
 1. `get_context`: return only the authenticated Student/Admin role and the Student's resolved grade label.
 2. `get_catalog`: return enabled game types, available subjects and the student's own Game XP summary.
-3. `get_questions`: return published questions matching the authenticated student's grade, selected subject/game and optional difficulty. Return prompt/options only; never return answer keys.
+3. `get_questions`: return published questions matching the authenticated student's grade, selected subject/game and optional difficulty. Filter by selected language (English, Hindi, Kannada or Sanskrit) and return prompt/options only; never return answer keys.
 4. `get_daily_challenge`: return the current India-local date's ten-question challenge for the student's grade, or a paused/not-ready response.
 5. `submit_attempt`: accept question IDs, selected option indexes, game type and optional challenge ID. Validate every question and challenge membership; calculate score on the server; award XP under the approved policy; store only aggregate totals; update player stats and achievements. Require a unique client attempt ID so retrying the same submission cannot award XP twice. Daily challenges use the Quick Quiz game type and mix questions across available subjects within one grade-specific set.
 6. `get_my_progress`: return only the caller's aggregate stats and unlocked/locked achievement catalogue.
