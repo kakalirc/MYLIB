@@ -64,6 +64,21 @@
   if (typeof originalRenderPortalShell === 'function') {
     window.renderPortalShell = function (bodyHtml) {
       var result = originalRenderPortalShell.apply(this, arguments);
+      if (typeof currentRole !== 'undefined' && currentRole === 'Admin') {
+        var topbar = document.querySelector('#app .topbar');
+        if (topbar && !document.getElementById('libKnowledgeArenaAdminLink')) {
+          var link = document.createElement('a');
+          link.id = 'libKnowledgeArenaAdminLink';
+          link.className = 'btn-small';
+          link.href = new URL('knowledge-arena/knowledge-arena.html?view=admin', document.baseURI).href;
+          link.target = '_blank';
+          link.rel = 'noopener';
+          link.textContent = 'Knowledge Arena';
+          var who = topbar.querySelector('.who');
+          if (who) who.insertAdjacentElement('afterend', link);
+          else topbar.appendChild(link);
+        }
+      }
       if (typeof currentRole !== 'undefined' && currentRole === 'Student') {
         Array.prototype.forEach.call(document.querySelectorAll('#app .card'), function (card) {
           if (card.closest('#student-portal-settings')) return;
