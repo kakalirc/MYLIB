@@ -24,7 +24,7 @@ One-job-per-invocation AI generation worker. It also accepts `{"action":"publish
 3. Checks shared India-local daily/monthly INR budgets before any paid AI call. Defaults are ₹100/day and ₹1,000/month across all students.
 4. Reserves a conservative estimated batch cost in the private `ka_ai_usage` ledger before calling the provider. Settled actual cost replaces the reservation; interrupted/uncertain calls remain reserved for Admin review.
 5. Reads the Anthropic key server-side from existing `ai_settings` using service role. It does not call or modify the existing `ai-proxy`.
-6. Generates evergreen MCQs, checks structure/metadata/duplicates and runs a second AI validation pass.
+6. Generates evergreen MCQs in the selected English, Hindi, Kannada or Sanskrit language, checks structure/metadata/duplicates and runs a second AI validation pass.
 7. Publishes question prompts/options and private answer keys atomically through `ka_store_generated_question()`.
 8. Can publish ten English Quick Quiz questions per active grade when a full set is available. This action is idempotent for a given India-local date.
 
