@@ -523,7 +523,7 @@
       ["Games today",a.games_played_today],["Published questions",a.question_bank_published],
       ["Average accuracy (30d)",a.average_accuracy_30d == null ? "—" : a.average_accuracy_30d + "%"],
       ["AI spend today",money(a.ai_cost_inr_today)],["AI spend this month",money(a.ai_cost_inr_month)],
-      ["Reserved for review",money(a.ai_cost_inr_reserved_today)],["Generation failures (24h)",a.generation_failures_24h]
+      ["Unsettled AI reserve",money(a.ai_cost_inr_reserved_today)],["Generation failures (24h)",a.generation_failures_24h]
     ].map((m) => '<article class="metric"><small>' + m[0] + '</small><strong>' + (m[1] == null ? "—" : m[1]) + '</strong></article>').join("");
     $("admin-games-enabled").checked = !!settings.games_enabled;
     $("admin-generation-enabled").checked = !!settings.generation_enabled;
