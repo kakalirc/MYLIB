@@ -310,6 +310,7 @@ using (
     where p.id=auth.uid() and p.role='Student'
       and p.linked_student_id is not null
       and (grade_label=coalesce(g.name,'General') or grade_label='General')
+      and (expires_at is null or expires_at > now())
   )
 );
 
@@ -346,7 +347,7 @@ using (
       and p.role='Student' and p.linked_student_id is not null
       and d.grade_label=coalesce(g.name,'General')
       and q.grade_label=d.grade_label
-      and q.status='published'
+      and q.status='published' and (q.expires_at is null or q.expires_at > now())
   )
 );
 
