@@ -1,0 +1,41 @@
+name: Knowledge Arena checks
+
+on:
+  pull_request:
+    paths:
+      - "supabase/functions/knowledge-arena/**"
+      - "supabase/functions/knowledge-arena-worker/**"
+      - "supabase/functions/_shared/knowledge-arena.ts"
+      - "knowledge-arena/proposed-schema.sql"
+      - ".github/workflows/knowledge-arena-check.yml"
+  push:
+    branches:
+      - "feature/knowledge-arena"
+    paths:
+      - "supabase/functions/knowledge-arena/**"
+      - "supabase/functions/knowledge-arena-worker/**"
+      - "supabase/functions/_shared/knowledge-arena.ts"
+      - "knowledge-arena/proposed-schema.sql"
+      - ".github/workflows/knowledge-arena-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  deno-check:
+    name: Type-check isolated Edge Functions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Install Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Format check
+        run: |
+          deno fmt --check supabase/functions/_shared/knowledge-arena.ts supabase/functions/knowledge-arena/index.ts supabase/functions/knowledge-arena-worker/index.ts
+      - name: Type check student/Admin API
+        run: deno check supabase/functions/knowledge-arena/index.ts
+      - name: Type check generation worker
+        run: deno check supabase/functions/knowledge-arena-worker/index.ts
