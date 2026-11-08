@@ -98,6 +98,8 @@ Deno.serve(async (req) => {
       const ctx = await studentContext(db, profile);
       if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
       const today = indiaDate();
+      const { data: dailySettings } = await db.from("ka_settings").select("daily_challenge_enabled").eq("id", 1).maybeSingle();
+      if (!dailySettings?.daily_challenge_enabled) return json(200, { challenge: null, paused: true });
       const { data: challenge, error } = await db.from("ka_daily_challenges")
         .select("id,challenge_date,title,description,status")
         .eq("challenge_date", today).eq("status", "published").maybeSingle();
@@ -107,7 +109,8 @@ Deno.serve(async (req) => {
         .select("sort_order,question:ka_questions(id,subject,topic,grade_label,language_code,difficulty,game_type,prompt,options)")
         .eq("challenge_id", challenge.id).order("sort_order");
       if (itemError) return errorResponse(503, "Could not load today's challenge questions.");
-      const questions = (items || []).map((x: { question: unknown }) => x.question).filter(Boolean);
+      const questions = (items || []).map((x: { question: any }) => x.question)
+        .filter((q: any) => q && (q.grade_label === ctx.gradeLabel || q.grade_label === "General"));
       return json(200, { challenge, questions });
     }
 
@@ -172,8 +175,10 @@ Deno.serve(async (req) => {
           .select("id,status,challenge_date").eq("id", challengeId).eq("status", "published").maybeSingle();
         if (challengeError || !challenge || challenge.challenge_date !== today) return errorResponse(400, "Daily challenge is not active.");
         const { data: challengeItems, error: challengeItemsError } = await db.from("ka_daily_challenge_items")
-          .select("question_id").eq("challenge_id", challengeId);
-        if (challengeItemsError || !challengeItems || ids.length !== challengeItems.length || ids.some((id) => !challengeItems.some((x: any) => x.question_id === id))) {
+          .select("question_id,question:ka_questions(grade_label)").eq("challenge_id", challengeId);
+        const eligibleItems = (challengeItems || []).filter((x: any) => x.question &&
+          (x.question.grade_label === ctx.gradeLabel || x.question.grade_label === "General"));
+        if (challengeItemsError || !challengeItems || ids.length !== eligibleItems.length || ids.some((id) => !eligibleItems.some((x: any) => x.question_id === id))) {
           return errorResponse(400, "Attempt includes questions outside today's challenge.");
         }
       }
@@ -268,6 +273,13 @@ Deno.serve(async (req) => {
         const gradeLabel = String(body.grade_label || "").trim();
         const subject = String(body.subject || "").trim();
         if (!["easy", "medium", "hard"].includes(difficulty) || requestedCount < 1 || requestedCount > 20 || !gradeLabel || !subject) return errorResponse(400, "Provide grade, subject, valid difficulty and 1–20 questions.");
+        if (!(current.disabled_game_types || []).includes(gameType) === false || (current.disabled_subjects || []).includes(subject)) return errorResponse(423, "This game or subject is disabled.");
+        if (gradeLabel !== "General") {
+          const { data: grade } = await db.from("grades").select("name").eq("name", gradeLabel).maybeSingle();
+          if (!grade) return errorResponse(400, "Unknown grade label.");
+        }
+        const { data: subjectRow } = await db.from("subjects").select("name").eq("name", subject).maybeSingle();
+        if (!subjectRow) return errorResponse(400, "Unknown subject.");
         const { data: job, error } = await db.from("ka_generation_jobs").insert({
           status: "queued", subject, topic: String(body.topic || subject).slice(0, 120),
           grade_label: gradeLabel, language_code: String(body.language_code || "en").slice(0, 12),
