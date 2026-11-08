@@ -8,7 +8,8 @@ async function adminSummary(db: ReturnType<typeof adminClient>) {
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-  const [players, attempts, active, questions, accuracies, jobs24, jobs30, settings] = await Promise.all([
+  const monthStart = indiaDayStartIso(today.slice(0, 7) + "-01");
+  const [players, attempts, active, questions, accuracies, jobs24, jobs30, jobsToday, jobsMonth, settings, subjects, grades] = await Promise.all([
     db.from("profiles").select("id", { count: "exact", head: true }).eq("role", "Student").not("linked_student_id", "is", null),
     db.from("ka_attempts").select("id", { count: "exact", head: true }).gte("completed_at", sinceToday),
     db.from("ka_attempts").select("user_id").gte("completed_at", sinceToday).limit(10000),
@@ -16,9 +17,13 @@ async function adminSummary(db: ReturnType<typeof adminClient>) {
     db.from("ka_attempts").select("accuracy").gte("completed_at", since30d).limit(10000),
     db.from("ka_generation_jobs").select("status,estimated_cost_inr,started_at").gte("started_at", since24h),
     db.from("ka_generation_jobs").select("status,estimated_cost_inr,started_at").gte("started_at", since30d),
+    db.from("ka_generation_jobs").select("estimated_cost_inr").gte("started_at", sinceToday),
+    db.from("ka_generation_jobs").select("estimated_cost_inr").gte("started_at", monthStart),
     db.from("ka_settings").select("generation_enabled,daily_challenge_enabled,games_enabled,disabled_game_types,disabled_subjects,daily_ai_budget_inr,monthly_ai_budget_inr").eq("id", 1).maybeSingle(),
+    db.from("subjects").select("name").order("name"),
+    db.from("grades").select("name").order("name"),
   ]);
-  const errors = [players, attempts, active, questions, accuracies, jobs24, jobs30, settings].filter(x => x.error);
+  const errors = [players, attempts, active, questions, accuracies, jobs24, jobs30, jobsToday, jobsMonth, settings, subjects, grades].filter(x => x.error);
   if (errors.length) throw new Error("Could not load the Knowledge Arena summary.");
   const accuracyValues = (accuracies.data || []).map((x: { accuracy: number }) => Number(x.accuracy)).filter(Number.isFinite);
   const average = accuracyValues.length ? accuracyValues.reduce((a: number, b: number) => a + b, 0) / accuracyValues.length : null;
@@ -30,7 +35,12 @@ async function adminSummary(db: ReturnType<typeof adminClient>) {
     average_accuracy_30d: average === null ? null : Math.round(average * 100) / 100,
     generation_jobs_24h: (jobs24.data || []).length,
     generation_failures_24h: (jobs24.data || []).filter((x: { status: string }) => x.status === "failed").length,
+    ai_cost_inr_24h: (jobs24.data || []).reduce((n: number, x: { estimated_cost_inr: number }) => n + safeNumber(x.estimated_cost_inr), 0),
+    ai_cost_inr_today: (jobsToday.data || []).reduce((n: number, x: { estimated_cost_inr: number }) => n + safeNumber(x.estimated_cost_inr), 0),
+    ai_cost_inr_month: (jobsMonth.data || []).reduce((n: number, x: { estimated_cost_inr: number }) => n + safeNumber(x.estimated_cost_inr), 0),
     ai_cost_inr_30d: (jobs30.data || []).reduce((n: number, x: { estimated_cost_inr: number }) => n + safeNumber(x.estimated_cost_inr), 0),
+    subjects: (subjects.data || []).map((x: { name: string }) => x.name),
+    grades: (grades.data || []).map((x: { name: string }) => x.name),
     automation: settings.data || null,
   };
 }
@@ -237,6 +247,15 @@ Deno.serve(async (req) => {
       return json(200, { summary: await adminSummary(db) });
     }
 
+    if (action === "get_admin_jobs") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const { data, error } = await db.from("ka_generation_jobs")
+        .select("id,status,subject,topic,grade_label,game_type,difficulty,requested_count,published_count,created_at,started_at,completed_at,error_code,error_summary,estimated_cost_inr")
+        .order("created_at", { ascending: false }).limit(50);
+      if (error) return errorResponse(503, "Could not load generation jobs.");
+      return json(200, { jobs: data || [] });
+    }
+
     if (action === "admin_control") {
       if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
       const control = String(body.control || "");
@@ -288,7 +307,7 @@ Deno.serve(async (req) => {
         return errorResponse(400, "Unknown Admin control.");
       }
       const { data, error } = await db.from("ka_settings").update(patch).eq("id", 1)
-        .select("generation_enabled,daily_challenge_enabled,games_enabled,disabled_game_types,disabled_subjects,daily_ai_budget_usd,monthly_ai_budget_usd").single();
+        .select("generation_enabled,daily_challenge_enabled,games_enabled,disabled_game_types,disabled_subjects,daily_ai_budget_inr,monthly_ai_budget_inr").single();
       if (error) return errorResponse(503, "Could not update Knowledge Arena settings.");
       return json(200, { settings: data });
     }
