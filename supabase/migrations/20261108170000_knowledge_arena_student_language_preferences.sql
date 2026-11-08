@@ -7,3 +7,7 @@ create table if not exists public.ka_student_preferences (
 
 alter table public.ka_student_preferences enable row level security;
 revoke all on table public.ka_student_preferences from anon, authenticated;
+
+
+alter table public.ka_student_preferences
+  add column if not exists selected_grade_label text;
