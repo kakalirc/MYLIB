@@ -107,7 +107,9 @@ Deno.serve(async (req) => {
       const subject = typeof body.subject === "string" ? body.subject.trim() : "";
       if (!subject) return errorResponse(400, "Select a subject before loading questions.");
       const difficulty = body.difficulty === undefined ? "" : String(body.difficulty);
+      const languageCode = body.language_code === undefined ? "" : String(body.language_code);
       if (difficulty && !["easy", "medium", "hard"].includes(difficulty)) return errorResponse(400, "Invalid difficulty.");
+      if (languageCode && !["en","hi","kn","sa"].includes(languageCode)) return errorResponse(400, "Invalid question language.");
       const { data: settings } = await db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle();
       if (!settings?.games_enabled || (settings.disabled_game_types || []).includes(gameType)) return errorResponse(423, "This game is currently unavailable.");
       if (subject && (settings.disabled_subjects || []).includes(subject)) return errorResponse(423, "This subject is currently unavailable.");
@@ -117,6 +119,7 @@ Deno.serve(async (req) => {
         .order("created_at", { ascending: false }).limit(Math.min(Math.max(safeNumber(body.limit, 10), 1), 20));
       if (subject) query = query.eq("subject", subject);
       if (difficulty) query = query.eq("difficulty", difficulty);
+      if (languageCode) query = query.eq("language_code", languageCode);
       const { data, error } = await query;
       if (error) return errorResponse(503, "Could not load questions.");
       return json(200, { questions: data || [], grade_label: ctx.gradeLabel });
@@ -390,7 +393,7 @@ Deno.serve(async (req) => {
         if (!subjectRow) return errorResponse(400, "Unknown subject.");
         const { data: job, error } = await db.from("ka_generation_jobs").insert({
           status: "queued", subject, topic: String(body.topic || subject).slice(0, 120),
-          grade_label: gradeLabel, language_code: String(body.language_code || "en").slice(0, 12),
+          grade_label: gradeLabel, language_code: languageCode,
           game_type: gameType, difficulty, requested_count: requestedCount,
         }).select("id,status,subject,topic,grade_label,language_code,game_type,difficulty,requested_count,created_at").single();
         if (error) return errorResponse(503, "Could not queue the generation job.");
