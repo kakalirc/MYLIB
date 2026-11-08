@@ -501,6 +501,15 @@
     const subjects = adminOptions && adminOptions.subjects ? adminOptions.subjects : a.subjects || [];
     $("queue-grade").innerHTML = [...new Set(["General", ...grades])].map((x) => '<option value="' + escapeHtml(x) + '">' + escapeHtml(x) + '</option>').join("");
     $("queue-subject").innerHTML = subjects.map((x) => '<option value="' + escapeHtml(x) + '">' + escapeHtml(x) + '</option>').join("");
+    const disabledGames = new Set(settings.disabled_game_types || []);
+    const disabledSubjects = new Set(settings.disabled_subjects || []);
+    const gameTypes = adminOptions && adminOptions.game_types ? adminOptions.game_types : Object.keys(GAME_NAMES);
+    $("admin-game-switches").innerHTML = gameTypes.map((id) =>
+      '<label><input type="checkbox" data-disable-game="' + escapeHtml(id) + '" ' + (disabledGames.has(id) ? 'checked' : '') + '> ' + escapeHtml(GAME_NAMES[id] || id) + '</label>'
+    ).join("");
+    $("admin-subject-switches").innerHTML = subjects.map((subject) =>
+      '<label><input type="checkbox" data-disable-subject="' + escapeHtml(subject) + '" ' + (disabledSubjects.has(subject) ? 'checked' : '') + '> ' + escapeHtml(subject) + '</label>'
+    ).join("");
     renderJobs();
   }
 
@@ -545,6 +554,19 @@
       await refreshAdmin();
     } catch (error) { feedback.textContent = error.message; }
   }
+  async function saveContentControls() {
+    const feedback = $("content-feedback");
+    feedback.textContent = "Saving…";
+    try {
+      const disabledGames = [...document.querySelectorAll("[data-disable-game]:checked")].map((x) => x.dataset.disableGame);
+      const disabledSubjects = [...document.querySelectorAll("[data-disable-subject]:checked")].map((x) => x.dataset.disableSubject);
+      await api("admin_control", { control: "set_disabled_game_types", values: disabledGames });
+      await api("admin_control", { control: "set_disabled_subjects", values: disabledSubjects });
+      feedback.textContent = "Game and subject availability saved.";
+      await refreshAdmin();
+    } catch (error) { feedback.textContent = error.message; }
+  }
+
   async function saveBudgets() {
     const feedback = $("budget-feedback");
     const daily = Number($("admin-daily-budget").value);
@@ -619,6 +641,7 @@
   });
   $("back-to-games").addEventListener("click", () => showView("play"));
   $("save-platform-controls").addEventListener("click", savePlatformControls);
+  $("save-content-controls").addEventListener("click", saveContentControls);
   $("save-ai-budgets").addEventListener("click", saveBudgets);
   $("publish-daily").addEventListener("click", publishDaily);
   $("queue-generation").addEventListener("click", queueGeneration);
