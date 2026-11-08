@@ -93,6 +93,8 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
   if (!job) return { skipped: "no_queued_jobs_or_worker_lease_active" };
 
   let generated = 0, validated = 0, published = 0, rejected = 0, inputTokens = 0, outputTokens = 0;
+  const shapeRejections: string[] = [];
+  const validationRejections: string[] = [];
   let usageId: string | null = null;
   let reservedCostInr = 0, reservedCostUsd = 0;
   let leaseLost = false, heartbeatBusy = false;
@@ -216,7 +218,11 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
     for (const q of candidates.slice(0, job.requested_count)) {
       const shapeIssue = validateShape(q, job);
       const normalized = typeof q?.prompt === "string" ? normalisePrompt(q.prompt) : "";
-      if (shapeIssue || !normalized || seen.has(normalized)) { rejected++; continue; }
+      if (shapeIssue || !normalized || seen.has(normalized)) {
+        rejected++;
+        shapeRejections.push(shapeIssue || (!normalized ? "empty prompt" : "duplicate prompt"));
+        continue;
+      }
       const validatorPrompt = "Independently check this MCQ for factual correctness, unambiguous wording, grade suitability, exactly one correct option, and whether the explanation supports the answer. Do not rewrite it. If you cannot confidently verify it from stable, well-established knowledge, reject it. Return JSON only: {\"approved\":boolean,\"issues\":[string]}.\nQuestion JSON:\n"
         + JSON.stringify(q);
       assertLease();
@@ -225,7 +231,11 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       inputTokens += validation.inputTokens;
       outputTokens += validation.outputTokens;
       const verdict = parseJson(validation.text);
-      if (!verdict || verdict.approved !== true || !Array.isArray(verdict.issues)) { rejected++; continue; }
+      if (!verdict || verdict.approved !== true || !Array.isArray(verdict.issues)) {
+        rejected++;
+        validationRejections.push(!verdict ? "invalid validator JSON" : !Array.isArray(verdict.issues) ? "validator issues field missing" : (Array.isArray(verdict.issues) ? verdict.issues.join("; ").slice(0, 240) : "not approved"));
+        continue;
+      }
       const payload = {
         subject: job.subject, topic: String(q.topic || job.topic || job.subject),
         grade_label: job.grade_label, language_code: job.language_code,
@@ -248,6 +258,11 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
     const totalCostUsd = priorCostUsd + actualCostUsd;
     const totalCostInr = priorCostInr + actualCostInr;
     const status = published === job.requested_count ? "completed" : published > 0 ? "partial" : "failed";
+    if (rejected) console.warn("Knowledge Arena question rejection summary", {
+      job_id: job.id, grade_label: job.grade_label, subject: job.subject,
+      generated, rejected, shape_rejections: shapeRejections.slice(0, 12),
+      validation_rejections: validationRejections.slice(0, 12),
+    });
     if (settings.daily_challenge_enabled && published > 0) {
       assertLease();
       const { error: challengeError } = await db.rpc("ka_publish_daily_challenges", { p_challenge_date: indiaDate() });
