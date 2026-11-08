@@ -123,8 +123,8 @@ Deno.serve(async (req) => {
       if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
       const today = indiaDate();
       const { data: dailySettings } = await db.from("ka_settings")
-        .select("daily_challenge_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle();
-      if (!dailySettings?.daily_challenge_enabled) return json(200, { challenge: null, paused: true });
+        .select("daily_challenge_enabled,games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle();
+      if (!dailySettings?.daily_challenge_enabled || !dailySettings.games_enabled) return json(200, { challenge: null, paused: true });
       const { data: challenge, error } = await db.from("ka_daily_challenges")
         .select("id,challenge_date,grade_label,title,description,status")
         .eq("challenge_date", today).eq("grade_label", ctx.gradeLabel).eq("status", "published").maybeSingle();
@@ -163,12 +163,13 @@ Deno.serve(async (req) => {
         .select("id,subject,topic,grade_label,difficulty,game_type,prompt,options,explanation")
         .in("id", ids).eq("status", "published").in("grade_label", [ctx.gradeLabel, "General"]);
       if (questionError || !questions || questions.length !== ids.length) return errorResponse(400, "One or more questions are unavailable.");
-      if (questions.some((q: any) => q.game_type !== gameType)) return errorResponse(400, "Questions do not match the selected game.");
-      const subjectSet = new Set(questions.map((q: any) => q.subject));
       const challengeId = typeof body.challenge_id === "string" ? body.challenge_id : null;
+      if (!challengeId && questions.some((q: any) => q.game_type !== gameType)) return errorResponse(400, "Questions do not match the selected game.");
+      const subjectSet = new Set(questions.map((q: any) => q.subject));
       if (!challengeId && subjectSet.size !== 1) return errorResponse(400, "A practice attempt must contain questions from one subject.");
       const { data: gameSettings } = await db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle();
-      if (!gameSettings?.games_enabled || (gameSettings.disabled_game_types || []).includes(gameType) ||
+      if (!gameSettings?.games_enabled ||
+          questions.some((q: any) => (gameSettings.disabled_game_types || []).includes(q.game_type)) ||
           questions.some((q: any) => (gameSettings.disabled_subjects || []).includes(q.subject))) {
         return errorResponse(423, "This game or subject is currently unavailable.");
       }
