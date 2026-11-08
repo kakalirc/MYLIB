@@ -30,6 +30,8 @@ async function adminSummary(db: ReturnType<typeof adminClient>) {
   const average = accuracyValues.length ? accuracyValues.reduce((a: number, b: number) => a + b, 0) / accuracyValues.length : null;
   const usageCost = (rows: any[]) => rows.reduce((n: number, x: any) =>
     n + (x.status === "settled" ? safeNumber(x.actual_cost_inr) : safeNumber(x.reserved_cost_inr)), 0);
+  const usageReserved = (rows: any[]) => rows.reduce((n: number, x: any) =>
+    n + (x.status === "settled" ? 0 : safeNumber(x.reserved_cost_inr)), 0);
   return {
     registered_players: players.count || 0,
     active_players_today: new Set((active.data || []).map((x: { user_id: string }) => x.user_id)).size,
@@ -42,6 +44,8 @@ async function adminSummary(db: ReturnType<typeof adminClient>) {
     ai_cost_inr_today: usageCost(usageToday.data || []),
     ai_cost_inr_month: usageCost(usageMonth.data || []),
     ai_cost_inr_30d: usageCost(usage30.data || []),
+    ai_cost_inr_reserved_today: usageReserved(usageToday.data || []),
+    ai_cost_inr_reserved_month: usageReserved(usageMonth.data || []),
     subjects: (subjects.data || []).map((x: { name: string }) => x.name),
     grades: (grades.data || []).map((x: { name: string }) => x.name),
     automation: settings.data || null,
@@ -292,6 +296,21 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "get_admin_usage_reviews") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const { data: usageRows, error } = await db.from("ka_ai_usage")
+        .select("id,job_id,status,reserved_cost_inr,actual_cost_inr,usd_inr_rate,input_tokens,output_tokens,created_at")
+        .eq("status", "review").order("created_at", { ascending: true }).limit(100);
+      if (error) return errorResponse(503, "Could not load AI usage reservations for review.");
+      const jobIds = [...new Set((usageRows || []).map((x: any) => x.job_id))];
+      const { data: jobs, error: jobError } = jobIds.length
+        ? await db.from("ka_generation_jobs").select("id,subject,grade_label,game_type,status,error_code").in("id", jobIds)
+        : { data: [], error: null };
+      if (jobError) return errorResponse(503, "Could not load generation job summaries.");
+      const jobMap = new Map((jobs || []).map((x: any) => [x.id, x]));
+      return json(200, { reviews: (usageRows || []).map((x: any) => ({ ...x, job: jobMap.get(x.job_id) || null })) });
+    }
+
     if (action === "get_admin_jobs") {
       if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
       const { data, error } = await db.from("ka_generation_jobs")
@@ -328,6 +347,23 @@ Deno.serve(async (req) => {
           if (subjectError || (knownSubjects || []).length !== values.length) return errorResponse(400, "One or more subjects are invalid.");
         }
         patch[control === "set_disabled_game_types" ? "disabled_game_types" : "disabled_subjects"] = values;
+      } else if (control === "resolve_usage_review") {
+        const usageId = typeof body.usage_id === "string" ? body.usage_id : "";
+        const actualCostInr = safeNumber(body.actual_cost_inr, -1);
+        if (!usageId || !Number.isFinite(actualCostInr) || actualCostInr < 0 || actualCostInr > 1000000) {
+          return errorResponse(400, "Provide a valid usage reservation and confirmed actual INR cost.");
+        }
+        const { data: usageRow, error: usageReadError } = await db.from("ka_ai_usage")
+          .select("id,status,usd_inr_rate").eq("id", usageId).eq("status", "review").maybeSingle();
+        if (usageReadError || !usageRow) return errorResponse(409, "This AI usage reservation is no longer awaiting review.");
+        const fxRate = safeNumber(usageRow.usd_inr_rate, 0);
+        if (fxRate <= 0) return errorResponse(409, "The recorded exchange rate is invalid; reservation cannot be settled.");
+        const { data: settled, error: settleError } = await db.from("ka_ai_usage").update({
+          status: "settled", actual_cost_inr: actualCostInr, actual_cost_usd: actualCostInr / fxRate,
+          settled_at: new Date().toISOString(),
+        }).eq("id", usageId).eq("status", "review").select("id,status,actual_cost_inr").maybeSingle();
+        if (settleError || !settled) return errorResponse(409, "Could not settle the AI usage reservation.");
+        return json(200, { usage: settled });
       } else if (control === "pause_job" || control === "resume_job") {
         if (typeof body.job_id !== "string") return errorResponse(400, "job_id is required.");
         const targetStatus = control === "pause_job" ? "paused" : "queued";
