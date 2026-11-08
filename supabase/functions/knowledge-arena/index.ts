@@ -317,7 +317,7 @@ Deno.serve(async (req) => {
     if (action === "get_admin_jobs") {
       if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
       const { data, error } = await db.from("ka_generation_jobs")
-        .select("id,status,subject,topic,grade_label,game_type,difficulty,requested_count,published_count,created_at,started_at,completed_at,error_code,error_summary,estimated_cost_inr")
+        .select("id,status,subject,topic,grade_label,language_code,game_type,difficulty,requested_count,published_count,created_at,started_at,completed_at,error_code,error_summary,estimated_cost_inr")
         .order("created_at", { ascending: false }).limit(50);
       if (error) return errorResponse(503, "Could not load generation jobs.");
       return json(200, { jobs: data || [] });
@@ -383,7 +383,8 @@ Deno.serve(async (req) => {
         const requestedCount = safeNumber(body.requested_count, 0);
         const gradeLabel = String(body.grade_label || "").trim();
         const subject = String(body.subject || "").trim();
-        if (!["easy", "medium", "hard"].includes(difficulty) || requestedCount < 1 || requestedCount > 20 || !gradeLabel || !subject) return errorResponse(400, "Provide grade, subject, valid difficulty and 1–20 questions.");
+        const languageCode = String(body.language_code || "en");
+        if (!["easy", "medium", "hard"].includes(difficulty) || !["en","hi","kn","sa"].includes(languageCode) || requestedCount < 1 || requestedCount > 20 || !gradeLabel || !subject) return errorResponse(400, "Provide grade, subject, supported language, valid difficulty and 1–20 questions.");
         if ((current.disabled_game_types || []).includes(gameType) || (current.disabled_subjects || []).includes(subject)) return errorResponse(423, "This game or subject is disabled.");
         if (gradeLabel !== "General") {
           const { data: grade } = await db.from("grades").select("name").eq("name", gradeLabel).maybeSingle();
