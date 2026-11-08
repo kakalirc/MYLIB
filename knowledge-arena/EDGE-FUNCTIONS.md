@@ -30,6 +30,14 @@ One-job-per-invocation AI generation worker. It also accepts `{"action":"publish
 
 The second AI pass is a quality filter, not a guarantee of factual correctness. The initial generator avoids current affairs and time-sensitive questions.
 
+### Generation error handling
+
+- The worker extracts one complete balanced JSON root, so nested braces/brackets, escaped quotes, Markdown fences and short surrounding prose do not corrupt parsing.
+- A malformed or schema-invalid generator/validator response receives at most one retry. Both attempts' token usage is included in the AI cost ledger.
+- A structurally valid independent-validator rejection is not retried or overridden. Strict factual, ambiguity, duplicate and grade-suitability checks remain in force.
+- If an exception occurs after one or more questions have already been stored, the job is recorded as `partial` with its published count and error details. A job with zero published questions remains `failed`.
+- Parser regression tests run in the Knowledge Arena CI workflow.
+
 ## Required configuration before deployment
 
 Existing Supabase Edge Function environment:

@@ -1,4 +1,5 @@
 import { adminClient, errorResponse, json, safeNumber, indiaDate, indiaDayStartIso } from "../_shared/knowledge-arena.ts";
+import { parseJsonResponse } from "./json-response.ts";
 
 const MODEL = Deno.env.get("KA_ANTHROPIC_MODEL") || "claude-haiku-4-5";
 const MAX_BATCH = 20;
@@ -17,17 +18,34 @@ async function anthropic(apiKey: string, system: string, prompt: string, maxToke
   return { text, inputTokens: safeNumber(data.usage?.input_tokens), outputTokens: safeNumber(data.usage?.output_tokens) };
 }
 
-function parseJson(text: string): any {
-  const cleaned = text.trim().replace(/^\`\`\`(?:json)?/i, "").replace(/\`\`\`$/, "").trim();
-  const firstArray = cleaned.indexOf("[");
-  const firstObject = cleaned.indexOf("{");
-  const first = firstArray < 0 ? firstObject : firstObject < 0 ? firstArray : Math.min(firstArray, firstObject);
-  if (first < 0) throw new Error("AI response was not valid JSON.");
-  const opener = cleaned[first];
-  const closer = opener === "[" ? "]" : "}";
-  const last = cleaned.lastIndexOf(closer) + 1;
-  if (last <= first) throw new Error("AI response was not valid JSON.");
-  return JSON.parse(cleaned.slice(first, last));
+async function requestStructuredJson(
+  apiKey: string,
+  system: string,
+  prompt: string,
+  maxTokens: number,
+  label: string,
+  isValid: (value: any) => boolean,
+  recordUsage: (inputTokens: number, outputTokens: number) => void,
+): Promise<any> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const retryInstruction = attempt === 1 ? "" :
+      "\\nThe previous response was malformed or did not match the required JSON schema. Return exactly one complete JSON value, with no second JSON block or trailing commentary.";
+    const response = await anthropic(apiKey, system, prompt + retryInstruction, maxTokens);
+    recordUsage(response.inputTokens, response.outputTokens);
+    try {
+      const value = parseJsonResponse(response.text);
+      if (!isValid(value)) throw new Error(label + " JSON did not match its required schema.");
+      return value;
+    } catch (error) {
+      lastError = error;
+      console.warn("Knowledge Arena structured response retry", {
+        response_type: label, attempt, error: String((error as Error).message || error).slice(0, 240),
+      });
+    }
+  }
+  throw new Error(label + " response remained invalid after two attempts: " +
+    String((lastError as Error)?.message || lastError || "invalid JSON").slice(0, 300));
 }
 
 function normalisePrompt(s: string) { return s.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim(); }
@@ -204,12 +222,12 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
         : "")
       + "- Do not include markdown or prose outside the JSON array.";
     assertLease();
-    const generatedResponse = await anthropic(ai.api_key, system, prompt, 6000);
+    const candidates = await requestStructuredJson(
+      ai.api_key, system, prompt, 6000, "Generator",
+      (value) => Array.isArray(value) && value.length > 0,
+      (input, output) => { inputTokens += input; outputTokens += output; },
+    );
     assertLease();
-    inputTokens += generatedResponse.inputTokens;
-    outputTokens += generatedResponse.outputTokens;
-    const candidates = parseJson(generatedResponse.text);
-    if (!Array.isArray(candidates)) throw new Error("Generator did not return a JSON array.");
     generated = candidates.length;
 
     const { data: existing } = await db.from("ka_questions").select("prompt")
@@ -226,14 +244,20 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       const validatorPrompt = "Independently check this MCQ for factual correctness, unambiguous wording, grade suitability, exactly one correct option, and whether the explanation supports the answer. Do not rewrite it. If you cannot confidently verify it from stable, well-established knowledge, reject it. Return JSON only: {\"approved\":boolean,\"issues\":[string]}.\nQuestion JSON:\n"
         + JSON.stringify(q);
       assertLease();
-      const validation = await anthropic(ai.api_key, "You are a strict independent educational content auditor. Reject doubtful, ambiguous, inaccurate, or unsuitable questions. Do not approve merely because the supplied answer claims to be correct.", validatorPrompt, 900);
+      const verdict = await requestStructuredJson(
+        ai.api_key,
+        "You are a strict independent educational content auditor. Reject doubtful, ambiguous, inaccurate, or unsuitable questions. Do not approve merely because the supplied answer claims to be correct.",
+        validatorPrompt, 900, "Validator",
+        (value) => !!value && typeof value === "object" &&
+          typeof value.approved === "boolean" &&
+          Array.isArray(value.issues) &&
+          value.issues.every((issue: unknown) => typeof issue === "string"),
+        (input, output) => { inputTokens += input; outputTokens += output; },
+      );
       assertLease();
-      inputTokens += validation.inputTokens;
-      outputTokens += validation.outputTokens;
-      const verdict = parseJson(validation.text);
-      if (!verdict || verdict.approved !== true || !Array.isArray(verdict.issues)) {
+      if (verdict.approved !== true || verdict.issues.length > 0) {
         rejected++;
-        validationRejections.push(!verdict ? "invalid validator JSON" : !Array.isArray(verdict.issues) ? "validator issues field missing" : (Array.isArray(verdict.issues) ? verdict.issues.join("; ").slice(0, 240) : "not approved"));
+        validationRejections.push(verdict.issues.join("; ").slice(0, 240) || "independent validator did not approve");
         continue;
       }
       const payload = {
@@ -295,13 +319,15 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       if (reviewError) console.error("Could not mark AI reservation for review", reviewError);
     }
     if (!leaseLost) {
+      const failureStatus = published > 0 ? "partial" : "failed";
       await updateJob(db, job.id, {
-        status: "failed", generated_count: generated, validated_count: validated, published_count: published,
+        status: failureStatus, generated_count: generated, validated_count: validated, published_count: published,
         rejected_count: rejected, model: MODEL, input_tokens: inputTokens, output_tokens: outputTokens,
         estimated_cost_usd: priorCostUsd + (usageId ? reservedCostUsd : 0),
         estimated_cost_inr: priorCostInr + (usageId ? reservedCostInr : 0),
         usd_inr_rate: usdInrRate, completed_at: new Date().toISOString(),
-        error_code: "generation_failed", error_summary: String((e as Error).message || e).slice(0, 500),
+        error_code: published > 0 ? "generation_interrupted_after_partial" : "generation_failed",
+        error_summary: String((e as Error).message || e).slice(0, 500),
       });
     }
     throw e;
