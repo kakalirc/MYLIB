@@ -28,7 +28,7 @@
   let previewMode = false, previewReason = "";
   let catalog = null, progress = null, leaderboard = [], dailyChallenge = null;
   let currentView = "play", currentGame = "quick_quiz", currentQuestions = [];
-  let currentAnswers = [], currentIndex = 0, currentScore = 0, challengeId = null;
+  let currentAnswers = [], currentIndex = 0, currentScore = 0, challengeId = null, clientAttemptId = null;
   let gameStartedAt = 0, memoryTimer = null, memoryRevealed = false;
   let adminSummary = null, adminOptions = null, adminJobs = [];
 
@@ -329,6 +329,7 @@
   function startQuestionView() {
     if (!currentQuestions.length) return;
     gameStartedAt = Date.now();
+    clientAttemptId = crypto.randomUUID();
     currentAnswers = [];
     currentIndex = 0;
     $("results").classList.add("hidden");
@@ -412,6 +413,7 @@
     }
     try {
       const payload = {
+        client_attempt_id: clientAttemptId,
         game_type: currentGame,
         answers: currentAnswers,
         duration_seconds: Math.max(0, Math.round((Date.now() - gameStartedAt) / 1000))
