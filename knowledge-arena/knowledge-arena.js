@@ -30,7 +30,7 @@
   let currentView = "play", currentGame = "quick_quiz", currentQuestions = [];
   let currentAnswers = [], currentIndex = 0, currentScore = 0, challengeId = null, clientAttemptId = null;
   let gameStartedAt = 0, memoryTimer = null, memoryRevealed = false;
-  let adminSummary = null, adminOptions = null, adminJobs = [], adminUsageReviews = [];
+  let adminSummary = null, adminOptions = null, adminJobs = [], adminUsageReviews = [], adminLeadership = null;
 
   function setStatus(label, tone) {
     const el = $("connection-status");
@@ -534,6 +534,7 @@
       adminJobs = jobs.jobs || [];
       adminUsageReviews = usage.reviews || [];
       renderAdmin();
+      await refreshLeadership();
     } catch (error) {
       usePreview("Admin API/database setup is pending: " + error.message);
       $("admin-nav").classList.remove("hidden");
@@ -632,6 +633,38 @@
     adminJobs = jobs.jobs || [];
     adminUsageReviews = usage.reviews || [];
     renderAdmin();
+    await refreshLeadership();
+  }
+  async function refreshLeadership() {
+    const feedback = $("leadership-feedback");
+    if (feedback) feedback.textContent = "Refreshing student leadership…";
+    try {
+      adminLeadership = await api("get_admin_leadership");
+      renderLeadership();
+      if (feedback) feedback.textContent = "Game progress updated. Attendance rewards remain in the existing LIB system.";
+    } catch (error) {
+      if ($("leadership-game-leaders")) $("leadership-game-leaders").innerHTML = '<p class="muted">' + escapeHtml(error.message) + '</p>';
+      if (feedback) feedback.textContent = "Could not refresh leadership data.";
+    }
+  }
+  function renderLeadership() {
+    const data = adminLeadership || {};
+    const summary = data.summary || {};
+    $("leadership-metrics").innerHTML = [
+      ["Game players", summary.game_players || 0],
+      ["Total Game XP", Number(summary.game_xp_total || 0).toLocaleString("en-IN")],
+      ["Game achievements", summary.game_achievements_total || 0]
+    ].map((m) => '<article class="metric"><small>' + m[0] + '</small><strong>' + m[1] + '</strong></article>').join("");
+    const players = data.players || [];
+    if (!players.length) {
+      $("leadership-game-leaders").innerHTML = '<p class="muted">No Knowledge Arena game progress has been recorded yet.</p>';
+    } else {
+      const head = '<div class="leadership-row leadership-header"><span>RANK</span><span>STUDENT</span><span>GRADE</span><span>GAME XP / LEVEL</span><span>GAMES</span><span>ACCURACY</span><span>BADGES</span><span>STREAK</span></div>';
+      const rows = players.map((p) => '<div class="leadership-row"><span>#' + p.rank + '</span><span><b>' + escapeHtml(p.student_name) + '</b>' + (p.student_code ? '<small>' + escapeHtml(p.student_code) + '</small>' : '') + '</span><span>' + escapeHtml(p.grade_label) + '</span><span><b>' + Number(p.game_xp || 0).toLocaleString("en-IN") + ' XP</b><small>Level ' + p.game_level + '</small></span><span>' + p.games_played + '</span><span>' + p.accuracy_percent + '%</span><span>' + p.achievements_earned + '</span><span>' + p.current_streak + ' days<small>Best ' + p.best_streak + '</small></span></div>').join("");
+      $("leadership-game-leaders").innerHTML = '<div class="leadership-table">' + head + rows + '</div>';
+    }
+    const attendance = data.attendance_rewards || {};
+    $("leadership-attendance").innerHTML = '<strong>Attendance rewards remain separate.</strong><p class="muted">' + escapeHtml(attendance.message || "The existing attendance reward source has not yet been connected.") + '</p>';
   }
   async function updateJob(action, jobId) {
     try {
@@ -745,6 +778,7 @@
   $("publish-daily").addEventListener("click", publishDaily);
   $("queue-generation").addEventListener("click", queueGeneration);
   $("refresh-jobs").addEventListener("click", () => refreshAdmin().catch((e) => $("admin-jobs").textContent = e.message));
+  $("refresh-leadership").addEventListener("click", refreshLeadership);
 
   initialise();
 })();
