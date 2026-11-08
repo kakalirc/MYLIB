@@ -26,6 +26,45 @@ permissions:
   contents: read
 
 jobs:
+  schema-smoke-test:
+    name: Smoke-test proposed schema in disposable PostgreSQL
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: knowledge_arena_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d knowledge_arena_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/knowledge_arena_ci
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Create disposable Supabase-compatible fixture
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/tests/schema-fixture.sql
+      - name: Apply proposed Knowledge Arena schema to disposable database
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/proposed-schema.sql
+      - name: Test grade challenges, duplicate prevention, worker lease and grants
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/tests/schema-smoke.sql
+      - name: Confirm schema preflight refuses a second application
+        run: |
+          if psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/proposed-schema.sql; then
+            echo "Expected the preflight to reject an existing ka_* object."
+            exit 1
+          else
+            echo "Preflight correctly refused a second application."
+          fi
+
   deno-check:
     name: Type-check isolated Edge Functions
     runs-on: ubuntu-latest
