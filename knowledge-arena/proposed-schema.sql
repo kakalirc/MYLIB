@@ -61,7 +61,7 @@ begin
   ) then
     raise exception 'Preflight failed: required student grade or subject columns are missing.';
   end if;
-end $;
+end $$;
 
 create table public.ka_questions (
   id uuid primary key default gen_random_uuid(),
