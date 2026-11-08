@@ -214,8 +214,22 @@
     const {data,error}=await client.auth.getSession();if(error||!data.session){$('session-state').textContent='Not signed in';setMessage('Please return to LIB Student Login and sign in before opening Knowledge Arena.','error');return;}
     session=data.session;
     if(studentView){$('admin-nav').remove();}
-    try{await loadCatalog();}catch(e){$('session-state').textContent='Login verified';setMessage(e.message,'error');return;}
-    if(!studentView){
+    let isStudent=false,isAdmin=false;
+    try{await loadCatalog();isStudent=true;}
+    catch(studentError){
+      if(studentView){$('session-state').textContent='Student access unavailable';setMessage(studentError.message,'error');return;}
+      try{await api('get_admin_summary');isAdmin=true;}
+      catch(adminError){$('session-state').textContent='Account not authorised';setMessage('This account is not authorised to use Knowledge Arena. Please sign in with a linked LIB Student or Admin account.','error');return;}
+    }
+    if(isAdmin){
+      $('session-state').textContent='LIB Admin session';
+      document.querySelectorAll('.nav-btn:not(#admin-nav)').forEach(b=>b.remove());
+      $('admin-nav').classList.remove('hidden');
+      $('hero-score').classList.add('hidden');
+      $('grade-label').textContent='Administrative controls and shared service health';
+      $('hero h1').innerHTML='Knowledge Arena<br><em>control centre.</em>';
+      showView('admin');
+    }else if(isStudent&&!studentView){
       try{await api('get_admin_summary');$('admin-nav').classList.remove('hidden');}
       catch(e){$('admin-nav').remove();}
     }
