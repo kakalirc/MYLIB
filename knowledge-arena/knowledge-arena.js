@@ -162,7 +162,7 @@
       showShell();
       if (role === "Admin") {
         $("welcome-line").textContent = "Monitor Knowledge Arena, manage shared AI budgets and publish daily challenges.";
-        $("admin-nav").classList.remove("hidden");
+        prepareAdminLayout();
         await loadAdmin();
         const requested = new URLSearchParams(location.search).get("view");
         showView(requested === "admin" ? "admin" : "admin");
@@ -184,7 +184,7 @@
         const requestedView = new URLSearchParams(location.search).get("view");
         if (requestedView === "admin") {
           role = "AdminPreview";
-          $("admin-nav").classList.remove("hidden");
+          prepareAdminLayout();
           usePreview(error.message || "The Knowledge Arena API is not deployed yet.");
           renderAdminPreview(error.message || "The Knowledge Arena API is not deployed yet.");
         } else {
@@ -268,6 +268,13 @@
       '</b><span>' + escapeHtml(r.display_name) + (r.is_me ? "<small>You</small>" : "") +
       '</span><b>' + Number(r.game_xp || 0).toLocaleString("en-IN") + '</b></div>'
     ).join("") : '<p class="muted">No scores yet. Be the first to play!</p>';
+  }
+
+  function prepareAdminLayout() {
+    const hero = document.querySelector("#arena-shell .hero");
+    if (hero) hero.classList.add("hidden");
+    document.querySelectorAll("#main-nav .nav-btn:not(#admin-nav)").forEach((button) => button.classList.add("hidden"));
+    $("admin-nav").classList.remove("hidden");
   }
 
   function showView(name) {
@@ -480,6 +487,7 @@
   }
 
   function renderAdminPreview(message) {
+    prepareAdminLayout();
     adminSummary = {
       registered_players: "—", active_players_today: "—", games_played_today: "—",
       question_bank_published: "—", average_accuracy_30d: "—",
