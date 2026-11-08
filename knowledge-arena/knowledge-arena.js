@@ -296,9 +296,9 @@
       .map((name) => String(name || "").trim())
       .filter(Boolean)
       .map((name) => [name.toLocaleLowerCase(), name])).values()];
-    select.innerHTML = uniqueSubjects.length
+    select.innerHTML = '<option value="All">All</option>' + (uniqueSubjects.length
       ? uniqueSubjects.map((name) => '<option value="' + escapeHtml(name) + '">' + escapeHtml(name) + '</option>').join("")
-      : '<option value="">No subjects available</option>';
+      : '');
   }
 
   function levelInfo(xp) {
@@ -406,15 +406,31 @@
         note("Please select your school grade first.", "warning"); return;
       }
       const isLanguageStudent = assignedGradeLabel.trim().toLocaleLowerCase() === "language";
-      const selectedSubject = $("subject-select").value;
-      const languageCode = isLanguageStudent ? $("language-select").value : (selectedSubject.toLocaleLowerCase() === "french" ? "fr" : "en");
-      const subject = isLanguageStudent ? LANGUAGE_OPTIONS[languageCode] : selectedSubject;
-      if (!subject) { note(isLanguageStudent ? "Please choose a language first." : "Please choose a subject first.", "warning"); return; }
+      const selectedSubject = $("subject-select").value || "All";
+      const languageCode = isLanguageStudent
+        ? $("language-select").value
+        : (game === "word_master" ? "en" : (selectedSubject.toLocaleLowerCase() === "french" ? "fr" : "en"));
+      // Each game owns its academic subject. The page-level subject selector is
+      // only a filter for mixed Quick Quiz; it must never block another game.
+      const gameSubjects = {
+        word_master: isLanguageStudent ? LANGUAGE_OPTIONS[languageCode] : "English",
+        number_quest: "Math",
+        brain_teaser: "Math",
+        science_explorer: "Science",
+        memory_challenge: "Science"
+      };
+      const subject = Object.prototype.hasOwnProperty.call(gameSubjects, game)
+        ? gameSubjects[game]
+        : (selectedSubject.toLocaleLowerCase() === "all" ? "" : selectedSubject);
+      if (!subject && game !== "quick_quiz") {
+        note(isLanguageStudent ? "Please choose a language first." : "This game does not have a subject configured yet.", "warning");
+        return;
+      }
       try {
         const data = await api("get_questions", { game_type: game, subject, language_code: languageCode, limit: 10 });
         currentQuestions = (data.questions || []).sort(() => Math.random() - 0.5);
         if (!currentQuestions.length) {
-          note("There are no published questions for " + GAME_NAMES[game] + " in " + subject + " yet. Please try another subject or return later.", "info");
+          note("There are no published questions for " + GAME_NAMES[game] + (subject ? " in " + subject : " for this grade") + " yet. Please try again later.", "info");
           return;
         }
       } catch (error) {
