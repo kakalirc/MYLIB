@@ -50,3 +50,6 @@ The SQL still requires review against the live schema and an explicitly approved
 - Student Login navigation is implemented in separate JS/CSS files; `index.html` has only the external script reference required to load them.
 - Admin reporting is aggregate-only; no student-level attempt drill-down or question-level data is exposed.
 - No PR merge, production migration, Edge Function deployment, secret configuration, scheduler or student access activation has occurred.
+
+## Fun Zone navigation
+The four Fun Zone cards are full-card links into the matching Knowledge Arena views: Daily Challenges, Games & Brain Teasers, Game XP & Levels (My Progress), and Badges & Leaderboard. The badges view includes both the student's achievement list and the pseudonymous Game XP leaderboard. Deep links are handled after the existing LIB session and role checks; they do not bypass authentication.
