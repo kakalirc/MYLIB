@@ -518,6 +518,7 @@
     adminJobs = [];
     adminUsageReviews = [];
     renderAdmin();
+    renderLeadership();
     disableAdminPreviewControls();
     if (message) note("Admin preview only: " + message + " Controls are disabled until the authenticated API and schema are deployed.", "warning");
     showView("admin");
@@ -650,14 +651,15 @@
   function renderLeadership() {
     const data = adminLeadership || {};
     const summary = data.summary || {};
+    const unavailable = !adminLeadership;
     $("leadership-metrics").innerHTML = [
-      ["Game players", summary.game_players || 0],
-      ["Total Game XP", Number(summary.game_xp_total || 0).toLocaleString("en-IN")],
-      ["Game achievements", summary.game_achievements_total || 0]
+      ["Game players", unavailable ? "—" : summary.game_players || 0],
+      ["Total Game XP", unavailable ? "—" : Number(summary.game_xp_total || 0).toLocaleString("en-IN")],
+      ["Game achievements", unavailable ? "—" : summary.game_achievements_total || 0]
     ].map((m) => '<article class="metric"><small>' + m[0] + '</small><strong>' + m[1] + '</strong></article>').join("");
     const players = data.players || [];
     if (!players.length) {
-      $("leadership-game-leaders").innerHTML = '<p class="muted">No Knowledge Arena game progress has been recorded yet.</p>';
+      $("leadership-game-leaders").innerHTML = '<p class="muted">' + (unavailable ? 'Live leadership data is unavailable in preview mode.' : 'No Knowledge Arena game progress has been recorded yet.') + '</p>';
     } else {
       const head = '<div class="leadership-row leadership-header"><span>RANK</span><span>STUDENT</span><span>GRADE</span><span>GAME XP / LEVEL</span><span>GAMES</span><span>ACCURACY</span><span>BADGES</span><span>STREAK</span></div>';
       const rows = players.map((p) => '<div class="leadership-row"><span>#' + p.rank + '</span><span><b>' + escapeHtml(p.student_name) + '</b>' + (p.student_code ? '<small>' + escapeHtml(p.student_code) + '</small>' : '') + '</span><span>' + escapeHtml(p.grade_label) + '</span><span><b>' + Number(p.game_xp || 0).toLocaleString("en-IN") + ' XP</b><small>Level ' + p.game_level + '</small></span><span>' + p.games_played + '</span><span>' + p.accuracy_percent + '%</span><span>' + p.achievements_earned + '</span><span>' + p.current_streak + ' days<small>Best ' + p.best_streak + '</small></span></div>').join("");
