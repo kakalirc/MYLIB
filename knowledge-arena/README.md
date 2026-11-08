@@ -28,9 +28,9 @@ The SQL includes preflight checks and explicit RLS policies, but it still requir
 ## Current backend scope and limitations
 - Student API supports catalog, grade-filtered MCQ retrieval, attempt submission with server-side answer checking, aggregate progress, pseudonymous leaderboard, summary-only Admin reporting and Admin controls.
 - Attempt storage contains only aggregate counts and XP; individual selected answers are not persisted.
-- The generation worker processes one queued batch per invocation, checks budgets, uses server-side AI credentials and applies structural, duplicate and second-pass AI validation.
-- XP settings must be configured after the XP policy is approved; attempt submission fails closed until then.
-- Daily challenge retrieval exists, but automatic daily challenge creation is blocked pending challenge length, subject mix and grade-band fairness decisions.
+- The generation worker processes one queued batch per invocation, serialises workers with a database lease, reserves a conservative preflight estimate, enforces shared India-local budgets of ₹100/day and ₹1,000/month by default, uses server-side AI credentials and applies structural, duplicate and second-pass AI validation. Admin budget updates are supported by the API; a connected Admin settings UI remains outstanding.
+- Game XP defaults are 5 XP per correct answer, a 10 XP perfect-attempt bonus, and a 100 XP per-student daily cap. These apply only to Knowledge Arena Game XP, not attendance XP.
+- Daily challenge retrieval exists. The approved initial challenge design is 10 questions per day, a mix from available subjects, grade-appropriate questions, and one common competition group; automatic creation/publication is not implemented yet.
 - The first generation pipeline uses MCQ content for all listed game categories; the distinct Memory Challenge interaction is not yet implemented.
 - Leaderboard display is pseudonymous until the display-name policy is approved.
 
