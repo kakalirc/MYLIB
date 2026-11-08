@@ -9,24 +9,27 @@ async function adminSummary(db: ReturnType<typeof adminClient>) {
   const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
   const monthStart = indiaDayStartIso(today.slice(0, 7) + "-01");
-  const [players, attempts, active, questions, accuracies, jobs24, jobs30, jobsToday, jobsMonth, settings, subjects, grades] = await Promise.all([
+  const [players, attempts, active, questions, accuracies, jobs24, usage24, usageToday, usageMonth, usage30, settings, subjects, grades] = await Promise.all([
     db.from("profiles").select("id", { count: "exact", head: true }).eq("role", "Student").not("linked_student_id", "is", null),
     db.from("ka_attempts").select("id", { count: "exact", head: true }).gte("completed_at", sinceToday),
     db.from("ka_attempts").select("user_id").gte("completed_at", sinceToday).limit(10000),
     db.from("ka_questions").select("id", { count: "exact", head: true }).eq("status", "published"),
     db.from("ka_attempts").select("accuracy").gte("completed_at", since30d).limit(10000),
-    db.from("ka_generation_jobs").select("status,estimated_cost_inr,started_at").gte("started_at", since24h),
-    db.from("ka_generation_jobs").select("status,estimated_cost_inr,started_at").gte("started_at", since30d),
-    db.from("ka_generation_jobs").select("estimated_cost_inr").gte("started_at", sinceToday),
-    db.from("ka_generation_jobs").select("estimated_cost_inr").gte("started_at", monthStart),
+    db.from("ka_generation_jobs").select("status,created_at").gte("created_at", since24h),
+    db.from("ka_ai_usage").select("status,reserved_cost_inr,actual_cost_inr").gte("created_at", since24h),
+    db.from("ka_ai_usage").select("status,reserved_cost_inr,actual_cost_inr").gte("created_at", sinceToday),
+    db.from("ka_ai_usage").select("status,reserved_cost_inr,actual_cost_inr").gte("created_at", monthStart),
+    db.from("ka_ai_usage").select("status,reserved_cost_inr,actual_cost_inr").gte("created_at", since30d),
     db.from("ka_settings").select("generation_enabled,daily_challenge_enabled,games_enabled,disabled_game_types,disabled_subjects,daily_ai_budget_inr,monthly_ai_budget_inr").eq("id", 1).maybeSingle(),
     db.from("subjects").select("name").order("name"),
     db.from("grades").select("name").order("name"),
   ]);
-  const errors = [players, attempts, active, questions, accuracies, jobs24, jobs30, jobsToday, jobsMonth, settings, subjects, grades].filter(x => x.error);
+  const errors = [players, attempts, active, questions, accuracies, jobs24, usage24, usageToday, usageMonth, usage30, settings, subjects, grades].filter(x => x.error);
   if (errors.length) throw new Error("Could not load the Knowledge Arena summary.");
   const accuracyValues = (accuracies.data || []).map((x: { accuracy: number }) => Number(x.accuracy)).filter(Number.isFinite);
   const average = accuracyValues.length ? accuracyValues.reduce((a: number, b: number) => a + b, 0) / accuracyValues.length : null;
+  const usageCost = (rows: any[]) => rows.reduce((n: number, x: any) =>
+    n + (x.status === "settled" ? safeNumber(x.actual_cost_inr) : safeNumber(x.reserved_cost_inr)), 0);
   return {
     registered_players: players.count || 0,
     active_players_today: new Set((active.data || []).map((x: { user_id: string }) => x.user_id)).size,
@@ -35,10 +38,10 @@ async function adminSummary(db: ReturnType<typeof adminClient>) {
     average_accuracy_30d: average === null ? null : Math.round(average * 100) / 100,
     generation_jobs_24h: (jobs24.data || []).length,
     generation_failures_24h: (jobs24.data || []).filter((x: { status: string }) => x.status === "failed").length,
-    ai_cost_inr_24h: (jobs24.data || []).reduce((n: number, x: { estimated_cost_inr: number }) => n + safeNumber(x.estimated_cost_inr), 0),
-    ai_cost_inr_today: (jobsToday.data || []).reduce((n: number, x: { estimated_cost_inr: number }) => n + safeNumber(x.estimated_cost_inr), 0),
-    ai_cost_inr_month: (jobsMonth.data || []).reduce((n: number, x: { estimated_cost_inr: number }) => n + safeNumber(x.estimated_cost_inr), 0),
-    ai_cost_inr_30d: (jobs30.data || []).reduce((n: number, x: { estimated_cost_inr: number }) => n + safeNumber(x.estimated_cost_inr), 0),
+    ai_cost_inr_24h: usageCost(usage24.data || []),
+    ai_cost_inr_today: usageCost(usageToday.data || []),
+    ai_cost_inr_month: usageCost(usageMonth.data || []),
+    ai_cost_inr_30d: usageCost(usage30.data || []),
     subjects: (subjects.data || []).map((x: { name: string }) => x.name),
     grades: (grades.data || []).map((x: { name: string }) => x.name),
     automation: settings.data || null,
