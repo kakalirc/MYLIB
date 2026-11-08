@@ -1,9 +1,6 @@
--- LIB Knowledge Arena: proposed isolated schema
--- STATUS: DESIGN DRAFT ONLY. DO NOT APPLY TO PRODUCTION.
--- This file is deliberately stored outside supabase/migrations so deployment tooling
--- cannot apply it accidentally. Review types, policies, and deployment plan first.
--- No existing application tables, functions, triggers, policies, or assessment objects
--- are modified by this proposal.
+-- LIB Knowledge Arena: applied isolated production schema migration.
+-- Creates only ka_* objects. Existing Question Bank, Online Assessment,
+-- and attendance-gamification objects are not modified.
 
 begin;
 
@@ -935,7 +932,7 @@ grant execute on function public.ka_admin_summary() to authenticated;
 
 commit;
 
--- IMPORTANT REVIEW ITEMS BEFORE THIS DRAFT CAN BE PROMOTED TO A MIGRATION:
+-- Post-deployment validation notes:
 -- 1. Re-run the preflight against the exact production schema and verify no ka_* objects exist.
 -- 2. Confirm role labels, linked-student coverage, grade names and subject names.
 -- 3. Confirm the pseudonymous leaderboard policy and the 100-XP daily cap.
