@@ -30,6 +30,7 @@
   ];
 
   let client = null, session = null, role = "", gradeLabel = "", assignedGradeLabel = "", lockedOut = false;
+  let guestMode = false, guestTokenValue = "", guestGameCount = 0;
   const LANGUAGE_OPTIONS = { en: "English", hi: "Hindi", kn: "Kannada", sa: "Sanskrit", fr: "French" };
   let previewMode = false, previewReason = "";
   let catalog = null, progress = null, leaderboard = [], dailyChallenge = null;
@@ -37,6 +38,7 @@
   let currentAnswers = [], currentIndex = 0, currentScore = 0, challengeId = null, clientAttemptId = null;
   let gameStartedAt = 0, memoryTimer = null, memoryRevealed = false;
   let adminSummary = null, adminOptions = null, adminJobs = [], adminUsageReviews = [], adminLeadership = null, adminQuestions = [], adminSuitability = null;
+  let adminGuestLeads = [], adminGuestPromotions = [];
 
   function setStatus(label, tone) {
     const el = $("connection-status");
@@ -73,25 +75,22 @@
   }
 
   async function api(action, payload = {}) {
-    if (lockedOut) throw new Error("This tab has been signed out. Please sign in again through My LIB.");
-    const { data: authData, error: authError } = await client.auth.getSession();
-    if (authError || !authData.session) throw new Error("Your LIB login has expired. Please sign in again.");
-    session = authData.session;
-    const response = await fetch(API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "apikey": SUPABASE_ANON_KEY,
-        "Authorization": "Bearer " + session.access_token
-      },
-      body: JSON.stringify({ action, ...payload })
-    });
+    const isGuestAction = String(action).startsWith("guest_");
+    if (!isGuestAction && lockedOut) throw new Error("This tab has been signed out. Please sign in again through My LIB.");
+    let authorization = SUPABASE_ANON_KEY;
+    if (!isGuestAction) {
+      const { data: authData, error: authError } = await client.auth.getSession();
+      if (authError || !authData.session) throw new Error("Your LIB login has expired. Please sign in again.");
+      session = authData.session; authorization = session.access_token;
+    }
+    const guestPayload = isGuestAction && guestTokenValue && !["guest_register","guest_options"].includes(action) ? { guest_token: guestTokenValue } : {};
+    const response = await fetch(API_URL, { method: "POST", headers: {
+      "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + authorization
+    }, body: JSON.stringify({ action, ...guestPayload, ...payload }) });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const message = body && body.error && body.error.message ? body.error.message : "Knowledge Arena service returned " + response.status + ".";
-      const error = new Error(message);
-      error.status = response.status;
-      throw error;
+      const message = body?.error?.message || "Knowledge Arena service returned " + response.status + ".";
+      const error = new Error(message); error.status = response.status; throw error;
     }
     return body;
   }
@@ -132,11 +131,7 @@
       return;
     }
     const { data, error } = await client.auth.getSession();
-    if (error || !data.session) {
-      setStatus("SIGN IN REQUIRED", "warning");
-      showGate("auth");
-      return;
-    }
+    if (error || !data.session) { await initialiseGuest(); return; }
     session = data.session;
     client.auth.onAuthStateChange((event) => {
       if (event === "SIGNED_OUT") {
@@ -210,6 +205,67 @@
         }
       }
     }
+  }
+
+  function showGuestGate() {
+    $("guest-gate").classList.remove("hidden"); $("auth-gate").classList.add("hidden");
+    $("access-gate").classList.add("hidden"); $("arena-shell").classList.add("hidden");
+  }
+  async function initialiseGuest() {
+    guestMode = true; role = "Guest"; setStatus("GUEST", "success");
+    try {
+      const saved = localStorage.getItem("ka_guest_token");
+      if (saved) {
+        guestTokenValue = saved;
+        try { const resumed = await api("guest_resume"); gradeLabel = resumed.grade_label || ""; await loadGuest(); return; }
+        catch (e) { localStorage.removeItem("ka_guest_token"); guestTokenValue = ""; }
+      }
+      const options = await api("guest_options");
+      $("guest-grade").innerHTML = '<option value="">Select your grade</option>' + (options.grades || []).map(x => '<option value="' + escapeHtml(x) + '">' + escapeHtml(x) + '</option>').join("");
+      if (!options.games_enabled) $("guest-register-feedback").textContent = "Games are temporarily paused. Please try again later.";
+      showGuestGate();
+    } catch (e) { showGuestGate(); $("guest-register-feedback").textContent = e.message || "Guest access is temporarily unavailable."; setStatus("UNAVAILABLE","danger"); }
+  }
+  async function registerGuest(event) {
+    event.preventDefault();
+    const feedback=$("guest-register-feedback"), button=$("guest-start-button"), mobile=$("guest-mobile").value.replace(/\\D/g,"");
+    if (!/^[6-9]\\d{9}$/.test(mobile)) { feedback.textContent="Enter a valid 10-digit Indian mobile number."; return; }
+    feedback.textContent="Starting your guest session…"; button.disabled=true;
+    try {
+      const r=await api("guest_register",{guest_name:$("guest-name").value.trim(),mobile_number:mobile,grade_label:$("guest-grade").value,enquiry_consent:$("guest-enquiry-consent").checked,marketing_consent:$("guest-marketing-consent").checked});
+      guestTokenValue=r.guest_token; localStorage.setItem("ka_guest_token",guestTokenValue); gradeLabel=r.grade_label||"";
+      guestMode=true; await loadGuest(); showGuestPromotion("welcome");
+    } catch(e) { feedback.textContent=e.message||"Could not start your guest session."; }
+    finally { button.disabled=false; }
+  }
+  async function loadGuest() {
+    const data=await api("guest_catalog"); catalog=data; gradeLabel=data.grade_label||gradeLabel;
+    $("guest-gate").classList.add("hidden"); showShell();
+    $("main-nav").querySelectorAll(".nav-btn").forEach(b=>b.classList.toggle("hidden",b.id!=="play-nav"));
+    $("hero-xp").closest(".hero-score").classList.add("hidden");
+    $("welcome-line").textContent="Welcome to Knowledge Arena. Choose a game and start learning!";
+    $("grade-label").textContent="Your selected class: "+gradeLabel;
+    renderGameAvailability(data.games||[]); setStatus("GUEST PLAY","success"); showView("play");
+  }
+  async function showGuestPromotion(trigger,gameType="",subject="") {
+    if(!guestMode)return;
+    if(trigger==="after_game"){guestGameCount++;if(guestGameCount!==1&&guestGameCount%3!==1)return;}
+    const key="ka_guest_promos_"+trigger; let shown=[];
+    try{shown=JSON.parse(sessionStorage.getItem(key)||"[]");}catch(e){}
+    try{
+      const r=await api("guest_promotions",{trigger,game_type:gameType,subject});
+      const p=(r.promotions||[]).find(x=>!shown.includes(x.id)); if(!p)return;
+      $("guest-promotion-heading").textContent=p.title; $("guest-promotion-copy").textContent=p.body;
+      $("guest-promotion-cta").textContent=p.cta_label; $("guest-promotion-cta").href=p.cta_url;
+      const img=$("guest-promotion-image"); if(p.image_url){img.src=p.image_url;img.classList.remove("hidden");}else{img.removeAttribute("src");img.classList.add("hidden");}
+      $("guest-promotion-modal").dataset.promotionId=p.id; $("guest-promotion-modal").classList.remove("hidden");
+      shown.push(p.id);sessionStorage.setItem(key,JSON.stringify(shown));
+      await api("guest_promotion_event",{promotion_id:p.id,event_type:"view"});
+    }catch(e){}
+  }
+  async function closeGuestPromotion(type) {
+    const modal=$("guest-promotion-modal"),id=modal.dataset.promotionId;modal.classList.add("hidden");
+    if(id){try{await api("guest_promotion_event",{promotion_id:id,event_type:type});}catch(e){}}
   }
 
   async function loadStudent() {
@@ -462,7 +518,7 @@
       if (role === "Teacher" || role === "Admin") payload.grade_label = gradeLabel;
       if (isLanguageStudent && ["word_master","word_builder"].includes(game)) payload.language_code = $("language-select").value;
       try {
-        const data = await api("get_questions", payload);
+        const data = guestMode ? await api("guest_questions", { game_type: game }) : await api("get_questions", payload);
         currentQuestions = (data.questions || []).sort(() => Math.random() - 0.5);
         if (!currentQuestions.length) {
           note("There are no approved questions for " + GAME_NAMES[game] + " at this grade yet. More questions can be generated from the Admin control centre.", "info");
@@ -560,6 +616,20 @@
       $("quiz").classList.add("hidden");
       $("results").classList.remove("hidden");
       $("next-question").disabled = false;
+      return;
+    }
+    if (guestMode) {
+      try {
+        const result=await api("guest_submit",{game_type:currentGame,answers:currentAnswers,duration_seconds:Math.max(0,Math.round((Date.now()-gameStartedAt)/1000))});
+        currentScore=Number(result.correct_count||0);
+        $("result-score").textContent=currentScore+" / "+Number(result.question_count||currentQuestions.length);
+        $("result-title").textContent=currentScore===currentQuestions.length?"Perfect score!":currentScore>=Math.ceil(currentQuestions.length*.6)?"Well played!":"Good effort!";
+        $("result-message").textContent="Accuracy: "+result.accuracy+"%. Guest results are not added to student XP or leaderboards.";
+        const feedback=new Map((result.feedback||[]).map(x=>[x.question_id,x]));
+        $("result-review").innerHTML=currentQuestions.map((q,i)=>{const item=feedback.get(q.id);if(!item)return "";const answer=q.options&&q.options[item.correct_option]?q.options[item.correct_option]:"";return '<div class="result-review-item"><b>'+(i+1)+". "+(item.correct?"Correct":"Incorrect")+'</b>'+(!item.correct&&answer?'<p><strong>Correct answer:</strong> '+escapeHtml(answer)+'</p>':'')+'<p>'+escapeHtml(item.explanation||"")+'</p></div>';}).join("");
+        $("quiz").classList.add("hidden");$("results").classList.remove("hidden");$("next-question").disabled=false;
+        showGuestPromotion("after_game",currentGame,currentQuestions[0]?.subject||"");
+      } catch(e) {$("next-question").disabled=false;$("quiz-feedback").textContent="We could not save this guest result: "+e.message+". Please retry.";$("next-question").textContent="Retry submission";$("next-question").classList.remove("hidden");}
       return;
     }
     try {
