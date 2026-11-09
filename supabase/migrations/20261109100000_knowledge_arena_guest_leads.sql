@@ -109,6 +109,40 @@ create index if not exists ka_guest_notes_lead_idx on public.ka_guest_lead_notes
 create index if not exists ka_guest_promotion_events_promotion_idx on public.ka_guest_promotion_events(promotion_id, event_type, created_at desc);
 create index if not exists ka_guest_leads_status_idx on public.ka_guest_leads(lead_status, last_seen_at desc);
 
+create or replace function public.ka_guest_activity_rollup()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public
+as $
+begin
+  update public.ka_guest_sessions
+    set games_completed = games_completed + 1,
+        questions_answered = questions_answered + new.question_count,
+        last_game_type = new.game_type,
+        last_subject = new.subject,
+        last_seen_at = new.completed_at
+    where id = new.session_id;
+  update public.ka_guest_leads
+    set games_completed = games_completed + 1,
+        questions_answered = questions_answered + new.question_count,
+        last_game_type = new.game_type,
+        last_subject = new.subject,
+        last_activity_at = new.completed_at,
+        last_seen_at = new.completed_at,
+        updated_at = now()
+    where id = new.lead_id;
+  return new;
+end;
+$;
+
+drop trigger if exists ka_guest_activity_rollup_trg on public.ka_guest_activity;
+create trigger ka_guest_activity_rollup_trg
+after insert on public.ka_guest_activity
+for each row execute function public.ka_guest_activity_rollup();
+
+revoke all on function public.ka_guest_activity_rollup() from public, anon, authenticated;
+
 alter table public.ka_guest_leads enable row level security;
 alter table public.ka_guest_sessions enable row level security;
 alter table public.ka_guest_activity enable row level security;
