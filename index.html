@@ -574,12 +574,12 @@ if (location.hostname !== 'app.libeducation.com') {
 <div class="wrap" id="app"><div class="app-splash"><div class="app-splash-name">My LIB</div><div class="app-splash-sub">LIB Education · Parent, Student &amp; Teacher login</div><div class="app-splash-spinner"></div></div></div>
 
 <script>
-const APP_VERSION = '2026.11';
+const APP_VERSION = '2026.11.1';
 // The app links every WhatsApp message gives (never the address the sender happens to be on).
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-05 08:25 IST'; // Student Maintenance: Subscription history newest first
+const BUILD_TIMESTAMP = '2026-11-09 10:15 IST'; // Student Maintenance: Subscription history newest first
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -18446,6 +18446,9 @@ function renderLogin() {
           </div>
           <div style="margin-top:14px;text-align:center"><a href="#" onclick="openGuideChooser();return false" style="color:var(--forest);font-weight:600;font-size:13.5px;text-decoration:underline;text-underline-offset:3px">📖 User Guide</a></div>
           <div style="margin-top:10px;text-align:center;font-size:13.5px;color:var(--muted)">New student? <a href="register.html" style="color:var(--forest);font-weight:600;text-decoration:underline;text-underline-offset:3px">📝 Register here</a></div>
+          <div style="margin-top:12px;text-align:center">
+            <a href="knowledge-arena/knowledge-arena.html" style="display:inline-block;padding:9px 16px;border:1px solid var(--forest);border-radius:7px;background:rgba(60,94,66,0.08);color:var(--forest);font-weight:700;font-size:13.5px;text-decoration:none">🎮 Play Knowledge Arena as Guest</a>
+          </div>
         </div>
         <div class="footer-note">
           © LIBXL-Education Private Limited. All rights reserved.<br>
