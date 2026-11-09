@@ -244,6 +244,8 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
   if (action === "guest_submit") {
     const gameType = body.game_type;
     const answers = body.answers;
+    const attemptId = String(body.client_attempt_id || "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(attemptId)) return errorResponse(400, "A valid game attempt ID is required.");
     if (!validGameType(gameType) || !Array.isArray(answers) || answers.length < 1 || answers.length > MAX_QUESTIONS_PER_ATTEMPT) return errorResponse(400, "Invalid game submission.");
     const ids = [...new Set(answers.map((x: any) => x?.question_id).filter((x: any) => typeof x === "string"))];
     if (ids.length !== answers.length || answers.some((x: any) => !Number.isInteger(x.option_index) || x.option_index < 0)) return errorResponse(400, "Answer format is invalid.");
@@ -280,7 +282,7 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
     const correct = feedback.filter((x) => x.correct).length;
     const now = new Date().toISOString();
     const { error: activityError } = await db.from("ka_guest_activity").insert({
-      lead_id: guest.lead_id, session_id: guest.id, game_type: gameType, subject: subjects.join(", "),
+      lead_id: guest.lead_id, session_id: guest.id, client_attempt_id: attemptId, game_type: gameType, subject: subjects.join(", "),
       question_count: answers.length, correct_count: correct, accuracy: Math.round(correct / answers.length * 10000) / 100,
       duration_seconds: Math.max(0, Math.min(3600, safeNumber(body.duration_seconds, 0))), completed_at: now
     });
