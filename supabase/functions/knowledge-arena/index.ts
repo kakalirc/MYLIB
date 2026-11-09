@@ -91,8 +91,8 @@ function isHttpsUrl(value: string): boolean {
 function normalizeGuestMobile(value: unknown): string | null {
   const supplied = String(value || "").trim();
   // Require an explicit international prefix; the guest form supplies +91 by default.
-  const normalized = supplied.replace(/[\\s().-]/g, "");
-  return /^\\+[1-9]\\d{7,14}$/.test(normalized) ? normalized : null;
+  const normalized = supplied.replace(/[\s().-]/g, "");
+  return /^\+[1-9]\d{7,14}$/.test(normalized) ? normalized : null;
 }
 async function guestTokenHash(token: string): Promise<string> {
   const bytes = new TextEncoder().encode(token);
