@@ -192,6 +192,18 @@
         </div>
 
         <div class="panel admin-panel">
+          <h3>Grade &amp; Subject Suitability</h3>
+          <p>Configure which subjects and games are suitable for each grade. New subjects remain unavailable until enabled. Changes are enforced by the Knowledge Arena API.</p>
+          <label>Configure academic subjects for grade<select id="suitability-grade"></select></label>
+          <div id="suitability-subject-list" class="admin-check-list"></div>
+          <label>Configure games for grade<select id="suitability-game-grade"></select></label>
+          <div id="suitability-game-grade-list" class="admin-check-list"></div>
+          <label>Configure subjects used by game<select id="suitability-game"></select></label>
+          <div id="suitability-game-subject-list" class="admin-check-list"></div>
+          <p class="admin-feedback" id="suitability-feedback" role="status"></p>
+        </div>
+
+        <div class="panel admin-panel">
           <h3>Shared AI budget</h3>
           <p>One combined budget for all students and all Knowledge Arena AI generation. Costs are tracked in INR using the configured exchange rate.</p>
           <div class="admin-budget-grid">
