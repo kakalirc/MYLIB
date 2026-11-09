@@ -1186,8 +1186,6 @@
       const rows = players.map((p) => '<div class="leadership-row"><span>#' + p.rank + '</span><span><b>' + escapeHtml(p.student_name) + '</b>' + (p.student_code ? '<small>' + escapeHtml(p.student_code) + '</small>' : '') + '</span><span>' + escapeHtml(p.grade_label) + '</span><span><b>' + Number(p.game_xp || 0).toLocaleString("en-IN") + ' XP</b><small>Level ' + p.game_level + '</small></span><span>' + p.games_played + '</span><span>' + p.accuracy_percent + '%</span><span>' + p.achievements_earned + '</span><span>' + p.current_streak + ' days<small>Best ' + p.best_streak + '</small></span></div>').join("");
       $("leadership-game-leaders").innerHTML = '<div class="leadership-table">' + head + rows + '</div>';
     }
-    const attendance = data.attendance_rewards || {};
-    $("leadership-attendance").innerHTML = '<strong>Attendance rewards remain separate.</strong><p class="muted">' + escapeHtml(attendance.message || "The existing attendance reward source has not yet been connected.") + '</p>';
   }
   function guestLeadFilters(offset=0) { return {status: $("guest-lead-status").value, search: $("guest-lead-search").value.trim(), grade_label: $("guest-lead-grade").value, date_from: $("guest-lead-from").value, date_to: $("guest-lead-to").value, limit: 100, offset}; }
   async function refreshGuestLeads() {
