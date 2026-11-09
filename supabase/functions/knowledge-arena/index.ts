@@ -154,8 +154,13 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
     if (sessionError || !session) return errorResponse(503, "Could not start the guest session.");
     await db.from("ka_guest_leads").update({ last_guest_name: name, last_grade_label: grade }).eq("id", lead.id);
     const consentEvents = [];
-    if (body.enquiry_consent === true) consentEvents.push({ lead_id: lead.id, session_id: session.id, consent_type: "enquiry", granted: true, source: "knowledge_arena_guest" });
-    if (body.marketing_consent === true) consentEvents.push({ lead_id: lead.id, session_id: session.id, consent_type: "whatsapp_marketing", granted: true, source: "knowledge_arena_guest" });
+    if (!existing) {
+      consentEvents.push({ lead_id: lead.id, session_id: session.id, consent_type: "enquiry", granted: body.enquiry_consent === true, source: "knowledge_arena_guest" });
+      consentEvents.push({ lead_id: lead.id, session_id: session.id, consent_type: "whatsapp_marketing", granted: body.marketing_consent === true, source: "knowledge_arena_guest" });
+    } else {
+      if (!existing.enquiry_consent && body.enquiry_consent === true) consentEvents.push({ lead_id: lead.id, session_id: session.id, consent_type: "enquiry", granted: true, source: "knowledge_arena_guest" });
+      if (!existing.marketing_consent && body.marketing_consent === true) consentEvents.push({ lead_id: lead.id, session_id: session.id, consent_type: "whatsapp_marketing", granted: true, source: "knowledge_arena_guest" });
+    }
     if (consentEvents.length) {
       const { error } = await db.from("ka_guest_consents").insert(consentEvents);
       if (error) return errorResponse(503, "Could not record consent. Registration was not completed.");
@@ -172,6 +177,11 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
   }
   const guest = await getGuestSession(db, body.guest_token);
   if (!guest) return errorResponse(401, "Guest session expired. Please register again.");
+  if (action === "guest_end") {
+    const { error } = await db.from("ka_guest_sessions").update({ ended_at: new Date().toISOString() }).eq("id", guest.id);
+    if (error) return errorResponse(503, "Could not end the guest session.");
+    return json(200, { ended: true });
+  }
   if (action === "guest_resume") return json(200, { session_id: guest.id, guest_name: guest.guest_name, grade_label: guest.grade_label, expires_at: guest.expires_at });
   if (action === "guest_catalog") {
     const [{ data: settings, error: settingsError }, { data: subjects, error: subjectError },
