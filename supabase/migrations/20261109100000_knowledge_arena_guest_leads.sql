@@ -145,6 +145,16 @@ for each row execute function public.ka_guest_activity_rollup();
 
 revoke all on function public.ka_guest_activity_rollup() from public, anon, authenticated;
 
+
+insert into public.ka_guest_promotions (title, body, cta_label, cta_url, trigger, display_order, active)
+select v.title, v.body, v.cta_label, v.cta_url, v.trigger, v.display_order, true
+from (values
+  ('Welcome to LIB Education', 'Enjoy Knowledge Arena? Explore personalised tuition in languages, Mathematics and Science, with online and offline learning options.', 'Explore our courses', 'https://www.libeducation.com/services', 'welcome', 10),
+  ('Take your learning further', 'Build confidence with expert-led tuition, small groups and individual attention. Find the right programme for your learning goals.', 'Book a Demo', 'https://www.libeducation.com/demo', 'after_game', 10),
+  ('Keep learning with LIB', 'Discover academic tuition and spoken language programmes at LIB Education. Your next learning goal starts here.', 'Book a Demo', 'https://www.libeducation.com/demo', 'exit', 10)
+) as v(title, body, cta_label, cta_url, trigger, display_order)
+where not exists (select 1 from public.ka_guest_promotions p where p.trigger = v.trigger and p.title = v.title);
+
 alter table public.ka_guest_leads enable row level security;
 alter table public.ka_guest_sessions enable row level security;
 alter table public.ka_guest_activity enable row level security;
