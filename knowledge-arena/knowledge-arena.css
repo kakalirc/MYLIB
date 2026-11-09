@@ -50,3 +50,12 @@ footer{background:var(--navy);color:#fff;padding:22px max(24px,calc((100vw - 120
 .admin-subnav-btn.active{background:#172b4d;border-color:#172b4d;color:#fff;box-shadow:0 2px 6px rgba(23,43,77,.16)}
 #view-admin [data-admin-section].hidden{display:none!important}
 @media(max-width:640px){.admin-subnav{flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain}.admin-subnav-btn{flex:0 0 auto}}
+
+
+/* Knowledge Arena Guest Lead communication controls */
+.guest-whatsapp-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
+.guest-whatsapp-history-item{padding:10px 12px;border:1px solid var(--line,#dbe2ee);border-radius:10px;margin:8px 0;}
+.guest-whatsapp-history-item>div{display:flex;justify-content:space-between;gap:12px;align-items:center;}
+.guest-whatsapp-history-item small{display:block;color:var(--muted,#667085);}
+.guest-whatsapp-history-item p{white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0 0;}
+.btn-small{min-height:32px;padding:6px 12px;font-size:.88rem;width:auto;align-self:flex-start;}
