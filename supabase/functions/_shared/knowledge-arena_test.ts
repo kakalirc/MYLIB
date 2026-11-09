@@ -1,5 +1,8 @@
 import { assertEquals } from "jsr:@std/assert";
-import { GAME_CATALOG, gameSubjects, validGameType } from "./knowledge-arena.ts";
+import {
+  GAME_CATALOG, gameSubjects, validGameType,
+  isLanguageGame, languageGradeLabels, languageSubject,
+} from "./knowledge-arena.ts";
 
 Deno.test("catalogue contains the 14 approved named games", () => {
   assertEquals(GAME_CATALOG.length, 14);
@@ -16,6 +19,30 @@ Deno.test("subject routing keeps Math and Science games separate", () => {
   assertEquals(gameSubjects("science_explorer", ["Math", "Science"]), ["Science"]);
 });
 
+Deno.test("Money Matters routes both live Math and Economics subject labels", () => {
+  assertEquals(gameSubjects("money_matters", ["Math"]), ["Math"]);
+  assertEquals(gameSubjects("money_matters", ["Mathematics"]), ["Mathematics"]);
+  assertEquals(gameSubjects("money_matters", ["Economics"]), ["Economics"]);
+  assertEquals(gameSubjects("money_matters", ["Math", "Economics", "Science"]), ["Math", "Economics"]);
+});
+
 Deno.test("multi-subject games can use the enabled LIB subject catalogue", () => {
   assertEquals(gameSubjects("quick_quiz", ["English", "Economics"]), ["English", "Economics"]);
+});
+
+
+Deno.test("language games are independent of academic grade", () => {
+  assertEquals(isLanguageGame("word_master"), true);
+  assertEquals(isLanguageGame("word_builder"), true);
+  assertEquals(isLanguageGame("quick_quiz"), false);
+  assertEquals(languageGradeLabels("11"), ["11", "General", "Language"]);
+  assertEquals(languageGradeLabels("Language"), ["Language", "General"]);
+});
+Deno.test("language codes map to exact LIB subject labels", () => {
+  assertEquals(languageSubject("en"), "English");
+  assertEquals(languageSubject("hi"), "Hindi");
+  assertEquals(languageSubject("kn"), "Kannada");
+  assertEquals(languageSubject("sa"), "Sanskrit");
+  assertEquals(languageSubject("fr"), "French");
+  assertEquals(languageSubject("xx"), null);
 });

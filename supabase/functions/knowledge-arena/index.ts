@@ -1,4 +1,4 @@
-import { adminClient, authenticate, corsHeaders, errorResponse, indiaDate, indiaDayStartIso, json, studentContext, validGameType, safeNumber, GAME_CATALOG, gameSubjects } from "../_shared/knowledge-arena.ts";
+import { adminClient, authenticate, corsHeaders, errorResponse, indiaDate, indiaDayStartIso, json, studentContext, validGameType, safeNumber, GAME_CATALOG, gameSubjects, isLanguageGame, languageSubject, languageGradeLabels } from "../_shared/knowledge-arena.ts";
 
 const MAX_QUESTIONS_PER_ATTEMPT = 30;
 
@@ -175,7 +175,7 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
       { data: gradeSubjects, error: gradeSubjectError }, { data: gameSubjectRules, error: gameSubjectError }] = await Promise.all([
       db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle(),
       db.from("subjects").select("name").order("name"),
-      db.from("ka_questions").select("game_type,subject").eq("status", "published").in("grade_label", [guest.grade_label, "General"])
+      db.from("ka_questions").select("game_type,subject,grade_label,language_code").eq("status", "published").in("grade_label", languageGradeLabels(guest.grade_label))
         .or("expires_at.is.null,expires_at.gt." + new Date().toISOString()).limit(5000),
       db.from("ka_game_grade_rules").select("game_type").eq("grade_label", guest.grade_label).eq("enabled", true),
       db.from("ka_grade_subject_rules").select("subject").eq("grade_label", guest.grade_label).eq("enabled", true),
@@ -189,13 +189,20 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
       if (!gameSubjectMap.has(rule.game_type)) gameSubjectMap.set(rule.game_type, new Set());
       gameSubjectMap.get(rule.game_type)!.add(String(rule.subject).toLowerCase());
     }
-    const validRows = (questionRows || []).filter((q: any) =>
-      enabledSubjects.has(String(q.subject).toLowerCase()) &&
-      !(settings.disabled_subjects || []).includes(q.subject) &&
-      !(settings.disabled_game_types || []).includes(q.game_type));
+    const validRows = (questionRows || []).filter((q: any) => {
+      if ((settings.disabled_subjects || []).includes(q.subject) ||
+          (settings.disabled_game_types || []).includes(q.game_type)) return false;
+      if (isLanguageGame(q.game_type)) {
+        const expectedSubject = languageSubject(q.language_code);
+        return !!expectedSubject && String(q.subject).toLocaleLowerCase() === expectedSubject.toLocaleLowerCase();
+      }
+      return [guest.grade_label, "General"].includes(q.grade_label) &&
+        enabledSubjects.has(String(q.subject).toLowerCase());
+    });
     const counts = new Map<string, number>();
     for (const q of validRows) {
-      if (!enabledGames.has(q.game_type) || !gameSubjectMap.get(q.game_type)?.has(String(q.subject).toLowerCase())) continue;
+      if ((!isLanguageGame(q.game_type) && !enabledGames.has(q.game_type)) ||
+          !gameSubjectMap.get(q.game_type)?.has(String(q.subject).toLowerCase())) continue;
       counts.set(q.game_type, (counts.get(q.game_type) || 0) + 1);
     }
     const games = settings.games_enabled ? GAME_CATALOG.filter(g => (counts.get(g.id) || 0) >= 5) : [];
@@ -204,6 +211,10 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
   if (action === "guest_questions") {
     const gameType = body.game_type;
     if (!validGameType(gameType)) return errorResponse(400, "Invalid game type.");
+    const languageGame = isLanguageGame(gameType);
+    const languageCode = String(body.language_code || "");
+    const selectedLanguageSubject = languageGame ? languageSubject(languageCode) : null;
+    if (languageGame && !selectedLanguageSubject) return errorResponse(400, "Choose English, Hindi, Kannada, Sanskrit or French before starting this game.");
     const { data: settings, error: settingsError } = await db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle();
     if (settingsError || !settings?.games_enabled || (settings.disabled_game_types || []).includes(gameType)) return errorResponse(423, "This game is currently unavailable.");
     const [{ data: gradeGame }, { data: gradeSubjects }, { data: gameSubjectRows }, { data: allSubjects }] = await Promise.all([
@@ -212,20 +223,27 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
       db.from("ka_game_subject_rules").select("subject").eq("game_type", gameType).eq("enabled", true),
       db.from("subjects").select("name").order("name")
     ]);
-    if (!gradeGame?.enabled) return errorResponse(423, "This game is not available for the selected grade.");
+    if (!languageGame && !gradeGame?.enabled) return errorResponse(423, "This game is not available for the selected grade.");
     const eligible = new Set((gradeSubjects || []).map((x: any) => String(x.subject).toLowerCase()));
     const mapped = new Set((gameSubjectRows || []).map((x: any) => String(x.subject).toLowerCase()));
-    const allowed = gameSubjects(gameType, uniqueSubjectNames(allSubjects).filter((s) => !(settings.disabled_subjects || []).includes(s)))
-      .filter((s) => eligible.has(s.toLowerCase()) && mapped.has(s.toLowerCase()));
+    const subjectNames = uniqueSubjectNames(allSubjects).filter((s) => !(settings.disabled_subjects || []).includes(s));
+    const allowed = languageGame
+      ? subjectNames.filter((s) => s.toLocaleLowerCase() === selectedLanguageSubject!.toLocaleLowerCase() && mapped.has(s.toLocaleLowerCase()))
+      : gameSubjects(gameType, subjectNames).filter((s) => eligible.has(s.toLowerCase()) && mapped.has(s.toLowerCase()));
     if (!allowed.length) return json(200, { questions: [], grade_label: guest.grade_label });
-    const { data: questions, error } = await db.from("ka_questions")
+    const gradeBands = languageGame ? languageGradeLabels(guest.grade_label) : [guest.grade_label, "General"];
+    let questionQuery = db.from("ka_questions")
       .select("id,subject,topic,grade_label,language_code,difficulty,game_type,prompt,options")
       .eq("status", "published").eq("game_type", gameType).in("subject", allowed)
-      .in("grade_label", [guest.grade_label, "General"])
-      .or("expires_at.is.null,expires_at.gt." + new Date().toISOString())
-      .order("created_at", { ascending: false }).limit(10);
+      .in("grade_label", gradeBands)
+      .or("expires_at.is.null,expires_at.gt." + new Date().toISOString());
+    if (languageGame) questionQuery = questionQuery.eq("language_code", languageCode);
+    const { data: questions, error } = await questionQuery
+      .order("created_at", { ascending: false }).limit(100);
     if (error) return errorResponse(503, "Could not load questions.");
-    return json(200, { questions: questions || [], grade_label: guest.grade_label });
+    const gradeRank = (q: any) => q.grade_label === guest.grade_label ? 0 : q.grade_label === "General" ? 1 : 2;
+    const selectedQuestions = (questions || []).sort((a: any, b: any) => gradeRank(a) - gradeRank(b)).slice(0, 10);
+    return json(200, { questions: selectedQuestions, grade_label: guest.grade_label });
   }
   if (action === "guest_submit") {
     const gameType = body.game_type;
@@ -233,12 +251,16 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
     const attemptId = String(body.client_attempt_id || "");
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(attemptId)) return errorResponse(400, "A valid game attempt ID is required.");
     if (!validGameType(gameType) || !Array.isArray(answers) || answers.length < 1 || answers.length > MAX_QUESTIONS_PER_ATTEMPT) return errorResponse(400, "Invalid game submission.");
+    const languageGame = isLanguageGame(String(gameType));
+    const languageCode = String(body.language_code || "");
+    const selectedLanguageSubject = languageGame ? languageSubject(languageCode) : null;
+    if (languageGame && !selectedLanguageSubject) return errorResponse(400, "Choose a language before submitting this game.");
     const ids = [...new Set(answers.map((x: any) => x?.question_id).filter((x: any) => typeof x === "string"))];
     if (ids.length !== answers.length || answers.some((x: any) => !Number.isInteger(x.option_index) || x.option_index < 0)) return errorResponse(400, "Answer format is invalid.");
     const { data: questions, error: qError } = await db.from("ka_questions")
-      .select("id,subject,grade_label,game_type,options,explanation")
+      .select("id,subject,grade_label,language_code,game_type,options,explanation")
       .in("id", ids).eq("status", "published").eq("game_type", gameType)
-      .in("grade_label", [guest.grade_label, "General"])
+      .in("grade_label", languageGame ? languageGradeLabels(guest.grade_label) : [guest.grade_label, "General"])
       .or("expires_at.is.null,expires_at.gt." + new Date().toISOString());
     if (qError || !questions || questions.length !== ids.length) return errorResponse(400, "One or more questions are unavailable.");
     const subjects = [...new Set(questions.map((q: any) => q.subject))];
@@ -253,9 +275,14 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
     if (keyError || !keys || keys.length !== ids.length) return errorResponse(503, "Answer validation is unavailable.");
     const eligibleSubjects = new Set((gradeSubjects || []).map((x: any) => String(x.subject).toLowerCase()));
     const mappedSubjects = new Set((gameSubjectRows || []).map((x: any) => String(x.subject).toLowerCase()));
-    if (!settings?.games_enabled || !gradeGame?.enabled || (settings.disabled_game_types || []).includes(gameType) ||
+    if (languageGame && questions.some((q: any) =>
+        q.language_code !== languageCode || String(q.subject).toLocaleLowerCase() !== selectedLanguageSubject!.toLocaleLowerCase())) {
+      return errorResponse(400, "Submitted questions do not match the selected language.");
+    }
+    if (!settings?.games_enabled || (!languageGame && !gradeGame?.enabled) || (settings.disabled_game_types || []).includes(gameType) ||
         subjects.some((subject) => (settings.disabled_subjects || []).includes(subject) ||
-          !eligibleSubjects.has(String(subject).toLowerCase()) || !mappedSubjects.has(String(subject).toLowerCase()))) {
+          (!languageGame && !eligibleSubjects.has(String(subject).toLowerCase())) ||
+          !mappedSubjects.has(String(subject).toLowerCase()))) {
       return errorResponse(423, "This game or subject is not available for the selected grade.");
     }
     const keyMap = new Map(keys.map((x: any) => [x.question_id, Number(x.correct_option)]));
@@ -372,8 +399,8 @@ Deno.serve(async (req) => {
       if (settings.games_enabled && selectedGradeLabel) {
         const [{ data: questionRows, error: questionError }, { data: gradeGames, error: gradeGameError },
           { data: gradeSubjects, error: gradeSubjectError }, { data: gameSubjectRules, error: gameSubjectError }] = await Promise.all([
-          db.from("ka_questions").select("game_type,subject").eq("status", "published")
-            .in("grade_label", [selectedGradeLabel, "General"])
+          db.from("ka_questions").select("game_type,subject,grade_label,language_code").eq("status", "published")
+            .in("grade_label", languageGradeLabels(selectedGradeLabel))
             .or("expires_at.is.null,expires_at.gt." + new Date().toISOString()).limit(5000),
           db.from("ka_game_grade_rules").select("game_type").eq("grade_label", selectedGradeLabel).eq("enabled", true),
           db.from("ka_grade_subject_rules").select("subject").eq("grade_label", selectedGradeLabel).eq("enabled", true),
@@ -387,13 +414,20 @@ Deno.serve(async (req) => {
           if (!gameSubjectMap.has(rule.game_type)) gameSubjectMap.set(rule.game_type, new Set());
           gameSubjectMap.get(rule.game_type)!.add(String(rule.subject).toLocaleLowerCase());
         }
-        const rows = (questionRows || []).filter((q: any) =>
-          !(settings.disabled_game_types || []).includes(q.game_type) &&
-          !(settings.disabled_subjects || []).includes(q.subject) &&
-          enabledSubjects.has(String(q.subject).toLocaleLowerCase()));
+        const rows = (questionRows || []).filter((q: any) => {
+          if ((settings.disabled_game_types || []).includes(q.game_type) ||
+              (settings.disabled_subjects || []).includes(q.subject)) return false;
+          if (isLanguageGame(q.game_type)) {
+            const expectedSubject = languageSubject(q.language_code);
+            return !!expectedSubject && String(q.subject).toLocaleLowerCase() === expectedSubject.toLocaleLowerCase();
+          }
+          return [selectedGradeLabel, "General"].includes(q.grade_label) &&
+            enabledSubjects.has(String(q.subject).toLocaleLowerCase());
+        });
         const questionCounts = new Map<string, number>();
         for (const q of rows) {
-          if (!enabledGameIds.has(q.game_type) || !enabledSubjects.has(String(q.subject).toLocaleLowerCase()) ||
+          if ((!isLanguageGame(q.game_type) && !enabledGameIds.has(q.game_type)) ||
+              (!isLanguageGame(q.game_type) && !enabledSubjects.has(String(q.subject).toLocaleLowerCase())) ||
               !gameSubjectMap.get(q.game_type)?.has(String(q.subject).toLocaleLowerCase())) continue;
           questionCounts.set(q.game_type, (questionCounts.get(q.game_type) || 0) + 1);
         }
@@ -448,8 +482,10 @@ Deno.serve(async (req) => {
       const resolved = await playerGrade(db, profile, user.id, body.grade_label);
       if (!resolved) return errorResponse(400, "Select a valid grade before starting a game.");
       const effectiveGradeLabel = resolved.gradeLabel;
+      const languageGame = isLanguageGame(gameType);
       let languageCode = body.language_code === undefined ? "" : String(body.language_code);
-      if (languageCode && !["en","hi","kn","sa","fr"].includes(languageCode)) return errorResponse(400, "Invalid question language.");
+      if (languageGame && !languageSubject(languageCode)) return errorResponse(400, "Choose English, Hindi, Kannada, Sanskrit or French before starting this game.");
+      if (!languageGame) languageCode = "";
       if (body.difficulty && !["easy","medium","hard"].includes(String(body.difficulty))) return errorResponse(400, "Invalid difficulty.");
       const { data: settings } = await db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle();
       if (!settings?.games_enabled || (settings.disabled_game_types || []).includes(gameType)) return errorResponse(423, "This game is currently unavailable.");
@@ -462,35 +498,30 @@ Deno.serve(async (req) => {
         db.from("ka_game_subject_rules").select("subject").eq("game_type", gameType).eq("enabled", true),
       ]);
       if (gradeGameError || gradeSubjectError || gameSubjectError) return errorResponse(503, "Could not verify academic suitability.");
-      if (!gradeGame?.enabled) return errorResponse(423, "This game is not configured for your selected grade.");
+      if (!languageGame && !gradeGame?.enabled) return errorResponse(423, "This game is not configured for your selected grade.");
       const allSubjects = uniqueSubjectNames(subjectRows).filter((s) => !(settings.disabled_subjects || []).includes(s));
       const eligibleSubjects = new Set((gradeSubjectRows || []).map((x: any) => String(x.subject).toLocaleLowerCase()));
       const configuredGameSubjects = new Set((gameSubjectRows || []).map((x: any) => String(x.subject).toLocaleLowerCase()));
-      let allowedSubjects = gameSubjects(gameType, allSubjects).filter((s) =>
-        eligibleSubjects.has(s.toLocaleLowerCase()) && configuredGameSubjects.has(s.toLocaleLowerCase()));
-      if (profile.role === "Student" && ["word_master","word_builder"].includes(gameType)) {
-        const ctx = await studentContext(db, profile);
-        if (ctx?.gradeLabel.trim().toLocaleLowerCase() === "language") {
-          const { data: preference, error } = await db.from("ka_student_preferences")
-            .select("preferred_language_code").eq("user_id", user.id).maybeSingle();
-          if (error) return errorResponse(503, "Could not verify your saved language preference.");
-          languageCode = preference?.preferred_language_code || "en";
-          const languageNames: Record<string, string> = { en: "English", hi: "Hindi", kn: "Kannada", sa: "Sanskrit", fr: "French" };
-          allowedSubjects = allowedSubjects.filter((s) => s.toLocaleLowerCase() === languageNames[languageCode].toLocaleLowerCase());
-        }
-      }
+      const allowedSubjects = languageGame
+        ? allSubjects.filter((s) => s.toLocaleLowerCase() === languageSubject(languageCode)!.toLocaleLowerCase() &&
+            configuredGameSubjects.has(s.toLocaleLowerCase()))
+        : gameSubjects(gameType, allSubjects).filter((s) =>
+            eligibleSubjects.has(s.toLocaleLowerCase()) && configuredGameSubjects.has(s.toLocaleLowerCase()));
       if (!allowedSubjects.length) return json(200, { questions: [], grade_label: effectiveGradeLabel });
       let query = db.from("ka_questions")
         .select("id,subject,topic,grade_label,language_code,difficulty,game_type,prompt,options")
-        .eq("status", "published").in("grade_label", [effectiveGradeLabel, "General"]).eq("game_type", gameType)
+        .eq("status", "published").in("grade_label", languageGame ? languageGradeLabels(effectiveGradeLabel) : [effectiveGradeLabel, "General"]).eq("game_type", gameType)
         .in("subject", allowedSubjects)
         .or("expires_at.is.null,expires_at.gt." + new Date().toISOString())
-        .order("created_at", { ascending: false }).limit(Math.min(Math.max(safeNumber(body.limit, 10), 1), 20));
+        .order("created_at", { ascending: false }).limit(100);
       if (body.difficulty) query = query.eq("difficulty", String(body.difficulty));
       if (languageCode) query = query.eq("language_code", languageCode);
       const { data, error } = await query;
       if (error) return errorResponse(503, "Could not load questions.");
-      return json(200, { questions: data || [], grade_label: effectiveGradeLabel });
+      const requestedLimit = Math.min(Math.max(safeNumber(body.limit, 10), 1), 20);
+      const gradeRank = (q: any) => q.grade_label === effectiveGradeLabel ? 0 : q.grade_label === "General" ? 1 : 2;
+      const selectedQuestions = (data || []).sort((a: any, b: any) => gradeRank(a) - gradeRank(b)).slice(0, requestedLimit);
+      return json(200, { questions: selectedQuestions, grade_label: effectiveGradeLabel });
     }
 
     if (action === "get_daily_challenge") {
@@ -544,6 +575,10 @@ Deno.serve(async (req) => {
       const gameType = body.game_type;
       if (!validGameType(gameType)) return errorResponse(400, "Invalid game type.");
       const selections = body.answers;
+      const languageGame = isLanguageGame(String(gameType));
+      const languageCode = String(body.language_code || "");
+      const selectedLanguageSubject = languageGame ? languageSubject(languageCode) : null;
+      if (languageGame && !selectedLanguageSubject) return errorResponse(400, "Choose a language before submitting this game.");
       if (!Array.isArray(selections) || selections.length < 1 || selections.length > MAX_QUESTIONS_PER_ATTEMPT) {
         return errorResponse(400, "Submit between 1 and 30 answers.");
       }
@@ -559,12 +594,16 @@ Deno.serve(async (req) => {
       if (!resolved) return errorResponse(400, "Select a valid grade before submitting this game.");
       const effectiveGradeLabel = resolved.gradeLabel;
       const { data: questions, error: questionError } = await db.from("ka_questions")
-        .select("id,subject,topic,grade_label,difficulty,game_type,prompt,options,explanation")
-        .in("id", ids).eq("status", "published").in("grade_label", [effectiveGradeLabel, "General"])
+        .select("id,subject,topic,grade_label,language_code,difficulty,game_type,prompt,options,explanation")
+        .in("id", ids).eq("status", "published").in("grade_label", languageGame ? languageGradeLabels(effectiveGradeLabel) : [effectiveGradeLabel, "General"])
         .or("expires_at.is.null,expires_at.gt." + new Date().toISOString());
       if (questionError || !questions || questions.length !== ids.length) return errorResponse(400, "One or more questions are unavailable.");
       const challengeId = typeof body.challenge_id === "string" ? body.challenge_id : null;
       if (questions.some((q: any) => q.game_type !== gameType)) return errorResponse(400, "Questions do not match the selected game.");
+      if (languageGame && questions.some((q: any) =>
+          q.language_code !== languageCode || String(q.subject).toLocaleLowerCase() !== selectedLanguageSubject!.toLocaleLowerCase())) {
+        return errorResponse(400, "Submitted questions do not match the selected language.");
+      }
       const subjectSet = new Set(questions.map((q: any) => q.subject));
       const { data: subjectRows, error: subjectError } = await db.from("subjects").select("name");
       if (subjectError) return errorResponse(503, "Could not verify question subjects.");
@@ -574,11 +613,13 @@ Deno.serve(async (req) => {
         db.from("ka_grade_subject_rules").select("subject").eq("grade_label", effectiveGradeLabel).eq("enabled", true),
         db.from("ka_game_subject_rules").select("subject").eq("game_type", gameType).eq("enabled", true),
       ]);
-      if (gradeGameError || gradeSubjectError || gameSubjectError || !gradeGame?.enabled) return errorResponse(423, "This game is not configured for your selected grade.");
+      if (gradeGameError || gradeSubjectError || gameSubjectError || (!languageGame && !gradeGame?.enabled)) return errorResponse(423, "This game is not configured for your selected grade.");
       const eligibleSubjects = new Set((gradeSubjectRows || []).map((x: any) => String(x.subject).toLocaleLowerCase()));
       const configuredGameSubjects = new Set((gameSubjectRows || []).map((x: any) => String(x.subject).toLocaleLowerCase()));
-      const permittedSubjects = gameSubjects(gameType, uniqueSubjectNames(subjectRows)).filter((s) =>
-        eligibleSubjects.has(s.toLocaleLowerCase()) && configuredGameSubjects.has(s.toLocaleLowerCase()));
+      const permittedSubjects = languageGame
+        ? [selectedLanguageSubject!].filter((s) => configuredGameSubjects.has(s.toLocaleLowerCase()))
+        : gameSubjects(gameType, uniqueSubjectNames(subjectRows)).filter((s) =>
+            eligibleSubjects.has(s.toLocaleLowerCase()) && configuredGameSubjects.has(s.toLocaleLowerCase()));
       if (questions.some((q: any) => !permittedSubjects.some((s) => s.toLocaleLowerCase() === String(q.subject).toLocaleLowerCase()))) {
         return errorResponse(400, "One or more questions do not belong to this game's configured subjects.");
       }

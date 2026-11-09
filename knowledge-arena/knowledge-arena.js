@@ -34,7 +34,7 @@
   const LANGUAGE_OPTIONS = { en: "English", hi: "Hindi", kn: "Kannada", sa: "Sanskrit", fr: "French" };
   let previewMode = false, previewReason = "";
   let catalog = null, progress = null, leaderboard = [], dailyChallenge = null;
-  let currentView = "play", currentGame = "quick_quiz", currentQuestions = [];
+  let currentView = "play", currentGame = "quick_quiz", currentQuestions = [], currentLanguageCode = "";
   let currentAnswers = [], currentIndex = 0, currentScore = 0, challengeId = null, clientAttemptId = null;
   let gameStartedAt = 0, memoryTimer = null, memoryRevealed = false;
   let adminSummary = null, adminOptions = null, adminJobs = [], adminUsageReviews = [], adminLeadership = null, adminQuestions = [], adminSuitability = null;
@@ -363,7 +363,6 @@
     select.innerHTML = '<option value="">Select your grade</option>' + options.map((name) =>
       '<option value="' + escapeHtml(name) + '">' + escapeHtml(name) + '</option>').join("");
     select.value = catalog?.selected_grade_label || "";
-    $("language-subject-choice").classList.add("hidden");
     if (!select.value) note("Please select your school grade before starting a game.", "info");
   }
 
@@ -389,11 +388,9 @@
   }
 
   function configureLanguageChoice() {
-    const isLanguageStudent = gradeLabel.trim().toLocaleLowerCase() === "language";
-    $("language-subject-choice").classList.toggle("hidden", !isLanguageStudent);
-    if (isLanguageStudent) {
-      $("language-select").value = LANGUAGE_OPTIONS[catalog?.preferred_language_code] ? catalog.preferred_language_code : "en";
-    }
+    // Language selection is independent of academic grade and required per play.
+    $("language-select").value = "";
+    $("language-subject-choice").classList.remove("hidden");
   }
 
   async function savePreferredLanguage() {
@@ -598,15 +595,25 @@
       if (role === "Teacher" || role === "Admin") {
         if (!gradeLabel) { note("Select a grade before starting a game.", "warning"); showView("play"); return; }
       }
-      const isLanguageStudent = assignedGradeLabel.trim().toLocaleLowerCase() === "language";
+      const languageGame = ["word_master","word_builder"].includes(game);
+      currentLanguageCode = languageGame ? $("language-select").value : "";
+      if (languageGame && !currentLanguageCode) {
+        note("Please choose a language before starting " + GAME_NAMES[game] + ".", "warning");
+        $("language-select").focus();
+        return;
+      }
       const payload = { game_type: game, limit: 10 };
       if (role === "Teacher" || role === "Admin") payload.grade_label = gradeLabel;
-      if (isLanguageStudent && ["word_master","word_builder"].includes(game)) payload.language_code = $("language-select").value;
+      if (languageGame) payload.language_code = currentLanguageCode;
       try {
-        const data = guestMode ? await api("guest_questions", { game_type: game }) : await api("get_questions", payload);
+        const data = guestMode
+          ? await api("guest_questions", { game_type: game, ...(languageGame ? { language_code: currentLanguageCode } : {}) })
+          : await api("get_questions", payload);
         currentQuestions = (data.questions || []).sort(() => Math.random() - 0.5);
         if (!currentQuestions.length) {
-          note("There are no approved questions for " + GAME_NAMES[game] + " at this grade yet. More questions can be generated from the Admin control centre.", "info");
+          note(languageGame
+            ? "No approved " + LANGUAGE_OPTIONS[currentLanguageCode] + " questions are available for " + GAME_NAMES[game] + " at your selected level yet. Please choose another language or try again later."
+            : "There are no approved questions for " + GAME_NAMES[game] + " at this grade yet. More questions can be generated from the Admin control centre.", "info");
           return;
         }
         gradeLabel = data.grade_label || gradeLabel;
@@ -705,7 +712,7 @@
     }
     if (guestMode) {
       try {
-        const result=await api("guest_submit",{game_type:currentGame,client_attempt_id:clientAttemptId,answers:currentAnswers,duration_seconds:Math.max(0,Math.round((Date.now()-gameStartedAt)/1000))});
+        const result=await api("guest_submit",{game_type:currentGame,language_code:currentLanguageCode,client_attempt_id:clientAttemptId,answers:currentAnswers,duration_seconds:Math.max(0,Math.round((Date.now()-gameStartedAt)/1000))});
         currentScore=Number(result.correct_count||0);
         $("result-score").textContent=currentScore+" / "+Number(result.question_count||currentQuestions.length);
         $("result-title").textContent=currentScore===currentQuestions.length?"Perfect score!":currentScore>=Math.ceil(currentQuestions.length*.6)?"Well played!":"Good effort!";
@@ -721,6 +728,7 @@
       const payload = {
         client_attempt_id: clientAttemptId,
         game_type: currentGame,
+        ...(currentLanguageCode ? { language_code: currentLanguageCode } : {}),
         answers: currentAnswers,
         duration_seconds: Math.max(0, Math.round((Date.now() - gameStartedAt) / 1000))
       };
@@ -1414,7 +1422,9 @@
     document.querySelectorAll(".game-card").forEach((card) => card.classList.toggle("hidden",
       button.dataset.filter !== "all" && card.dataset.kind !== button.dataset.filter));
   });
-  $("language-select").addEventListener("change", savePreferredLanguage);
+  $("language-select").addEventListener("change", () => {
+    if ($("language-select").value) hideNote();
+  });
   $("tina-grade-select").addEventListener("change", saveTinaGradePreference);
   $("start-featured").addEventListener("click", () => startGame("quick_quiz", false));
   $("start-daily").addEventListener("click", () => startGame("quick_quiz", true));

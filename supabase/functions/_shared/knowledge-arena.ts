@@ -67,7 +67,7 @@ export const GAME_CATALOG = [
   { id: "society_culture_challenge", name: "Society & Culture Challenge", category: "academic", subjects: ["Sociology", "Social Science"] },
   { id: "civics_constitution_challenge", name: "Civics & Constitution Challenge", category: "academic", subjects: ["Political Science", "Social Science"] },
   { id: "economics_explorer", name: "Economics Explorer", category: "academic", subjects: ["Economics"] },
-  { id: "money_matters", name: "Money Matters", category: "academic", subjects: ["Economics", "Mathematics"] },
+  { id: "money_matters", name: "Money Matters", category: "academic", subjects: ["Economics", "Math", "Mathematics"] },
   { id: "word_builder", name: "Word Builder", category: "academic", subjects: ["English", "Hindi", "Kannada", "Sanskrit", "French"] },
   { id: "math_sprint", name: "Math Sprint", category: "academic", subjects: ["Math", "Mathematics"] },
 ] as const;
@@ -87,4 +87,18 @@ export function gameSubjects(gameType: string, subjects: string[]): string[] {
 export function safeNumber(value: unknown, fallback = 0): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+
+export const LANGUAGE_SUBJECT_BY_CODE: Readonly<Record<string, string>> = {
+  en: "English", hi: "Hindi", kn: "Kannada", sa: "Sanskrit", fr: "French",
+};
+export function isLanguageGame(gameType: string): boolean {
+  return gameType === "word_master" || gameType === "word_builder";
+}
+export function languageSubject(languageCode: unknown): string | null {
+  return LANGUAGE_SUBJECT_BY_CODE[String(languageCode || "")] || null;
+}
+export function languageGradeLabels(gradeLabel: string): string[] {
+  return [...new Set([gradeLabel, "General", "Language"])];
 }
