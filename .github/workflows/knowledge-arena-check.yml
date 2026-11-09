@@ -55,6 +55,13 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Create disposable Supabase-compatible fixture
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/tests/schema-fixture.sql
+      - name: Test guest lead migration in a separate disposable database
+        run: |
+          createdb guest_ci
+          GUEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/guest_ci
+          psql "$GUEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/tests/schema-fixture.sql
+          psql "$GUEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261109100000_knowledge_arena_guest_leads.sql
+          psql "$GUEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/tests/guest-leads-smoke.sql
       - name: Apply proposed Knowledge Arena schema to disposable database
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/proposed-schema.sql
       - name: Test grade challenges, duplicate prevention, worker lease and grants
