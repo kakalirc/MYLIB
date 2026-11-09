@@ -157,20 +157,25 @@
       role = context.role || "";
       gradeLabel = context.grade_label || "";
       assignedGradeLabel = gradeLabel;
-      if (role !== "Student" && role !== "Admin") {
-        showGate("access", "Only linked LIB student accounts and authorised administrators can use Knowledge Arena.");
+      if (role !== "Student" && role !== "Teacher" && role !== "Admin") {
+        showGate("access", "Knowledge Arena is available to linked LIB students, teachers and authorised administrators.");
         setStatus("ACCESS DENIED", "danger");
         return;
       }
       showShell();
       if (role === "Admin") {
-        $("welcome-line").textContent = "Monitor Knowledge Arena, manage shared AI budgets and publish daily challenges.";
+        $("welcome-line").textContent = "Manage Knowledge Arena or enter player mode to play at a selected grade.";
         prepareAdminLayout();
         await loadAdmin();
         const requested = new URLSearchParams(location.search).get("view");
-        showView(requested === "admin" ? "admin" : "admin");
+        showView(requested === "play" ? "play" : "admin");
+      } else if (role === "Teacher") {
+        prepareTeacherLayout();
+        await loadRolePlayer();
+        showView("play");
       } else {
         $("admin-nav").classList.add("hidden");
+        $("admin-play-nav").classList.add("hidden");
         await loadStudent();
         const requested = new URLSearchParams(location.search).get("view");
         showView(["daily","progress","achievements","leaderboard"].includes(requested) ? requested : "play");
@@ -203,7 +208,6 @@
       catalog = await api("get_catalog");
       if (catalog.grade_label) gradeLabel = catalog.grade_label;
       progress = await api("get_my_progress");
-      populateSubjects();
       configureLanguageChoice();
       configureTinaGradeChoice();
       const enabledGames = new Set((catalog.games || []).map((game) => game.id));
@@ -253,7 +257,6 @@
       catalog.selected_grade_label = result.grade_label;
       catalog.grade_label = result.grade_label;
       gradeLabel = result.grade_label;
-      $("academic-subject-choice").classList.remove("hidden");
       $("grade-label").textContent = "Your selected grade: " + gradeLabel;
       $("welcome-line").textContent = "Your selected grade: " + gradeLabel + ". Learn, play and build your own Game XP.";
       note("Your grade is saved as " + gradeLabel + ". You can change it any time.", "success");
@@ -265,7 +268,6 @@
 
   function configureLanguageChoice() {
     const isLanguageStudent = gradeLabel.trim().toLocaleLowerCase() === "language";
-    $("academic-subject-choice").classList.toggle("hidden", isLanguageStudent);
     $("language-subject-choice").classList.toggle("hidden", !isLanguageStudent);
     if (isLanguageStudent) {
       $("language-select").value = LANGUAGE_OPTIONS[catalog?.preferred_language_code] ? catalog.preferred_language_code : "en";
@@ -287,19 +289,7 @@
     } finally { select.disabled = false; }
   }
 
-  function populateSubjects() {
-    const select = $("subject-select");
-    if (!select) return;
-    const subjects = catalog && Array.isArray(catalog.subjects) ? catalog.subjects : [];
-    // Protect the dropdown from duplicate subject rows and case/spacing variants.
-    const uniqueSubjects = [...new Map(subjects
-      .map((name) => String(name || "").trim())
-      .filter(Boolean)
-      .map((name) => [name.toLocaleLowerCase(), name])).values()];
-    select.innerHTML = '<option value="All">All</option>' + (uniqueSubjects.length
-      ? uniqueSubjects.map((name) => '<option value="' + escapeHtml(name) + '">' + escapeHtml(name) + '</option>').join("")
-      : '');
-  }
+  function populateSubjects() { /* Subject selection is intentionally hidden from players. */ }
 
   function levelInfo(xp) {
     const level = Math.floor(Math.max(0, Number(xp || 0)) / XP_PER_LEVEL) + 1;
@@ -359,12 +349,70 @@
   function prepareAdminLayout() {
     const hero = document.querySelector("#arena-shell .hero");
     if (hero) hero.classList.add("hidden");
-    document.querySelectorAll("#main-nav .nav-btn:not(#admin-nav)").forEach((button) => button.classList.add("hidden"));
+    document.querySelectorAll("#main-nav .nav-btn:not(#admin-nav):not(#admin-play-nav)").forEach((button) => button.classList.add("hidden"));
     $("admin-nav").classList.remove("hidden");
+    $("admin-play-nav").classList.remove("hidden");
+  }
+
+  function prepareTeacherLayout() {
+    ["daily","progress","achievements","leaderboard","admin"].forEach((v) => {
+      const button = document.querySelector('#main-nav .nav-btn[data-view="' + v + '"]');
+      if (button) button.classList.add("hidden");
+    });
+    $("player-grade-choice").classList.remove("hidden");
+  }
+
+  async function loadRolePlayer() {
+    try {
+      const options = await api("get_catalog");
+      catalog = options;
+      const select = $("player-grade-select");
+      select.innerHTML = '<option value="">Select a grade</option>' +
+        (options.available_grade_options || []).map((x) => '<option value="' + escapeHtml(x) + '">' + escapeHtml(x) + '</option>').join("");
+      $("player-grade-choice").classList.remove("hidden");
+      const remembered = sessionStorage.getItem("ka_player_grade") || "";
+      if (remembered && (options.available_grade_options || []).includes(remembered)) {
+        select.value = remembered;
+        await loadRolePlayerGrade(remembered);
+      } else {
+        gradeLabel = "";
+        renderGameAvailability([]);
+        note("Select a grade to see the games and questions suitable for that level.", "info");
+      }
+    } catch (error) { note(error.message, "warning"); }
+  }
+
+  async function loadRolePlayerGrade(value) {
+    if (!value) { gradeLabel = ""; renderGameAvailability([]); return; }
+    try {
+      sessionStorage.setItem("ka_player_grade", value);
+      catalog = await api("get_catalog", { grade_label: value });
+      gradeLabel = catalog.grade_label || value;
+      renderGameAvailability(catalog.games || []);
+      $("grade-label").textContent = "Player grade: " + gradeLabel;
+      $("welcome-line").textContent = "Playing at " + gradeLabel + " level. This selection does not change your LIB profile.";
+      hideNote();
+    } catch (error) { note(error.message, "warning"); }
+  }
+
+  function renderGameAvailability(games) {
+    const enabledGames = new Set((games || []).map((game) => game.id));
+    document.querySelectorAll(".game-card").forEach((card) => {
+      const launch = card.querySelector(".launch");
+      if (!launch) return;
+      const enabled = enabledGames.has(launch.dataset.game);
+      card.classList.toggle("game-disabled", !enabled);
+      launch.disabled = !enabled;
+      if (!enabled) launch.textContent = "Questions being prepared";
+      else launch.textContent = "Play now →";
+    });
   }
 
   function showView(name) {
     if (name === "admin" && role !== "Admin" && role !== "AdminPreview") return;
+    if (name === "play" && (role === "Teacher" || role === "Admin") && !gradeLabel) {
+      $("player-grade-choice").classList.remove("hidden");
+    }
     currentView = name;
     ["play","daily","progress","achievements","leaderboard","admin"].forEach((v) => {
       const section = $("view-" + v);
@@ -375,6 +423,7 @@
     document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
     if (name === "daily" && role === "Student") loadDailyChallenge();
     if ((name === "leaderboard" || name === "achievements") && role === "Student" && !previewMode) loadLeaderboard().catch((e) => note(e.message, "warning"));
+    if (name === "play" && role === "Admin" && !catalog?.available_grade_options?.length) loadRolePlayer();
   }
 
   async function startGame(game, isDaily) {
