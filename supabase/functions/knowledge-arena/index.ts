@@ -519,7 +519,7 @@ Deno.serve(async (req) => {
       if (gradeError || subjectError) return errorResponse(503, "Could not load grade and subject options.");
       return json(200, {
         grades: [...new Set(["General", ...(grades || []).map((x: any) => String(x.name))])],
-        subjects: uniqueSubjectNames(subjects).filter((s) => s.toLocaleLowerCase() !== "all"),
+        subjects: uniqueSubjectNames(subjects).filter((s) => !["all","math + science"].includes(s.toLocaleLowerCase())),
         game_types: GAME_CATALOG.map((game) => game.id),
       });
     }
@@ -538,7 +538,7 @@ Deno.serve(async (req) => {
       if (gsError || ggError || gsrError || gradesError || subjectsError) return errorResponse(503, "Could not load suitability settings. Apply the Knowledge Arena suitability migration first.");
       return json(200, { grade_subject_rules: gradeSubjects || [], game_grade_rules: gameGrades || [],
         game_subject_rules: gameSubjectsRows || [], grades: [...new Set((grades || []).map((x: any) => x.name))],
-        subjects: uniqueSubjectNames(subjects), games: GAME_CATALOG });
+        subjects: uniqueSubjectNames(subjects).filter((s) => !["all","math + science"].includes(s.toLocaleLowerCase())), games: GAME_CATALOG });
     }
 
     if (action === "set_suitability") {
