@@ -81,16 +81,192 @@ async function adminSummary(db: ReturnType<typeof adminClient>) {
   };
 }
 
+
+const GUEST_SESSION_DAYS = 30;
+const GUEST_STATUSES = ["New","Contacted","Interested","Demo Booked","Demo Completed","Converted to Student","Not Interested"];
+
+function normalizeGuestMobile(value: unknown): string | null {
+  const digits = String(value || "").replace(/\\D/g, "");
+  const national = digits.startsWith("91") && digits.length === 12 ? digits.slice(2) : digits;
+  return /^[6-9]\\d{9}$/.test(national) ? "+91" + national : null;
+}
+async function guestTokenHash(token: string): Promise<string> {
+  const bytes = new TextEncoder().encode(token);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+function guestToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return [...bytes].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+async function getGuestSession(db: ReturnType<typeof adminClient>, token: unknown) {
+  if (typeof token !== "string" || token.length < 32 || token.length > 256) return null;
+  const hash = await guestTokenHash(token);
+  const { data, error } = await db.from("ka_guest_sessions")
+    .select("id,lead_id,guest_name,grade_label,expires_at,ended_at")
+    .eq("session_token_hash", hash).is("ended_at", null).gt("expires_at", new Date().toISOString()).maybeSingle();
+  if (error || !data) return null;
+  await db.from("ka_guest_sessions").update({ last_seen_at: new Date().toISOString() }).eq("id", data.id);
+  await db.from("ka_guest_leads").update({ last_seen_at: new Date().toISOString() }).eq("id", data.lead_id);
+  return data;
+}
+async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Record<string, unknown>) {
+  const action = String(body.action || "");
+  if (action === "guest_register") {
+    const name = String(body.guest_name || "").trim().replace(/\\s+/g, " ");
+    const mobile = normalizeGuestMobile(body.mobile_number);
+    const grade = String(body.grade_label || "").trim();
+    if (name.length < 2 || name.length > 80) return errorResponse(400, "Enter a name between 2 and 80 characters.");
+    if (!mobile) return errorResponse(400, "Enter a valid 10-digit Indian mobile number.");
+    if (!grade || grade.length > 80) return errorResponse(400, "Select your grade.");
+    const [{ data: gradeRow, error: gradeError }, { data: existing, error: leadReadError }] = await Promise.all([
+      db.from("grades").select("name").eq("name", grade).eq("archived", false).maybeSingle(),
+      db.from("ka_guest_leads").select("id,enquiry_consent,marketing_consent").eq("mobile_e164", mobile).maybeSingle()
+    ]);
+    if (gradeError || leadReadError) return errorResponse(503, "Guest registration is temporarily unavailable.");
+    if (!gradeRow) return errorResponse(400, "Select a valid grade.");
+    const now = new Date().toISOString();
+    const { data: lead, error: leadError } = await db.from("ka_guest_leads").upsert({
+      mobile_e164: mobile, last_seen_at: now, updated_at: now,
+      enquiry_consent: !!existing?.enquiry_consent || body.enquiry_consent === true,
+      marketing_consent: !!existing?.marketing_consent || body.marketing_consent === true
+    }, { onConflict: "mobile_e164" }).select("id").single();
+    if (leadError || !lead) return errorResponse(503, "Could not save the guest lead.");
+    const token = guestToken();
+    const expires = new Date(Date.now() + GUEST_SESSION_DAYS * 86400000).toISOString();
+    const { data: session, error: sessionError } = await db.from("ka_guest_sessions").insert({
+      lead_id: lead.id, session_token_hash: await guestTokenHash(token), guest_name: name,
+      grade_label: grade, expires_at: expires
+    }).select("id,guest_name,grade_label,expires_at").single();
+    if (sessionError || !session) return errorResponse(503, "Could not start the guest session.");
+    await db.from("ka_guest_leads").update({ last_guest_name: name, last_grade_label: grade }).eq("id", lead.id);
+    const consentEvents = [];
+    if (body.enquiry_consent === true) consentEvents.push({ lead_id: lead.id, session_id: session.id, consent_type: "enquiry", granted: true, source: "knowledge_arena_guest" });
+    if (body.marketing_consent === true) consentEvents.push({ lead_id: lead.id, session_id: session.id, consent_type: "whatsapp_marketing", granted: true, source: "knowledge_arena_guest" });
+    if (consentEvents.length) {
+      const { error } = await db.from("ka_guest_consents").insert(consentEvents);
+      if (error) return errorResponse(503, "Could not record consent. Registration was not completed.");
+    }
+    return json(200, { guest_token: token, session_id: session.id, guest_name: name, grade_label: grade, expires_at: expires, returning_lead: !!existing });
+  }
+  const guest = await getGuestSession(db, body.guest_token);
+  if (!guest) return errorResponse(401, "Guest session expired. Please register again.");
+  if (action === "guest_resume") return json(200, { session_id: guest.id, guest_name: guest.guest_name, grade_label: guest.grade_label, expires_at: guest.expires_at });
+  if (action === "guest_catalog") {
+    const [{ data: settings, error: settingsError }, { data: subjects, error: subjectError }] = await Promise.all([
+      db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle(),
+      db.from("subjects").select("name").order("name")
+    ]);
+    if (settingsError || subjectError || !settings) return errorResponse(503, "Knowledge Arena is not configured.");
+    const { data: gradeGame, error: gradeGameError } = await db.from("ka_game_grade_rules").select("game_type,enabled").eq("grade_label", guest.grade_label).eq("enabled", true);
+    if (gradeGameError) return errorResponse(503, "Could not load games for this grade.");
+    const available = new Set((gradeGame || []).map((x: any) => x.game_type));
+    const games = GAME_CATALOG.filter((g) => settings.games_enabled && available.has(g.id) && !(settings.disabled_game_types || []).includes(g.id));
+    return json(200, { games, subjects: uniqueSubjectNames(subjects).filter((s) => !(settings.disabled_subjects || []).includes(s)), grade_label: guest.grade_label });
+  }
+  if (action === "guest_questions") {
+    const gameType = body.game_type;
+    if (!validGameType(gameType)) return errorResponse(400, "Invalid game type.");
+    const { data: settings, error: settingsError } = await db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle();
+    if (settingsError || !settings?.games_enabled || (settings.disabled_game_types || []).includes(gameType)) return errorResponse(423, "This game is currently unavailable.");
+    const [{ data: gradeGame }, { data: gradeSubjects }, { data: gameSubjectRows }, { data: allSubjects }] = await Promise.all([
+      db.from("ka_game_grade_rules").select("enabled").eq("game_type", gameType).eq("grade_label", guest.grade_label).maybeSingle(),
+      db.from("ka_grade_subject_rules").select("subject").eq("grade_label", guest.grade_label).eq("enabled", true),
+      db.from("ka_game_subject_rules").select("subject").eq("game_type", gameType).eq("enabled", true),
+      db.from("subjects").select("name").order("name")
+    ]);
+    if (!gradeGame?.enabled) return errorResponse(423, "This game is not available for the selected grade.");
+    const eligible = new Set((gradeSubjects || []).map((x: any) => String(x.subject).toLowerCase()));
+    const mapped = new Set((gameSubjectRows || []).map((x: any) => String(x.subject).toLowerCase()));
+    const allowed = gameSubjects(gameType, uniqueSubjectNames(allSubjects).filter((s) => !(settings.disabled_subjects || []).includes(s)))
+      .filter((s) => eligible.has(s.toLowerCase()) && mapped.has(s.toLowerCase()));
+    if (!allowed.length) return json(200, { questions: [], grade_label: guest.grade_label });
+    const { data: questions, error } = await db.from("ka_questions")
+      .select("id,subject,topic,grade_label,language_code,difficulty,game_type,prompt,options")
+      .eq("status", "published").eq("game_type", gameType).in("subject", allowed)
+      .in("grade_label", [guest.grade_label, "General"])
+      .or("expires_at.is.null,expires_at.gt." + new Date().toISOString())
+      .order("created_at", { ascending: false }).limit(10);
+    if (error) return errorResponse(503, "Could not load questions.");
+    return json(200, { questions: questions || [], grade_label: guest.grade_label });
+  }
+  if (action === "guest_submit") {
+    const gameType = body.game_type;
+    const answers = body.answers;
+    if (!validGameType(gameType) || !Array.isArray(answers) || answers.length < 1 || answers.length > MAX_QUESTIONS_PER_ATTEMPT) return errorResponse(400, "Invalid game submission.");
+    const ids = [...new Set(answers.map((x: any) => x?.question_id).filter((x: any) => typeof x === "string"))];
+    if (ids.length !== answers.length || answers.some((x: any) => !Number.isInteger(x.option_index) || x.option_index < 0)) return errorResponse(400, "Answer format is invalid.");
+    const { data: questions, error: qError } = await db.from("ka_questions")
+      .select("id,subject,grade_label,game_type,options,explanation")
+      .in("id", ids).eq("status", "published").eq("game_type", gameType)
+      .in("grade_label", [guest.grade_label, "General"])
+      .or("expires_at.is.null,expires_at.gt." + new Date().toISOString());
+    if (qError || !questions || questions.length !== ids.length) return errorResponse(400, "One or more questions are unavailable.");
+    const subjects = [...new Set(questions.map((q: any) => q.subject))];
+    const [{ data: keys, error: keyError }, { data: settings }] = await Promise.all([
+      db.from("ka_question_keys").select("question_id,correct_option").in("question_id", ids),
+      db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle()
+    ]);
+    if (keyError || !keys || keys.length !== ids.length) return errorResponse(503, "Answer validation is unavailable.");
+    if (!settings?.games_enabled || (settings.disabled_game_types || []).includes(gameType) || subjects.some((s) => (settings.disabled_subjects || []).includes(s))) return errorResponse(423, "This game is currently unavailable.");
+    const keyMap = new Map(keys.map((x: any) => [x.question_id, Number(x.correct_option)]));
+    const feedback = answers.map((answer: any) => {
+      const q = questions.find((x: any) => x.id === answer.question_id);
+      const correctOption = keyMap.get(answer.question_id);
+      if (!q || correctOption === undefined || answer.option_index >= q.options.length) throw new Error("Invalid answer.");
+      return { question_id: q.id, correct: answer.option_index === correctOption, correct_option: correctOption, explanation: q.explanation };
+    });
+    const correct = feedback.filter((x) => x.correct).length;
+    const now = new Date().toISOString();
+    const { error: activityError } = await db.from("ka_guest_activity").insert({
+      lead_id: guest.lead_id, session_id: guest.id, game_type: gameType, subject: subjects.join(", "),
+      question_count: answers.length, correct_count: correct, accuracy: Math.round(correct / answers.length * 10000) / 100,
+      duration_seconds: Math.max(0, Math.min(3600, safeNumber(body.duration_seconds, 0))), completed_at: now
+    });
+    if (activityError) return errorResponse(503, "Could not save guest activity.");
+    await db.from("ka_guest_sessions").update({
+      games_completed: 1, questions_answered: answers.length, last_game_type: gameType, last_subject: subjects.join(", "), last_seen_at: now
+    }).eq("id", guest.id);
+    await db.from("ka_guest_leads").update({
+      games_completed: 1, questions_answered: answers.length, last_game_type: gameType, last_subject: subjects.join(", "), last_activity_at: now, last_seen_at: now
+    }).eq("id", guest.lead_id);
+    return json(200, { correct_count: correct, question_count: answers.length, accuracy: Math.round(correct / answers.length * 10000) / 100, feedback });
+  }
+  if (action === "guest_promotions") {
+    const trigger = String(body.trigger || "after_game");
+    if (!["welcome","after_game","exit"].includes(trigger)) return errorResponse(400, "Invalid promotion trigger.");
+    const { data, error } = await db.from("ka_guest_promotions").select("id,title,body,image_url,cta_label,cta_url,trigger,display_order")
+      .eq("active", true).eq("trigger", trigger).or("starts_at.is.null,starts_at.lte." + new Date().toISOString())
+      .or("ends_at.is.null,ends_at.gt." + new Date().toISOString()).order("display_order").limit(10);
+    if (error) return errorResponse(503, "Could not load promotions.");
+    return json(200, { promotions: (data || []).filter((p: any) =>
+      (!p.target_grades?.length || p.target_grades.includes(guest.grade_label)) &&
+      (!p.target_game_types?.length || p.target_game_types.includes(String(body.game_type || ""))) &&
+      (!p.target_subjects?.length || p.target_subjects.includes(String(body.subject || "")))) });
+  }
+  if (action === "guest_promotion_event") {
+    const promotionId = String(body.promotion_id || "");
+    const eventType = String(body.event_type || "");
+    if (!promotionId || !["view","click","dismiss"].includes(eventType)) return errorResponse(400, "Invalid promotion event.");
+    const { error } = await db.from("ka_guest_promotion_events").insert({ lead_id: guest.lead_id, session_id: guest.id, promotion_id: promotionId, event_type: eventType });
+    if (error) return errorResponse(503, "Could not record promotion activity.");
+    return json(200, { recorded: true });
+  }
+  return errorResponse(400, "Unknown guest action.");
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return errorResponse(405, "Use POST.");
   try {
-    const auth = await authenticate(req);
-    if ("error" in auth) return errorResponse(auth.status ?? 401, auth.error ?? "Authentication failed.");
-    const { db, user, profile } = auth;
     let body: Record<string, unknown>;
     try { body = await req.json(); } catch { return errorResponse(400, "Invalid JSON request."); }
     const action = String(body.action || "");
+    const db = adminClient();
+    if (action.startsWith("guest_")) return await handleGuestAction(db, body);
+    const auth = await authenticate(req);
+    if ("error" in auth) return errorResponse(auth.status ?? 401, auth.error ?? "Authentication failed.");
+    const { user, profile } = auth;
 
     if (action === "get_context") {
       if (profile.role === "Admin") return json(200, { role: "Admin" });
