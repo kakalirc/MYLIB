@@ -44,7 +44,7 @@ end $$;
 
 -- Atomic registration: repeat parent mobile reuses one lead, creates separate
 -- child sessions, and appends consent grants/withdrawals without losing history.
-select set_config('request.jwt.claim.role','service_role',true);
+set request.jwt.claim.role = 'service_role';
 
 do $$
 declare
