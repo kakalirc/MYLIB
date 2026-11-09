@@ -5385,7 +5385,6 @@ async function saveManualDemo() {
     requirements: (d.requirements || '').trim() || null, message: (d.message || '').trim() || null,
     amount: d.fee === 'free' ? 0 : 100, status: 'New', source: d.source || 'Other'
   };
-  if (d.fee === 'paid') Object.assign(row, { paid: true, paid_at: now, paid_via: 'Manual' });
   if (manualDemoEditId) return saveManualDemoEdit(row);
   wixBookingsMsg = 'Saving…'; render();
   const { error } = await sb.from('wix_demo_bookings').insert(row);
@@ -5403,9 +5402,6 @@ async function saveManualDemoEdit(row) {
   if (!b) return;
   const upd = { student_name: row.student_name, phone: row.phone, email: row.email, subject: row.subject, class_mode: row.class_mode,
     requirements: row.requirements, message: row.message, source: row.source, amount: row.amount };
-  const fee = manualDemoDraft.fee;
-  if (fee === 'paid' && !b.paid) Object.assign(upd, { paid: true, paid_at: new Date().toISOString(), paid_via: 'Manual' });
-  if (fee !== 'paid' && b.paid) Object.assign(upd, { paid: false, paid_at: null, paid_via: null, payment_id: null });
   wixBookingsMsg = 'Saving…'; render();
   const { error } = await sb.from('wix_demo_bookings').update(upd).eq('id', b.id);
   if (error) { wixBookingsMsg = 'Could not save: ' + error.message; render(); return; }
@@ -5436,7 +5432,7 @@ function manualDemoFormHtml(editId) {
         ${inp('subject', 'Subject')}
         ${sel('classMode', [['Online', 'Online'], ['Offline', 'Offline']])}
         ${sel('source', MANUAL_DEMO_SOURCES.map(x => [x, 'Came from: ' + x]))}
-        ${sel('fee', [['unpaid', 'Demo fee: Not paid yet'], ['paid', 'Demo fee: ₹100 already paid'], ['free', 'Free demo']])}
+        ${sel('fee', [['unpaid', 'Demo fee: Not paid yet'], ['free', 'Free demo']])}
       </div>
       <textarea rows="2" placeholder="Requirements (grade, board, topics…)" oninput="manualDemoDraft.requirements=this.value" style="width:100%;margin-top:8px">${esc(d.requirements || '')}</textarea>
       <textarea rows="2" placeholder="Message / notes" oninput="manualDemoDraft.message=this.value" style="width:100%;margin-top:6px">${esc(d.message || '')}</textarea>
