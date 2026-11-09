@@ -765,7 +765,11 @@
       adminUsageReviews = usage.reviews || [];
       renderAdmin();
       await refreshLeadership();
-      await Promise.all([refreshGuestLeads(), refreshGuestPromotions()]);
+      try { await Promise.all([refreshGuestLeads(), refreshGuestPromotions()]); }
+      catch (guestError) {
+        $("guest-lead-feedback").textContent = "Guest lead data is not available yet: " + guestError.message;
+        $("guest-promotion-feedback").textContent = "Guest promotions are not available yet: " + guestError.message;
+      }
     } catch (error) {
       usePreview("Admin API/database setup is pending: " + error.message);
       $("admin-nav").classList.remove("hidden");
