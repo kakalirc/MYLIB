@@ -79,7 +79,7 @@ export function validGameType(value: unknown): value is string {
 export function gameSubjects(gameType: string, subjects: string[]): string[] {
   const game = GAME_CATALOG.find((item) => item.id === gameType);
   if (!game) return [];
-  if (game.subjects.includes("*")) return subjects;
+  if (game.subjects.length === 1 && game.subjects[0] === "*") return subjects;
   return subjects.filter((subject) => game.subjects.some((candidate) =>
     candidate.toLocaleLowerCase() === subject.toLocaleLowerCase()));
 }
