@@ -482,8 +482,72 @@ Deno.serve(async (req) => {
       return json(200, {
         grades: [...new Set(["General", ...(grades || []).map((x: any) => String(x.name))])],
         subjects: uniqueSubjectNames(subjects),
-        game_types: ["word_master","number_quest","science_explorer","quick_quiz","brain_teaser","memory_challenge"],
+        game_types: GAME_CATALOG.map((game) => game.id),
       });
+    }
+
+    if (action === "get_admin_questions") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      let query = db.from("ka_questions")
+        .select("id,subject,topic,grade_label,language_code,difficulty,game_type,prompt,options,explanation,status,created_at,answer_key:ka_question_keys(correct_option)")
+        .order("created_at", { ascending: false }).limit(100);
+      if (body.grade_label) query = query.eq("grade_label", String(body.grade_label));
+      if (body.subject) query = query.eq("subject", String(body.subject));
+      if (body.game_type) query = query.eq("game_type", String(body.game_type));
+      if (body.status) query = query.eq("status", String(body.status));
+      const { data, error } = await query;
+      if (error) return errorResponse(503, "Could not load the Knowledge Arena question bank.");
+      return json(200, { questions: (data || []).map((q: any) => ({
+        ...q, correct_option: q.answer_key?.[0]?.correct_option ?? null, answer_key: undefined,
+      })) });
+    }
+
+    if (action === "admin_question") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const questionId = String(body.question_id || "");
+      if (!questionId) return errorResponse(400, "Question ID is required.");
+      const { data: existing, error: readError } = await db.from("ka_questions")
+        .select("id,status").eq("id", questionId).maybeSingle();
+      if (readError || !existing) return errorResponse(404, "Question not found.");
+      const operation = String(body.operation || "");
+      if (operation === "archive") {
+        const { data, error } = await db.from("ka_questions").update({ status: "rejected" })
+          .eq("id", questionId).select("id,status").single();
+        if (error) return errorResponse(503, "Could not remove this question from play.");
+        return json(200, { question: data });
+      }
+      if (operation === "delete") {
+        const { error: dailyError } = await db.from("ka_daily_challenge_items").delete().eq("question_id", questionId);
+        if (dailyError) return errorResponse(503, "Could not remove question references from daily challenges.");
+        const { error: keyError } = await db.from("ka_question_keys").delete().eq("question_id", questionId);
+        if (keyError) return errorResponse(503, "Could not remove the question answer key.");
+        const { error } = await db.from("ka_questions").delete().eq("id", questionId);
+        if (error) return errorResponse(503, "Could not delete this question.");
+        return json(200, { deleted: true, question_id: questionId });
+      }
+      if (operation === "update") {
+        const prompt = String(body.prompt || "").trim();
+        const explanation = String(body.explanation || "").trim();
+        const options = body.options;
+        const correct = safeNumber(body.correct_option, -1);
+        if (prompt.length < 12 || prompt.length > 700 || explanation.length < 8 || explanation.length > 900 ||
+            !Array.isArray(options) || options.length !== 4 ||
+            options.some((x: any) => typeof x !== "string" || !x.trim() || x.length > 250) ||
+            new Set(options.map((x: string) => x.trim().toLocaleLowerCase())).size !== 4 ||
+            !Number.isInteger(correct) || correct < 0 || correct > 3) {
+          return errorResponse(400, "Enter a valid question, four distinct options, an explanation and a correct option.");
+        }
+        const { error: updateError } = await db.from("ka_questions").update({
+          prompt, options, explanation, topic: String(body.topic || "General").trim().slice(0, 120),
+          difficulty: ["easy","medium","hard"].includes(String(body.difficulty)) ? String(body.difficulty) : "medium",
+        }).eq("id", questionId);
+        if (updateError) return errorResponse(503, "Could not update the question.");
+        const { error: keyError } = await db.from("ka_question_keys").update({ correct_option: correct, updated_at: new Date().toISOString() })
+          .eq("question_id", questionId);
+        if (keyError) return errorResponse(503, "Question updated, but its answer key could not be saved. Please retry the answer-key update.");
+        return json(200, { updated: true, question_id: questionId });
+      }
+      return errorResponse(400, "Unknown question operation.");
     }
 
     if (action === "get_admin_usage_reviews") {
