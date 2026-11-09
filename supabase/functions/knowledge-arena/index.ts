@@ -131,19 +131,21 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
     if (!gradeRow) return errorResponse(400, "Select a valid grade.");
     const now = new Date().toISOString();
     let lead: any = null;
+    const currentEnquiryConsent = body.enquiry_consent === true;
+    const currentMarketingConsent = body.marketing_consent === true;
     if (existing) {
       const { data, error } = await db.from("ka_guest_leads").update({
         last_seen_at: now, last_activity_at: now, updated_at: now,
-        enquiry_consent: !!existing.enquiry_consent || body.enquiry_consent === true,
-        marketing_consent: !!existing.marketing_consent || body.marketing_consent === true
+        enquiry_consent: currentEnquiryConsent,
+        marketing_consent: currentMarketingConsent
       }).eq("id", existing.id).select("id").single();
       if (error) return errorResponse(503, "Could not update the existing guest lead.");
       lead = data;
     } else {
       const { data, error } = await db.from("ka_guest_leads").insert({
         mobile_e164: mobile, last_seen_at: now, updated_at: now,
-        enquiry_consent: body.enquiry_consent === true,
-        marketing_consent: body.marketing_consent === true
+        enquiry_consent: currentEnquiryConsent,
+        marketing_consent: currentMarketingConsent
       }).select("id").single();
       if (error) return errorResponse(503, "Could not save the guest lead.");
       lead = data;
@@ -157,13 +159,14 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
     }).select("id,guest_name,grade_label,expires_at").single();
     if (sessionError || !session) return errorResponse(503, "Could not start the guest session.");
     await db.from("ka_guest_leads").update({ last_guest_name: name, last_grade_label: grade, last_activity_at: now, last_seen_at: now, updated_at: now }).eq("id", lead.id);
+    // Record the initial choice for each consent type and every subsequent change,
+    // including withdrawal. The lead row stores current state; this table is append-only history.
     const consentEvents = [];
-    if (!existing) {
-      consentEvents.push({ lead_id: lead.id, session_id: session.id, consent_type: "enquiry", granted: body.enquiry_consent === true, source: "knowledge_arena_guest" });
-      consentEvents.push({ lead_id: lead.id, session_id: session.id, consent_type: "whatsapp_marketing", granted: body.marketing_consent === true, source: "knowledge_arena_guest" });
-    } else {
-      if (!existing.enquiry_consent && body.enquiry_consent === true) consentEvents.push({ lead_id: lead.id, session_id: session.id, consent_type: "enquiry", granted: true, source: "knowledge_arena_guest" });
-      if (!existing.marketing_consent && body.marketing_consent === true) consentEvents.push({ lead_id: lead.id, session_id: session.id, consent_type: "whatsapp_marketing", granted: true, source: "knowledge_arena_guest" });
+    if (!existing || existing.enquiry_consent !== currentEnquiryConsent) {
+      consentEvents.push({ lead_id: lead.id, session_id: session.id, consent_type: "enquiry", granted: currentEnquiryConsent, source: "knowledge_arena_guest" });
+    }
+    if (!existing || existing.marketing_consent !== currentMarketingConsent) {
+      consentEvents.push({ lead_id: lead.id, session_id: session.id, consent_type: "whatsapp_marketing", granted: currentMarketingConsent, source: "knowledge_arena_guest" });
     }
     if (consentEvents.length) {
       const { error } = await db.from("ka_guest_consents").insert(consentEvents);
