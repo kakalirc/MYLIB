@@ -12,11 +12,12 @@
   <header class="topbar">
     <a class="brand" href="../"><span class="brand-mark">LIB</span><span>Knowledge Arena<small>LEARN · PLAY · COMPETE</small></span></a>
     <nav id="main-nav" aria-label="Main navigation">
-      <button class="nav-btn active" data-view="play">Play</button>
+      <button class="nav-btn active" data-view="play" id="play-nav">Play</button>
       <button class="nav-btn" data-view="daily">Daily challenge</button>
       <button class="nav-btn" data-view="progress">My progress</button>
       <button class="nav-btn" data-view="achievements">Achievements</button>
       <button class="nav-btn" data-view="leaderboard">Leaderboard</button>
+      <button class="nav-btn hidden" id="admin-play-nav" data-view="play">Play games</button>
       <button class="nav-btn hidden" id="admin-nav" data-view="admin">Admin</button>
     </nav>
     <span class="demo-pill" id="connection-status">CONNECTING</span>
@@ -67,27 +68,25 @@
           <select id="tina-grade-select" aria-label="Choose your school grade"><option value="">Select your grade</option></select>
           <small class="muted">We’ll use this grade to choose suitable questions. Your choice is saved for next time.</small>
         </div>
-        <div class="arena-subject-row">
-          <div id="academic-subject-choice" class="subject-choice">
-            <label for="subject-select">Choose a subject</label>
-            <select id="subject-select" aria-label="Choose a subject"><option value="">Loading subjects…</option></select>
-          </div>
-          <div id="language-subject-choice" class="subject-choice hidden">
-            <label for="language-select">Choose your language</label>
-            <select id="language-select" aria-label="Choose your language">
-              <option value="en">English</option><option value="hi">Hindi</option>
-              <option value="kn">Kannada</option><option value="sa">Sanskrit</option><option value="fr">French</option>
-            </select>
-            <small class="muted">Your choice is saved automatically for your next visit.</small>
-          </div>
+        <div id="player-grade-choice" class="subject-choice hidden">
+          <label for="player-grade-select">Choose a grade to play</label>
+          <select id="player-grade-select" aria-label="Choose a grade to play"><option value="">Select a grade</option></select>
+          <small class="muted">This is a temporary player-mode selection. It will not change your LIB profile.</small>
+        </div>
+        <div id="language-subject-choice" class="subject-choice hidden">
+          <label for="language-select">Choose your language</label>
+          <select id="language-select" aria-label="Choose your language">
+            <option value="en">English</option><option value="hi">Hindi</option>
+            <option value="kn">Kannada</option><option value="sa">Sanskrit</option><option value="fr">French</option>
+          </select>
+          <small class="muted">Your choice is saved automatically for your next visit.</small>
         </div>
         <details class="panel arena-help" id="arena-help">
           <summary>❔ How do the games and subjects work?</summary>
           <div class="arena-help-content">
-            <p><strong>Each game chooses its own subject:</strong> Word Master — English (or your selected language in a Language programme); Number Quest and Brain Teaser — Mathematics; Science Explorer and Memory Challenge — Science.</p>
-            <p><strong>Quick Quiz</strong> follows the subject selector. Choose <strong>All</strong> for a mix from all available subjects.</p>
+            <p>Choose a game and Knowledge Arena will automatically select suitable questions from the subjects configured for that game and your grade. You do not need to choose a subject.</p>
             <p><strong>Grade:</strong> if asked, choose your current school grade. This only helps select questions and does not change your LIB student profile.</p>
-            <p><strong>Daily challenge:</strong> ten English Quick Quiz questions for your grade when enough suitable questions are published. You can try it more than once.</p>
+            <p><strong>Daily challenge:</strong> a mixed set of suitable questions for your grade when enough content is available. You can try it more than once.</p>
             <p><strong>Game XP</strong> is separate from attendance XP and rewards. Correct answers earn 5 XP; a perfect attempt earns a 10 XP bonus, subject to the daily cap.</p>
             <p>If a game says no published questions are available, try another game or return later. It is a content-availability message, not a subscription restriction.</p>
           </div>
@@ -101,9 +100,17 @@
           <article class="game-card" data-kind="academic"><div class="game-icon blue">Aa</div><span class="tag">LANGUAGE</span><h3>Word Master</h3><p>Vocabulary, spelling and word puzzles.</p><button class="text-btn launch" data-game="word_master">Play now →</button></article>
           <article class="game-card" data-kind="academic"><div class="game-icon gold">∑</div><span class="tag">MATHEMATICS</span><h3>Number Quest</h3><p>Patterns, calculations and brain training.</p><button class="text-btn launch" data-game="number_quest">Play now →</button></article>
           <article class="game-card" data-kind="academic"><div class="game-icon mint">⚛</div><span class="tag">SCIENCE</span><h3>Science Explorer</h3><p>Discover how the world works.</p><button class="text-btn launch" data-game="science_explorer">Play now →</button></article>
-          <article class="game-card" data-kind="fun"><div class="game-icon pink">?</div><span class="tag">GENERAL KNOWLEDGE</span><h3>Quick Quiz</h3><p>A mixed quiz to test what you know.</p><button class="text-btn launch" data-game="quick_quiz">Play now →</button></article>
-          <article class="game-card" data-kind="fun"><div class="game-icon violet">◇</div><span class="tag">LOGIC</span><h3>Brain Teaser</h3><p>Reasoning, riddles and clever challenges.</p><button class="text-btn launch" data-game="brain_teaser">Play now →</button></article>
+          <article class="game-card" data-kind="fun"><div class="game-icon pink">?</div><span class="tag">GENERAL KNOWLEDGE</span><h3>Quick Quiz</h3><p>A mixed quiz across available subjects.</p><button class="text-btn launch" data-game="quick_quiz">Play now →</button></article>
+          <article class="game-card" data-kind="fun"><div class="game-icon violet">◇</div><span class="tag">REASONING</span><h3>Brain Teaser</h3><p>Reasoning, riddles and clever challenges.</p><button class="text-btn launch" data-game="brain_teaser">Play now →</button></article>
           <article class="game-card" data-kind="fun"><div class="game-icon orange">◉</div><span class="tag">MEMORY</span><h3>Memory Challenge</h3><p>Study a sequence, then test your recall.</p><button class="text-btn launch" data-game="memory_challenge">Play now →</button></article>
+          <article class="game-card" data-kind="academic"><div class="game-icon blue">🌍</div><span class="tag">GEOGRAPHY</span><h3>World Explorer</h3><p>Explore places, maps and our world.</p><button class="text-btn launch" data-game="world_explorer">Play now →</button></article>
+          <article class="game-card" data-kind="academic"><div class="game-icon gold">⌛</div><span class="tag">HISTORY</span><h3>History Quest</h3><p>Explore events, people and timelines.</p><button class="text-btn launch" data-game="history_quest">Play now →</button></article>
+          <article class="game-card" data-kind="academic"><div class="game-icon mint">◎</div><span class="tag">SOCIOLOGY</span><h3>Society & Culture Challenge</h3><p>Explore society, culture and social life.</p><button class="text-btn launch" data-game="society_culture_challenge">Play now →</button></article>
+          <article class="game-card" data-kind="academic"><div class="game-icon violet">⚖</div><span class="tag">CIVICS</span><h3>Civics & Constitution Challenge</h3><p>Learn about democracy, rights and governance.</p><button class="text-btn launch" data-game="civics_constitution_challenge">Play now →</button></article>
+          <article class="game-card" data-kind="academic"><div class="game-icon gold">₹</div><span class="tag">ECONOMICS</span><h3>Economics Explorer</h3><p>Understand markets and economic ideas.</p><button class="text-btn launch" data-game="economics_explorer">Play now →</button></article>
+          <article class="game-card" data-kind="academic"><div class="game-icon orange">◈</div><span class="tag">FINANCIAL LITERACY</span><h3>Money Matters</h3><p>Learn savings, budgeting and money decisions.</p><button class="text-btn launch" data-game="money_matters">Play now →</button></article>
+          <article class="game-card" data-kind="academic"><div class="game-icon pink">Ab</div><span class="tag">LANGUAGE</span><h3>Word Builder</h3><p>Build vocabulary and strengthen language skills.</p><button class="text-btn launch" data-game="word_builder">Play now →</button></article>
+          <article class="game-card" data-kind="academic"><div class="game-icon blue">＋</div><span class="tag">MATHEMATICS</span><h3>Math Sprint</h3><p>Practise mental maths and quick calculations.</p><button class="text-btn launch" data-game="math_sprint">Play now →</button></article>
         </div>
       </section>
 
