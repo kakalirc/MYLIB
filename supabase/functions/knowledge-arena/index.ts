@@ -266,13 +266,31 @@ Deno.serve(async (req) => {
     if (action === "get_daily_challenge") {
       const ctx = await studentContext(db, profile);
       if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
+      let dailyGrade = ctx.gradeLabel;
+      if (ctx.gradeLabel.trim().toLocaleLowerCase() === "tina student") {
+        const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
+          .select("selected_grade_label").eq("user_id", user.id).maybeSingle();
+        if (preferenceError) return errorResponse(503, "Could not verify your saved grade.");
+        if (!preference?.selected_grade_label) return errorResponse(400, "Please select your school grade first.");
+        dailyGrade = preference.selected_grade_label;
+      }
       const today = indiaDate();
       const { data: dailySettings } = await db.from("ka_settings")
         .select("daily_challenge_enabled,games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle();
       if (!dailySettings?.daily_challenge_enabled || !dailySettings.games_enabled) return json(200, { challenge: null, paused: true });
+      const [{ data: gradeSubjects, error: gradeSubjectError }, { data: gradeGames, error: gradeGameError },
+        { data: gameSubjectsRows, error: gameSubjectError }] = await Promise.all([
+        db.from("ka_grade_subject_rules").select("subject").eq("grade_label", dailyGrade).eq("enabled", true),
+        db.from("ka_game_grade_rules").select("game_type").eq("grade_label", dailyGrade).eq("enabled", true),
+        db.from("ka_game_subject_rules").select("subject").eq("game_type", "quick_quiz").eq("enabled", true),
+      ]);
+      if (gradeSubjectError || gradeGameError || gameSubjectError) return errorResponse(503, "Could not verify daily challenge suitability.");
+      const eligibleSubjects = new Set((gradeSubjects || []).map((x: any) => String(x.subject).toLocaleLowerCase()));
+      const eligibleGames = new Set((gradeGames || []).map((x: any) => x.game_type));
+      const quickQuizSubjects = new Set((gameSubjectsRows || []).map((x: any) => String(x.subject).toLocaleLowerCase()));
       const { data: challenge, error } = await db.from("ka_daily_challenges")
         .select("id,challenge_date,grade_label,title,description,status")
-        .eq("challenge_date", today).eq("grade_label", ctx.gradeLabel).eq("status", "published").maybeSingle();
+        .eq("challenge_date", today).eq("grade_label", dailyGrade).eq("status", "published").maybeSingle();
       if (error) return errorResponse(503, "Could not load today's challenge.");
       if (!challenge) return json(200, { challenge: null });
       const { data: items, error: itemError } = await db.from("ka_daily_challenge_items")
@@ -280,7 +298,12 @@ Deno.serve(async (req) => {
         .eq("challenge_id", challenge.id).order("sort_order");
       if (itemError) return errorResponse(503, "Could not load today's challenge questions.");
       const questions = (items || []).map((x: { question: any }) => x.question)
-        .filter((q: any) => q && q.status === "published" && (!q.expires_at || Date.parse(q.expires_at) > Date.now()) && q.grade_label === ctx.gradeLabel &&
+        .filter((q: any) => q && q.status === "published" &&
+          (!q.expires_at || Date.parse(q.expires_at) > Date.now()) &&
+          [dailyGrade, "General"].includes(q.grade_label) &&
+          eligibleGames.has(q.game_type) && q.game_type === "quick_quiz" &&
+          eligibleSubjects.has(String(q.subject).toLocaleLowerCase()) &&
+          quickQuizSubjects.has(String(q.subject).toLocaleLowerCase()) &&
           !(dailySettings.disabled_game_types || []).includes(q.game_type) &&
           !(dailySettings.disabled_subjects || []).includes(q.subject));
       if (questions.length !== 10) return json(200, { challenge: null, questions: [], unavailable: true });
