@@ -217,8 +217,22 @@
       const saved = localStorage.getItem("ka_guest_token");
       if (saved) {
         guestTokenValue = saved;
-        try { const resumed = await api("guest_resume"); gradeLabel = resumed.grade_label || ""; await loadGuest(); return; }
-        catch (e) { localStorage.removeItem("ka_guest_token"); guestTokenValue = ""; }
+        let resumed = null;
+        try { resumed = await api("guest_resume"); }
+        catch (e) {
+          localStorage.removeItem("ka_guest_token");
+          guestTokenValue = "";
+        }
+        if (resumed) {
+          gradeLabel = resumed.grade_label || "";
+          try { await loadGuest(); return; }
+          catch (e) {
+            showGuestGate();
+            $("guest-register-feedback").textContent = "Your registration is saved, but games are temporarily unavailable. Please try again shortly.";
+            setStatus("UNAVAILABLE", "danger");
+            return;
+          }
+        }
       }
       // The public grade catalogue is readable through the existing anon/RLS SELECT policy.
       // Load it directly so this form does not depend on the newer guest_options Edge Function
@@ -256,7 +270,12 @@
       const r=await api("guest_register",{guest_name:$("guest-name").value.trim(),mobile_number:mobile,grade_label:$("guest-grade").value,enquiry_consent:$("guest-enquiry-consent").checked,marketing_consent:$("guest-marketing-consent").checked});
       guestTokenValue=r.guest_token; localStorage.setItem("ka_guest_token",guestTokenValue); gradeLabel=r.grade_label||"";
       guestMode=true; await loadGuest(); showGuestPromotion("welcome");
-    } catch(e) { feedback.textContent=e.message||"Could not start your guest session."; }
+    } catch(e) {
+      feedback.textContent = guestTokenValue
+        ? "Your registration is saved, but games are temporarily unavailable. Please try again shortly."
+        : (e.message || "Could not start your guest session.");
+      if (guestTokenValue) setStatus("UNAVAILABLE", "danger");
+    }
     finally { button.disabled=false; }
   }
   async function loadGuest() {
