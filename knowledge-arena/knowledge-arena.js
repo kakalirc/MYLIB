@@ -543,6 +543,9 @@
     $("quiz").classList.add("hidden");
     $("results").classList.add("hidden");
     document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
+    // Re-apply the Admin submenu whenever its view is opened. This covers direct
+    // iframe entry (?view=admin), AdminPreview fallback, and returning from player mode.
+    if (name === "admin" && typeof showAdminSection === "function") showAdminSection(activeAdminSection || "overview");
     if (name === "daily" && role === "Student") loadDailyChallenge();
     if ((name === "leaderboard" || name === "achievements") && role === "Student" && !previewMode) loadLeaderboard().catch((e) => note(e.message, "warning"));
     if (name === "play" && role === "Admin" && !catalog?.available_grade_options?.length) loadRolePlayer();
@@ -800,6 +803,7 @@
     adminUsageReviews = [];
     renderAdmin();
     renderLeadership();
+    showAdminSection("overview");
     disableAdminPreviewControls();
     if (message) note("Admin preview only: " + message + " Controls are disabled until the authenticated API and schema are deployed.", "warning");
     showView("admin");
