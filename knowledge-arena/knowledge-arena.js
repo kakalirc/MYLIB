@@ -535,26 +535,30 @@
     });
     $("quiz").classList.add("hidden");
     $("results").classList.add("hidden");
-    $("guest-register-form").addEventListener("submit", registerGuest);
-  $("guest-exit").addEventListener("click",exitGuest);
-  $("guest-promotion-close").addEventListener("click",()=>closeGuestPromotion("dismiss"));
-  $("guest-promotion-dismiss").addEventListener("click",()=>closeGuestPromotion("dismiss"));
-  $("guest-promotion-cta").addEventListener("click",()=>closeGuestPromotion("click"));
-  $("refresh-guest-leads").addEventListener("click",()=>{adminGuestLeadOffset=0;refreshGuestLeads().catch(e=>$("guest-lead-feedback").textContent=e.message);});
-  $("export-guest-leads").addEventListener("click",exportGuestLeads);
-  $("guest-lead-search").addEventListener("keydown",e=>{if(e.key==="Enter"){adminGuestLeadOffset=0;refreshGuestLeads().catch(err=>$("guest-lead-feedback").textContent=err.message);}});
-  ["guest-lead-grade","guest-lead-from","guest-lead-to","guest-lead-status"].forEach(id=>$(id).addEventListener("change",()=>{adminGuestLeadOffset=0;refreshGuestLeads().catch(e=>$("guest-lead-feedback").textContent=e.message);}));
-  $("guest-lead-list").addEventListener("click",e=>{const b=e.target.closest("[data-open-guest-lead]");if(b)openGuestLead(b.dataset.openGuestLead);});
-  $("guest-lead-detail").addEventListener("click",e=>{const b=e.target.closest("[data-export-guest-leads]");if(b)exportGuestLeads();});
-  $("guest-promotion-form").addEventListener("submit",saveGuestPromotion);
-  $("promotion-reset").addEventListener("click",resetPromotionForm);
-  $("refresh-guest-promotions").addEventListener("click",()=>refreshGuestPromotions().catch(e=>$("guest-promotion-feedback").textContent=e.message));
-  $("guest-promotion-list").addEventListener("click",e=>{const edit=e.target.closest("[data-edit-promotion]"),del=e.target.closest("[data-delete-promotion]");if(edit)editGuestPromotion(edit.dataset.editPromotion);if(del)deleteGuestPromotion(del.dataset.deletePromotion);});
-  document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
+    document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
     if (name === "daily" && role === "Student") loadDailyChallenge();
     if ((name === "leaderboard" || name === "achievements") && role === "Student" && !previewMode) loadLeaderboard().catch((e) => note(e.message, "warning"));
     if (name === "play" && role === "Admin" && !catalog?.available_grade_options?.length) loadRolePlayer();
   }
+
+  // Bind form and action handlers once at startup, not from showView().
+  // In particular, guest registration must prevent the browser's native form
+  // submission even though the guest registration gate is the initial view.
+  $("guest-register-form").addEventListener("submit", registerGuest);
+  $("guest-exit").addEventListener("click", exitGuest);
+  $("guest-promotion-close").addEventListener("click", () => closeGuestPromotion("dismiss"));
+  $("guest-promotion-dismiss").addEventListener("click", () => closeGuestPromotion("dismiss"));
+  $("guest-promotion-cta").addEventListener("click", () => closeGuestPromotion("click"));
+  $("refresh-guest-leads").addEventListener("click", () => { adminGuestLeadOffset=0; refreshGuestLeads().catch(e => $("guest-lead-feedback").textContent=e.message); });
+  $("export-guest-leads").addEventListener("click", exportGuestLeads);
+  $("guest-lead-search").addEventListener("keydown", e => { if(e.key === "Enter") { adminGuestLeadOffset=0; refreshGuestLeads().catch(err => $("guest-lead-feedback").textContent=err.message); } });
+  ["guest-lead-grade","guest-lead-from","guest-lead-to","guest-lead-status"].forEach(id => $(id).addEventListener("change", () => { adminGuestLeadOffset=0; refreshGuestLeads().catch(e => $("guest-lead-feedback").textContent=e.message); }));
+  $("guest-lead-list").addEventListener("click", e => { const b=e.target.closest("[data-open-guest-lead]"); if(b) openGuestLead(b.dataset.openGuestLead); });
+  $("guest-lead-detail").addEventListener("click", e => { const b=e.target.closest("[data-export-guest-leads]"); if(b) exportGuestLeads(); });
+  $("guest-promotion-form").addEventListener("submit", saveGuestPromotion);
+  $("promotion-reset").addEventListener("click", resetPromotionForm);
+  $("refresh-guest-promotions").addEventListener("click", () => refreshGuestPromotions().catch(e => $("guest-promotion-feedback").textContent=e.message));
+  $("guest-promotion-list").addEventListener("click", e => { const edit=e.target.closest("[data-edit-promotion]"), del=e.target.closest("[data-delete-promotion]"); if(edit) editGuestPromotion(edit.dataset.editPromotion); if(del) deleteGuestPromotion(del.dataset.deletePromotion); });
 
   async function startGame(game, isDaily) {
     currentGame = game;
