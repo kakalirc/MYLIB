@@ -479,7 +479,20 @@
     });
     $("quiz").classList.add("hidden");
     $("results").classList.add("hidden");
-    document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
+    $("guest-register-form").addEventListener("submit", registerGuest);
+  $("guest-promotion-close").addEventListener("click",()=>closeGuestPromotion("dismiss"));
+  $("guest-promotion-dismiss").addEventListener("click",()=>closeGuestPromotion("dismiss"));
+  $("guest-promotion-cta").addEventListener("click",()=>closeGuestPromotion("click"));
+  $("refresh-guest-leads").addEventListener("click",()=>refreshGuestLeads().catch(e=>$("guest-lead-feedback").textContent=e.message));
+  $("guest-lead-search").addEventListener("keydown",e=>{if(e.key==="Enter")refreshGuestLeads().catch(err=>$("guest-lead-feedback").textContent=err.message);});
+  $("guest-lead-status").addEventListener("change",()=>refreshGuestLeads().catch(e=>$("guest-lead-feedback").textContent=e.message));
+  $("guest-lead-list").addEventListener("click",e=>{const b=e.target.closest("[data-open-guest-lead]");if(b)openGuestLead(b.dataset.openGuestLead);});
+  $("guest-lead-detail").addEventListener("click",e=>{const b=e.target.closest("[data-export-guest-leads]");if(b)exportGuestLeads();});
+  $("guest-promotion-form").addEventListener("submit",saveGuestPromotion);
+  $("promotion-reset").addEventListener("click",resetPromotionForm);
+  $("refresh-guest-promotions").addEventListener("click",()=>refreshGuestPromotions().catch(e=>$("guest-promotion-feedback").textContent=e.message));
+  $("guest-promotion-list").addEventListener("click",e=>{const edit=e.target.closest("[data-edit-promotion]"),del=e.target.closest("[data-delete-promotion]");if(edit)editGuestPromotion(edit.dataset.editPromotion);if(del)deleteGuestPromotion(del.dataset.deletePromotion);});
+  document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
     if (name === "daily" && role === "Student") loadDailyChallenge();
     if ((name === "leaderboard" || name === "achievements") && role === "Student" && !previewMode) loadLeaderboard().catch((e) => note(e.message, "warning"));
     if (name === "play" && role === "Admin" && !catalog?.available_grade_options?.length) loadRolePlayer();
@@ -735,6 +748,7 @@
       adminUsageReviews = usage.reviews || [];
       renderAdmin();
       await refreshLeadership();
+      await Promise.all([refreshGuestLeads(), refreshGuestPromotions()]);
     } catch (error) {
       usePreview("Admin API/database setup is pending: " + error.message);
       $("admin-nav").classList.remove("hidden");
@@ -1013,6 +1027,77 @@
     const attendance = data.attendance_rewards || {};
     $("leadership-attendance").innerHTML = '<strong>Attendance rewards remain separate.</strong><p class="muted">' + escapeHtml(attendance.message || "The existing attendance reward source has not yet been connected.") + '</p>';
   }
+  async function refreshGuestLeads() {
+    const status=$("guest-lead-feedback"); if(status) status.textContent="Loading guest leads…";
+    const result=await api("get_admin_guest_leads",{status:$("guest-lead-status").value,search:$("guest-lead-search").value.trim(),limit:100});
+    adminGuestLeads=result.leads||[];
+    const total=result.total||0, newCount=adminGuestLeads.filter(x=>x.lead_status==="New").length;
+    const demoCount=adminGuestLeads.filter(x=>["Demo Booked","Demo Completed"].includes(x.lead_status)).length;
+    $("guest-lead-metrics").innerHTML=[["Total matching",total],["New in this view",newCount],["Demo booked / completed",demoCount]].map(x=>'<article class="metric"><small>'+x[0]+'</small><strong>'+x[1]+'</strong></article>').join("");
+    $("guest-lead-list").innerHTML=adminGuestLeads.length?'<div class="guest-lead-table">'+
+      '<div class="guest-lead-row guest-lead-head"><span>Guest / mobile</span><span>Grade</span><span>Sessions / games</span><span>Status</span><span>Last seen</span><span></span></div>'+
+      adminGuestLeads.map(x=>'<div class="guest-lead-row"><span><b>'+escapeHtml(x.last_guest_name||"Guest")+'</b><small>'+escapeHtml(x.mobile_e164)+'</small></span><span>'+escapeHtml(x.last_grade_label||"—")+'</span><span>'+x.sessions_count+' / '+x.games_completed+'</span><span>'+escapeHtml(x.lead_status)+'</span><span>'+escapeHtml(new Date(x.last_seen_at).toLocaleString("en-IN"))+'</span><span><button class="text-btn" data-open-guest-lead="'+x.id+'">View</button></span></div>').join("")+'</div>':'<p class="muted">No guest leads match these filters.</p>';
+    if(status) status.textContent=total+" guest lead(s) found.";
+  }
+  async function openGuestLead(id) {
+    const panel=$("guest-lead-detail"); panel.classList.remove("hidden"); panel.textContent="Loading lead details…";
+    try {
+      const d=await api("get_admin_guest_lead_detail",{lead_id:id}), l=d.lead;
+      panel.innerHTML='<div class="admin-panel-head"><h3>'+escapeHtml(l.last_guest_name||"Guest lead")+' · '+escapeHtml(l.mobile_e164)+'</h3><button class="text-btn" id="close-guest-lead">Close</button></div>'+
+        '<p class="muted">First seen: '+escapeHtml(new Date(l.first_seen_at).toLocaleString("en-IN"))+' · Last seen: '+escapeHtml(new Date(l.last_seen_at).toLocaleString("en-IN"))+'</p>'+
+        '<p>Enquiry consent: <b>'+ (l.enquiry_consent?"Yes":"No")+'</b> · WhatsApp marketing consent: <b>'+(l.marketing_consent?"Yes":"No")+'</b></p>'+
+        '<h4>Guest sessions</h4><div class="guest-detail-list">'+(d.sessions||[]).map(x=>'<p><b>'+escapeHtml(x.guest_name)+'</b> · '+escapeHtml(x.grade_label)+' · '+escapeHtml(new Date(x.started_at).toLocaleString("en-IN"))+'</p>').join("")+'</div>'+
+        '<h4>Game activity</h4><div class="guest-detail-list">'+(d.activity||[]).map(x=>'<p>'+escapeHtml(GAME_NAMES[x.game_type]||x.game_type)+' · '+escapeHtml(x.subject||"")+' · '+x.correct_count+'/'+x.question_count+' correct · '+escapeHtml(new Date(x.completed_at).toLocaleString("en-IN"))+'</p>').join("")+'</div>'+
+        '<h4>Consent history</h4><div class="guest-detail-list">'+(d.consents||[]).map(x=>'<p>'+escapeHtml(x.consent_type)+' · '+(x.granted?"Granted":"Withdrawn")+' · '+escapeHtml(new Date(x.recorded_at).toLocaleString("en-IN"))+'</p>').join("")+'</div>'+
+        '<h4>Follow-up notes</h4><div class="guest-detail-list">'+(d.notes||[]).map(x=>'<p>'+escapeHtml(x.note)+' <small>'+escapeHtml(new Date(x.created_at).toLocaleString("en-IN"))+'</small></p>').join("")+'</div>'+
+        '<div class="guest-lead-edit"><label>Lead status<select id="guest-detail-status">'+["New","Contacted","Interested","Demo Booked","Demo Completed","Converted to Student","Not Interested"].map(x=>'<option '+(x===l.lead_status?"selected":"")+'>'+x+'</option>').join("")+'</select></label>'+
+        '<label>LIB Student ID (optional, for conversion)<input id="guest-detail-student" value="'+escapeHtml(l.converted_student_id||"")+'" placeholder="Existing student UUID"></label>'+
+        '<label>Follow-up note<textarea id="guest-detail-note" rows="3" maxlength="2000" placeholder="Add an internal note"></textarea></label>'+
+        '<button class="btn-secondary" id="save-guest-lead" data-lead-id="'+l.id+'">Save follow-up</button>'+
+        (l.enquiry_consent||l.marketing_consent?'<a class="btn-secondary" href="https://wa.me/'+encodeURIComponent(l.mobile_e164.replace("+",""))+'" target="_blank" rel="noopener noreferrer">Open WhatsApp</a>':'<small class="muted">No contact consent recorded. Do not send promotional messages.</small>')+'</div>';
+      $("close-guest-lead").addEventListener("click",()=>panel.classList.add("hidden"));
+      $("save-guest-lead").addEventListener("click",async()=>{
+        const b=$("save-guest-lead");b.disabled=true;
+        try{await api("admin_update_guest_lead",{lead_id:id,lead_status:$("guest-detail-status").value,converted_student_id:$("guest-detail-student").value.trim()||null,note:$("guest-detail-note").value.trim()});$("guest-lead-feedback").textContent="Lead updated.";await refreshGuestLeads();await openGuestLead(id);}
+        catch(e){$("guest-lead-feedback").textContent=e.message;}finally{b.disabled=false;}
+      });
+    } catch(e){panel.textContent=e.message;}
+  }
+  function csvCell(value){return '"'+String(value??"").replace(/"/g,'""')+'"';}
+  function exportGuestLeads() {
+    const rows=[["Name","Mobile","Grade","Status","First seen","Last seen","Sessions","Games","Enquiry consent","WhatsApp marketing consent"]];
+    adminGuestLeads.forEach(x=>rows.push([x.last_guest_name,x.mobile_e164,x.last_grade_label,x.lead_status,x.first_seen_at,x.last_seen_at,x.sessions_count,x.games_completed,x.enquiry_consent,x.marketing_consent]));
+    const blob=new Blob([rows.map(r=>r.map(csvCell).join(",")).join("\r\n")],{type:"text/csv;charset=utf-8"});
+    const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="knowledge-arena-guest-leads.csv";a.click();URL.revokeObjectURL(url);
+  }
+  async function refreshGuestPromotions() {
+    const r=await api("get_admin_guest_promotions");adminGuestPromotions=r.promotions||[];
+    $("guest-promotion-list").innerHTML=adminGuestPromotions.length?adminGuestPromotions.map(p=>'<div class="guest-promotion-admin-row"><div><b>'+escapeHtml(p.title)+'</b><small>'+escapeHtml(p.trigger)+' · '+(p.active?"Active":"Inactive")+' · Views '+p.metrics.view+' · Clicks '+p.metrics.click+'</small></div><div><button class="text-btn" data-edit-promotion="'+p.id+'">Edit</button> <button class="text-btn" data-delete-promotion="'+p.id+'">Delete</button></div></div>').join(""):'<p class="muted">No promotions configured yet.</p>';
+  }
+  function resetPromotionForm() {
+    $("guest-promotion-form").reset();$("promotion-id").value="";$("promotion-cta-label").value="Explore courses";$("promotion-order").value="100";
+  }
+  async function saveGuestPromotion(event) {
+    event.preventDefault();const feedback=$("guest-promotion-feedback");feedback.textContent="Saving…";
+    const list=id=>$(id).value.split(",").map(x=>x.trim()).filter(Boolean);
+    try{
+      await api("admin_save_guest_promotion",{id:$("promotion-id").value||null,title:$("promotion-title").value.trim(),body:$("promotion-body").value.trim(),image_url:$("promotion-image").value.trim(),cta_label:$("promotion-cta-label").value.trim(),cta_url:$("promotion-cta-url").value.trim(),trigger:$("promotion-trigger").value,target_grades:list("promotion-grades"),target_game_types:list("promotion-games"),target_subjects:list("promotion-subjects"),display_order:Number($("promotion-order").value),active:$("promotion-active").checked});
+      feedback.textContent="Promotion saved.";resetPromotionForm();await refreshGuestPromotions();
+    }catch(e){feedback.textContent=e.message;}
+  }
+  function editGuestPromotion(id) {
+    const p=adminGuestPromotions.find(x=>x.id===id);if(!p)return;
+    $("promotion-id").value=p.id;$("promotion-title").value=p.title;$("promotion-body").value=p.body;$("promotion-image").value=p.image_url||"";
+    $("promotion-cta-label").value=p.cta_label;$("promotion-cta-url").value=p.cta_url;$("promotion-trigger").value=p.trigger;
+    $("promotion-grades").value=(p.target_grades||[]).join(", ");$("promotion-games").value=(p.target_game_types||[]).join(", ");
+    $("promotion-subjects").value=(p.target_subjects||[]).join(", ");$("promotion-order").value=p.display_order;$("promotion-active").checked=!!p.active;
+    $("guest-promotions-panel").scrollIntoView({behavior:"smooth",block:"start"});
+  }
+  async function deleteGuestPromotion(id) {
+    if(!confirm("Delete this guest promotion?"))return;
+    try{await api("admin_delete_guest_promotion",{id});await refreshGuestPromotions();}catch(e){$("guest-promotion-feedback").textContent=e.message;}
+  }
+
   async function updateJob(action, jobId) {
     try {
       await api("admin_control", { control: action === "pause" ? "pause_job" : "resume_job", job_id: jobId });
