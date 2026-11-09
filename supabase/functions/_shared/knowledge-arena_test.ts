@@ -23,7 +23,7 @@ Deno.test("Money Matters routes both live Math and Economics subject labels", ()
   assertEquals(gameSubjects("money_matters", ["Math"]), ["Math"]);
   assertEquals(gameSubjects("money_matters", ["Mathematics"]), ["Mathematics"]);
   assertEquals(gameSubjects("money_matters", ["Economics"]), ["Economics"]);
-  assertEquals(gameSubjects("money_matters", ["Math", "Economics", "Science"]), ["Economics", "Math"]);
+  assertEquals(gameSubjects("money_matters", ["Math", "Economics", "Science"]), ["Math", "Economics"]);
 });
 
 Deno.test("multi-subject games can use the enabled LIB subject catalogue", () => {
