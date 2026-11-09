@@ -43,13 +43,15 @@ create table if not exists public.ka_guest_activity (
   id uuid primary key default gen_random_uuid(),
   lead_id uuid not null references public.ka_guest_leads(id) on delete cascade,
   session_id uuid not null references public.ka_guest_sessions(id) on delete cascade,
+  client_attempt_id uuid not null,
   game_type text not null,
   subject text,
   question_count integer not null check (question_count > 0),
   correct_count integer not null check (correct_count >= 0 and correct_count <= question_count),
   accuracy numeric(5,2) not null check (accuracy >= 0 and accuracy <= 100),
   duration_seconds integer not null default 0 check (duration_seconds >= 0),
-  completed_at timestamptz not null default now()
+  completed_at timestamptz not null default now(),
+  constraint ka_guest_activity_attempt_unique unique (session_id, client_attempt_id)
 );
 
 create table if not exists public.ka_guest_consents (
