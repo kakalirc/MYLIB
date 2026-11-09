@@ -597,7 +597,7 @@ Deno.serve(async (req) => {
     if (action === "get_admin_questions") {
       if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
       let query = db.from("ka_questions")
-        .select("id,subject,topic,grade_label,language_code,difficulty,game_type,prompt,options,explanation,status,created_at,answer_key:ka_question_keys(correct_option)")
+        .select("id,subject,topic,grade_label,language_code,difficulty,game_type,prompt,options,explanation,status,created_at")
         .order("created_at", { ascending: false }).limit(100);
       if (body.grade_label) query = query.eq("grade_label", String(body.grade_label));
       if (body.subject) query = query.eq("subject", String(body.subject));
@@ -605,8 +605,14 @@ Deno.serve(async (req) => {
       if (body.status) query = query.eq("status", String(body.status));
       const { data, error } = await query;
       if (error) return errorResponse(503, "Could not load the Knowledge Arena question bank.");
+      const questionIds = (data || []).map((q: any) => q.id);
+      const { data: keys, error: keyError } = questionIds.length
+        ? await db.from("ka_question_keys").select("question_id,correct_option").in("question_id", questionIds)
+        : { data: [], error: null };
+      if (keyError) return errorResponse(503, "Could not load question answer keys for Admin review.");
+      const keyMap = new Map((keys || []).map((x: any) => [x.question_id, x.correct_option]));
       return json(200, { questions: (data || []).map((q: any) => ({
-        ...q, correct_option: q.answer_key?.[0]?.correct_option ?? null, answer_key: undefined,
+        ...q, correct_option: keyMap.get(q.id) ?? null,
       })) });
     }
 
