@@ -7,6 +7,14 @@
 
 begin;
 
+-- A manual Admin toggle is not proof of a Razorpay capture. Preserve the
+-- existing audit fields, but return non-Razorpay paid flags to the unpaid queue
+-- so a later verified Razorpay payment can still be matched to that booking.
+update public.wix_demo_bookings
+   set paid = false
+ where paid is true
+   and (paid_via is distinct from 'Razorpay' or payment_id is null);
+
 create or replace function public.razorpay_try_match(p_payment text)
 returns text
 language plpgsql
