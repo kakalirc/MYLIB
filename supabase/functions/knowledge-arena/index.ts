@@ -117,62 +117,41 @@ async function getGuestSession(db: ReturnType<typeof adminClient>, token: unknow
 async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Record<string, unknown>) {
   const action = String(body.action || "");
   if (action === "guest_register") {
-    const name = String(body.guest_name || "").trim().replace(/\s+/g, " ");
+    const name = String(body.guest_name || "").trim().replace(/\\s+/g, " ");
     const mobile = normalizeGuestMobile(body.mobile_number);
     const grade = String(body.grade_label || "").trim();
     if (name.length < 2 || name.length > 80) return errorResponse(400, "Enter a name between 2 and 80 characters.");
     if (!mobile) return errorResponse(400, "Enter a valid international mobile number with country code (8–15 digits).");
     if (!grade || grade.length > 80) return errorResponse(400, "Select your grade.");
-    const [{ data: gradeRow, error: gradeError }, { data: existing, error: leadReadError }] = await Promise.all([
-      db.from("grades").select("name").eq("name", grade).eq("archived", false).maybeSingle(),
-      db.from("ka_guest_leads").select("id,enquiry_consent,marketing_consent").eq("mobile_e164", mobile).maybeSingle()
-    ]);
-    if (gradeError || leadReadError) return errorResponse(503, "Guest registration is temporarily unavailable.");
+    const { data: gradeRow, error: gradeError } = await db.from("grades")
+      .select("name").eq("name", grade).eq("archived", false).maybeSingle();
+    if (gradeError) return errorResponse(503, "Guest registration is temporarily unavailable.");
     if (!gradeRow) return errorResponse(400, "Select a valid grade.");
-    const now = new Date().toISOString();
-    let lead: any = null;
-    const currentEnquiryConsent = body.enquiry_consent === true;
-    const currentMarketingConsent = body.marketing_consent === true;
-    if (existing) {
-      const { data, error } = await db.from("ka_guest_leads").update({
-        last_seen_at: now, last_activity_at: now, updated_at: now,
-        enquiry_consent: currentEnquiryConsent,
-        marketing_consent: currentMarketingConsent
-      }).eq("id", existing.id).select("id").single();
-      if (error) return errorResponse(503, "Could not update the existing guest lead.");
-      lead = data;
-    } else {
-      const { data, error } = await db.from("ka_guest_leads").insert({
-        mobile_e164: mobile, last_seen_at: now, updated_at: now,
-        enquiry_consent: currentEnquiryConsent,
-        marketing_consent: currentMarketingConsent
-      }).select("id").single();
-      if (error) return errorResponse(503, "Could not save the guest lead.");
-      lead = data;
-    }
-    if (!lead) return errorResponse(503, "Could not save the guest lead.");
+
     const token = guestToken();
     const expires = new Date(Date.now() + GUEST_SESSION_DAYS * 86400000).toISOString();
-    const { data: session, error: sessionError } = await db.from("ka_guest_sessions").insert({
-      lead_id: lead.id, session_token_hash: await guestTokenHash(token), guest_name: name,
-      grade_label: grade, expires_at: expires
-    }).select("id,guest_name,grade_label,expires_at").single();
-    if (sessionError || !session) return errorResponse(503, "Could not start the guest session.");
-    await db.from("ka_guest_leads").update({ last_guest_name: name, last_grade_label: grade, last_activity_at: now, last_seen_at: now, updated_at: now }).eq("id", lead.id);
-    // Record the initial choice for each consent type and every subsequent change,
-    // including withdrawal. The lead row stores current state; this table is append-only history.
-    const consentEvents = [];
-    if (!existing || existing.enquiry_consent !== currentEnquiryConsent) {
-      consentEvents.push({ lead_id: lead.id, session_id: session.id, consent_type: "enquiry", granted: currentEnquiryConsent, source: "knowledge_arena_guest" });
+    const { data: registration, error: registrationError } = await db.rpc("ka_register_guest_atomic", {
+      p_mobile_e164: mobile,
+      p_guest_name: name,
+      p_grade_label: grade,
+      p_session_token_hash: await guestTokenHash(token),
+      p_expires_at: expires,
+      p_enquiry_consent: body.enquiry_consent === true,
+      p_marketing_consent: body.marketing_consent === true
+    });
+    const result = Array.isArray(registration) ? registration[0] : registration;
+    if (registrationError || !result?.session_id) {
+      console.error("Atomic guest registration failed", registrationError);
+      return errorResponse(503, "Guest registration is temporarily unavailable. Please try again.");
     }
-    if (!existing || existing.marketing_consent !== currentMarketingConsent) {
-      consentEvents.push({ lead_id: lead.id, session_id: session.id, consent_type: "whatsapp_marketing", granted: currentMarketingConsent, source: "knowledge_arena_guest" });
-    }
-    if (consentEvents.length) {
-      const { error } = await db.from("ka_guest_consents").insert(consentEvents);
-      if (error) return errorResponse(503, "Could not record consent. Registration was not completed.");
-    }
-    return json(200, { guest_token: token, session_id: session.id, guest_name: name, grade_label: grade, expires_at: expires, returning_lead: !!existing });
+    return json(200, {
+      guest_token: token,
+      session_id: result.session_id,
+      guest_name: result.guest_name,
+      grade_label: result.grade_label,
+      expires_at: result.expires_at,
+      returning_lead: result.returning_lead === true
+    });
   }
   if (action === "guest_options") {
     const [{ data: grades, error: gradeError }, { data: settings, error: settingsError }] = await Promise.all([
