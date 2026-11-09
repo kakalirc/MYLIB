@@ -6,9 +6,6 @@ alter table public.ka_guest_leads
 
 alter table public.ka_guest_leads
   add constraint ka_guest_leads_mobile_e164_check
-  check (mobile_e164 ~ '^\\+[1-9][0-9]{7,14}
-
-commit;
-);
+  check (mobile_e164 ~ '^\+[1-9][0-9]{7,14}$');
 
 commit;
