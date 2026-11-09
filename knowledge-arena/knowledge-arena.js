@@ -813,6 +813,7 @@
       ]);
       adminSummary = summary.summary;
       adminOptions = options;
+      adminSuitability = suitability;
       adminJobs = jobs.jobs || [];
       adminUsageReviews = usage.reviews || [];
       renderAdmin();
@@ -866,6 +867,7 @@
     ).join("");
     renderJobs();
     renderUsageReviews();
+    renderSuitability();
   }
 
   function renderGenerationStatus() {
