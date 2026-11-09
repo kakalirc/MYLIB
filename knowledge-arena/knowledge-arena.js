@@ -1191,8 +1191,19 @@
         '<label>LIB Student ID (optional, for conversion)<input id="guest-detail-student" value="'+escapeHtml(l.converted_student_id||"")+'" placeholder="Existing student UUID"></label>'+
         '<label>Follow-up note<textarea id="guest-detail-note" rows="3" maxlength="2000" placeholder="Add an internal note"></textarea></label>'+
         '<button class="btn-secondary" id="save-guest-lead" data-lead-id="'+l.id+'">Save follow-up</button>'+
-        (l.enquiry_consent||l.marketing_consent?'<a class="btn-secondary" href="https://wa.me/'+encodeURIComponent(l.mobile_e164.replace("+",""))+'" target="_blank" rel="noopener noreferrer">'+(l.marketing_consent?"WhatsApp marketing follow-up":"WhatsApp enquiry follow-up")+'</a>':'<small class="muted">No contact consent recorded. Do not send promotional messages.</small>')+'</div>';
+        (l.marketing_consent?
+          '<div class="guest-whatsapp-followup"><h4>WhatsApp follow-up</h4><p class="muted">Edit this message if needed. WhatsApp will open with the draft; an Admin must review and send it manually.</p>'+
+          '<textarea id="guest-whatsapp-message" rows="12" maxlength="4000">'+escapeHtml("Hello!\\n\\nThank you for registering "+(l.last_guest_name||"your child")+" for LIB Education’s Knowledge Arena!\\n\\nWe hope your child enjoyed exploring our games, quizzes and learning challenges.\\n\\nAt LIB Education, we offer:\\n📚 Academic Tuition\\n🌍 Spoken Language Courses\\n✏️ School Curriculum Support\\n🧠 Interactive Learning Activities\\n\\nWe would be happy to help your child take the next step in their learning journey.\\n\\nWould you like to know more about our programmes or schedule a demo class?\\n\\nWe look forward to hearing from you.\\n\\nTeam LIB Education\\n🌐 www.libeducation.com\\n📞 +91 9845393178")+'</textarea>'+
+          '<button class="btn-secondary" id="open-guest-whatsapp" type="button">Open WhatsApp draft</button></div>':
+          '<small class="muted">WhatsApp marketing consent has not been given. Promotional follow-up is disabled.</small>')+'</div>';
       $("close-guest-lead").addEventListener("click",()=>panel.classList.add("hidden"));
+      const whatsappButton=$("open-guest-whatsapp");
+      if(whatsappButton) whatsappButton.addEventListener("click",()=>{
+        const message=$("guest-whatsapp-message").value;
+        const phone=String(l.mobile_e164||"").replace(/\\D/g,"");
+        if(!phone){$("guest-lead-feedback").textContent="No valid mobile number is available for this lead.";return;}
+        window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(message),"_blank","noopener,noreferrer");
+      });
       $("save-guest-lead").addEventListener("click",async()=>{
         const b=$("save-guest-lead");b.disabled=true;
         try{await api("admin_update_guest_lead",{lead_id:id,lead_status:$("guest-detail-status").value,converted_student_id:$("guest-detail-student").value.trim()||null,note:$("guest-detail-note").value.trim()});$("guest-lead-feedback").textContent="Lead updated.";await refreshGuestLeads();await openGuestLead(id);}
