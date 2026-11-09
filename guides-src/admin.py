@@ -195,14 +195,18 @@ def guide():
 
 
     g.add('knowledgearena', 'Teaching', 'Knowledge Arena content and controls', 'Manage the question supply and availability without changing the existing Question Bank or attendance rewards.', g2(
-        box('Game and subject availability', 'The Knowledge Arena control centre has master switches for games, AI generation and the daily challenge, plus individual game and subject availability controls.'),
-        box('Question generation', 'Queue a job with grade, subject, game, difficulty, language, count and optional topic. Review generation status and published content before relying on it for students.'),
+        box('Grade and subject suitability', 'Configure which subjects are academically suitable for each grade, which games are enabled for each grade, and which subjects each game can draw from. These rules are enforced by the API.'),
+        box('Question generation', 'Queue a job with grade, subject, game, difficulty, language, count and optional topic. AI validates generated questions and publishes them automatically; Admin review is optional.'),
     ) + g2(
-        box('Daily challenge', 'Publish only when ten suitable Quick Quiz questions are available for each active grade. The challenge is English content and mixes available subjects.'),
+        box('Question Bank Review', 'Review recently generated or existing questions. Admin can edit prompts, options, answer keys, explanations and difficulty; remove a question from play; or delete it permanently. Historical aggregate XP and attempts remain intact.'),
+        box('Daily challenge', 'Daily challenges use grade-eligible Quick Quiz questions from subjects enabled for that grade. A challenge is available only when ten suitable questions can be assembled.'),
         box('AI budget and reservations', 'Daily and monthly INR limits are shared. Interrupted or uncertain provider calls remain reserved for review; verify actual cost before settling them.'),
     ) + bullets([
-        'Student game selection is game-specific: Word Master uses English or the selected Language-programme language; Number Quest and Brain Teaser use Mathematics; Science Explorer and Memory Challenge use Science; Quick Quiz follows the selected subject filter, with All meaning no subject restriction.',
-        'Grade selection in Knowledge Arena is a question-matching preference; it does not edit the student’s LIB grade.',
+        'The subject selector is hidden from Students, Teachers and Admins. Subject remains internal metadata for AI generation, suitability rules and reporting.',
+        'All fourteen named games are available for generation. A game appears to a player only when at least five published questions match its game, grade and enabled subjects.',
+        'Teachers and Admins can enter player mode and select a grade for the current session. This does not edit their LIB profiles. Students use their profile grade; Tina Student selects and saves a school grade.',
+        'The six existing games are retained. The additional games are World Explorer, History Quest, Society & Culture Challenge, Civics & Constitution Challenge, Economics Explorer, Money Matters, Word Builder and Math Sprint.',
+        'Math + Science is a combined course selection; its questions are generated and stored under Mathematics and Science separately.',
         'The admin screen is summary-only and does not expose individual answers or question-level student history.',
         'Knowledge Arena Game XP is separate from attendance XP, levels, badges, streaks and the existing attendance leaderboard.',
         'A no-published-questions message indicates that eligible published content is unavailable for that game and grade. Check publication, grade labels, subject and game type before changing student settings.',

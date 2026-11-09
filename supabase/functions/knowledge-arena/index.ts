@@ -1,6 +1,26 @@
-import { adminClient, authenticate, corsHeaders, errorResponse, indiaDate, indiaDayStartIso, json, studentContext, validGameType, safeNumber } from "../_shared/knowledge-arena.ts";
+import { adminClient, authenticate, corsHeaders, errorResponse, indiaDate, indiaDayStartIso, json, studentContext, validGameType, safeNumber, GAME_CATALOG, gameSubjects } from "../_shared/knowledge-arena.ts";
 
 const MAX_QUESTIONS_PER_ATTEMPT = 30;
+
+async function playerGrade(db: ReturnType<typeof adminClient>, profile: any, userId: string, requestedGrade?: unknown) {
+  if (profile.role === "Student") {
+    const ctx = await studentContext(db, profile);
+    if (!ctx) return null;
+    if (ctx.gradeLabel.trim().toLocaleLowerCase() === "tina student") {
+      const { data: preference, error } = await db.from("ka_student_preferences")
+        .select("selected_grade_label").eq("user_id", userId).maybeSingle();
+      if (error) throw new Error("Could not verify your saved grade.");
+      return preference?.selected_grade_label ? { gradeLabel: preference.selected_grade_label, assignedGradeLabel: ctx.gradeLabel } : null;
+    }
+    return { gradeLabel: ctx.gradeLabel, assignedGradeLabel: ctx.gradeLabel };
+  }
+  if (profile.role !== "Teacher" && profile.role !== "Admin") return null;
+  const label = String(requestedGrade || "").trim();
+  if (!label) return null;
+  const { data: grade, error } = await db.from("grades").select("name").eq("name", label).eq("archived", false).maybeSingle();
+  if (error || !grade) return null;
+  return { gradeLabel: grade.name, assignedGradeLabel: null };
+}
 
 function uniqueSubjectNames(rows: Array<{ name: unknown }> | null | undefined): string[] {
   const names = new Map<string, string>();
@@ -61,73 +81,336 @@ async function adminSummary(db: ReturnType<typeof adminClient>) {
   };
 }
 
+
+const GUEST_SESSION_DAYS = 30;
+const GUEST_STATUSES = ["New","Contacted","Interested","Demo Booked","Demo Completed","Converted to Student","Not Interested"];
+
+function isHttpsUrl(value: string): boolean {
+  try { return new URL(value).protocol === "https:"; } catch { return false; }
+}
+function normalizeGuestMobile(value: unknown): string | null {
+  const supplied = String(value || "").trim();
+  // Require an explicit international prefix; the guest form supplies +91 by default.
+  const normalized = supplied.replace(/[\s().-]/g, "");
+  return /^\+[1-9]\d{7,14}$/.test(normalized) ? normalized : null;
+}
+async function guestTokenHash(token: string): Promise<string> {
+  const bytes = new TextEncoder().encode(token);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+function guestToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return [...bytes].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+async function getGuestSession(db: ReturnType<typeof adminClient>, token: unknown) {
+  if (typeof token !== "string" || token.length < 32 || token.length > 256) return null;
+  const hash = await guestTokenHash(token);
+  const { data, error } = await db.from("ka_guest_sessions")
+    .select("id,lead_id,guest_name,grade_label,expires_at,ended_at")
+    .eq("session_token_hash", hash).is("ended_at", null).gt("expires_at", new Date().toISOString()).maybeSingle();
+  if (error || !data) return null;
+  await db.from("ka_guest_sessions").update({ last_seen_at: new Date().toISOString() }).eq("id", data.id);
+  await db.from("ka_guest_leads").update({ last_seen_at: new Date().toISOString(), last_activity_at: new Date().toISOString() }).eq("id", data.lead_id);
+  return data;
+}
+async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Record<string, unknown>) {
+  const action = String(body.action || "");
+  if (action === "guest_register") {
+    const name = String(body.guest_name || "").trim().replace(/\\s+/g, " ");
+    const mobile = normalizeGuestMobile(body.mobile_number);
+    const grade = String(body.grade_label || "").trim();
+    if (name.length < 2 || name.length > 80) return errorResponse(400, "Enter a name between 2 and 80 characters.");
+    if (!mobile) return errorResponse(400, "Enter a valid international mobile number with country code (8–15 digits).");
+    if (!grade || grade.length > 80) return errorResponse(400, "Select your grade.");
+    const { data: gradeRow, error: gradeError } = await db.from("grades")
+      .select("name").eq("name", grade).eq("archived", false).maybeSingle();
+    if (gradeError) return errorResponse(503, "Guest registration is temporarily unavailable.");
+    if (!gradeRow) return errorResponse(400, "Select a valid grade.");
+
+    const token = guestToken();
+    const expires = new Date(Date.now() + GUEST_SESSION_DAYS * 86400000).toISOString();
+    const { data: registration, error: registrationError } = await db.rpc("ka_register_guest_atomic", {
+      p_mobile_e164: mobile,
+      p_guest_name: name,
+      p_grade_label: grade,
+      p_session_token_hash: await guestTokenHash(token),
+      p_expires_at: expires,
+      p_enquiry_consent: body.enquiry_consent === true,
+      p_marketing_consent: body.marketing_consent === true
+    });
+    const result = Array.isArray(registration) ? registration[0] : registration;
+    if (registrationError || !result?.session_id) {
+      console.error("Atomic guest registration failed", registrationError);
+      return errorResponse(503, "Guest registration is temporarily unavailable. Please try again.");
+    }
+    return json(200, {
+      guest_token: token,
+      session_id: result.session_id,
+      guest_name: result.guest_name,
+      grade_label: result.grade_label,
+      expires_at: result.expires_at,
+      returning_lead: result.returning_lead === true
+    });
+  }
+  if (action === "guest_options") {
+    const [{ data: grades, error: gradeError }, { data: settings, error: settingsError }] = await Promise.all([
+      db.from("grades").select("name").eq("archived", false).order("sort_order"),
+      db.from("ka_settings").select("games_enabled").eq("id", 1).maybeSingle()
+    ]);
+    if (gradeError || settingsError || !settings) return errorResponse(503, "Guest registration is temporarily unavailable.");
+    return json(200, { grades: (grades || []).map((x: any) => x.name).filter((x: string) => x.toLocaleLowerCase() !== "tina student"), games_enabled: settings.games_enabled });
+  }
+  const guest = await getGuestSession(db, body.guest_token);
+  if (!guest) return errorResponse(401, "Guest session expired. Please register again.");
+  if (action === "guest_end") {
+    const { error } = await db.from("ka_guest_sessions").update({ ended_at: new Date().toISOString() }).eq("id", guest.id);
+    if (error) return errorResponse(503, "Could not end the guest session.");
+    return json(200, { ended: true });
+  }
+  if (action === "guest_resume") return json(200, { session_id: guest.id, guest_name: guest.guest_name, grade_label: guest.grade_label, expires_at: guest.expires_at });
+  if (action === "guest_catalog") {
+    const [{ data: settings, error: settingsError }, { data: subjects, error: subjectError },
+      { data: questionRows, error: questionError }, { data: gradeGames, error: gradeGameError },
+      { data: gradeSubjects, error: gradeSubjectError }, { data: gameSubjectRules, error: gameSubjectError }] = await Promise.all([
+      db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle(),
+      db.from("subjects").select("name").order("name"),
+      db.from("ka_questions").select("game_type,subject").eq("status", "published").in("grade_label", [guest.grade_label, "General"])
+        .or("expires_at.is.null,expires_at.gt." + new Date().toISOString()).limit(5000),
+      db.from("ka_game_grade_rules").select("game_type").eq("grade_label", guest.grade_label).eq("enabled", true),
+      db.from("ka_grade_subject_rules").select("subject").eq("grade_label", guest.grade_label).eq("enabled", true),
+      db.from("ka_game_subject_rules").select("game_type,subject").eq("enabled", true)
+    ]);
+    if (settingsError || subjectError || questionError || gradeGameError || gradeSubjectError || gameSubjectError || !settings) return errorResponse(503, "Knowledge Arena is not configured.");
+    const enabledGames = new Set((gradeGames || []).map((x: any) => x.game_type));
+    const enabledSubjects = new Set((gradeSubjects || []).map((x: any) => String(x.subject).toLowerCase()));
+    const gameSubjectMap = new Map<string, Set<string>>();
+    for (const rule of gameSubjectRules || []) {
+      if (!gameSubjectMap.has(rule.game_type)) gameSubjectMap.set(rule.game_type, new Set());
+      gameSubjectMap.get(rule.game_type)!.add(String(rule.subject).toLowerCase());
+    }
+    const validRows = (questionRows || []).filter((q: any) =>
+      enabledSubjects.has(String(q.subject).toLowerCase()) &&
+      !(settings.disabled_subjects || []).includes(q.subject) &&
+      !(settings.disabled_game_types || []).includes(q.game_type));
+    const counts = new Map<string, number>();
+    for (const q of validRows) {
+      if (!enabledGames.has(q.game_type) || !gameSubjectMap.get(q.game_type)?.has(String(q.subject).toLowerCase())) continue;
+      counts.set(q.game_type, (counts.get(q.game_type) || 0) + 1);
+    }
+    const games = settings.games_enabled ? GAME_CATALOG.filter(g => (counts.get(g.id) || 0) >= 5) : [];
+    return json(200, { games_enabled: settings.games_enabled, games, subjects: uniqueSubjectNames(subjects).filter((x) => !(settings.disabled_subjects || []).includes(x)), grade_label: guest.grade_label });
+  }
+  if (action === "guest_questions") {
+    const gameType = body.game_type;
+    if (!validGameType(gameType)) return errorResponse(400, "Invalid game type.");
+    const { data: settings, error: settingsError } = await db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle();
+    if (settingsError || !settings?.games_enabled || (settings.disabled_game_types || []).includes(gameType)) return errorResponse(423, "This game is currently unavailable.");
+    const [{ data: gradeGame }, { data: gradeSubjects }, { data: gameSubjectRows }, { data: allSubjects }] = await Promise.all([
+      db.from("ka_game_grade_rules").select("enabled").eq("game_type", gameType).eq("grade_label", guest.grade_label).maybeSingle(),
+      db.from("ka_grade_subject_rules").select("subject").eq("grade_label", guest.grade_label).eq("enabled", true),
+      db.from("ka_game_subject_rules").select("subject").eq("game_type", gameType).eq("enabled", true),
+      db.from("subjects").select("name").order("name")
+    ]);
+    if (!gradeGame?.enabled) return errorResponse(423, "This game is not available for the selected grade.");
+    const eligible = new Set((gradeSubjects || []).map((x: any) => String(x.subject).toLowerCase()));
+    const mapped = new Set((gameSubjectRows || []).map((x: any) => String(x.subject).toLowerCase()));
+    const allowed = gameSubjects(gameType, uniqueSubjectNames(allSubjects).filter((s) => !(settings.disabled_subjects || []).includes(s)))
+      .filter((s) => eligible.has(s.toLowerCase()) && mapped.has(s.toLowerCase()));
+    if (!allowed.length) return json(200, { questions: [], grade_label: guest.grade_label });
+    const { data: questions, error } = await db.from("ka_questions")
+      .select("id,subject,topic,grade_label,language_code,difficulty,game_type,prompt,options")
+      .eq("status", "published").eq("game_type", gameType).in("subject", allowed)
+      .in("grade_label", [guest.grade_label, "General"])
+      .or("expires_at.is.null,expires_at.gt." + new Date().toISOString())
+      .order("created_at", { ascending: false }).limit(10);
+    if (error) return errorResponse(503, "Could not load questions.");
+    return json(200, { questions: questions || [], grade_label: guest.grade_label });
+  }
+  if (action === "guest_submit") {
+    const gameType = body.game_type;
+    const answers = body.answers;
+    const attemptId = String(body.client_attempt_id || "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(attemptId)) return errorResponse(400, "A valid game attempt ID is required.");
+    if (!validGameType(gameType) || !Array.isArray(answers) || answers.length < 1 || answers.length > MAX_QUESTIONS_PER_ATTEMPT) return errorResponse(400, "Invalid game submission.");
+    const ids = [...new Set(answers.map((x: any) => x?.question_id).filter((x: any) => typeof x === "string"))];
+    if (ids.length !== answers.length || answers.some((x: any) => !Number.isInteger(x.option_index) || x.option_index < 0)) return errorResponse(400, "Answer format is invalid.");
+    const { data: questions, error: qError } = await db.from("ka_questions")
+      .select("id,subject,grade_label,game_type,options,explanation")
+      .in("id", ids).eq("status", "published").eq("game_type", gameType)
+      .in("grade_label", [guest.grade_label, "General"])
+      .or("expires_at.is.null,expires_at.gt." + new Date().toISOString());
+    if (qError || !questions || questions.length !== ids.length) return errorResponse(400, "One or more questions are unavailable.");
+    const subjects = [...new Set(questions.map((q: any) => q.subject))];
+    const [{ data: keys, error: keyError }, { data: settings }, { data: gradeGame },
+      { data: gradeSubjects }, { data: gameSubjectRows }] = await Promise.all([
+      db.from("ka_question_keys").select("question_id,correct_option").in("question_id", ids),
+      db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle(),
+      db.from("ka_game_grade_rules").select("enabled").eq("game_type", gameType).eq("grade_label", guest.grade_label).maybeSingle(),
+      db.from("ka_grade_subject_rules").select("subject").eq("grade_label", guest.grade_label).eq("enabled", true),
+      db.from("ka_game_subject_rules").select("subject").eq("game_type", gameType).eq("enabled", true)
+    ]);
+    if (keyError || !keys || keys.length !== ids.length) return errorResponse(503, "Answer validation is unavailable.");
+    const eligibleSubjects = new Set((gradeSubjects || []).map((x: any) => String(x.subject).toLowerCase()));
+    const mappedSubjects = new Set((gameSubjectRows || []).map((x: any) => String(x.subject).toLowerCase()));
+    if (!settings?.games_enabled || !gradeGame?.enabled || (settings.disabled_game_types || []).includes(gameType) ||
+        subjects.some((subject) => (settings.disabled_subjects || []).includes(subject) ||
+          !eligibleSubjects.has(String(subject).toLowerCase()) || !mappedSubjects.has(String(subject).toLowerCase()))) {
+      return errorResponse(423, "This game or subject is not available for the selected grade.");
+    }
+    const keyMap = new Map(keys.map((x: any) => [x.question_id, Number(x.correct_option)]));
+    const feedback = answers.map((answer: any) => {
+      const q = questions.find((x: any) => x.id === answer.question_id);
+      const correctOption = keyMap.get(answer.question_id);
+      if (!q || correctOption === undefined || answer.option_index >= q.options.length) throw new Error("Invalid answer.");
+      return { question_id: q.id, correct: answer.option_index === correctOption, correct_option: correctOption, explanation: q.explanation };
+    });
+    const correct = feedback.filter((x) => x.correct).length;
+    const now = new Date().toISOString();
+    const { error: activityError } = await db.from("ka_guest_activity").insert({
+      lead_id: guest.lead_id, session_id: guest.id, client_attempt_id: attemptId, game_type: gameType, subject: subjects.join(", "),
+      question_count: answers.length, correct_count: correct, accuracy: Math.round(correct / answers.length * 10000) / 100,
+      duration_seconds: Math.max(0, Math.min(3600, safeNumber(body.duration_seconds, 0))), completed_at: now
+    });
+    if (activityError) {
+      if (activityError.code === "23505") {
+        const { data: savedAttempt, error: savedAttemptError } = await db.from("ka_guest_activity")
+          .select("correct_count,question_count,accuracy").eq("session_id", guest.id).eq("client_attempt_id", attemptId).maybeSingle();
+        if (!savedAttemptError && savedAttempt) return json(200, {
+          correct_count: savedAttempt.correct_count, question_count: savedAttempt.question_count,
+          accuracy: savedAttempt.accuracy, feedback
+        });
+      }
+      return errorResponse(503, "Could not save guest activity.");
+    }
+    // The database trigger increments aggregate counters atomically for concurrent submissions.
+    return json(200, { correct_count: correct, question_count: answers.length, accuracy: Math.round(correct / answers.length * 10000) / 100, feedback });
+  }
+  if (action === "guest_promotions") {
+    const trigger = String(body.trigger || "after_game");
+    if (!["welcome","after_game","exit"].includes(trigger)) return errorResponse(400, "Invalid promotion trigger.");
+    const { data, error } = await db.from("ka_guest_promotions").select("id,title,body,image_url,cta_label,cta_url,trigger,display_order")
+      .eq("active", true).eq("trigger", trigger).or("starts_at.is.null,starts_at.lte." + new Date().toISOString())
+      .or("ends_at.is.null,ends_at.gt." + new Date().toISOString()).order("display_order").limit(10);
+    if (error) return errorResponse(503, "Could not load promotions.");
+    return json(200, { promotions: (data || []).filter((p: any) =>
+      (!p.target_grades?.length || p.target_grades.includes(guest.grade_label)) &&
+      (!p.target_game_types?.length || p.target_game_types.includes(String(body.game_type || ""))) &&
+      (!p.target_subjects?.length || p.target_subjects.includes(String(body.subject || "")))) });
+  }
+  if (action === "guest_promotion_event") {
+    const promotionId = String(body.promotion_id || "");
+    const eventType = String(body.event_type || "");
+    if (!promotionId || !["view","click","dismiss"].includes(eventType)) return errorResponse(400, "Invalid promotion event.");
+    const { error } = await db.from("ka_guest_promotion_events").insert({ lead_id: guest.lead_id, session_id: guest.id, promotion_id: promotionId, event_type: eventType });
+    if (error) return errorResponse(503, "Could not record promotion activity.");
+    return json(200, { recorded: true });
+  }
+  return errorResponse(400, "Unknown guest action.");
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return errorResponse(405, "Use POST.");
   try {
-    const auth = await authenticate(req);
-    if ("error" in auth) return errorResponse(auth.status ?? 401, auth.error ?? "Authentication failed.");
-    const { db, user, profile } = auth;
     let body: Record<string, unknown>;
     try { body = await req.json(); } catch { return errorResponse(400, "Invalid JSON request."); }
     const action = String(body.action || "");
+    const db = adminClient();
+    if (action.startsWith("guest_")) return await handleGuestAction(db, body);
+    const auth = await authenticate(req);
+    if ("error" in auth) return errorResponse(auth.status ?? 401, auth.error ?? "Authentication failed.");
+    const { user, profile } = auth;
 
     if (action === "get_context") {
       if (profile.role === "Admin") return json(200, { role: "Admin" });
+      if (profile.role === "Teacher") return json(200, { role: "Teacher" });
       if (profile.role === "Student") {
         const ctx = await studentContext(db, profile);
         if (!ctx) return errorResponse(403, "A linked LIB student record is required.");
         return json(200, { role: "Student", grade_label: ctx.gradeLabel });
       }
-      return errorResponse(403, "Knowledge Arena is available only to LIB Students and Admins.");
+      return errorResponse(403, "Knowledge Arena is available to linked LIB Students, Teachers and authorised Admins.");
     }
 
     if (action === "get_catalog") {
-      const ctx = await studentContext(db, profile);
-      if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
-      const [{ data: settings, error: settingsError }, { data: subjects, error: subjectsError }, { data: stats }] = await Promise.all([
+      const resolved = await playerGrade(db, profile, user.id, body.grade_label);
+      const [{ data: settings, error: settingsError }, { data: subjects, error: subjectsError },
+        { data: stats }, { data: grades, error: gradesError }] = await Promise.all([
         db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle(),
         db.from("subjects").select("name").order("name"),
         db.from("ka_player_stats").select("game_xp,games_played,questions_answered,correct_answers,current_streak,best_streak,last_played_on").eq("user_id", user.id).maybeSingle(),
+        db.from("grades").select("name").eq("archived", false).order("sort_order"),
       ]);
-      if (settingsError || subjectsError) return errorResponse(503, "Knowledge Arena is not configured yet.");
-      if (!settings) return errorResponse(503, "Knowledge Arena database setup is pending.");
-      let preferredLanguageCode: string | null = null;
-      let selectedGradeLabel: string | null = null;
+      if (settingsError || subjectsError || gradesError || !settings) return errorResponse(503, "Knowledge Arena is not configured yet.");
+      let selectedGradeLabel: string | null = resolved?.gradeLabel || null;
+      let assignedGradeLabel: string | null = null;
       let availableGradeOptions: string[] = [];
-      if (ctx.gradeLabel.trim().toLocaleLowerCase() === "tina student") {
-        const [{ data: preference, error: preferenceError }, { data: grades, error: gradesError }] = await Promise.all([
-          db.from("ka_student_preferences").select("selected_grade_label").eq("user_id", user.id).maybeSingle(),
-          db.from("grades").select("name").eq("archived", false).order("sort_order"),
-        ]);
-        if (preferenceError || gradesError) return errorResponse(503, "Could not load your grade options.");
-        selectedGradeLabel = preference?.selected_grade_label || null;
-        availableGradeOptions = [...new Set((grades || []).map((g: any) => String(g.name || "").trim())
-          .filter((name: string) => /^(?:[1-9]|1[0-2]|PU)$/i.test(name)))];
+      let preferredLanguageCode: string | null = null;
+      if (profile.role === "Student") {
+        const ctx = await studentContext(db, profile);
+        if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
+        assignedGradeLabel = ctx.gradeLabel;
+        if (ctx.gradeLabel.trim().toLocaleLowerCase() === "language") {
+          const { data: preference, error } = await db.from("ka_student_preferences")
+            .select("preferred_language_code").eq("user_id", user.id).maybeSingle();
+          if (error) return errorResponse(503, "Could not load your saved language preference.");
+          preferredLanguageCode = preference?.preferred_language_code || "en";
+        }
+        if (ctx.gradeLabel.trim().toLocaleLowerCase() === "tina student") {
+          const { data: preference, error } = await db.from("ka_student_preferences")
+            .select("selected_grade_label").eq("user_id", user.id).maybeSingle();
+          if (error) return errorResponse(503, "Could not load your saved grade.");
+          selectedGradeLabel = preference?.selected_grade_label || null;
+          availableGradeOptions = (grades || []).map((g: any) => String(g.name)).filter((name: string) => name.toLocaleLowerCase() !== "tina student");
+        }
+      } else {
+        availableGradeOptions = (grades || []).map((g: any) => String(g.name));
       }
-      if (ctx.gradeLabel.trim().toLocaleLowerCase() === "language") {
-        const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
-          .select("preferred_language_code").eq("user_id", user.id).maybeSingle();
-        if (preferenceError) return errorResponse(503, "Could not load your saved language preference.");
-        preferredLanguageCode = preference?.preferred_language_code || "en";
+      const subjectNames = uniqueSubjectNames(subjects).filter((s) => !(settings.disabled_subjects || []).includes(s));
+      let availableIds: string[] = [];
+      if (settings.games_enabled && selectedGradeLabel) {
+        const [{ data: questionRows, error: questionError }, { data: gradeGames, error: gradeGameError },
+          { data: gradeSubjects, error: gradeSubjectError }, { data: gameSubjectRules, error: gameSubjectError }] = await Promise.all([
+          db.from("ka_questions").select("game_type,subject").eq("status", "published")
+            .in("grade_label", [selectedGradeLabel, "General"])
+            .or("expires_at.is.null,expires_at.gt." + new Date().toISOString()).limit(5000),
+          db.from("ka_game_grade_rules").select("game_type").eq("grade_label", selectedGradeLabel).eq("enabled", true),
+          db.from("ka_grade_subject_rules").select("subject").eq("grade_label", selectedGradeLabel).eq("enabled", true),
+          db.from("ka_game_subject_rules").select("game_type,subject").eq("enabled", true),
+        ]);
+        if (questionError || gradeGameError || gradeSubjectError || gameSubjectError) return errorResponse(503, "Could not check grade and game suitability.");
+        const enabledGameIds = new Set((gradeGames || []).map((x: any) => x.game_type));
+        const enabledSubjects = new Set((gradeSubjects || []).map((x: any) => String(x.subject).toLocaleLowerCase()));
+        const gameSubjectMap = new Map<string, Set<string>>();
+        for (const rule of gameSubjectRules || []) {
+          if (!gameSubjectMap.has(rule.game_type)) gameSubjectMap.set(rule.game_type, new Set());
+          gameSubjectMap.get(rule.game_type)!.add(String(rule.subject).toLocaleLowerCase());
+        }
+        const rows = (questionRows || []).filter((q: any) =>
+          !(settings.disabled_game_types || []).includes(q.game_type) &&
+          !(settings.disabled_subjects || []).includes(q.subject) &&
+          enabledSubjects.has(String(q.subject).toLocaleLowerCase()));
+        const questionCounts = new Map<string, number>();
+        for (const q of rows) {
+          if (!enabledGameIds.has(q.game_type) || !enabledSubjects.has(String(q.subject).toLocaleLowerCase()) ||
+              !gameSubjectMap.get(q.game_type)?.has(String(q.subject).toLocaleLowerCase())) continue;
+          questionCounts.set(q.game_type, (questionCounts.get(q.game_type) || 0) + 1);
+        }
+        // Show a game only when at least five suitable, published questions are available.
+        availableIds = GAME_CATALOG.filter((game) => (questionCounts.get(game.id) || 0) >= 5).map((game) => game.id);
       }
       return json(200, {
         games_enabled: settings.games_enabled,
-        games: [
-          { id: "word_master", name: "Word Master", category: "academic" },
-          { id: "number_quest", name: "Number Quest", category: "academic" },
-          { id: "science_explorer", name: "Science Explorer", category: "academic" },
-          { id: "quick_quiz", name: "Quick Quiz", category: "fun" },
-          { id: "brain_teaser", name: "Brain Teaser", category: "fun" },
-          { id: "memory_challenge", name: "Memory Challenge", category: "fun" },
-        ].filter((g) => settings.games_enabled && !(settings.disabled_game_types || []).includes(g.id)),
-        subjects: uniqueSubjectNames(subjects).filter((s) => !(settings.disabled_subjects || []).includes(s)),
+        games: GAME_CATALOG.filter((g) => availableIds.includes(g.id)),
+        subjects: subjectNames,
         progress: stats || { game_xp: 0, games_played: 0, questions_answered: 0, correct_answers: 0, current_streak: 0, best_streak: 0 },
-        grade_label: selectedGradeLabel || ctx.gradeLabel,
-        assigned_grade_label: ctx.gradeLabel,
+        grade_label: selectedGradeLabel || assignedGradeLabel || "",
+        assigned_grade_label: assignedGradeLabel || "",
         selected_grade_label: selectedGradeLabel,
         available_grade_options: availableGradeOptions,
         preferred_language_code: preferredLanguageCode,
+        role: profile.role,
       });
     }
 
@@ -160,58 +443,50 @@ Deno.serve(async (req) => {
     }
 
     if (action === "get_questions") {
-      const ctx = await studentContext(db, profile);
-      if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
       const gameType = body.game_type;
       if (!validGameType(gameType)) return errorResponse(400, "Invalid game type.");
-      let subject = typeof body.subject === "string" ? body.subject.trim() : "";
-      const isLanguageStudent = ctx.gradeLabel.trim().toLocaleLowerCase() === "language";
-      // Enforce game-to-subject routing on the server as well as in the UI.
-      // Quick Quiz may intentionally load across all subjects.
-      if (!isLanguageStudent) {
-        const gameSubjects: Record<string, string> = {
-          word_master: "English",
-          number_quest: "Math",
-          brain_teaser: "Math",
-          science_explorer: "Science",
-          memory_challenge: "Science",
-        };
-        if (gameSubjects[gameType]) subject = gameSubjects[gameType];
-        else if (subject.toLocaleLowerCase() === "all") subject = "";
-      }
-      if (!subject && gameType !== "quick_quiz") return errorResponse(400, "A subject is required for this game.");
-      let effectiveGradeLabel = ctx.gradeLabel;
-      if (ctx.gradeLabel.trim().toLocaleLowerCase() === "tina student") {
-        const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
-          .select("selected_grade_label").eq("user_id", user.id).maybeSingle();
-        if (preferenceError) return errorResponse(503, "Could not verify your saved grade.");
-        if (!preference?.selected_grade_label) return errorResponse(400, "Please select your school grade first.");
-        effectiveGradeLabel = preference.selected_grade_label;
-      }
-      const difficulty = body.difficulty === undefined ? "" : String(body.difficulty);
+      const resolved = await playerGrade(db, profile, user.id, body.grade_label);
+      if (!resolved) return errorResponse(400, "Select a valid grade before starting a game.");
+      const effectiveGradeLabel = resolved.gradeLabel;
       let languageCode = body.language_code === undefined ? "" : String(body.language_code);
-      if (difficulty && !["easy", "medium", "hard"].includes(difficulty)) return errorResponse(400, "Invalid difficulty.");
       if (languageCode && !["en","hi","kn","sa","fr"].includes(languageCode)) return errorResponse(400, "Invalid question language.");
-      if (isLanguageStudent) {
-        const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
-          .select("preferred_language_code").eq("user_id", user.id).maybeSingle();
-        if (preferenceError) return errorResponse(503, "Could not verify your saved language preference.");
-        const savedCode = preference?.preferred_language_code || "en";
-        const languageNames: Record<string, string> = { en: "English", hi: "Hindi", kn: "Kannada", sa: "Sanskrit", fr: "French" };
-        if (languageCode && languageCode !== savedCode) return errorResponse(403, "Your selected language does not match your saved preference.");
-        if (subject !== languageNames[savedCode]) return errorResponse(403, "Choose your saved language before starting Word Master.");
-        languageCode = savedCode;
-      }
+      if (body.difficulty && !["easy","medium","hard"].includes(String(body.difficulty))) return errorResponse(400, "Invalid difficulty.");
       const { data: settings } = await db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle();
       if (!settings?.games_enabled || (settings.disabled_game_types || []).includes(gameType)) return errorResponse(423, "This game is currently unavailable.");
-      if (subject && (settings.disabled_subjects || []).includes(subject)) return errorResponse(423, "This subject is currently unavailable.");
+      const { data: subjectRows, error: subjectError } = await db.from("subjects").select("name").order("name");
+      if (subjectError) return errorResponse(503, "Could not load the subject catalogue.");
+      const [{ data: gradeGame, error: gradeGameError }, { data: gradeSubjectRows, error: gradeSubjectError },
+        { data: gameSubjectRows, error: gameSubjectError }] = await Promise.all([
+        db.from("ka_game_grade_rules").select("enabled").eq("game_type", gameType).eq("grade_label", effectiveGradeLabel).maybeSingle(),
+        db.from("ka_grade_subject_rules").select("subject").eq("grade_label", effectiveGradeLabel).eq("enabled", true),
+        db.from("ka_game_subject_rules").select("subject").eq("game_type", gameType).eq("enabled", true),
+      ]);
+      if (gradeGameError || gradeSubjectError || gameSubjectError) return errorResponse(503, "Could not verify academic suitability.");
+      if (!gradeGame?.enabled) return errorResponse(423, "This game is not configured for your selected grade.");
+      const allSubjects = uniqueSubjectNames(subjectRows).filter((s) => !(settings.disabled_subjects || []).includes(s));
+      const eligibleSubjects = new Set((gradeSubjectRows || []).map((x: any) => String(x.subject).toLocaleLowerCase()));
+      const configuredGameSubjects = new Set((gameSubjectRows || []).map((x: any) => String(x.subject).toLocaleLowerCase()));
+      let allowedSubjects = gameSubjects(gameType, allSubjects).filter((s) =>
+        eligibleSubjects.has(s.toLocaleLowerCase()) && configuredGameSubjects.has(s.toLocaleLowerCase()));
+      if (profile.role === "Student" && ["word_master","word_builder"].includes(gameType)) {
+        const ctx = await studentContext(db, profile);
+        if (ctx?.gradeLabel.trim().toLocaleLowerCase() === "language") {
+          const { data: preference, error } = await db.from("ka_student_preferences")
+            .select("preferred_language_code").eq("user_id", user.id).maybeSingle();
+          if (error) return errorResponse(503, "Could not verify your saved language preference.");
+          languageCode = preference?.preferred_language_code || "en";
+          const languageNames: Record<string, string> = { en: "English", hi: "Hindi", kn: "Kannada", sa: "Sanskrit", fr: "French" };
+          allowedSubjects = allowedSubjects.filter((s) => s.toLocaleLowerCase() === languageNames[languageCode].toLocaleLowerCase());
+        }
+      }
+      if (!allowedSubjects.length) return json(200, { questions: [], grade_label: effectiveGradeLabel });
       let query = db.from("ka_questions")
         .select("id,subject,topic,grade_label,language_code,difficulty,game_type,prompt,options")
         .eq("status", "published").in("grade_label", [effectiveGradeLabel, "General"]).eq("game_type", gameType)
+        .in("subject", allowedSubjects)
         .or("expires_at.is.null,expires_at.gt." + new Date().toISOString())
         .order("created_at", { ascending: false }).limit(Math.min(Math.max(safeNumber(body.limit, 10), 1), 20));
-      if (subject) query = query.eq("subject", subject);
-      if (difficulty) query = query.eq("difficulty", difficulty);
+      if (body.difficulty) query = query.eq("difficulty", String(body.difficulty));
       if (languageCode) query = query.eq("language_code", languageCode);
       const { data, error } = await query;
       if (error) return errorResponse(503, "Could not load questions.");
@@ -221,13 +496,31 @@ Deno.serve(async (req) => {
     if (action === "get_daily_challenge") {
       const ctx = await studentContext(db, profile);
       if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
+      let dailyGrade = ctx.gradeLabel;
+      if (ctx.gradeLabel.trim().toLocaleLowerCase() === "tina student") {
+        const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
+          .select("selected_grade_label").eq("user_id", user.id).maybeSingle();
+        if (preferenceError) return errorResponse(503, "Could not verify your saved grade.");
+        if (!preference?.selected_grade_label) return errorResponse(400, "Please select your school grade first.");
+        dailyGrade = preference.selected_grade_label;
+      }
       const today = indiaDate();
       const { data: dailySettings } = await db.from("ka_settings")
         .select("daily_challenge_enabled,games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle();
       if (!dailySettings?.daily_challenge_enabled || !dailySettings.games_enabled) return json(200, { challenge: null, paused: true });
+      const [{ data: gradeSubjects, error: gradeSubjectError }, { data: gradeGames, error: gradeGameError },
+        { data: gameSubjectsRows, error: gameSubjectError }] = await Promise.all([
+        db.from("ka_grade_subject_rules").select("subject").eq("grade_label", dailyGrade).eq("enabled", true),
+        db.from("ka_game_grade_rules").select("game_type").eq("grade_label", dailyGrade).eq("enabled", true),
+        db.from("ka_game_subject_rules").select("subject").eq("game_type", "quick_quiz").eq("enabled", true),
+      ]);
+      if (gradeSubjectError || gradeGameError || gameSubjectError) return errorResponse(503, "Could not verify daily challenge suitability.");
+      const eligibleSubjects = new Set((gradeSubjects || []).map((x: any) => String(x.subject).toLocaleLowerCase()));
+      const eligibleGames = new Set((gradeGames || []).map((x: any) => x.game_type));
+      const quickQuizSubjects = new Set((gameSubjectsRows || []).map((x: any) => String(x.subject).toLocaleLowerCase()));
       const { data: challenge, error } = await db.from("ka_daily_challenges")
         .select("id,challenge_date,grade_label,title,description,status")
-        .eq("challenge_date", today).eq("grade_label", ctx.gradeLabel).eq("status", "published").maybeSingle();
+        .eq("challenge_date", today).eq("grade_label", dailyGrade).eq("status", "published").maybeSingle();
       if (error) return errorResponse(503, "Could not load today's challenge.");
       if (!challenge) return json(200, { challenge: null });
       const { data: items, error: itemError } = await db.from("ka_daily_challenge_items")
@@ -235,7 +528,12 @@ Deno.serve(async (req) => {
         .eq("challenge_id", challenge.id).order("sort_order");
       if (itemError) return errorResponse(503, "Could not load today's challenge questions.");
       const questions = (items || []).map((x: { question: any }) => x.question)
-        .filter((q: any) => q && q.status === "published" && (!q.expires_at || Date.parse(q.expires_at) > Date.now()) && q.grade_label === ctx.gradeLabel &&
+        .filter((q: any) => q && q.status === "published" &&
+          (!q.expires_at || Date.parse(q.expires_at) > Date.now()) &&
+          [dailyGrade, "General"].includes(q.grade_label) &&
+          eligibleGames.has(q.game_type) && q.game_type === "quick_quiz" &&
+          eligibleSubjects.has(String(q.subject).toLocaleLowerCase()) &&
+          quickQuizSubjects.has(String(q.subject).toLocaleLowerCase()) &&
           !(dailySettings.disabled_game_types || []).includes(q.game_type) &&
           !(dailySettings.disabled_subjects || []).includes(q.subject));
       if (questions.length !== 10) return json(200, { challenge: null, questions: [], unavailable: true });
@@ -243,8 +541,6 @@ Deno.serve(async (req) => {
     }
 
     if (action === "submit_attempt") {
-      const ctx = await studentContext(db, profile);
-      if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
       const gameType = body.game_type;
       if (!validGameType(gameType)) return errorResponse(400, "Invalid game type.");
       const selections = body.answers;
@@ -259,14 +555,9 @@ Deno.serve(async (req) => {
         seen.add(item.question_id);
       }
       const ids = [...seen];
-      let effectiveGradeLabel = ctx.gradeLabel;
-      if (ctx.gradeLabel.trim().toLocaleLowerCase() === "tina student") {
-        const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
-          .select("selected_grade_label").eq("user_id", user.id).maybeSingle();
-        if (preferenceError) return errorResponse(503, "Could not verify your saved grade.");
-        if (!preference?.selected_grade_label) return errorResponse(400, "Please select your school grade first.");
-        effectiveGradeLabel = preference.selected_grade_label;
-      }
+      const resolved = await playerGrade(db, profile, user.id, body.grade_label);
+      if (!resolved) return errorResponse(400, "Select a valid grade before submitting this game.");
+      const effectiveGradeLabel = resolved.gradeLabel;
       const { data: questions, error: questionError } = await db.from("ka_questions")
         .select("id,subject,topic,grade_label,difficulty,game_type,prompt,options,explanation")
         .in("id", ids).eq("status", "published").in("grade_label", [effectiveGradeLabel, "General"])
@@ -275,7 +566,22 @@ Deno.serve(async (req) => {
       const challengeId = typeof body.challenge_id === "string" ? body.challenge_id : null;
       if (questions.some((q: any) => q.game_type !== gameType)) return errorResponse(400, "Questions do not match the selected game.");
       const subjectSet = new Set(questions.map((q: any) => q.subject));
-      if (!challengeId && subjectSet.size !== 1) return errorResponse(400, "A practice attempt must contain questions from one subject.");
+      const { data: subjectRows, error: subjectError } = await db.from("subjects").select("name");
+      if (subjectError) return errorResponse(503, "Could not verify question subjects.");
+      const [{ data: gradeGame, error: gradeGameError }, { data: gradeSubjectRows, error: gradeSubjectError },
+        { data: gameSubjectRows, error: gameSubjectError }] = await Promise.all([
+        db.from("ka_game_grade_rules").select("enabled").eq("game_type", gameType).eq("grade_label", effectiveGradeLabel).maybeSingle(),
+        db.from("ka_grade_subject_rules").select("subject").eq("grade_label", effectiveGradeLabel).eq("enabled", true),
+        db.from("ka_game_subject_rules").select("subject").eq("game_type", gameType).eq("enabled", true),
+      ]);
+      if (gradeGameError || gradeSubjectError || gameSubjectError || !gradeGame?.enabled) return errorResponse(423, "This game is not configured for your selected grade.");
+      const eligibleSubjects = new Set((gradeSubjectRows || []).map((x: any) => String(x.subject).toLocaleLowerCase()));
+      const configuredGameSubjects = new Set((gameSubjectRows || []).map((x: any) => String(x.subject).toLocaleLowerCase()));
+      const permittedSubjects = gameSubjects(gameType, uniqueSubjectNames(subjectRows)).filter((s) =>
+        eligibleSubjects.has(s.toLocaleLowerCase()) && configuredGameSubjects.has(s.toLocaleLowerCase()));
+      if (questions.some((q: any) => !permittedSubjects.some((s) => s.toLocaleLowerCase() === String(q.subject).toLocaleLowerCase()))) {
+        return errorResponse(400, "One or more questions do not belong to this game's configured subjects.");
+      }
       const { data: gameSettings } = await db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle();
       if (!gameSettings?.games_enabled ||
           questions.some((q: any) => (gameSettings.disabled_game_types || []).includes(q.game_type)) ||
@@ -306,11 +612,11 @@ Deno.serve(async (req) => {
       if (challengeId) {
         const { data: challenge, error: challengeError } = await db.from("ka_daily_challenges")
           .select("id,status,challenge_date,grade_label").eq("id", challengeId).eq("status", "published").maybeSingle();
-        if (challengeError || !challenge || challenge.challenge_date !== today || challenge.grade_label !== ctx.gradeLabel) return errorResponse(400, "Daily challenge is not active for this grade.");
+        if (challengeError || !challenge || challenge.challenge_date !== today || challenge.grade_label !== effectiveGradeLabel) return errorResponse(400, "Daily challenge is not active for this grade.");
         const { data: challengeItems, error: challengeItemsError } = await db.from("ka_daily_challenge_items")
           .select("question_id,question:ka_questions(grade_label)").eq("challenge_id", challengeId);
         const eligibleItems = (challengeItems || []).filter((x: any) => x.question &&
-          x.question.grade_label === ctx.gradeLabel);
+          [effectiveGradeLabel, "General"].includes(x.question.grade_label));
         if (challengeItemsError || !challengeItems || ids.length !== eligibleItems.length || ids.some((id) => !eligibleItems.some((x: any) => x.question_id === id))) {
           return errorResponse(400, "Attempt includes questions outside today's challenge.");
         }
@@ -373,8 +679,14 @@ Deno.serve(async (req) => {
     if (action === "get_leaderboard") {
       const ctx = await studentContext(db, profile);
       if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
-      const { data, error } = await db.from("ka_player_stats")
-        .select("user_id,game_xp,games_played").order("game_xp", { ascending: false }).order("games_played", { ascending: false }).limit(100);
+      const { data: studentProfiles, error: profileError } = await db.from("profiles")
+        .select("id").eq("role", "Student").not("linked_student_id", "is", null);
+      if (profileError) return errorResponse(503, "Could not load leaderboard eligibility.");
+      const studentIds = (studentProfiles || []).map((x: any) => x.id);
+      const { data, error } = studentIds.length ? await db.from("ka_player_stats")
+        .select("user_id,game_xp,games_played").in("user_id", studentIds)
+        .order("game_xp", { ascending: false }).order("games_played", { ascending: false }).limit(100)
+        : { data: [], error: null };
       if (error) return errorResponse(503, "Could not load leaderboard.");
       return json(200, { leaderboard: (data || []).map((x: any, i: number) => ({
         rank: i + 1, display_name: "Player " + (i + 1), game_xp: x.game_xp, games_played: x.games_played,
@@ -465,10 +777,128 @@ Deno.serve(async (req) => {
       ]);
       if (gradeError || subjectError) return errorResponse(503, "Could not load grade and subject options.");
       return json(200, {
-        grades: [...new Set(["General", ...(grades || []).map((x: any) => String(x.name))])],
-        subjects: uniqueSubjectNames(subjects),
-        game_types: ["word_master","number_quest","science_explorer","quick_quiz","brain_teaser","memory_challenge"],
+        grades: [...new Set(["General", ...(grades || []).map((x: any) => String(x.name)).filter((name: string) => name.toLocaleLowerCase() !== "tina student")])],
+        subjects: uniqueSubjectNames(subjects).filter((s) => !["all","math + science"].includes(s.toLocaleLowerCase())),
+        game_types: GAME_CATALOG.map((game) => game.id),
       });
+    }
+
+    if (action === "get_admin_suitability") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const [{ data: gradeSubjects, error: gsError }, { data: gameGrades, error: ggError },
+        { data: gameSubjectsRows, error: gsrError }, { data: grades, error: gradesError },
+        { data: subjects, error: subjectsError }] = await Promise.all([
+        db.from("ka_grade_subject_rules").select("grade_label,subject,enabled,source").order("grade_label").order("subject"),
+        db.from("ka_game_grade_rules").select("game_type,grade_label,enabled").order("grade_label"),
+        db.from("ka_game_subject_rules").select("game_type,subject,enabled").order("game_type"),
+        db.from("grades").select("name").eq("archived", false).order("sort_order"),
+        db.from("subjects").select("name").order("name"),
+      ]);
+      if (gsError || ggError || gsrError || gradesError || subjectsError) return errorResponse(503, "Could not load suitability settings. Apply the Knowledge Arena suitability migration first.");
+      return json(200, { grade_subject_rules: gradeSubjects || [], game_grade_rules: gameGrades || [],
+        game_subject_rules: gameSubjectsRows || [], grades: [...new Set((grades || []).map((x: any) => x.name).filter((name: string) => String(name).toLocaleLowerCase() !== "tina student"))],
+        subjects: uniqueSubjectNames(subjects).filter((s) => !["all","math + science"].includes(s.toLocaleLowerCase())), games: GAME_CATALOG });
+    }
+
+    if (action === "set_suitability") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const kind = String(body.kind || ""), enabled = body.enabled;
+      if (typeof enabled !== "boolean") return errorResponse(400, "enabled must be true or false.");
+      let table = "", key: Record<string,string> = {};
+      if (kind === "grade_subject") { table = "ka_grade_subject_rules"; key = { grade_label: String(body.grade_label || ""), subject: String(body.subject || "") }; }
+      else if (kind === "game_grade") { table = "ka_game_grade_rules"; key = { game_type: String(body.game_type || ""), grade_label: String(body.grade_label || "") }; }
+      else if (kind === "game_subject") { table = "ka_game_subject_rules"; key = { game_type: String(body.game_type || ""), subject: String(body.subject || "") }; }
+      else return errorResponse(400, "Unknown suitability rule.");
+      if (Object.values(key).some((v) => !v) || (key.game_type && !validGameType(key.game_type))) return errorResponse(400, "Invalid suitability rule details.");
+      if (key.grade_label) {
+        const { data: grade } = await db.from("grades").select("name").eq("name", key.grade_label).eq("archived", false).maybeSingle();
+        if (!grade || String(key.grade_label).toLocaleLowerCase() === "tina student") return errorResponse(400, "Choose a valid academic grade.");
+      }
+      if (key.subject) {
+        const { data: subject } = await db.from("subjects").select("name").eq("name", key.subject).maybeSingle();
+        if (!subject || ["all","math + science"].includes(String(key.subject).toLocaleLowerCase())) return errorResponse(400, "Choose an individual LIB subject.");
+      }
+      const { error } = await db.from(table).upsert({ ...key, enabled, source: kind === "grade_subject" ? "admin" : undefined,
+        updated_at: new Date().toISOString(), updated_by: user.id });
+      if (error) return errorResponse(503, "Could not save the suitability rule.");
+      return json(200, { saved: true, kind, enabled });
+    }
+
+    if (action === "get_admin_questions") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      let query = db.from("ka_questions")
+        .select("id,subject,topic,grade_label,language_code,difficulty,game_type,prompt,options,explanation,status,created_at")
+        .order("created_at", { ascending: false }).limit(100);
+      if (body.grade_label) query = query.eq("grade_label", String(body.grade_label));
+      if (body.subject) query = query.eq("subject", String(body.subject));
+      if (body.game_type) query = query.eq("game_type", String(body.game_type));
+      if (body.status) query = query.eq("status", String(body.status));
+      const { data, error } = await query;
+      if (error) return errorResponse(503, "Could not load the Knowledge Arena question bank.");
+      const questionIds = (data || []).map((q: any) => q.id);
+      const { data: keys, error: keyError } = questionIds.length
+        ? await db.from("ka_question_keys").select("question_id,correct_option").in("question_id", questionIds)
+        : { data: [], error: null };
+      if (keyError) return errorResponse(503, "Could not load question answer keys for Admin review.");
+      const keyMap = new Map((keys || []).map((x: any) => [x.question_id, x.correct_option]));
+      return json(200, { questions: (data || []).map((q: any) => ({
+        ...q, correct_option: keyMap.get(q.id) ?? null,
+      })) });
+    }
+
+    if (action === "admin_question") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const questionId = String(body.question_id || "");
+      if (!questionId) return errorResponse(400, "Question ID is required.");
+      const { data: existing, error: readError } = await db.from("ka_questions")
+        .select("id,status").eq("id", questionId).maybeSingle();
+      if (readError || !existing) return errorResponse(404, "Question not found.");
+      const operation = String(body.operation || "");
+      if (operation === "archive") {
+        const { data, error } = await db.from("ka_questions").update({ status: "rejected" })
+          .eq("id", questionId).select("id,status").single();
+        if (error) return errorResponse(503, "Could not remove this question from play.");
+        return json(200, { question: data });
+      }
+      if (operation === "publish") {
+        const { data, error } = await db.from("ka_questions").update({
+          status: "published", published_at: new Date().toISOString(),
+        }).eq("id", questionId).select("id,status,published_at").single();
+        if (error) return errorResponse(503, "Could not publish this question.");
+        return json(200, { question: data });
+      }
+      if (operation === "delete") {
+        const { error: dailyError } = await db.from("ka_daily_challenge_items").delete().eq("question_id", questionId);
+        if (dailyError) return errorResponse(503, "Could not remove question references from daily challenges.");
+        const { error: keyError } = await db.from("ka_question_keys").delete().eq("question_id", questionId);
+        if (keyError) return errorResponse(503, "Could not remove the question answer key.");
+        const { error } = await db.from("ka_questions").delete().eq("id", questionId);
+        if (error) return errorResponse(503, "Could not delete this question.");
+        return json(200, { deleted: true, question_id: questionId });
+      }
+      if (operation === "update") {
+        const prompt = String(body.prompt || "").trim();
+        const explanation = String(body.explanation || "").trim();
+        const options = body.options;
+        const correct = safeNumber(body.correct_option, -1);
+        if (prompt.length < 12 || prompt.length > 700 || explanation.length < 8 || explanation.length > 900 ||
+            !Array.isArray(options) || options.length !== 4 ||
+            options.some((x: any) => typeof x !== "string" || !x.trim() || x.length > 250) ||
+            new Set(options.map((x: string) => x.trim().toLocaleLowerCase())).size !== 4 ||
+            !Number.isInteger(correct) || correct < 0 || correct > 3) {
+          return errorResponse(400, "Enter a valid question, four distinct options, an explanation and a correct option.");
+        }
+        const { error: updateError } = await db.from("ka_questions").update({
+          prompt, options, explanation, topic: String(body.topic || "General").trim().slice(0, 120),
+          difficulty: ["easy","medium","hard"].includes(String(body.difficulty)) ? String(body.difficulty) : "medium",
+        }).eq("id", questionId);
+        if (updateError) return errorResponse(503, "Could not update the question.");
+        const { error: keyError } = await db.from("ka_question_keys").update({ correct_option: correct, updated_at: new Date().toISOString() })
+          .eq("question_id", questionId);
+        if (keyError) return errorResponse(503, "Question updated, but its answer key could not be saved. Please retry the answer-key update.");
+        return json(200, { updated: true, question_id: questionId });
+      }
+      return errorResponse(400, "Unknown question operation.");
     }
 
     if (action === "get_admin_usage_reviews") {
@@ -493,6 +923,149 @@ Deno.serve(async (req) => {
         .order("created_at", { ascending: false }).limit(50);
       if (error) return errorResponse(503, "Could not load generation jobs.");
       return json(200, { jobs: data || [] });
+    }
+
+
+    if (action === "get_admin_guest_leads") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const status = String(body.status || "").trim();
+      const search = String(body.search || "").trim().slice(0, 100);
+      const gradeLabel = String(body.grade_label || "").trim();
+      const dateFrom = String(body.date_from || "").trim();
+      const dateTo = String(body.date_to || "").trim();
+      const limit = Math.max(1, Math.min(100, Math.floor(safeNumber(body.limit, 50))));
+      const offset = Math.max(0, Math.floor(safeNumber(body.offset, 0)));
+      let query = db.from("ka_guest_leads").select("id,mobile_e164,last_guest_name,last_grade_label,enquiry_consent,marketing_consent,lead_status,converted_student_id,first_seen_at,last_seen_at,last_activity_at,last_game_type,last_subject", { count: "exact" })
+        .order("last_seen_at", { ascending: false }).range(offset, offset + limit - 1);
+      if (status && GUEST_STATUSES.includes(status)) query = query.eq("lead_status", status);
+      if (gradeLabel) query = query.eq("last_grade_label", gradeLabel);
+      if (dateFrom && /^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) query = query.gte("first_seen_at", dateFrom + "T00:00:00+05:30");
+      if (dateTo && /^\d{4}-\d{2}-\d{2}$/.test(dateTo)) query = query.lte("first_seen_at", dateTo + "T23:59:59+05:30");
+      if (search) { const term = search.replace(/[(),%_]/g, ""); query = query.or("mobile_e164.ilike.%" + term + "%,last_guest_name.ilike.%" + term + "%"); }
+      const { data: leads, error, count } = await query;
+      if (error) return errorResponse(503, "Could not load guest leads.");
+      const ids = (leads || []).map((x: any) => x.id);
+      const [{ data: sessions, error: sessionError }, { data: activity, error: activityError }] = await Promise.all([
+        ids.length ? db.from("ka_guest_sessions").select("id,lead_id,guest_name,grade_label,started_at,last_seen_at,expires_at,ended_at").in("lead_id", ids).order("started_at", { ascending: false }) : Promise.resolve({ data: [], error: null }),
+        ids.length ? db.from("ka_guest_activity").select("lead_id,game_type,subject,question_count,correct_count,accuracy,completed_at").in("lead_id", ids).order("completed_at", { ascending: false }) : Promise.resolve({ data: [], error: null })
+      ]);
+      if (sessionError || activityError) return errorResponse(503, "Could not load guest activity.");
+      const sessionCounts = new Map<string, number>();
+      const gameCounts = new Map<string, number>();
+      const activityByLead = new Map<string, any[]>();
+      for (const row of sessions || []) sessionCounts.set(row.lead_id, (sessionCounts.get(row.lead_id) || 0) + 1);
+      for (const row of activity || []) {
+        gameCounts.set(row.lead_id, (gameCounts.get(row.lead_id) || 0) + 1);
+        const arr = activityByLead.get(row.lead_id) || [];
+        if (arr.length < 8) arr.push(row);
+        activityByLead.set(row.lead_id, arr);
+      }
+      return json(200, { total: count || 0, leads: (leads || []).map((x: any) => ({
+        ...x, sessions_count: sessionCounts.get(x.id) || 0, games_completed: gameCounts.get(x.id) || 0,
+        recent_activity: activityByLead.get(x.id) || []
+      })) });
+    }
+
+    if (action === "get_admin_guest_lead_detail") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const leadId = String(body.lead_id || "");
+      if (!leadId) return errorResponse(400, "Lead ID is required.");
+      const [{ data: lead, error: leadError }, { data: sessions, error: sessionsError },
+        { data: activity, error: activityError }, { data: consents, error: consentsError },
+        { data: notes, error: notesError }, { data: events, error: eventsError }] = await Promise.all([
+        db.from("ka_guest_leads").select("*").eq("id", leadId).maybeSingle(),
+        db.from("ka_guest_sessions").select("id,guest_name,grade_label,started_at,last_seen_at,expires_at,ended_at").eq("lead_id", leadId).order("started_at", { ascending: false }).limit(100),
+        db.from("ka_guest_activity").select("*").eq("lead_id", leadId).order("completed_at", { ascending: false }).limit(200),
+        db.from("ka_guest_consents").select("*").eq("lead_id", leadId).order("recorded_at", { ascending: false }).limit(100),
+        db.from("ka_guest_lead_notes").select("id,note,admin_user_id,created_at").eq("lead_id", leadId).order("created_at", { ascending: false }).limit(100),
+        db.from("ka_guest_promotion_events").select("promotion_id,event_type,created_at").eq("lead_id", leadId).order("created_at", { ascending: false }).limit(200)
+      ]);
+      if (leadError || sessionsError || activityError || consentsError || notesError || eventsError) return errorResponse(503, "Could not load guest lead details.");
+      if (!lead) return errorResponse(404, "Guest lead not found.");
+      return json(200, { lead, sessions: sessions || [], activity: activity || [], consents: consents || [], notes: notes || [], promotion_events: events || [] });
+    }
+
+    if (action === "admin_update_guest_lead") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const leadId = String(body.lead_id || "");
+      const status = String(body.lead_status || "");
+      const note = String(body.note || "").trim();
+      const studentId = body.converted_student_id ? String(body.converted_student_id) : null;
+      if (!leadId || !GUEST_STATUSES.includes(status)) return errorResponse(400, "Choose a valid lead status.");
+      if (note.length > 2000) return errorResponse(400, "Notes must be 2,000 characters or fewer.");
+      if (status === "Converted to Student" && !studentId) return errorResponse(400, "Select the existing LIB student record before marking this lead as converted.");
+      if (studentId) {
+        const { data: student, error: studentError } = await db.from("students").select("id").eq("id", studentId).eq("archived", false).maybeSingle();
+        if (studentError || !student) return errorResponse(400, "Select a valid active LIB student.");
+      }
+      const { data: updated, error } = await db.from("ka_guest_leads").update({
+        lead_status: status, ...(studentId ? { converted_student_id: studentId } : {}), updated_at: new Date().toISOString()
+      }).eq("id", leadId).select("id,lead_status,converted_student_id").maybeSingle();
+      if (error || !updated) return errorResponse(404, "Guest lead could not be updated.");
+      if (note) {
+        const { error: noteError } = await db.from("ka_guest_lead_notes").insert({ lead_id: leadId, admin_user_id: user.id, note });
+        if (noteError) return errorResponse(503, "Lead status was updated, but the note could not be saved.");
+      }
+      return json(200, { lead: updated });
+    }
+
+    if (action === "get_admin_guest_promotions") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const { data, error } = await db.from("ka_guest_promotions").select("*").order("display_order").order("created_at", { ascending: false }).limit(200);
+      if (error) return errorResponse(503, "Could not load guest promotions.");
+      const ids = (data || []).map((x: any) => x.id);
+      const { data: events, error: eventError } = ids.length
+        ? await db.from("ka_guest_promotion_events").select("promotion_id,event_type").in("promotion_id", ids)
+        : { data: [], error: null };
+      if (eventError) return errorResponse(503, "Could not load promotion performance.");
+      const counts = new Map<string, { view: number; click: number; dismiss: number }>();
+      for (const e of events || []) {
+        const c = counts.get(e.promotion_id) || { view: 0, click: 0, dismiss: 0 };
+        c[e.event_type as "view" | "click" | "dismiss"]++;
+        counts.set(e.promotion_id, c);
+      }
+      return json(200, { promotions: (data || []).map((p: any) => ({ ...p, metrics: counts.get(p.id) || { view: 0, click: 0, dismiss: 0 } })) });
+    }
+
+    if (action === "admin_save_guest_promotion") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const id = typeof body.id === "string" ? body.id : null;
+      const title = String(body.title || "").trim();
+      const description = String(body.body || "").trim();
+      const ctaLabel = String(body.cta_label || "Explore courses").trim();
+      const ctaUrl = String(body.cta_url || "").trim();
+      const trigger = String(body.trigger || "after_game");
+      const imageUrl = String(body.image_url || "").trim() || null;
+      const arrays = ["target_grades","target_game_types","target_subjects"] as const;
+      const targets: Record<string, string[]> = {};
+      for (const key of arrays) {
+        const value = body[key] === undefined ? [] : body[key];
+        if (!Array.isArray(value) || value.length > 50 || value.some((x) => typeof x !== "string" || x.length > 100)) return errorResponse(400, "Promotion targeting values are invalid.");
+        targets[key] = [...new Set(value as string[])];
+      }
+      if (!title || title.length > 120 || !description || description.length > 500 || !ctaLabel || ctaLabel.length > 50 ||
+          !isHttpsUrl(ctaUrl) || !["welcome","after_game","exit"].includes(trigger)) return errorResponse(400, "Enter a title, description, secure CTA URL and valid trigger.");
+      if (imageUrl && !isHttpsUrl(imageUrl)) return errorResponse(400, "Promotion image must use HTTPS.");
+      if (targets.target_game_types.some((x) => !validGameType(x))) return errorResponse(400, "One or more target games are invalid.");
+      const payload = { title, body: description, image_url: imageUrl, cta_label: ctaLabel, cta_url: ctaUrl, trigger,
+        target_grades: targets.target_grades, target_game_types: targets.target_game_types, target_subjects: targets.target_subjects,
+        display_order: Math.max(0, Math.min(10000, Math.floor(safeNumber(body.display_order, 100)))),
+        active: body.active === true, starts_at: body.starts_at || null, ends_at: body.ends_at || null,
+        created_by: user.id, updated_at: new Date().toISOString() };
+      const { data, error } = id
+        ? await db.from("ka_guest_promotions").update(payload).eq("id", id).select("*").maybeSingle()
+        : await db.from("ka_guest_promotions").insert(payload).select("*").single();
+      if (error || !data) return errorResponse(503, "Could not save the guest promotion.");
+      return json(200, { promotion: data });
+    }
+
+    if (action === "admin_delete_guest_promotion") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const id = String(body.id || "");
+      if (!id) return errorResponse(400, "Promotion ID is required.");
+      const { error } = await db.from("ka_guest_promotions").update({ active: false, updated_at: new Date().toISOString() }).eq("id", id);
+      if (error) return errorResponse(503, "Could not deactivate the promotion.");
+      return json(200, { deactivated: true });
     }
 
     if (action === "admin_control") {
@@ -564,6 +1137,18 @@ Deno.serve(async (req) => {
         }
         const { data: subjectRow } = await db.from("subjects").select("name").eq("name", subject).maybeSingle();
         if (!subjectRow) return errorResponse(400, "Unknown subject.");
+        const { data: gameSubject } = await db.from("ka_game_subject_rules").select("enabled")
+          .eq("game_type", gameType).eq("subject", subject).maybeSingle();
+        if (!gameSubject?.enabled) return errorResponse(423, "This game is not configured for the selected subject.");
+        if (gradeLabel !== "General") {
+          const [{ data: gradeGame }, { data: gradeSubject }] = await Promise.all([
+            db.from("ka_game_grade_rules").select("enabled").eq("game_type", gameType).eq("grade_label", gradeLabel).maybeSingle(),
+            db.from("ka_grade_subject_rules").select("enabled").eq("grade_label", gradeLabel).eq("subject", subject).maybeSingle(),
+          ]);
+          if (!gradeGame?.enabled || !gradeSubject?.enabled) {
+            return errorResponse(423, "This subject and game combination is not enabled for the selected grade.");
+          }
+        }
         const { data: job, error } = await db.from("ka_generation_jobs").insert({
           status: "queued", subject, topic: String(body.topic || subject).slice(0, 120),
           grade_label: gradeLabel, language_code: languageCode,

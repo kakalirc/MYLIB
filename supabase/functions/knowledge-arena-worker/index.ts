@@ -202,6 +202,22 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
     });
 
     const system = "You create high-quality, age-appropriate educational multiple-choice questions. Output only valid JSON. Never invent current events, recent facts, citations, URLs, or source claims. Prefer stable, evergreen knowledge and curriculum fundamentals. Exactly one answer must be correct. Avoid ambiguity, trick wording, stereotypes, sensitive topics, and facts that vary by region unless the region is specified.";
+    const gameGuidance: Record<string, string> = {
+      word_master: "Focus on vocabulary, spelling, meanings and language usage.",
+      word_builder: "Focus on word formation, spelling, vocabulary and grammar.",
+      number_quest: "Focus on mathematical concepts, number sense and calculations.",
+      math_sprint: "Focus on concise mental-maths and calculation challenges.",
+      science_explorer: "Focus on age-appropriate scientific concepts and applications.",
+      world_explorer: "Focus on geography, places, maps and physical or human geography.",
+      history_quest: "Focus on historical periods, events, people and chronology.",
+      society_culture_challenge: "Focus on sociology, society, culture, institutions and social change.",
+      civics_constitution_challenge: "Focus on civics, democracy, constitutional principles and governance.",
+      economics_explorer: "Focus on economic concepts, markets, production, demand and supply.",
+      money_matters: "Focus on financial literacy, savings, budgeting and responsible money decisions.",
+      quick_quiz: "Use varied subject knowledge checks.",
+      brain_teaser: "Focus on reasoning, patterns and logical thinking grounded in the selected subject.",
+      memory_challenge: "Create a short recall challenge using subject facts or patterns."
+    };
     const prompt = "Create " + job.requested_count + " original MCQ questions for LIB Knowledge Arena.\n"
       + "Return a JSON array only. Each object must have:\n"
       + "{\"subject\":string,\"topic\":string,\"grade_label\":string,\"language_code\":string,\"difficulty\":\"easy|medium|hard\",\"game_type\":string,\"prompt\":string,\"options\":[string,string,string,string],\"correct_option\":integer_zero_based,\"explanation\":string,\"source_reference\":null}\n"
@@ -212,6 +228,7 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       + "- Language: " + job.language_code + "\n"
       + "- Difficulty: " + job.difficulty + "\n"
       + "- Game type: " + job.game_type + "\n"
+       + "- Game-specific content guidance: " + (gameGuidance[job.game_type] || "Use the selected subject and grade.") + "\n"
       + "- Exactly four concise options and exactly one defensible correct answer.\n"
       + "- Use vocabulary and concepts suitable for the specified grade.\n"
       + "- Do not include current affairs or time-sensitive facts.\n"

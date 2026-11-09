@@ -6,17 +6,22 @@ on:
       - "supabase/functions/knowledge-arena/**"
       - "supabase/functions/knowledge-arena-worker/**"
       - "supabase/functions/_shared/knowledge-arena.ts"
+      - "supabase/config.toml"
+      - "supabase/migrations/**"
       - "knowledge-arena/**"
       - "student-portal-tabs.js"
       - "student-portal-tabs.css"
       - ".github/workflows/knowledge-arena-check.yml"
+      - ".github/workflows/build-user-guides.yml"
   push:
     branches:
       - "feature/knowledge-arena"
+      - "feature/knowledge-arena-full-subject-games"
     paths:
       - "supabase/functions/knowledge-arena/**"
       - "supabase/functions/knowledge-arena-worker/**"
       - "supabase/functions/_shared/knowledge-arena.ts"
+      - "supabase/config.toml"
       - "knowledge-arena/**"
       - "student-portal-tabs.js"
       - "student-portal-tabs.css"
@@ -52,6 +57,15 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Create disposable Supabase-compatible fixture
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/tests/schema-fixture.sql
+      - name: Test guest lead migration in a separate disposable database
+        run: |
+          createdb --maintenance-db="$DATABASE_URL" guest_ci
+          GUEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/guest_ci
+          psql "$GUEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/tests/schema-fixture.sql
+          psql "$GUEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261109100000_knowledge_arena_guest_leads.sql
+          psql "$GUEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261109150000_knowledge_arena_international_guest_numbers.sql
+          psql "$GUEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261109160000_knowledge_arena_atomic_guest_registration.sql
+          psql "$GUEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/tests/guest-leads-smoke.sql
       - name: Apply proposed Knowledge Arena schema to disposable database
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/proposed-schema.sql
       - name: Test grade challenges, duplicate prevention, worker lease and grants
@@ -71,14 +85,16 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
-      - name: Install Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-      - name: Type check Student/Admin API
+      - name: Install Deno from the official npm distribution
+        run: |
+          npm install --global deno@2.9.6
+          deno --version
+      - name: Type check Student/Teacher/Admin API
         run: deno check supabase/functions/knowledge-arena/index.ts
       - name: Type check generation worker
         run: deno check supabase/functions/knowledge-arena-worker/index.ts
+      - name: Test game catalogue and subject routing
+        run: deno test supabase/functions/_shared/knowledge-arena_test.ts
       - name: Test AI JSON response parsing and malformed-output handling
         run: deno test supabase/functions/knowledge-arena-worker/json-response_test.ts
       - name: Parse browser JavaScript

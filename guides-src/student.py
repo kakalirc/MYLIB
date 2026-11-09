@@ -134,10 +134,11 @@ def guide():
 
     g.add('knowledgearena', 'Fun Zone', 'Knowledge Arena: games and daily challenge', 'Practice independently with grade-matched questions. Game XP is separate from attendance rewards.', g2(
         box('Choose your grade', 'If the app asks you to choose a school grade, select the grade you currently study in. This saved Knowledge Arena preference is used to select questions; it does not change your LIB student profile or school record.'),
-        box('Choose a subject', 'The subject selector is a general filter, not a restriction that should hide unrelated games. Each game uses its own subject: Word Master uses English (or your selected language in a Language programme); Number Quest and Brain Teaser use Mathematics; Science Explorer and Memory Challenge use Science.'),
+        box('Choose a game', 'The subject selector is hidden. Choose a game and Knowledge Arena automatically selects questions from the subjects configured for that game and suitable for your grade.'),
+        box('Choose a grade', 'If you are a Tina Student account without a school grade, select your current grade. The saved choice is used for question matching and does not change your LIB student profile.'),
     ) + g2(
-        box('Quick Quiz', 'Quick Quiz follows the subject filter. Choose All to allow questions from all available subjects, or choose one subject to focus the quiz.'),
-        box('Daily challenge', 'A fresh set of ten English Quick Quiz questions is published for your grade each India-local day when enough suitable questions are available. Attempts are unlimited.'),
+        box('Language games', 'Language-programme students can choose their preferred language. The choice is saved and used for Word Master and Word Builder.'),
+        box('Daily challenge', 'A mixed set of ten grade-appropriate Quick Quiz questions is published when enough suitable questions are available. Attempts are unlimited.'),
     ) + h3('Game XP and progress') + bullets([
         'You earn 5 Game XP for each correct answer, plus a 10 XP perfect-attempt bonus. A daily cap applies.',
         'Game XP, levels, achievements and the game leaderboard are separate from attendance XP, attendance badges and attendance streaks.',

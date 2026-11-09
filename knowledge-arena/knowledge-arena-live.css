@@ -80,3 +80,45 @@
 /* Language-category student selection */
 .subject-choice { display: contents; }
 #language-subject-choice small { grid-column: 1 / -1; margin-top: -8px; }
+
+
+/* Guest registration and marketing surfaces */
+.guest-register-form{display:grid;gap:9px;text-align:left;margin-top:20px}
+.guest-register-form>label:not(.guest-consent){font-size:12px;font-weight:700;color:#526176;margin-top:5px}
+.guest-register-form input:not([type=checkbox]),.guest-register-form select,.guest-promotion-form input,.guest-promotion-form textarea,.guest-promotion-form select,.guest-lead-filters input,.guest-lead-filters select,.guest-lead-edit input,.guest-lead-edit select,.guest-lead-edit textarea{width:100%;min-width:0;border:1px solid #dce3ee;border-radius:9px;background:#fff;padding:11px;color:var(--ink);font:500 13px 'DM Sans',sans-serif}
+.guest-mobile-field{display:flex;align-items:center;border:1px solid #dce3ee;border-radius:9px;background:#fff;overflow:hidden}
+.guest-mobile-field span{padding:11px 12px;background:#f5f7fb;color:#526176;font-size:13px;font-weight:700}
+.guest-mobile-field input{border:0!important;outline:none}
+.guest-consent{display:flex;align-items:flex-start;gap:9px;font-size:11px;line-height:1.5;color:#59677d;margin:7px 0}
+.guest-consent input{margin-top:2px;accent-color:#315f9f}
+.guest-privacy{font-size:10px;line-height:1.6;color:#7b8799;margin:5px 0 10px}
+.guest-privacy a{color:#315f9f}
+.guest-register-form .primary{width:100%}
+.guest-lead-filters{display:grid;grid-template-columns:1fr 220px;gap:10px;margin:14px 0}
+.guest-lead-list{overflow-x:auto;border:1px solid var(--line);border-radius:10px;margin-top:12px}
+.guest-lead-table{min-width:780px}
+.guest-lead-row{display:grid;grid-template-columns:1.4fr .8fr .8fr 1fr 1.2fr 60px;gap:10px;align-items:center;padding:11px 12px;border-bottom:1px solid #edf0f5;font-size:11px;color:#4b5870}
+.guest-lead-row:last-child{border-bottom:0}
+.guest-lead-row b,.guest-lead-row small{display:block}.guest-lead-row b{color:#273754}.guest-lead-row small{color:#8792a5;font-size:10px;margin-top:3px}
+.guest-lead-head{background:#f7f9fc;color:#7b8799;font-size:9px;font-weight:800;letter-spacing:.05em}
+.guest-lead-detail{margin-top:16px;padding:16px;border:1px solid var(--line);border-radius:12px;background:#fbfcff}
+.guest-lead-detail h4{font-size:12px;color:#344563;margin:16px 0 7px}
+.guest-detail-list{max-height:180px;overflow:auto;border:1px solid #e6ebf2;border-radius:8px;padding:8px 12px;background:#fff}
+.guest-detail-list p{font-size:11px;margin:7px 0;color:#526176}
+.guest-lead-edit{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:15px}
+.guest-lead-edit label,.guest-promotion-form label{display:flex;flex-direction:column;gap:5px;font-size:11px;font-weight:700;color:#64718a}
+.guest-lead-edit label:last-of-type{grid-column:1/-1}
+.guest-promotion-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:16px 0}
+.guest-promotion-form label:nth-child(3),.guest-promotion-form label:nth-child(5),.guest-promotion-form label:nth-child(7),.guest-promotion-form label:nth-child(8),.guest-promotion-form label:nth-child(9){grid-column:1/-1}
+.guest-promotion-actions{display:flex;gap:8px;align-items:center}
+.guest-promotion-admin-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px;border-bottom:1px solid #edf0f5;font-size:11px}
+.guest-promotion-admin-row b,.guest-promotion-admin-row small{display:block}.guest-promotion-admin-row small{color:#8290a3;margin-top:4px}
+.guest-promotion-modal{position:fixed;inset:0;z-index:50;background:#08152dcc;display:grid;place-items:center;padding:20px}
+.guest-promotion-card{position:relative;width:min(100%,520px);background:#fff;border-radius:20px;padding:28px;box-shadow:0 24px 70px #07152d55}
+.guest-promotion-card>img{display:block;width:100%;max-height:190px;object-fit:cover;border-radius:12px;margin-bottom:18px}
+.guest-promotion-card h2{font:700 26px 'Playfair Display',serif;color:var(--navy);margin:5px 0 10px}
+.guest-promotion-card>p:not(.eyebrow){font-size:13px;line-height:1.7;color:#5f6d82}
+.guest-promotion-close{position:absolute;right:14px;top:12px;border:0;background:#f2f4f8;border-radius:50%;width:32px;height:32px;font-size:22px;color:#526176}
+.guest-promotion-buttons{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:18px}
+.guest-promotion-buttons a{text-decoration:none}
+@media(max-width:650px){.guest-lead-filters,.guest-lead-edit,.guest-promotion-form{grid-template-columns:1fr}.guest-promotion-form label{grid-column:1!important}.guest-promotion-admin-row{align-items:flex-start;flex-direction:column}.guest-promotion-card{padding:22px}.guest-promotion-buttons>*{width:100%;text-align:center}.guest-promotion-buttons a{display:block}}

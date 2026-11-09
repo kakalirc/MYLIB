@@ -10,19 +10,34 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="../"><span class="brand-mark">LIB</span><span>Knowledge Arena<small>LEARN · PLAY · COMPETE</small></span></a>
+    <a class="brand" href="../" aria-label="LIB Education home"><img class="brand-logo" src="./lib-logo.svg" alt="LIB Education"><span class="brand-title">Knowledge Arena<small>LEARN · PLAY · COMPETE</small></span></a>
     <nav id="main-nav" aria-label="Main navigation">
-      <button class="nav-btn active" data-view="play">Play</button>
+      <button class="nav-btn active" data-view="play" id="play-nav">Play</button>
       <button class="nav-btn" data-view="daily">Daily challenge</button>
       <button class="nav-btn" data-view="progress">My progress</button>
       <button class="nav-btn" data-view="achievements">Achievements</button>
       <button class="nav-btn" data-view="leaderboard">Leaderboard</button>
+      <button class="nav-btn hidden" id="admin-play-nav" data-view="play">Play games</button>
       <button class="nav-btn hidden" id="admin-nav" data-view="admin">Admin</button>
     </nav>
-    <span class="demo-pill" id="connection-status">CONNECTING</span>
+    <div class="topbar-actions"><button class="back-learning-btn hidden" id="guest-exit" type="button">Exit guest</button><a class="back-learning-btn hidden" id="back-learning" href="../" target="_top" aria-label="Back to Learning">← Back to Learning</a><a class="support-btn hidden" id="knowledge-arena-support" href="https://wa.me/919845393178?text=Hello%20LIB%20Education%2C%20I%20need%20help%20with%20Knowledge%20Arena." target="_blank" rel="noopener noreferrer" aria-label="Contact LIB Education support on WhatsApp">Support</a><span class="demo-pill" id="connection-status">CONNECTING</span></div>
   </header>
 
   <main>
+    <section id="guest-gate" class="gate-card hidden" aria-labelledby="guest-title">
+      <div class="gate-symbol">✦</div><h1 id="guest-title">Welcome to Knowledge Arena</h1>
+      <p>Play, learn and challenge yourself. Register once to start your free games.</p>
+      <form id="guest-register-form" class="guest-register-form">
+        <label for="guest-name">Student / player name</label><input id="guest-name" name="guest_name" type="text" minlength="2" maxlength="80" autocomplete="name" required placeholder="Enter the student’s name">
+        <label for="guest-mobile">Parent / guardian mobile number (include country code)</label><div class="guest-mobile-field"><input id="guest-mobile" name="mobile_number" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" value="+91 " required placeholder="+91 98765 43210 or +44 7700 900123" aria-describedby="guest-mobile-help"></div><small id="guest-mobile-help" class="muted">Default country code is +91. Change it for an international number.</small>
+        <label for="guest-grade">Class / grade</label><select id="guest-grade" name="grade_label" required><option value="">Loading grades…</option></select>
+        <label class="guest-consent"><input id="guest-enquiry-consent" type="checkbox"><span>LIB Education may contact me about this learning enquiry.</span></label>
+        <label class="guest-consent"><input id="guest-marketing-consent" type="checkbox"><span>I agree to receive course offers and promotional updates on WhatsApp.</span></label>
+        <p class="guest-privacy">Your details are used to provide this guest experience and, where you consent, to follow up about LIB Education courses. <a href="https://www.libeducation.com/privacypolicy" target="_blank" rel="noopener noreferrer">Privacy notice</a>.</p>
+        <button class="primary" id="guest-start-button" type="submit">Start playing →</button><p id="guest-register-feedback" class="admin-feedback" role="status"></p>
+      </form>
+    </section>
+
     <section id="auth-gate" class="gate-card hidden">
       <div class="gate-symbol">🔐</div>
       <h1>Open Knowledge Arena from My LIB</h1>
@@ -67,27 +82,25 @@
           <select id="tina-grade-select" aria-label="Choose your school grade"><option value="">Select your grade</option></select>
           <small class="muted">We’ll use this grade to choose suitable questions. Your choice is saved for next time.</small>
         </div>
-        <div class="arena-subject-row">
-          <div id="academic-subject-choice" class="subject-choice">
-            <label for="subject-select">Choose a subject</label>
-            <select id="subject-select" aria-label="Choose a subject"><option value="">Loading subjects…</option></select>
-          </div>
-          <div id="language-subject-choice" class="subject-choice hidden">
-            <label for="language-select">Choose your language</label>
-            <select id="language-select" aria-label="Choose your language">
-              <option value="en">English</option><option value="hi">Hindi</option>
-              <option value="kn">Kannada</option><option value="sa">Sanskrit</option><option value="fr">French</option>
-            </select>
-            <small class="muted">Your choice is saved automatically for your next visit.</small>
-          </div>
+        <div id="player-grade-choice" class="subject-choice hidden">
+          <label for="player-grade-select">Choose a grade to play</label>
+          <select id="player-grade-select" aria-label="Choose a grade to play"><option value="">Select a grade</option></select>
+          <small class="muted">This is a temporary player-mode selection. It will not change your LIB profile.</small>
+        </div>
+        <div id="language-subject-choice" class="subject-choice hidden">
+          <label for="language-select">Choose your language</label>
+          <select id="language-select" aria-label="Choose your language">
+            <option value="en">English</option><option value="hi">Hindi</option>
+            <option value="kn">Kannada</option><option value="sa">Sanskrit</option><option value="fr">French</option>
+          </select>
+          <small class="muted">Your choice is saved automatically for your next visit.</small>
         </div>
         <details class="panel arena-help" id="arena-help">
           <summary>❔ How do the games and subjects work?</summary>
           <div class="arena-help-content">
-            <p><strong>Each game chooses its own subject:</strong> Word Master — English (or your selected language in a Language programme); Number Quest and Brain Teaser — Mathematics; Science Explorer and Memory Challenge — Science.</p>
-            <p><strong>Quick Quiz</strong> follows the subject selector. Choose <strong>All</strong> for a mix from all available subjects.</p>
+            <p>Choose a game and Knowledge Arena will automatically select suitable questions from the subjects configured for that game and your grade. You do not need to choose a subject.</p>
             <p><strong>Grade:</strong> if asked, choose your current school grade. This only helps select questions and does not change your LIB student profile.</p>
-            <p><strong>Daily challenge:</strong> ten English Quick Quiz questions for your grade when enough suitable questions are published. You can try it more than once.</p>
+            <p><strong>Daily challenge:</strong> a mixed set of suitable questions for your grade when enough content is available. You can try it more than once.</p>
             <p><strong>Game XP</strong> is separate from attendance XP and rewards. Correct answers earn 5 XP; a perfect attempt earns a 10 XP bonus, subject to the daily cap.</p>
             <p>If a game says no published questions are available, try another game or return later. It is a content-availability message, not a subscription restriction.</p>
           </div>
@@ -101,9 +114,17 @@
           <article class="game-card" data-kind="academic"><div class="game-icon blue">Aa</div><span class="tag">LANGUAGE</span><h3>Word Master</h3><p>Vocabulary, spelling and word puzzles.</p><button class="text-btn launch" data-game="word_master">Play now →</button></article>
           <article class="game-card" data-kind="academic"><div class="game-icon gold">∑</div><span class="tag">MATHEMATICS</span><h3>Number Quest</h3><p>Patterns, calculations and brain training.</p><button class="text-btn launch" data-game="number_quest">Play now →</button></article>
           <article class="game-card" data-kind="academic"><div class="game-icon mint">⚛</div><span class="tag">SCIENCE</span><h3>Science Explorer</h3><p>Discover how the world works.</p><button class="text-btn launch" data-game="science_explorer">Play now →</button></article>
-          <article class="game-card" data-kind="fun"><div class="game-icon pink">?</div><span class="tag">GENERAL KNOWLEDGE</span><h3>Quick Quiz</h3><p>A mixed quiz to test what you know.</p><button class="text-btn launch" data-game="quick_quiz">Play now →</button></article>
-          <article class="game-card" data-kind="fun"><div class="game-icon violet">◇</div><span class="tag">LOGIC</span><h3>Brain Teaser</h3><p>Reasoning, riddles and clever challenges.</p><button class="text-btn launch" data-game="brain_teaser">Play now →</button></article>
+          <article class="game-card" data-kind="fun"><div class="game-icon pink">?</div><span class="tag">GENERAL KNOWLEDGE</span><h3>Quick Quiz</h3><p>A mixed quiz across available subjects.</p><button class="text-btn launch" data-game="quick_quiz">Play now →</button></article>
+          <article class="game-card" data-kind="fun"><div class="game-icon violet">◇</div><span class="tag">REASONING</span><h3>Brain Teaser</h3><p>Reasoning, riddles and clever challenges.</p><button class="text-btn launch" data-game="brain_teaser">Play now →</button></article>
           <article class="game-card" data-kind="fun"><div class="game-icon orange">◉</div><span class="tag">MEMORY</span><h3>Memory Challenge</h3><p>Study a sequence, then test your recall.</p><button class="text-btn launch" data-game="memory_challenge">Play now →</button></article>
+          <article class="game-card" data-kind="academic"><div class="game-icon blue">🌍</div><span class="tag">GEOGRAPHY</span><h3>World Explorer</h3><p>Explore places, maps and our world.</p><button class="text-btn launch" data-game="world_explorer">Play now →</button></article>
+          <article class="game-card" data-kind="academic"><div class="game-icon gold">⌛</div><span class="tag">HISTORY</span><h3>History Quest</h3><p>Explore events, people and timelines.</p><button class="text-btn launch" data-game="history_quest">Play now →</button></article>
+          <article class="game-card" data-kind="academic"><div class="game-icon mint">◎</div><span class="tag">SOCIOLOGY</span><h3>Society & Culture Challenge</h3><p>Explore society, culture and social life.</p><button class="text-btn launch" data-game="society_culture_challenge">Play now →</button></article>
+          <article class="game-card" data-kind="academic"><div class="game-icon violet">⚖</div><span class="tag">CIVICS</span><h3>Civics & Constitution Challenge</h3><p>Learn about democracy, rights and governance.</p><button class="text-btn launch" data-game="civics_constitution_challenge">Play now →</button></article>
+          <article class="game-card" data-kind="academic"><div class="game-icon gold">₹</div><span class="tag">ECONOMICS</span><h3>Economics Explorer</h3><p>Understand markets and economic ideas.</p><button class="text-btn launch" data-game="economics_explorer">Play now →</button></article>
+          <article class="game-card" data-kind="academic"><div class="game-icon orange">◈</div><span class="tag">FINANCIAL LITERACY</span><h3>Money Matters</h3><p>Learn savings, budgeting and money decisions.</p><button class="text-btn launch" data-game="money_matters">Play now →</button></article>
+          <article class="game-card" data-kind="academic"><div class="game-icon pink">Ab</div><span class="tag">LANGUAGE</span><h3>Word Builder</h3><p>Build vocabulary and strengthen language skills.</p><button class="text-btn launch" data-game="word_builder">Play now →</button></article>
+          <article class="game-card" data-kind="academic"><div class="game-icon blue">＋</div><span class="tag">MATHEMATICS</span><h3>Math Sprint</h3><p>Practise mental maths and quick calculations.</p><button class="text-btn launch" data-game="math_sprint">Play now →</button></article>
         </div>
       </section>
 
@@ -111,7 +132,7 @@
         <div class="section-head"><div><p class="eyebrow">A FRESH CHALLENGE EACH DAY</p><h2>Daily challenge</h2></div><span class="tag">10 QUESTIONS</span></div>
         <div class="daily-card">
           <div class="daily-symbol">✦</div>
-          <div><h3 id="daily-title">Today's Knowledge Mix</h3><p id="daily-description">Ten English Quick Quiz questions selected for your grade, with a mix of available subjects.</p><div class="daily-meta"><span>10 questions</span><span>Unlimited attempts</span><span>Game XP is separate from attendance XP</span></div></div>
+          <div><h3 id="daily-title">Today's Knowledge Mix</h3><p id="daily-description">Ten grade-appropriate Quick Quiz questions selected from subjects enabled for your grade.</p><div class="daily-meta"><span>10 questions</span><span>Unlimited attempts</span><span>Game XP is separate from attendance XP</span></div></div>
           <button class="primary" id="start-daily">Take challenge →</button>
         </div>
         <p id="daily-message" class="muted daily-message" role="status"></p>
@@ -185,6 +206,18 @@
         </div>
 
         <div class="panel admin-panel">
+          <h3>Grade &amp; Subject Suitability</h3>
+          <p>Configure which subjects and games are suitable for each grade. New subjects remain unavailable until enabled. Changes are enforced by the Knowledge Arena API.</p>
+          <label>Configure academic subjects for grade<select id="suitability-grade"></select></label>
+          <div id="suitability-subject-list" class="admin-check-list"></div>
+          <label>Configure games for grade<select id="suitability-game-grade"></select></label>
+          <div id="suitability-game-grade-list" class="admin-check-list"></div>
+          <label>Configure subjects used by game<select id="suitability-game"></select></label>
+          <div id="suitability-game-subject-list" class="admin-check-list"></div>
+          <p class="admin-feedback" id="suitability-feedback" role="status"></p>
+        </div>
+
+        <div class="panel admin-panel">
           <h3>Shared AI budget</h3>
           <p>One combined budget for all students and all Knowledge Arena AI generation. Costs are tracked in INR using the configured exchange rate.</p>
           <div class="admin-budget-grid">
@@ -206,7 +239,7 @@
           <div class="admin-queue-grid">
             <label>Grade / class<select id="queue-grade"></select></label>
             <label>Subject<select id="queue-subject"></select></label>
-            <label>Game<select id="queue-game"><option value="quick_quiz" selected>Quick Quiz</option><option value="word_master">Word Master</option><option value="number_quest">Number Quest</option><option value="science_explorer">Science Explorer</option><option value="brain_teaser">Brain Teaser</option><option value="memory_challenge">Memory Challenge</option></select></label>
+            <label>Game<select id="queue-game"><option value="quick_quiz" selected>Quick Quiz</option><option value="word_master">Word Master</option><option value="number_quest">Number Quest</option><option value="science_explorer">Science Explorer</option><option value="brain_teaser">Brain Teaser</option><option value="memory_challenge">Memory Challenge</option><option value="world_explorer">World Explorer</option><option value="history_quest">History Quest</option><option value="society_culture_challenge">Society &amp; Culture Challenge</option><option value="civics_constitution_challenge">Civics &amp; Constitution Challenge</option><option value="economics_explorer">Economics Explorer</option><option value="money_matters">Money Matters</option><option value="word_builder">Word Builder</option><option value="math_sprint">Math Sprint</option></select></label>
             <label>Difficulty<select id="queue-difficulty"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option></select></label>
             <label>Question language<select id="queue-language"><option value="en">English</option><option value="hi">Hindi</option><option value="kn">Kannada</option><option value="sa">Sanskrit</option><option value="fr">French</option></select></label>
             <label>Number of questions<input id="queue-count" type="number" min="1" max="20" value="10"></label>
@@ -222,17 +255,58 @@
         </div>
 
         <div class="panel admin-panel">
+          <div class="admin-panel-head"><div><h3>Question Bank Review</h3><p class="muted">Questions are published automatically after validation. You can edit, remove from play or delete them here.</p></div><button class="btn-secondary" id="refresh-questions">Refresh</button></div>
+          <div class="admin-queue-grid">
+            <label>Grade<select id="review-grade"><option value="">All grades</option></select></label>
+            <label>Subject<select id="review-subject"><option value="">All subjects</option></select></label>
+            <label>Game<select id="review-game"><option value="">All games</option></select></label>
+            <label>Status<select id="review-status"><option value="">All statuses</option><option value="published">Published</option><option value="pending">Pending</option><option value="validated">Validated</option><option value="disabled">Disabled</option><option value="expired">Expired</option><option value="rejected">Removed from play</option></select></label>
+          </div>
+          <div id="admin-question-list"><p class="muted">Loading questions…</p></div>
+          <p class="admin-feedback" id="question-feedback" role="status"></p>
+        </div>
+
+        <div class="panel admin-panel">
           <h3>AI usage reservations requiring review</h3>
           <p>Interrupted or uncertain provider calls remain reserved against the shared budget. Confirm the actual provider cost before settling a reservation; the default value remains the conservative reserved amount.</p>
           <div id="admin-usage-reviews"><p class="muted">Loading AI usage reviews…</p></div>
+        </div>
+
+        <div class="panel admin-panel" id="guest-leads-panel">
+          <div class="admin-panel-head"><div><h3>Knowledge Arena Guest Leads</h3><p class="muted">One lead per mobile number. Guest registrations, sessions, game activity and consent are retained separately.</p></div><div><button class="btn-secondary" id="refresh-guest-leads">Refresh leads</button> <button class="btn-secondary" id="export-guest-leads">Export CSV</button></div></div>
+          <div class="guest-lead-filters"><input id="guest-lead-search" type="search" placeholder="Search name or mobile"><select id="guest-lead-grade"><option value="">All grades</option></select><input id="guest-lead-from" type="date" aria-label="Registered from"><input id="guest-lead-to" type="date" aria-label="Registered to"><select id="guest-lead-status"><option value="">All statuses</option><option>New</option><option>Contacted</option><option>Interested</option><option>Demo Booked</option><option>Demo Completed</option><option>Converted to Student</option><option>Not Interested</option></select></div>
+          <div id="guest-lead-metrics" class="metric-grid"></div><div id="guest-lead-list" class="guest-lead-list"><p class="muted">Loading guest leads…</p></div><div id="guest-lead-pagination" class="guest-lead-pagination"></div>
+          <div id="guest-lead-detail" class="guest-lead-detail hidden"></div><p id="guest-lead-feedback" class="admin-feedback" role="status"></p>
+        </div>
+        <div class="panel admin-panel" id="guest-promotions-panel">
+          <div class="admin-panel-head"><div><h3>Guest Marketing Promotions</h3><p class="muted">Create dismissible course promotions. Promotions never interrupt an active question.</p></div><button class="btn-secondary" id="refresh-guest-promotions">Refresh promotions</button></div>
+          <form id="guest-promotion-form" class="guest-promotion-form">
+            <input id="promotion-id" type="hidden"><label>Promotion title<input id="promotion-title" maxlength="120" required></label>
+            <label>Message<textarea id="promotion-body" maxlength="500" rows="3" required></textarea></label><label>Image URL<input id="promotion-image" type="url"></label>
+            <label>Button label<input id="promotion-cta-label" maxlength="50" value="Explore courses" required></label><label>Destination URL<input id="promotion-cta-url" type="url" required></label>
+            <label>Show when<select id="promotion-trigger"><option value="welcome">After registration</option><option value="after_game" selected>After a game</option><option value="exit">On exit</option></select></label>
+            <label>Target grades (comma-separated; blank = all)<input id="promotion-grades"></label><label>Target game types (comma-separated; blank = all)<input id="promotion-games"></label>
+            <label>Target subjects (comma-separated; blank = all)<input id="promotion-subjects"></label><label>Display order<input id="promotion-order" type="number" min="0" max="10000" value="100"></label>
+            <label class="guest-consent"><input id="promotion-active" type="checkbox"><span>Active</span></label>
+            <div class="guest-promotion-actions"><button class="btn-secondary" type="submit">Save promotion</button><button class="btn-secondary" id="promotion-reset" type="button">Clear form</button></div>
+          </form><div id="guest-promotion-list" class="guest-lead-list"></div><p id="guest-promotion-feedback" class="admin-feedback" role="status"></p>
         </div>
 
         <div class="panel admin-panel">
           <h3>Attendance gamification (read-only integration)</h3>
           <p>Attendance XP, levels, badges, streaks and the existing attendance leaderboard remain separate. This Knowledge Arena page does not recalculate or modify attendance rewards.</p>
           <div class="status-line"><span class="status-dot amber"></span> Existing attendance summary integration remains a separate follow-up.</div>
+          <div id="leadership-attendance" class="leadership-attendance"><p class="muted">Attendance rewards remain separate from Knowledge Arena.</p></div>
         </div>
       </section>
+
+    <section id="guest-promotion-modal" class="guest-promotion-modal hidden" role="dialog" aria-modal="true" aria-labelledby="guest-promotion-heading">
+      <div class="guest-promotion-card"><button id="guest-promotion-close" class="guest-promotion-close" type="button" aria-label="Close promotion">×</button>
+        <img id="guest-promotion-image" class="hidden" alt=""><p class="eyebrow">A LITTLE MORE FROM LIB EDUCATION</p>
+        <h2 id="guest-promotion-heading"></h2><p id="guest-promotion-copy"></p>
+        <div class="guest-promotion-buttons"><a id="guest-promotion-cta" class="primary" target="_blank" rel="noopener noreferrer"></a><button id="guest-promotion-dismiss" class="btn-secondary" type="button">Maybe later</button></div>
+      </div>
+    </section>
 
       <section id="quiz" class="quiz-panel hidden" aria-live="polite">
         <div class="quiz-top"><button class="text-btn" id="quit-quiz">← Exit game</button><span id="quiz-count">QUESTION 1 OF 10</span></div>
