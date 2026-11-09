@@ -132,7 +132,7 @@ Deno.serve(async (req) => {
             .select("selected_grade_label").eq("user_id", user.id).maybeSingle();
           if (error) return errorResponse(503, "Could not load your saved grade.");
           selectedGradeLabel = preference?.selected_grade_label || null;
-          availableGradeOptions = (grades || []).map((g: any) => String(g.name));
+          availableGradeOptions = (grades || []).map((g: any) => String(g.name)).filter((name: string) => name.toLocaleLowerCase() !== "tina student");
         }
       } else {
         availableGradeOptions = (grades || []).map((g: any) => String(g.name));
@@ -541,7 +541,7 @@ Deno.serve(async (req) => {
       ]);
       if (gradeError || subjectError) return errorResponse(503, "Could not load grade and subject options.");
       return json(200, {
-        grades: [...new Set(["General", ...(grades || []).map((x: any) => String(x.name))])],
+        grades: [...new Set(["General", ...(grades || []).map((x: any) => String(x.name)).filter((name: string) => name.toLocaleLowerCase() !== "tina student")])],
         subjects: uniqueSubjectNames(subjects).filter((s) => !["all","math + science"].includes(s.toLocaleLowerCase())),
         game_types: GAME_CATALOG.map((game) => game.id),
       });
@@ -560,7 +560,7 @@ Deno.serve(async (req) => {
       ]);
       if (gsError || ggError || gsrError || gradesError || subjectsError) return errorResponse(503, "Could not load suitability settings. Apply the Knowledge Arena suitability migration first.");
       return json(200, { grade_subject_rules: gradeSubjects || [], game_grade_rules: gameGrades || [],
-        game_subject_rules: gameSubjectsRows || [], grades: [...new Set((grades || []).map((x: any) => x.name))],
+        game_subject_rules: gameSubjectsRows || [], grades: [...new Set((grades || []).map((x: any) => x.name).filter((name: string) => String(name).toLocaleLowerCase() !== "tina student"))],
         subjects: uniqueSubjectNames(subjects).filter((s) => !["all","math + science"].includes(s.toLocaleLowerCase())), games: GAME_CATALOG });
     }
 
@@ -608,6 +608,13 @@ Deno.serve(async (req) => {
         const { data, error } = await db.from("ka_questions").update({ status: "rejected" })
           .eq("id", questionId).select("id,status").single();
         if (error) return errorResponse(503, "Could not remove this question from play.");
+        return json(200, { question: data });
+      }
+      if (operation === "publish") {
+        const { data, error } = await db.from("ka_questions").update({
+          status: "published", published_at: new Date().toISOString(),
+        }).eq("id", questionId).select("id,status,published_at").single();
+        if (error) return errorResponse(503, "Could not publish this question.");
         return json(200, { question: data });
       }
       if (operation === "delete") {
