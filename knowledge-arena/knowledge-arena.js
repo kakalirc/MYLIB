@@ -257,6 +257,8 @@
       catalog.selected_grade_label = result.grade_label;
       catalog.grade_label = result.grade_label;
       gradeLabel = result.grade_label;
+      catalog = await api("get_catalog");
+      renderGameAvailability(catalog.games || []);
       $("grade-label").textContent = "Your selected grade: " + gradeLabel;
       $("welcome-line").textContent = "Your selected grade: " + gradeLabel + ". Learn, play and build your own Game XP.";
       note("Your grade is saved as " + gradeLabel + ". You can change it any time.", "success");
@@ -568,6 +570,7 @@
         duration_seconds: Math.max(0, Math.round((Date.now() - gameStartedAt) / 1000))
       };
       if (challengeId) payload.challenge_id = challengeId;
+      if (role === "Teacher" || role === "Admin") payload.grade_label = gradeLabel;
       const result = await api("submit_attempt", payload);
       currentScore = Number(result.correct_count || 0);
       $("result-score").textContent = currentScore + " / " + Number(result.question_count || currentQuestions.length);
@@ -584,10 +587,12 @@
       }).join("");
       $("quiz").classList.add("hidden");
       $("results").classList.remove("hidden");
-      progress = await api("get_my_progress");
-      renderProgress();
-      renderAchievements();
-      await loadLeaderboard();
+      if (role === "Student") {
+        progress = await api("get_my_progress");
+        renderProgress();
+        renderAchievements();
+        await loadLeaderboard();
+      }
       $("next-question").disabled = false;
     } catch (error) {
       $("next-question").disabled = false;
