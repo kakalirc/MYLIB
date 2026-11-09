@@ -857,16 +857,70 @@
     renderUsageReviews();
   }
 
+  function renderGenerationStatus() {
+    const jobs = adminJobs || [];
+    const totals = jobs.reduce((a, job) => {
+      a.jobs++;
+      a.requested += Number(job.requested_count || 0);
+      a.generated += Number(job.generated_count || 0);
+      a.published += Number(job.published_count || 0);
+      a.rejected += Number(job.rejected_count || 0);
+      a[job.status] = (a[job.status] || 0) + 1;
+      return a;
+    }, { jobs: 0, requested: 0, generated: 0, published: 0, rejected: 0 });
+    const active = Number(totals.queued || 0) + Number(totals.running || 0);
+    $("admin-generation-summary").innerHTML = [
+      ["Questions requested", totals.requested],
+      ["Published", totals.published],
+      ["Awaiting processing", totals.queued ? jobs.filter(x => x.status === "queued").reduce((n,x)=>n+Math.max(0,Number(x.requested_count||0)-Number(x.published_count||0)),0) : 0],
+      ["Jobs in progress / queue", active],
+      ["Partial / failed", Number(totals.partial || 0) + Number(totals.failed || 0)],
+      ["Rejected by validation", totals.rejected]
+    ].map((m) => '<article class="metric"><small>' + m[0] + '</small><strong>' + Number(m[1] || 0).toLocaleString("en-IN") + '</strong></article>').join("");
+    const settings = adminSummary?.automation || {};
+    const dailyBudget = Number(settings.daily_ai_budget_inr || 0);
+    const monthlyBudget = Number(settings.monthly_ai_budget_inr || 0);
+    const dailySpend = Number(adminSummary?.ai_cost_inr_today || 0);
+    const monthlySpend = Number(adminSummary?.ai_cost_inr_month || 0);
+    $("admin-generation-budget").innerHTML =
+      '<span><b>Daily AI usage:</b> ' + money(dailySpend) + ' / ' + money(dailyBudget) + '</span>' +
+      '<span><b>Monthly AI usage:</b> ' + money(monthlySpend) + ' / ' + money(monthlyBudget) + '</span>' +
+      '<span><b>Generation:</b> ' + (settings.generation_enabled ? 'Enabled' : 'Paused') + '</span>';
+    const gameMap = new Map();
+    for (const job of jobs) {
+      const row = gameMap.get(job.game_type) || { jobs: 0, requested: 0, generated: 0, published: 0, rejected: 0, queued: 0, running: 0, partial: 0, failed: 0, completed: 0, paused: 0 };
+      row.jobs++;
+      row.requested += Number(job.requested_count || 0);
+      row.generated += Number(job.generated_count || 0);
+      row.published += Number(job.published_count || 0);
+      row.rejected += Number(job.rejected_count || 0);
+      row[job.status] = (row[job.status] || 0) + 1;
+      gameMap.set(job.game_type, row);
+    }
+    const gameRows = [...gameMap.entries()].sort((a,b) => (GAME_NAMES[a[0]] || a[0]).localeCompare(GAME_NAMES[b[0]] || b[0]));
+    $("admin-generation-games").innerHTML = gameRows.length
+      ? '<table class="generation-table"><thead><tr><th>Game</th><th>Jobs</th><th>Requested</th><th>Published</th><th>Queued</th><th>Partial / Failed</th></tr></thead><tbody>' +
+        gameRows.map(([id,row]) => '<tr><td>' + escapeHtml(GAME_NAMES[id] || id) + '</td><td>' + row.jobs + '</td><td>' + row.requested + '</td><td>' + row.published + '</td><td>' + row.queued + '</td><td>' + (row.partial + row.failed) + '</td></tr>').join("") +
+        '</tbody></table>'
+      : '<p class="muted">No generation jobs have been queued.</p>';
+    $("generation-status-feedback").textContent = "Showing " + jobs.length + " non-archived jobs. Status refreshes every 30 seconds while this page is open.";
+  }
+
   function renderJobs() {
+    renderGenerationStatus();
     if (!adminJobs.length) { $("admin-jobs").innerHTML = '<p class="muted">No generation jobs have been queued.</p>'; return; }
     $("admin-jobs").innerHTML = '<div class="admin-job-list">' + adminJobs.map((job) =>
       '<div class="admin-job"><div><b>' + escapeHtml(job.subject || "—") + ' · ' + escapeHtml(job.grade_label || "—") +
       '</b><small>' + escapeHtml(GAME_NAMES[job.game_type] || job.game_type) + ' · ' + escapeHtml(job.difficulty) +
-      ' · ' + job.published_count + '/' + job.requested_count + ' published · ' + escapeHtml(job.status) +
-      '</small>' + (job.error_summary ? '<small class="job-error">' + escapeHtml(job.error_summary) + '</small>' : '') +
+      ' · ' + Number(job.published_count || 0) + '/' + Number(job.requested_count || 0) + ' published · ' + escapeHtml(job.status) +
+      ' · ' + Number(job.generated_count || 0) + ' generated · ' + Number(job.rejected_count || 0) + ' rejected</small>' +
+      (job.error_summary ? '<small class="job-error">' + escapeHtml(job.error_summary) + '</small>' : '') +
       '</div><div class="job-actions">' +
       (job.status === "queued" ? '<button class="text-btn" data-job-action="pause" data-job-id="' + job.id + '">Pause</button>' : "") +
       (job.status === "paused" ? '<button class="text-btn" data-job-action="resume" data-job-id="' + job.id + '">Resume</button>' : "") +
+      (["partial","failed","paused"].includes(job.status) && Number(job.published_count || 0) < Number(job.requested_count || 0) ? '<button class="text-btn" data-job-action="requeue" data-job-id="' + job.id + '">Requeue missing</button>' : "") +
+      (["completed","partial","failed","paused"].includes(job.status) ? '<button class="text-btn" data-job-action="regenerate" data-job-id="' + job.id + '">Regenerate</button>' : "") +
+      (job.status !== "running" ? '<button class="text-btn danger-text" data-job-action="delete" data-job-id="' + job.id + '">Delete job</button>' : "") +
       '</div></div>'
     ).join("") + '</div>';
     $("admin-jobs").querySelectorAll("[data-job-action]").forEach((button) => {
@@ -1169,9 +1223,17 @@
   }
 
   async function updateJob(action, jobId) {
+    const labels = { pause: "Pause this queued job?", resume: "Resume this paused job?", requeue: "Create a new job for only the missing questions?", regenerate: "Create a fresh generation batch with the same settings?", delete: "Remove this job from the generation list? Its AI usage history and any generated questions will be retained." };
+    if (labels[action] && !window.confirm(labels[action])) return;
+    const controls = { pause: "pause_job", resume: "resume_job", requeue: "requeue_job", regenerate: "regenerate_job", delete: "delete_job" };
     try {
-      await api("admin_control", { control: action === "pause" ? "pause_job" : "resume_job", job_id: jobId });
+      await api("admin_control", { control: controls[action], job_id: jobId });
       await refreshAdmin();
+      if (action === "requeue" || action === "regenerate") {
+        $("generation-status-feedback").textContent = action === "requeue" ? "Missing-question retry queued." : "Fresh generation batch queued.";
+      } else if (action === "delete") {
+        $("generation-status-feedback").textContent = "Job removed from the list. Cost and question history retained.";
+      }
     } catch (error) { alert(error.message); }
   }
 
@@ -1282,6 +1344,7 @@
   $("publish-daily").addEventListener("click", publishDaily);
   $("queue-generation").addEventListener("click", queueGeneration);
   $("refresh-jobs").addEventListener("click", () => refreshAdmin().catch((e) => $("admin-jobs").textContent = e.message));
+  $("refresh-generation-status").addEventListener("click", () => refreshAdmin().catch((e) => $("generation-status-feedback").textContent = e.message));
   $("refresh-questions").addEventListener("click", refreshQuestions);
   ["review-grade","review-subject","review-game","review-status"].forEach((id) => $(id).addEventListener("change", renderQuestionBank));
   $("admin-question-list").addEventListener("click", handleQuestionAction);
@@ -1291,4 +1354,14 @@
   $("refresh-leadership").addEventListener("click", refreshLeadership);
 
   initialise();
+  // Refresh only the Admin dashboard data; never reload the full Knowledge Arena page.
+  setInterval(() => {
+    const adminView = $("view-admin");
+    if (role === "Admin" && adminView && !adminView.classList.contains("hidden")) {
+      refreshAdmin().catch((error) => {
+        const feedback = $("generation-status-feedback");
+        if (feedback) feedback.textContent = "Automatic status refresh failed: " + error.message;
+      });
+    }
+  }, 30000);
 })();
