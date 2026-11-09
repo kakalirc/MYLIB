@@ -24,6 +24,20 @@
   </header>
 
   <main>
+    <section id="guest-gate" class="gate-card hidden" aria-labelledby="guest-title">
+      <div class="gate-symbol">✦</div><h1 id="guest-title">Welcome to Knowledge Arena</h1>
+      <p>Play, learn and challenge yourself. Register once to start your free games.</p>
+      <form id="guest-register-form" class="guest-register-form">
+        <label for="guest-name">Your name</label><input id="guest-name" name="guest_name" type="text" minlength="2" maxlength="80" autocomplete="name" required placeholder="Enter your name">
+        <label for="guest-mobile">Mobile number</label><div class="guest-mobile-field"><span>+91</span><input id="guest-mobile" name="mobile_number" type="tel" inputmode="numeric" autocomplete="tel-national" maxlength="10" pattern="[6-9][0-9]{9}" required placeholder="10-digit mobile number"></div>
+        <label for="guest-grade">Class / grade</label><select id="guest-grade" name="grade_label" required><option value="">Loading grades…</option></select>
+        <label class="guest-consent"><input id="guest-enquiry-consent" type="checkbox"><span>LIB Education may contact me about this learning enquiry.</span></label>
+        <label class="guest-consent"><input id="guest-marketing-consent" type="checkbox"><span>I agree to receive course offers and promotional updates on WhatsApp.</span></label>
+        <p class="guest-privacy">No OTP is required. Your details are used to provide this guest experience and, where you consent, to follow up about LIB Education courses. <a href="https://www.libeducation.com/privacy-policy" target="_blank" rel="noopener noreferrer">Privacy notice</a>.</p>
+        <button class="primary" id="guest-start-button" type="submit">Start playing →</button><p id="guest-register-feedback" class="admin-feedback" role="status"></p>
+      </form>
+    </section>
+
     <section id="auth-gate" class="gate-card hidden">
       <div class="gate-symbol">🔐</div>
       <h1>Open Knowledge Arena from My LIB</h1>
@@ -258,12 +272,40 @@
           <div id="admin-usage-reviews"><p class="muted">Loading AI usage reviews…</p></div>
         </div>
 
+        <div class="panel admin-panel" id="guest-leads-panel">
+          <div class="admin-panel-head"><div><h3>Knowledge Arena Guest Leads</h3><p class="muted">One lead per mobile number. Guest registrations, sessions, game activity and consent are retained separately.</p></div><button class="btn-secondary" id="refresh-guest-leads">Refresh leads</button></div>
+          <div class="guest-lead-filters"><input id="guest-lead-search" type="search" placeholder="Search name or mobile"><select id="guest-lead-status"><option value="">All statuses</option><option>New</option><option>Contacted</option><option>Interested</option><option>Demo Booked</option><option>Demo Completed</option><option>Converted to Student</option><option>Not Interested</option></select></div>
+          <div id="guest-lead-metrics" class="metric-grid"></div><div id="guest-lead-list" class="guest-lead-list"><p class="muted">Loading guest leads…</p></div>
+          <div id="guest-lead-detail" class="guest-lead-detail hidden"></div><p id="guest-lead-feedback" class="admin-feedback" role="status"></p>
+        </div>
+        <div class="panel admin-panel" id="guest-promotions-panel">
+          <div class="admin-panel-head"><div><h3>Guest Marketing Promotions</h3><p class="muted">Create dismissible course promotions. Promotions never interrupt an active question.</p></div><button class="btn-secondary" id="refresh-guest-promotions">Refresh promotions</button></div>
+          <form id="guest-promotion-form" class="guest-promotion-form">
+            <input id="promotion-id" type="hidden"><label>Promotion title<input id="promotion-title" maxlength="120" required></label>
+            <label>Message<textarea id="promotion-body" maxlength="500" rows="3" required></textarea></label><label>Image URL<input id="promotion-image" type="url"></label>
+            <label>Button label<input id="promotion-cta-label" maxlength="50" value="Explore courses" required></label><label>Destination URL<input id="promotion-cta-url" type="url" required></label>
+            <label>Show when<select id="promotion-trigger"><option value="welcome">After registration</option><option value="after_game" selected>After a game</option><option value="exit">On exit</option></select></label>
+            <label>Target grades (comma-separated; blank = all)<input id="promotion-grades"></label><label>Target game types (comma-separated; blank = all)<input id="promotion-games"></label>
+            <label>Target subjects (comma-separated; blank = all)<input id="promotion-subjects"></label><label>Display order<input id="promotion-order" type="number" min="0" max="10000" value="100"></label>
+            <label class="guest-consent"><input id="promotion-active" type="checkbox"><span>Active</span></label>
+            <div class="guest-promotion-actions"><button class="btn-secondary" type="submit">Save promotion</button><button class="btn-secondary" id="promotion-reset" type="button">Clear form</button></div>
+          </form><div id="guest-promotion-list" class="guest-lead-list"></div><p id="guest-promotion-feedback" class="admin-feedback" role="status"></p>
+        </div>
+
         <div class="panel admin-panel">
           <h3>Attendance gamification (read-only integration)</h3>
           <p>Attendance XP, levels, badges, streaks and the existing attendance leaderboard remain separate. This Knowledge Arena page does not recalculate or modify attendance rewards.</p>
           <div class="status-line"><span class="status-dot amber"></span> Existing attendance summary integration remains a separate follow-up.</div>
         </div>
       </section>
+
+    <section id="guest-promotion-modal" class="guest-promotion-modal hidden" role="dialog" aria-modal="true" aria-labelledby="guest-promotion-heading">
+      <div class="guest-promotion-card"><button id="guest-promotion-close" class="guest-promotion-close" type="button" aria-label="Close promotion">×</button>
+        <img id="guest-promotion-image" class="hidden" alt=""><p class="eyebrow">A LITTLE MORE FROM LIB EDUCATION</p>
+        <h2 id="guest-promotion-heading"></h2><p id="guest-promotion-copy"></p>
+        <div class="guest-promotion-buttons"><a id="guest-promotion-cta" class="primary" target="_blank" rel="noopener noreferrer"></a><button id="guest-promotion-dismiss" class="btn-secondary" type="button">Maybe later</button></div>
+      </div>
+    </section>
 
       <section id="quiz" class="quiz-panel hidden" aria-live="polite">
         <div class="quiz-top"><button class="text-btn" id="quit-quiz">← Exit game</button><span id="quiz-count">QUESTION 1 OF 10</span></div>
