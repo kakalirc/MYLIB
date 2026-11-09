@@ -38,7 +38,7 @@
   let currentAnswers = [], currentIndex = 0, currentScore = 0, challengeId = null, clientAttemptId = null;
   let gameStartedAt = 0, memoryTimer = null, memoryRevealed = false;
   let adminSummary = null, adminOptions = null, adminJobs = [], adminUsageReviews = [], adminLeadership = null, adminQuestions = [], adminSuitability = null;
-  let adminGuestLeads = [], adminGuestPromotions = [], adminGuestLeadOffset = 0, adminGuestLeadTotal = 0;
+  let adminGuestLeads = [], adminGuestPromotions = [], adminGuestLeadOffset = 0, adminGuestLeadTotal = 0, currentGuestWhatsappHistoryId = null, currentGuestWhatsappLeadId = null;
 
   function setStatus(label, tone) {
     const el = $("connection-status");
@@ -814,6 +814,7 @@
     const allowed = new Set(["overview","setup","generation","question-bank","guests"]);
     if (!allowed.has(name)) name = "overview";
     activeAdminSection = name;
+    if (name === "question-bank") refreshQuestions();
     document.querySelectorAll("[data-admin-section]").forEach((panel) => {
       panel.classList.toggle("hidden", panel.dataset.adminSection !== name);
     });
@@ -828,8 +829,8 @@
   async function loadAdmin() {
     setStatus("ADMIN", "success");
     try {
-      const [summary, options, jobs, usage, questions, suitability] = await Promise.all([
-        api("get_admin_summary"), api("get_admin_options"), api("get_admin_jobs"), api("get_admin_usage_reviews"), api("get_admin_questions"), api("get_admin_suitability")
+      const [summary, options, jobs, usage, suitability] = await Promise.all([
+        api("get_admin_summary"), api("get_admin_options"), api("get_admin_jobs"), api("get_admin_usage_reviews"), api("get_admin_suitability")
       ]);
       adminSummary = summary.summary;
       adminOptions = options;
@@ -1103,16 +1104,29 @@
     }).join("");
   }
 
+  let questionBankRequest = null;
   async function refreshQuestions() {
+    if (questionBankRequest) return questionBankRequest;
     const feedback = $("question-feedback");
+    const list = $("admin-question-list");
     feedback.textContent = "Loading questions…";
-    try {
-      const data = await api("get_admin_questions");
-      adminQuestions = data.questions || [];
-      populateQuestionFilters();
-      renderQuestionBank();
-      feedback.textContent = "Loaded " + adminQuestions.length + " recent questions.";
-    } catch (error) { feedback.textContent = error.message; }
+    if (list) list.innerHTML = '<p class="muted">Loading questions…</p>';
+    questionBankRequest = (async () => {
+      try {
+        const data = await api("get_admin_questions");
+        if (!data || !Array.isArray(data.questions)) throw new Error("The server returned an invalid question-bank response.");
+        adminQuestions = data.questions;
+        populateQuestionFilters();
+        renderQuestionBank();
+        feedback.textContent = "Loaded " + adminQuestions.length + " most recent questions.";
+      } catch (error) {
+        feedback.textContent = "Could not load questions: " + error.message;
+        if (list) list.innerHTML = '<p class="muted">Questions could not be loaded. Use Refresh to try again.</p>';
+      } finally {
+        questionBankRequest = null;
+      }
+    })();
+    return questionBankRequest;
   }
 
   async function handleQuestionAction(event) {
@@ -1127,7 +1141,7 @@
     button.disabled = true;
     feedback.textContent = operation === "save" ? "Saving question…" : operation === "archive" ? "Removing question from play…" : "Deleting question…";
     try {
-      const payload = { operation, question_id: id };
+      const payload = { operation: operation === "save" ? "update" : operation, question_id: id };
       if (operation === "save") {
         payload.prompt = row.querySelector('[data-field="prompt"]').value;
         payload.topic = row.querySelector('[data-field="topic"]').value;
@@ -1206,6 +1220,7 @@
     if(status) status.textContent=total+" guest lead(s) found.";
   }
   async function openGuestLead(id) {
+    if(currentGuestWhatsappLeadId!==id){currentGuestWhatsappHistoryId=null;currentGuestWhatsappLeadId=id;}
     const panel=$("guest-lead-detail"); panel.classList.remove("hidden"); panel.textContent="Loading lead details…";
     try {
       const d=await api("get_admin_guest_lead_detail",{lead_id:id}), l=d.lead;
@@ -1216,27 +1231,52 @@
         '<h4>Game activity</h4><div class="guest-detail-list">'+(d.activity||[]).map(x=>'<p>'+escapeHtml(GAME_NAMES[x.game_type]||x.game_type)+' · '+escapeHtml(x.subject||"")+' · '+x.correct_count+'/'+x.question_count+' correct · '+escapeHtml(new Date(x.completed_at).toLocaleString("en-IN"))+'</p>').join("")+'</div>'+
         '<h4>Consent history</h4><div class="guest-detail-list">'+(d.consents||[]).map(x=>'<p>'+escapeHtml(x.consent_type)+' · '+(x.granted?"Granted":"Withdrawn")+' · '+escapeHtml(new Date(x.recorded_at).toLocaleString("en-IN"))+'</p>').join("")+'</div>'+
         '<h4>Promotion engagement</h4><div class="guest-detail-list">'+(d.promotion_events||[]).map(x=>'<p>'+escapeHtml(x.event_type)+' · '+escapeHtml(x.promotion_id)+' · '+escapeHtml(new Date(x.created_at).toLocaleString("en-IN"))+'</p>').join("")+'</div>'+
+        '<h4>WhatsApp history</h4><div class="guest-detail-list guest-whatsapp-history">'+(d.whatsapp_history||[]).map(x=>'<article class="guest-whatsapp-history-item"><div><b>'+ (x.send_status==="sent"?"Sent":"Opened") +'</b><small>'+escapeHtml(new Date(x.sent_at||x.opened_at).toLocaleString("en-IN"))+(x.sent_by_name?' · '+escapeHtml(x.sent_by_name):'')+'</small></div><p>'+escapeHtml(x.message_text)+'</p></article>').join("")+'</div>'+
         '<h4>Follow-up notes</h4><div class="guest-detail-list">'+(d.notes||[]).map(x=>'<p>'+escapeHtml(x.note)+' <small>'+escapeHtml(new Date(x.created_at).toLocaleString("en-IN"))+'</small></p>').join("")+'</div>'+
         '<div class="guest-lead-edit"><label>Lead status<select id="guest-detail-status">'+["New","Contacted","Interested","Demo Booked","Demo Completed","Converted to Student","Not Interested"].map(x=>'<option '+(x===l.lead_status?"selected":"")+'>'+x+'</option>').join("")+'</select></label>'+
         '<label>LIB Student ID (optional, for conversion)<input id="guest-detail-student" value="'+escapeHtml(l.converted_student_id||"")+'" placeholder="Existing student UUID"></label>'+
+        '<button class="btn-secondary" id="update-guest-lead" type="button">Update lead</button>'+
         '<label>Follow-up note<textarea id="guest-detail-note" rows="3" maxlength="2000" placeholder="Add an internal note"></textarea></label>'+
-        '<button class="btn-secondary" id="save-guest-lead" data-lead-id="'+l.id+'">Save follow-up</button>'+
+        '<button class="btn-secondary btn-small" id="save-guest-lead-note" type="button">Save</button>'+
         (l.marketing_consent?
-          '<div class="guest-whatsapp-followup"><h4>WhatsApp follow-up</h4><p class="muted">Edit this message if needed. WhatsApp will open with the draft; an Admin must review and send it manually.</p>'+
-          '<textarea id="guest-whatsapp-message" rows="12" maxlength="4000">'+escapeHtml("Hello!\\n\\nThank you for registering "+(l.last_guest_name||"your child")+" for LIB Education’s Knowledge Arena!\\n\\nWe hope your child enjoyed exploring our games, quizzes and learning challenges.\\n\\nAt LIB Education, we offer:\\n📚 Academic Tuition\\n🌍 Spoken Language Courses\\n✏️ School Curriculum Support\\n🧠 Interactive Learning Activities\\n\\nWe would be happy to help your child take the next step in their learning journey.\\n\\nWould you like to know more about our programmes or schedule a demo class?\\n\\nWe look forward to hearing from you.\\n\\nTeam LIB Education\\n🌐 www.libeducation.com\\n📞 +91 9845393178")+'</textarea>'+
-          '<button class="btn-secondary" id="open-guest-whatsapp" type="button">Open WhatsApp draft</button></div>':
+          '<div class="guest-whatsapp-followup"><h4>WhatsApp follow-up</h4><p class="muted">Edit the message if needed. Opening WhatsApp records the message in history. Mark it sent after you send it.</p>'+
+          '<textarea id="guest-whatsapp-message" rows="12" maxlength="4000">'+escapeHtml("Hello!\n\nThank you for registering "+(l.last_guest_name||"your child")+" for LIB Education’s Knowledge Arena!\n\nWe hope your child enjoyed exploring our games, quizzes and learning challenges.\n\nAt LIB Education, we offer:\n📚 Academic Tuition\n🌍 Spoken Language Courses\n✏️ School Curriculum Support\n🧠 Interactive Learning Activities\n\nWe would be happy to help your child take the next step in their learning journey.\n\nWould you like to know more about our programmes or schedule a demo class?\n\nWe look forward to hearing from you.\n\nTeam LIB Education\n🌐 www.libeducation.com\n📞 +91 9845393178")+'</textarea>'+
+          '<div class="guest-whatsapp-actions"><button class="btn-secondary" id="open-guest-whatsapp" type="button">Open WhatsApp</button><button class="btn-secondary" id="mark-guest-whatsapp-sent" type="button" '+(currentGuestWhatsappHistoryId?'':'disabled')+'>Mark Sent</button></div></div>':
           '<small class="muted">WhatsApp marketing consent has not been given. Promotional follow-up is disabled.</small>')+'</div>';
       $("close-guest-lead").addEventListener("click",()=>panel.classList.add("hidden"));
-      const whatsappButton=$("open-guest-whatsapp");
-      if(whatsappButton) whatsappButton.addEventListener("click",()=>{
+      const whatsappButton=$("open-guest-whatsapp"), sentButton=$("mark-guest-whatsapp-sent");
+      if(whatsappButton) whatsappButton.addEventListener("click",async()=>{
         const message=$("guest-whatsapp-message").value;
-        const phone=String(l.mobile_e164||"").replace(/\\D/g,"");
+        const phone=String(l.mobile_e164||"").replace(/\D/g,"");
         if(!phone){$("guest-lead-feedback").textContent="No valid mobile number is available for this lead.";return;}
-        window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(message),"_blank","noopener,noreferrer");
+        const whatsappWindow=window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(message),"_blank","noopener,noreferrer");
+        if(!whatsappWindow){$("guest-lead-feedback").textContent="Please allow pop-ups for WhatsApp, then try again.";return;}
+        whatsappButton.disabled=true;
+        try{
+          const saved=await api("admin_record_guest_whatsapp_open",{lead_id:id,phone_number:l.mobile_e164,message_text:message});
+          currentGuestWhatsappHistoryId=saved.history_id;
+          if(sentButton) sentButton.disabled=false;
+          $("guest-lead-feedback").textContent="WhatsApp opened and saved in history.";
+          await openGuestLead(id);
+        }catch(e){$("guest-lead-feedback").textContent="WhatsApp opened, but history could not be saved: "+e.message;}
+        finally{whatsappButton.disabled=false;}
       });
-      $("save-guest-lead").addEventListener("click",async()=>{
-        const b=$("save-guest-lead");b.disabled=true;
-        try{await api("admin_update_guest_lead",{lead_id:id,lead_status:$("guest-detail-status").value,converted_student_id:$("guest-detail-student").value.trim()||null,note:$("guest-detail-note").value.trim()});$("guest-lead-feedback").textContent="Lead updated.";await refreshGuestLeads();await openGuestLead(id);}
+      if(sentButton) sentButton.addEventListener("click",async()=>{
+        if(!currentGuestWhatsappHistoryId){$("guest-lead-feedback").textContent="Open WhatsApp first to create a history entry.";return;}
+        sentButton.disabled=true;
+        try{await api("admin_mark_guest_whatsapp_sent",{history_id:currentGuestWhatsappHistoryId});$("guest-lead-feedback").textContent="Message marked Sent.";await openGuestLead(id);}
+        catch(e){$("guest-lead-feedback").textContent=e.message;sentButton.disabled=false;}
+      });
+      $("update-guest-lead").addEventListener("click",async()=>{
+        const b=$("update-guest-lead");b.disabled=true;
+        try{await api("admin_update_guest_lead",{lead_id:id,lead_status:$("guest-detail-status").value,converted_student_id:$("guest-detail-student").value.trim()||null});$("guest-lead-feedback").textContent="Lead updated.";await refreshGuestLeads();await openGuestLead(id);}
+        catch(e){$("guest-lead-feedback").textContent=e.message;}finally{b.disabled=false;}
+      });
+      $("save-guest-lead-note").addEventListener("click",async()=>{
+        const b=$("save-guest-lead-note"), noteText=$("guest-detail-note").value.trim();
+        if(!noteText){$("guest-lead-feedback").textContent="Enter a follow-up note before saving.";return;}
+        b.disabled=true;
+        try{await api("admin_save_guest_lead_note",{lead_id:id,note:noteText});$("guest-lead-feedback").textContent="Follow-up note saved.";await openGuestLead(id);}
         catch(e){$("guest-lead-feedback").textContent=e.message;}finally{b.disabled=false;}
       });
     } catch(e){panel.textContent=e.message;}
