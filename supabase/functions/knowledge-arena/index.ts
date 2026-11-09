@@ -321,11 +321,11 @@ Deno.serve(async (req) => {
       if (challengeId) {
         const { data: challenge, error: challengeError } = await db.from("ka_daily_challenges")
           .select("id,status,challenge_date,grade_label").eq("id", challengeId).eq("status", "published").maybeSingle();
-        if (challengeError || !challenge || challenge.challenge_date !== today || challenge.grade_label !== ctx.gradeLabel) return errorResponse(400, "Daily challenge is not active for this grade.");
+        if (challengeError || !challenge || challenge.challenge_date !== today || challenge.grade_label !== effectiveGradeLabel) return errorResponse(400, "Daily challenge is not active for this grade.");
         const { data: challengeItems, error: challengeItemsError } = await db.from("ka_daily_challenge_items")
           .select("question_id,question:ka_questions(grade_label)").eq("challenge_id", challengeId);
         const eligibleItems = (challengeItems || []).filter((x: any) => x.question &&
-          x.question.grade_label === ctx.gradeLabel);
+          x.question.grade_label === effectiveGradeLabel);
         if (challengeItemsError || !challengeItems || ids.length !== eligibleItems.length || ids.some((id) => !eligibleItems.some((x: any) => x.question_id === id))) {
           return errorResponse(400, "Attempt includes questions outside today's challenge.");
         }
