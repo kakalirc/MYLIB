@@ -650,7 +650,7 @@
     }
     if (guestMode) {
       try {
-        const result=await api("guest_submit",{game_type:currentGame,answers:currentAnswers,duration_seconds:Math.max(0,Math.round((Date.now()-gameStartedAt)/1000))});
+        const result=await api("guest_submit",{game_type:currentGame,client_attempt_id:clientAttemptId,answers:currentAnswers,duration_seconds:Math.max(0,Math.round((Date.now()-gameStartedAt)/1000))});
         currentScore=Number(result.correct_count||0);
         $("result-score").textContent=currentScore+" / "+Number(result.question_count||currentQuestions.length);
         $("result-title").textContent=currentScore===currentQuestions.length?"Perfect score!":currentScore>=Math.ceil(currentQuestions.length*.6)?"Well played!":"Good effort!";
