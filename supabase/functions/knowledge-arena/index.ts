@@ -126,12 +126,25 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
     if (gradeError || leadReadError) return errorResponse(503, "Guest registration is temporarily unavailable.");
     if (!gradeRow) return errorResponse(400, "Select a valid grade.");
     const now = new Date().toISOString();
-    const { data: lead, error: leadError } = await db.from("ka_guest_leads").upsert({
-      mobile_e164: mobile, last_seen_at: now, updated_at: now,
-      enquiry_consent: !!existing?.enquiry_consent || body.enquiry_consent === true,
-      marketing_consent: !!existing?.marketing_consent || body.marketing_consent === true
-    }, { onConflict: "mobile_e164" }).select("id").single();
-    if (leadError || !lead) return errorResponse(503, "Could not save the guest lead.");
+    let lead: any = null;
+    if (existing) {
+      const { data, error } = await db.from("ka_guest_leads").update({
+        last_seen_at: now, updated_at: now,
+        enquiry_consent: !!existing.enquiry_consent || body.enquiry_consent === true,
+        marketing_consent: !!existing.marketing_consent || body.marketing_consent === true
+      }).eq("id", existing.id).select("id").single();
+      if (error) return errorResponse(503, "Could not update the existing guest lead.");
+      lead = data;
+    } else {
+      const { data, error } = await db.from("ka_guest_leads").insert({
+        mobile_e164: mobile, last_seen_at: now, updated_at: now,
+        enquiry_consent: body.enquiry_consent === true,
+        marketing_consent: body.marketing_consent === true
+      }).select("id").single();
+      if (error) return errorResponse(503, "Could not save the guest lead.");
+      lead = data;
+    }
+    if (!lead) return errorResponse(503, "Could not save the guest lead.");
     const token = guestToken();
     const expires = new Date(Date.now() + GUEST_SESSION_DAYS * 86400000).toISOString();
     const { data: session, error: sessionError } = await db.from("ka_guest_sessions").insert({
@@ -232,12 +245,7 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
       duration_seconds: Math.max(0, Math.min(3600, safeNumber(body.duration_seconds, 0))), completed_at: now
     });
     if (activityError) return errorResponse(503, "Could not save guest activity.");
-    await db.from("ka_guest_sessions").update({
-      games_completed: 1, questions_answered: answers.length, last_game_type: gameType, last_subject: subjects.join(", "), last_seen_at: now
-    }).eq("id", guest.id);
-    await db.from("ka_guest_leads").update({
-      games_completed: 1, questions_answered: answers.length, last_game_type: gameType, last_subject: subjects.join(", "), last_activity_at: now, last_seen_at: now
-    }).eq("id", guest.lead_id);
+    // The database trigger increments aggregate counters atomically for concurrent submissions.
     return json(200, { correct_count: correct, question_count: answers.length, accuracy: Math.round(correct / answers.length * 10000) / 100, feedback });
   }
   if (action === "guest_promotions") {
