@@ -88,3 +88,17 @@ export function safeNumber(value: unknown, fallback = 0): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
+
+
+export const LANGUAGE_SUBJECT_BY_CODE: Readonly<Record<string, string>> = {
+  en: "English", hi: "Hindi", kn: "Kannada", sa: "Sanskrit", fr: "French",
+};
+export function isLanguageGame(gameType: string): boolean {
+  return gameType === "word_master" || gameType === "word_builder";
+}
+export function languageSubject(languageCode: unknown): string | null {
+  return LANGUAGE_SUBJECT_BY_CODE[String(languageCode || "")] || null;
+}
+export function languageGradeLabels(gradeLabel: string): string[] {
+  return [...new Set([gradeLabel, "General", "Language"])];
+}
