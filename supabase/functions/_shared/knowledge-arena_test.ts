@@ -1,5 +1,8 @@
 import { assertEquals } from "jsr:@std/assert";
-import { GAME_CATALOG, gameSubjects, validGameType } from "./knowledge-arena.ts";
+import {
+  GAME_CATALOG, gameSubjects, validGameType,
+  isLanguageGame, languageGradeLabels, languageSubject,
+} from "./knowledge-arena.ts";
 
 Deno.test("catalogue contains the 14 approved named games", () => {
   assertEquals(GAME_CATALOG.length, 14);
@@ -28,7 +31,6 @@ Deno.test("multi-subject games can use the enabled LIB subject catalogue", () =>
 });
 
 
-import { isLanguageGame, languageGradeLabels, languageSubject } from "./knowledge-arena.ts";
 Deno.test("language games are independent of academic grade", () => {
   assertEquals(isLanguageGame("word_master"), true);
   assertEquals(isLanguageGame("word_builder"), true);
