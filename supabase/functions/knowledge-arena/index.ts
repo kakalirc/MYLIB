@@ -1150,11 +1150,18 @@ Deno.serve(async (req) => {
       } else if (control === "delete_job") {
         const jobId = typeof body.job_id === "string" ? body.job_id : "";
         if (!jobId) return errorResponse(400, "job_id is required.");
+        const { data: target, error: targetError } = await db.from("ka_generation_jobs")
+          .select("id,status").eq("id", jobId).is("archived_at", null).maybeSingle();
+        if (targetError || !target) return errorResponse(404, "Generation job not found.");
+        if (target.status === "running") return errorResponse(409, "A running job cannot be removed.");
+        const archivePatch: Record<string, unknown> = { archived_at: new Date().toISOString(), archived_by: user.id };
+        // A queued job must be stopped before it is hidden from the active queue.
+        // Preserve completed/partial/failed status for audit accuracy.
+        if (target.status === "queued") archivePatch.status = "paused";
         const { data: removed, error: removeError } = await db.from("ka_generation_jobs")
-          .update({ status: "paused", archived_at: new Date().toISOString(), archived_by: user.id })
-          .eq("id", jobId).is("archived_at", null).neq("status", "running")
+          .update(archivePatch).eq("id", jobId).eq("status", target.status).is("archived_at", null)
           .select("id,status,archived_at").maybeSingle();
-        if (removeError || !removed) return errorResponse(409, "Job could not be removed; it may already be running or removed.");
+        if (removeError || !removed) return errorResponse(409, "Job could not be removed; its status may have changed.");
         return json(200, { removed: true, job: removed, audit_history_retained: true });
       } else if (control === "queue_generation") {
         if (!current.generation_enabled) return errorResponse(423, "AI generation is paused.");
