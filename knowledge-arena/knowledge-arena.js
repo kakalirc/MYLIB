@@ -1082,7 +1082,7 @@
         '<label>LIB Student ID (optional, for conversion)<input id="guest-detail-student" value="'+escapeHtml(l.converted_student_id||"")+'" placeholder="Existing student UUID"></label>'+
         '<label>Follow-up note<textarea id="guest-detail-note" rows="3" maxlength="2000" placeholder="Add an internal note"></textarea></label>'+
         '<button class="btn-secondary" id="save-guest-lead" data-lead-id="'+l.id+'">Save follow-up</button>'+
-        (l.enquiry_consent||l.marketing_consent?'<a class="btn-secondary" href="https://wa.me/'+encodeURIComponent(l.mobile_e164.replace("+",""))+'" target="_blank" rel="noopener noreferrer">Open WhatsApp</a>':'<small class="muted">No contact consent recorded. Do not send promotional messages.</small>')+'</div>';
+        (l.enquiry_consent||l.marketing_consent?'<a class="btn-secondary" href="https://wa.me/'+encodeURIComponent(l.mobile_e164.replace("+",""))+'" target="_blank" rel="noopener noreferrer">'+(l.marketing_consent?"WhatsApp marketing follow-up":"WhatsApp enquiry follow-up")+'</a>':'<small class="muted">No contact consent recorded. Do not send promotional messages.</small>')+'</div>';
       $("close-guest-lead").addEventListener("click",()=>panel.classList.add("hidden"));
       $("save-guest-lead").addEventListener("click",async()=>{
         const b=$("save-guest-lead");b.disabled=true;
