@@ -42,3 +42,11 @@ footer{background:var(--navy);color:#fff;padding:22px max(24px,calc((100vw - 120
 #guest-exit{background:#e7b94c;color:#101d3a;border-color:#e7b94c}
 #guest-exit:hover{background:#f0ca70;border-color:#f0ca70}
 #guest-exit:disabled{opacity:.7;cursor:wait}
+
+/* Knowledge Arena Admin navigation: one focused workspace at a time. */
+.admin-subnav{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 20px;padding:10px;background:#f3f5f9;border:1px solid #dce3ed;border-radius:12px}
+.admin-subnav-btn{appearance:none;border:1px solid #cbd5e1;background:#fff;color:#26364d;border-radius:9px;padding:9px 13px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.admin-subnav-btn:hover{border-color:#5576a5;background:#f8fbff}
+.admin-subnav-btn.active{background:#172b4d;border-color:#172b4d;color:#fff;box-shadow:0 2px 6px rgba(23,43,77,.16)}
+#view-admin [data-admin-section].hidden{display:none!important}
+@media(max-width:640px){.admin-subnav{flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain}.admin-subnav-btn{flex:0 0 auto}}
