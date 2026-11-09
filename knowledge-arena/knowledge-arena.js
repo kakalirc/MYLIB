@@ -38,7 +38,7 @@
   let currentAnswers = [], currentIndex = 0, currentScore = 0, challengeId = null, clientAttemptId = null;
   let gameStartedAt = 0, memoryTimer = null, memoryRevealed = false;
   let adminSummary = null, adminOptions = null, adminJobs = [], adminUsageReviews = [], adminLeadership = null, adminQuestions = [], adminSuitability = null;
-  let adminGuestLeads = [], adminGuestPromotions = [], adminGuestLeadOffset = 0, adminGuestLeadTotal = 0;
+  let adminGuestLeads = [], adminGuestPromotions = [], adminGuestLeadOffset = 0, adminGuestLeadTotal = 0, currentGuestWhatsappHistoryId = null;
 
   function setStatus(label, tone) {
     const el = $("connection-status");
@@ -1244,7 +1244,7 @@
           '<small class="muted">WhatsApp marketing consent has not been given. Promotional follow-up is disabled.</small>')+'</div>';
       $("close-guest-lead").addEventListener("click",()=>panel.classList.add("hidden"));
       const whatsappButton=$("open-guest-whatsapp"), sentButton=$("mark-guest-whatsapp-sent");
-      let latestWhatsappHistoryId=null;
+      currentGuestWhatsappHistoryId=null;
       if(whatsappButton) whatsappButton.addEventListener("click",async()=>{
         const message=$("guest-whatsapp-message").value;
         const phone=String(l.mobile_e164||"").replace(/\\D/g,"");
@@ -1254,7 +1254,7 @@
         whatsappButton.disabled=true;
         try{
           const saved=await api("admin_record_guest_whatsapp_open",{lead_id:id,phone_number:l.mobile_e164,message_text:message});
-          latestWhatsappHistoryId=saved.history_id;
+          currentGuestWhatsappHistoryId=saved.history_id;
           if(sentButton) sentButton.disabled=false;
           $("guest-lead-feedback").textContent="WhatsApp opened and saved in history.";
           await openGuestLead(id);
@@ -1262,9 +1262,9 @@
         finally{whatsappButton.disabled=false;}
       });
       if(sentButton) sentButton.addEventListener("click",async()=>{
-        if(!latestWhatsappHistoryId){$("guest-lead-feedback").textContent="Open WhatsApp first to create a history entry.";return;}
+        if(!currentGuestWhatsappHistoryId){$("guest-lead-feedback").textContent="Open WhatsApp first to create a history entry.";return;}
         sentButton.disabled=true;
-        try{await api("admin_mark_guest_whatsapp_sent",{history_id:latestWhatsappHistoryId});$("guest-lead-feedback").textContent="Message marked Sent.";await openGuestLead(id);}
+        try{await api("admin_mark_guest_whatsapp_sent",{history_id:currentGuestWhatsappHistoryId});$("guest-lead-feedback").textContent="Message marked Sent.";await openGuestLead(id);}
         catch(e){$("guest-lead-feedback").textContent=e.message;sentButton.disabled=false;}
       });
       $("update-guest-lead").addEventListener("click",async()=>{
