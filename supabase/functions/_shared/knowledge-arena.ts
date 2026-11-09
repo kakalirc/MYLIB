@@ -55,8 +55,33 @@ export function indiaDayStartIso(date: string): string {
   return new Date(date + "T00:00:00+05:30").toISOString();
 }
 
+export const GAME_CATALOG = [
+  { id: "word_master", name: "Word Master", category: "academic", subjects: ["English", "Hindi", "Kannada", "Sanskrit", "French"] },
+  { id: "number_quest", name: "Number Quest", category: "academic", subjects: ["Math", "Mathematics"] },
+  { id: "science_explorer", name: "Science Explorer", category: "academic", subjects: ["Science"] },
+  { id: "quick_quiz", name: "Quick Quiz", category: "fun", subjects: ["*"] },
+  { id: "brain_teaser", name: "Brain Teaser", category: "fun", subjects: ["*"] },
+  { id: "memory_challenge", name: "Memory Challenge", category: "fun", subjects: ["*"] },
+  { id: "world_explorer", name: "World Explorer", category: "academic", subjects: ["Social Science", "Geography"] },
+  { id: "history_quest", name: "History Quest", category: "academic", subjects: ["History", "Social Science"] },
+  { id: "society_culture_challenge", name: "Society & Culture Challenge", category: "academic", subjects: ["Sociology", "Social Science"] },
+  { id: "civics_constitution_challenge", name: "Civics & Constitution Challenge", category: "academic", subjects: ["Political Science", "Social Science"] },
+  { id: "economics_explorer", name: "Economics Explorer", category: "academic", subjects: ["Economics"] },
+  { id: "money_matters", name: "Money Matters", category: "academic", subjects: ["Economics", "Mathematics"] },
+  { id: "word_builder", name: "Word Builder", category: "academic", subjects: ["English", "Hindi", "Kannada", "Sanskrit", "French"] },
+  { id: "math_sprint", name: "Math Sprint", category: "academic", subjects: ["Math", "Mathematics"] },
+] as const;
+
 export function validGameType(value: unknown): value is string {
-  return ["word_master", "number_quest", "science_explorer", "quick_quiz", "brain_teaser", "memory_challenge"].includes(String(value));
+  return GAME_CATALOG.some((game) => game.id === String(value));
+}
+
+export function gameSubjects(gameType: string, subjects: string[]): string[] {
+  const game = GAME_CATALOG.find((item) => item.id === gameType);
+  if (!game) return [];
+  if (game.subjects.includes("*")) return subjects;
+  return subjects.filter((subject) => game.subjects.some((candidate) =>
+    candidate.toLocaleLowerCase() === subject.toLocaleLowerCase()));
 }
 
 export function safeNumber(value: unknown, fallback = 0): number {
