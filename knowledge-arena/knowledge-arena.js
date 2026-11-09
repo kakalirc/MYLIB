@@ -319,9 +319,16 @@
     try { const options=await api("guest_options"); $("guest-grade").innerHTML='<option value="">Select your grade</option>'+(options.grades||[]).map(x=>'<option value="'+escapeHtml(x)+'">'+escapeHtml(x)+'</option>').join(""); } catch(e) {}
   }
   async function exitGuest() {
-    guestExitPending=true;
-    await showGuestPromotion("exit");
-    if($("guest-promotion-modal").classList.contains("hidden")) await finishGuestExit();
+    if (!guestMode || guestExitPending) return;
+    guestExitPending = true;
+    const button = $("guest-exit");
+    if (button) button.disabled = true;
+    try {
+      // Exiting is a direct action; do not interrupt it with an exit promotion.
+      await finishGuestExit();
+    } finally {
+      if (button) button.disabled = false;
+    }
   }
 
   async function loadStudent() {
