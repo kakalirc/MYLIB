@@ -15,6 +15,7 @@ permissions:
 
 jobs:
   build-guides:
+    if: github.actor != 'github-actions[bot]'
     name: Regenerate and commit role-based PDF guides
     runs-on: ubuntu-latest
     steps:
