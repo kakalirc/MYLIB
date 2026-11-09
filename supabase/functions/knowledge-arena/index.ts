@@ -449,8 +449,14 @@ Deno.serve(async (req) => {
     if (action === "get_leaderboard") {
       const ctx = await studentContext(db, profile);
       if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
-      const { data, error } = await db.from("ka_player_stats")
-        .select("user_id,game_xp,games_played").order("game_xp", { ascending: false }).order("games_played", { ascending: false }).limit(100);
+      const { data: studentProfiles, error: profileError } = await db.from("profiles")
+        .select("id").eq("role", "Student").not("linked_student_id", "is", null);
+      if (profileError) return errorResponse(503, "Could not load leaderboard eligibility.");
+      const studentIds = (studentProfiles || []).map((x: any) => x.id);
+      const { data, error } = studentIds.length ? await db.from("ka_player_stats")
+        .select("user_id,game_xp,games_played").in("user_id", studentIds)
+        .order("game_xp", { ascending: false }).order("games_played", { ascending: false }).limit(100)
+        : { data: [], error: null };
       if (error) return errorResponse(503, "Could not load leaderboard.");
       return json(200, { leaderboard: (data || []).map((x: any, i: number) => ({
         rank: i + 1, display_name: "Player " + (i + 1), game_xp: x.game_xp, games_played: x.games_played,
