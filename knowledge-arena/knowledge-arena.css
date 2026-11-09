@@ -59,3 +59,41 @@ footer{background:var(--navy);color:#fff;padding:22px max(24px,calc((100vw - 120
 .guest-whatsapp-history-item small{display:block;color:var(--muted,#667085);}
 .guest-whatsapp-history-item p{white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0 0;}
 .btn-small{min-height:32px;padding:6px 12px;font-size:.88rem;width:auto;align-self:flex-start;}
+
+
+/* Keep the player grade and language selectors in distinct, readable rows. */
+#view-play .subject-choice:not(.hidden){
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:8px;
+  margin:0 0 18px;
+  max-width:760px;
+}
+#view-play .subject-choice label{
+  display:block;
+  margin:0;
+  font-size:14px;
+  font-weight:700;
+  line-height:1.45;
+  color:var(--ink);
+}
+#view-play .subject-choice select{
+  display:block;
+  width:min(100%,320px);
+  min-height:42px;
+  padding:9px 12px;
+  border:1px solid var(--line);
+  border-radius:9px;
+  background:#fff;
+  color:var(--ink);
+}
+#view-play .subject-choice small{
+  display:block;
+  max-width:680px;
+  line-height:1.55;
+}
+@media(max-width:600px){
+  #view-play .subject-choice{width:100%;}
+  #view-play .subject-choice select{width:100%;max-width:100%;}
+}
