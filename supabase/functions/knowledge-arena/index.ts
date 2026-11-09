@@ -519,7 +519,7 @@ Deno.serve(async (req) => {
       if (gradeError || subjectError) return errorResponse(503, "Could not load grade and subject options.");
       return json(200, {
         grades: [...new Set(["General", ...(grades || []).map((x: any) => String(x.name))])],
-        subjects: uniqueSubjectNames(subjects),
+        subjects: uniqueSubjectNames(subjects).filter((s) => s.toLocaleLowerCase() !== "all"),
         game_types: GAME_CATALOG.map((game) => game.id),
       });
     }
@@ -714,13 +714,17 @@ Deno.serve(async (req) => {
         }
         const { data: subjectRow } = await db.from("subjects").select("name").eq("name", subject).maybeSingle();
         if (!subjectRow) return errorResponse(400, "Unknown subject.");
-        const [{ data: gradeGame }, { data: gradeSubject }, { data: gameSubject }] = await Promise.all([
-          db.from("ka_game_grade_rules").select("enabled").eq("game_type", gameType).eq("grade_label", gradeLabel).maybeSingle(),
-          db.from("ka_grade_subject_rules").select("enabled").eq("grade_label", gradeLabel).eq("subject", subject).maybeSingle(),
-          db.from("ka_game_subject_rules").select("enabled").eq("game_type", gameType).eq("subject", subject).maybeSingle(),
-        ]);
-        if (!gradeGame?.enabled || !gradeSubject?.enabled || !gameSubject?.enabled) {
-          return errorResponse(423, "This subject and game combination is not enabled for the selected grade.");
+        const { data: gameSubject } = await db.from("ka_game_subject_rules").select("enabled")
+          .eq("game_type", gameType).eq("subject", subject).maybeSingle();
+        if (!gameSubject?.enabled) return errorResponse(423, "This game is not configured for the selected subject.");
+        if (gradeLabel !== "General") {
+          const [{ data: gradeGame }, { data: gradeSubject }] = await Promise.all([
+            db.from("ka_game_grade_rules").select("enabled").eq("game_type", gameType).eq("grade_label", gradeLabel).maybeSingle(),
+            db.from("ka_grade_subject_rules").select("enabled").eq("grade_label", gradeLabel).eq("subject", subject).maybeSingle(),
+          ]);
+          if (!gradeGame?.enabled || !gradeSubject?.enabled) {
+            return errorResponse(423, "This subject and game combination is not enabled for the selected grade.");
+          }
         }
         const { data: job, error } = await db.from("ka_generation_jobs").insert({
           status: "queued", subject, topic: String(body.topic || subject).slice(0, 120),
