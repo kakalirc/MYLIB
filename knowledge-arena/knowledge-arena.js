@@ -160,6 +160,8 @@
     try {
       const context = await api("get_context");
       role = context.role || "";
+      const backToLearning = $("back-learning");
+      if (backToLearning) backToLearning.classList.toggle("hidden", role !== "Student" && role !== "Teacher");
       gradeLabel = context.grade_label || "";
       assignedGradeLabel = gradeLabel;
       if (role !== "Student" && role !== "Teacher" && role !== "Admin") {
