@@ -66,7 +66,7 @@ select g.name, s.name,
   end,
   'default'
 from public.grades g
-cross join (select distinct trim(name) as name from public.subjects where trim(name) <> '' and lower(trim(name)) <> 'all') s
+cross join (select distinct trim(name) as name from public.subjects where trim(name) <> '' and lower(trim(name)) not in ('all','math + science')) s
 where coalesce(g.archived,false)=false
 on conflict (grade_label,subject) do nothing;
 
