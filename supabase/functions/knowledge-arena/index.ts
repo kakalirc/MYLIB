@@ -85,7 +85,10 @@ async function adminSummary(db: ReturnType<typeof adminClient>) {
 const GUEST_SESSION_DAYS = 30;
 const GUEST_STATUSES = ["New","Contacted","Interested","Demo Booked","Demo Completed","Converted to Student","Not Interested"];
 
-function isHttpsUrl(value: string): boolean {\n  try { return new URL(value).protocol === "https:"; } catch { return false; }\n}\nfunction normalizeGuestMobile(value: unknown): string | null {
+function isHttpsUrl(value: string): boolean {
+  try { return new URL(value).protocol === "https:"; } catch { return false; }
+}
+function normalizeGuestMobile(value: unknown): string | null {
   const digits = String(value || "").replace(/\D/g, "");
   const national = digits.startsWith("91") && digits.length === 12 ? digits.slice(2) : digits;
   return /^[6-9]\d{9}$/.test(national) ? "+91" + national : null;
@@ -1041,8 +1044,8 @@ Deno.serve(async (req) => {
         targets[key] = [...new Set(value as string[])];
       }
       if (!title || title.length > 120 || !description || description.length > 500 || !ctaLabel || ctaLabel.length > 50 ||
-          !/^https:\/\/i.test(ctaUrl) || !["welcome","after_game","exit"].includes(trigger)) return errorResponse(400, "Enter a title, description, secure CTA URL and valid trigger.");
-      if (imageUrl && !/^https:\/\/i.test(imageUrl)) return errorResponse(400, "Promotion image must use HTTPS.");
+          !isHttpsUrl(ctaUrl) || !["welcome","after_game","exit"].includes(trigger)) return errorResponse(400, "Enter a title, description, secure CTA URL and valid trigger.");
+      if (imageUrl && !isHttpsUrl(imageUrl)) return errorResponse(400, "Promotion image must use HTTPS.");
       if (targets.target_game_types.some((x) => !validGameType(x))) return errorResponse(400, "One or more target games are invalid.");
       const payload = { title, body: description, image_url: imageUrl, cta_label: ctaLabel, cta_url: ctaUrl, trigger,
         target_grades: targets.target_grades, target_game_types: targets.target_game_types, target_subjects: targets.target_subjects,
