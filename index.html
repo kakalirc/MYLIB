@@ -4036,7 +4036,7 @@ async function loadWixBookings() {
       demoLogId: r.demo_log_id || '', notes: r.notes || '',
       createdAt: r.created_at || '',
       convertedStudentId: r.converted_student_id || '',
-      paid: !!r.paid, paidAt: r.paid_at || '', paymentId: r.payment_id || '', paidVia: r.paid_via || '',
+      paid: !!r.paid && r.paid_via === 'Razorpay' && !!r.payment_id, paidAt: r.paid_at || '', paymentId: r.payment_id || '', paidVia: r.paid_via || '',
       formData: r.form_data && typeof r.form_data === 'object' ? r.form_data : null,
       ackSentAt: r.ack_sent_at || '', ackReady: 'ack_sent_at' in r
     }));
@@ -17596,9 +17596,9 @@ function renderWixBookings() {
   const filters = ['New', 'Scheduled', 'Done', 'Converted', 'Lost', 'Cancelled', 'All'].concat(wixCallsReady ? ['Calls due'] : []);
   const newCount = data.wixBookings.filter(b => b.status === 'New').length;
   const paidCount = data.wixBookings.filter(b => !!b.paid).length;
-  const notPaidCount = data.wixBookings.filter(b => !b.paid).length;
+  const notPaidCount = data.wixBookings.filter(b => !b.paid && Number(b.amount || 0) > 0).length;
   const wixFilterMatch = (b, f) => f === 'All' || (f === 'Calls due' ? !!wixCallDueOn(b) : b.status === f);
-  const list = data.wixBookings.filter(b => wixFilterMatch(b, wixBookingsFilter) && (!wixPaidReady || wixPaidFilter === 'All' || (wixPaidFilter === 'Paid') === !!b.paid));
+  const list = data.wixBookings.filter(b => wixFilterMatch(b, wixBookingsFilter) && (!wixPaidReady || wixPaidFilter === 'All' || (wixPaidFilter === 'Paid' ? !!b.paid : (!b.paid && Number(b.amount || 0) > 0))));
   const d = wixBookingScheduleDraft;
   const ed = wixBookingEditDraft;
   const statusColor = s => s === 'New' ? 'var(--brick)' : s === 'Scheduled' ? 'var(--accent)' : s === 'Done' ? '#6b5ca5' : s === 'Converted' ? 'var(--forest)' : s === 'Lost' ? '#a0522d' : '#888';
