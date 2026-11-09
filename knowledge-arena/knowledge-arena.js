@@ -220,9 +220,30 @@
         try { const resumed = await api("guest_resume"); gradeLabel = resumed.grade_label || ""; await loadGuest(); return; }
         catch (e) { localStorage.removeItem("ka_guest_token"); guestTokenValue = ""; }
       }
-      const options = await api("guest_options");
-      $("guest-grade").innerHTML = '<option value="">Select your grade</option>' + (options.grades || []).map(x => '<option value="' + escapeHtml(x) + '">' + escapeHtml(x) + '</option>').join("");
-      if (!options.games_enabled) { $("guest-register-feedback").textContent = "Games are temporarily paused. Please try again later."; $("guest-start-button").disabled = true; } else { $("guest-start-button").disabled = false; }
+      // The public grade catalogue is readable through the existing anon/RLS SELECT policy.
+      // Load it directly so this form does not depend on the newer guest_options Edge Function
+      // action being deployed before the review build is opened.
+      const { data: gradeRows, error: gradeError } = await client
+        .from("grades").select("name").eq("archived", false).order("sort_order");
+      if (gradeError) throw new Error("Could not load class / grade options. Please refresh and try again.");
+      const grades = [...new Set((gradeRows || []).map(x => String(x.name || "").trim())
+        .filter(name => name && name.toLocaleLowerCase() !== "tina student"))];
+      const gradeSelect = $("guest-grade");
+      gradeSelect.innerHTML = '<option value="">Select your grade</option>' +
+        grades.map(name => '<option value="' + escapeHtml(name) + '">' + escapeHtml(name) + '</option>').join("");
+      if (!grades.length) throw new Error("No active class / grade options are configured.");
+      $("guest-start-button").disabled = false;
+      // Keep the live pause control when the guest Edge Function is available.
+      try {
+        const options = await api("guest_options");
+        if (options.games_enabled === false) {
+          $("guest-register-feedback").textContent = "Games are temporarily paused. Please try again later.";
+          $("guest-start-button").disabled = true;
+        }
+      } catch (optionsError) {
+        // Grade loading remains independent. Registration reports a service error if
+        // the guest Edge Function has not yet been deployed.
+      }
       showGuestGate();
     } catch (e) { showGuestGate(); $("guest-register-feedback").textContent = e.message || "Guest access is temporarily unavailable."; setStatus("UNAVAILABLE","danger"); }
   }
