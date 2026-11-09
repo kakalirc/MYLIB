@@ -222,7 +222,7 @@
       }
       const options = await api("guest_options");
       $("guest-grade").innerHTML = '<option value="">Select your grade</option>' + (options.grades || []).map(x => '<option value="' + escapeHtml(x) + '">' + escapeHtml(x) + '</option>').join("");
-      if (!options.games_enabled) $("guest-register-feedback").textContent = "Games are temporarily paused. Please try again later.";
+      if (!options.games_enabled) { $("guest-register-feedback").textContent = "Games are temporarily paused. Please try again later."; $("guest-start-button").disabled = true; } else { $("guest-start-button").disabled = false; }
       showGuestGate();
     } catch (e) { showGuestGate(); $("guest-register-feedback").textContent = e.message || "Guest access is temporarily unavailable."; setStatus("UNAVAILABLE","danger"); }
   }
@@ -246,7 +246,7 @@
     $("guest-exit").classList.remove("hidden");
     $("welcome-line").textContent="Welcome to Knowledge Arena. Choose a game and start learning!";
     $("grade-label").textContent="Your selected class: "+gradeLabel;
-    renderGameAvailability(data.games||[]); setStatus("GUEST PLAY","success"); showView("play");
+    renderGameAvailability(data.games||[]); if(!data.games_enabled) note("Knowledge Arena games are temporarily paused by Admin. Please return later.","warning"); setStatus("GUEST PLAY","success"); showView("play");
   }
   async function showGuestPromotion(trigger,gameType="",subject="") {
     if(!guestMode)return;
