@@ -98,6 +98,12 @@ begin
           from public.ka_questions q
           where q.status='published' and q.game_type='quick_quiz' and q.grade_label='General'
             and not (q.subject = any(disabled_subjects))
+            and exists (select 1 from public.ka_grade_subject_rules gs
+              where gs.grade_label=grade_row.grade_label and lower(gs.subject)=lower(q.subject) and gs.enabled=true)
+            and exists (select 1 from public.ka_game_grade_rules gg
+              where gg.grade_label=grade_row.grade_label and gg.game_type=q.game_type and gg.enabled=true)
+            and exists (select 1 from public.ka_game_subject_rules gsr
+              where gsr.game_type=q.game_type and lower(gsr.subject)=lower(q.subject) and gsr.enabled=true)
         ) candidates
         order by case when candidates.subject_rank <= 2 then 0 else 1 end,
                  candidates.subject_rank,
