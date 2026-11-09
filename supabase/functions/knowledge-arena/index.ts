@@ -871,6 +871,141 @@ Deno.serve(async (req) => {
       return json(200, { jobs: data || [] });
     }
 
+
+    if (action === "get_admin_guest_leads") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const status = String(body.status || "").trim();
+      const search = String(body.search || "").trim().slice(0, 100);
+      const limit = Math.max(1, Math.min(100, Math.floor(safeNumber(body.limit, 50))));
+      let query = db.from("ka_guest_leads").select("id,mobile_e164,last_guest_name,last_grade_label,enquiry_consent,marketing_consent,lead_status,converted_student_id,first_seen_at,last_seen_at,last_activity_at,last_game_type,last_subject", { count: "exact" })
+        .order("last_seen_at", { ascending: false }).limit(limit);
+      if (status && GUEST_STATUSES.includes(status)) query = query.eq("lead_status", status);
+      if (search) query = query.or("mobile_e164.ilike.%" + search.replace(/[(),]/g, "") + "%,last_guest_name.ilike.%" + search.replace(/[(),]/g, "") + "%");
+      const { data: leads, error, count } = await query;
+      if (error) return errorResponse(503, "Could not load guest leads.");
+      const ids = (leads || []).map((x: any) => x.id);
+      const [{ data: sessions, error: sessionError }, { data: activity, error: activityError }] = await Promise.all([
+        ids.length ? db.from("ka_guest_sessions").select("id,lead_id,guest_name,grade_label,started_at,last_seen_at,expires_at,ended_at").in("lead_id", ids).order("started_at", { ascending: false }) : Promise.resolve({ data: [], error: null }),
+        ids.length ? db.from("ka_guest_activity").select("lead_id,game_type,subject,question_count,correct_count,accuracy,completed_at").in("lead_id", ids).order("completed_at", { ascending: false }) : Promise.resolve({ data: [], error: null })
+      ]);
+      if (sessionError || activityError) return errorResponse(503, "Could not load guest activity.");
+      const sessionCounts = new Map<string, number>();
+      const gameCounts = new Map<string, number>();
+      const activityByLead = new Map<string, any[]>();
+      for (const row of sessions || []) sessionCounts.set(row.lead_id, (sessionCounts.get(row.lead_id) || 0) + 1);
+      for (const row of activity || []) {
+        gameCounts.set(row.lead_id, (gameCounts.get(row.lead_id) || 0) + 1);
+        const arr = activityByLead.get(row.lead_id) || [];
+        if (arr.length < 8) arr.push(row);
+        activityByLead.set(row.lead_id, arr);
+      }
+      return json(200, { total: count || 0, leads: (leads || []).map((x: any) => ({
+        ...x, sessions_count: sessionCounts.get(x.id) || 0, games_completed: gameCounts.get(x.id) || 0,
+        recent_activity: activityByLead.get(x.id) || []
+      })) });
+    }
+
+    if (action === "get_admin_guest_lead_detail") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const leadId = String(body.lead_id || "");
+      if (!leadId) return errorResponse(400, "Lead ID is required.");
+      const [{ data: lead, error: leadError }, { data: sessions, error: sessionsError },
+        { data: activity, error: activityError }, { data: consents, error: consentsError },
+        { data: notes, error: notesError }, { data: events, error: eventsError }] = await Promise.all([
+        db.from("ka_guest_leads").select("*").eq("id", leadId).maybeSingle(),
+        db.from("ka_guest_sessions").select("id,guest_name,grade_label,started_at,last_seen_at,expires_at,ended_at").eq("lead_id", leadId).order("started_at", { ascending: false }).limit(100),
+        db.from("ka_guest_activity").select("*").eq("lead_id", leadId).order("completed_at", { ascending: false }).limit(200),
+        db.from("ka_guest_consents").select("*").eq("lead_id", leadId).order("recorded_at", { ascending: false }).limit(100),
+        db.from("ka_guest_lead_notes").select("id,note,admin_user_id,created_at").eq("lead_id", leadId).order("created_at", { ascending: false }).limit(100),
+        db.from("ka_guest_promotion_events").select("promotion_id,event_type,created_at").eq("lead_id", leadId).order("created_at", { ascending: false }).limit(200)
+      ]);
+      if (leadError || sessionsError || activityError || consentsError || notesError || eventsError) return errorResponse(503, "Could not load guest lead details.");
+      if (!lead) return errorResponse(404, "Guest lead not found.");
+      return json(200, { lead, sessions: sessions || [], activity: activity || [], consents: consents || [], notes: notes || [], promotion_events: events || [] });
+    }
+
+    if (action === "admin_update_guest_lead") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const leadId = String(body.lead_id || "");
+      const status = String(body.lead_status || "");
+      const note = String(body.note || "").trim();
+      const studentId = body.converted_student_id ? String(body.converted_student_id) : null;
+      if (!leadId || !GUEST_STATUSES.includes(status)) return errorResponse(400, "Choose a valid lead status.");
+      if (note.length > 2000) return errorResponse(400, "Notes must be 2,000 characters or fewer.");
+      if (studentId) {
+        const { data: student, error: studentError } = await db.from("students").select("id").eq("id", studentId).eq("archived", false).maybeSingle();
+        if (studentError || !student) return errorResponse(400, "Select a valid active LIB student.");
+      }
+      const { data: updated, error } = await db.from("ka_guest_leads").update({
+        lead_status: status, converted_student_id: studentId, updated_at: new Date().toISOString()
+      }).eq("id", leadId).select("id,lead_status,converted_student_id").maybeSingle();
+      if (error || !updated) return errorResponse(404, "Guest lead could not be updated.");
+      if (note) {
+        const { error: noteError } = await db.from("ka_guest_lead_notes").insert({ lead_id: leadId, admin_user_id: user.id, note });
+        if (noteError) return errorResponse(503, "Lead status was updated, but the note could not be saved.");
+      }
+      return json(200, { lead: updated });
+    }
+
+    if (action === "get_admin_guest_promotions") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const { data, error } = await db.from("ka_guest_promotions").select("*").order("display_order").order("created_at", { ascending: false }).limit(200);
+      if (error) return errorResponse(503, "Could not load guest promotions.");
+      const ids = (data || []).map((x: any) => x.id);
+      const { data: events, error: eventError } = ids.length
+        ? await db.from("ka_guest_promotion_events").select("promotion_id,event_type").in("promotion_id", ids)
+        : { data: [], error: null };
+      if (eventError) return errorResponse(503, "Could not load promotion performance.");
+      const counts = new Map<string, { view: number; click: number; dismiss: number }>();
+      for (const e of events || []) {
+        const c = counts.get(e.promotion_id) || { view: 0, click: 0, dismiss: 0 };
+        c[e.event_type as "view" | "click" | "dismiss"]++;
+        counts.set(e.promotion_id, c);
+      }
+      return json(200, { promotions: (data || []).map((p: any) => ({ ...p, metrics: counts.get(p.id) || { view: 0, click: 0, dismiss: 0 } })) });
+    }
+
+    if (action === "admin_save_guest_promotion") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const id = typeof body.id === "string" ? body.id : null;
+      const title = String(body.title || "").trim();
+      const description = String(body.body || "").trim();
+      const ctaLabel = String(body.cta_label || "Explore courses").trim();
+      const ctaUrl = String(body.cta_url || "").trim();
+      const trigger = String(body.trigger || "after_game");
+      const imageUrl = String(body.image_url || "").trim() || null;
+      const arrays = ["target_grades","target_game_types","target_subjects"] as const;
+      const targets: Record<string, string[]> = {};
+      for (const key of arrays) {
+        const value = body[key] === undefined ? [] : body[key];
+        if (!Array.isArray(value) || value.length > 50 || value.some((x) => typeof x !== "string" || x.length > 100)) return errorResponse(400, "Promotion targeting values are invalid.");
+        targets[key] = [...new Set(value as string[])];
+      }
+      if (!title || title.length > 120 || !description || description.length > 500 || !ctaLabel || ctaLabel.length > 50 ||
+          !/^https:\\/\\//i.test(ctaUrl) || !["welcome","after_game","exit"].includes(trigger)) return errorResponse(400, "Enter a title, description, secure CTA URL and valid trigger.");
+      if (imageUrl && !/^https:\\/\\//i.test(imageUrl)) return errorResponse(400, "Promotion image must use HTTPS.");
+      if (targets.target_game_types.some((x) => !validGameType(x))) return errorResponse(400, "One or more target games are invalid.");
+      const payload = { title, body: description, image_url: imageUrl, cta_label: ctaLabel, cta_url: ctaUrl, trigger,
+        target_grades: targets.target_grades, target_game_types: targets.target_game_types, target_subjects: targets.target_subjects,
+        display_order: Math.max(0, Math.min(10000, Math.floor(safeNumber(body.display_order, 100)))),
+        active: body.active === true, starts_at: body.starts_at || null, ends_at: body.ends_at || null,
+        created_by: user.id, updated_at: new Date().toISOString() };
+      const { data, error } = id
+        ? await db.from("ka_guest_promotions").update(payload).eq("id", id).select("*").maybeSingle()
+        : await db.from("ka_guest_promotions").insert(payload).select("*").single();
+      if (error || !data) return errorResponse(503, "Could not save the guest promotion.");
+      return json(200, { promotion: data });
+    }
+
+    if (action === "admin_delete_guest_promotion") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const id = String(body.id || "");
+      if (!id) return errorResponse(400, "Promotion ID is required.");
+      const { error } = await db.from("ka_guest_promotions").delete().eq("id", id);
+      if (error) return errorResponse(503, "Could not delete the promotion.");
+      return json(200, { deleted: true });
+    }
+
     if (action === "admin_control") {
       if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
       const control = String(body.control || "");
