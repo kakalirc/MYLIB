@@ -9,7 +9,12 @@
   const GAME_NAMES = {
     word_master: "Word Master", number_quest: "Number Quest",
     science_explorer: "Science Explorer", quick_quiz: "Quick Quiz",
-    brain_teaser: "Brain Teaser", memory_challenge: "Memory Challenge"
+    brain_teaser: "Brain Teaser", memory_challenge: "Memory Challenge",
+    world_explorer: "World Explorer", history_quest: "History Quest",
+    society_culture_challenge: "Society & Culture Challenge",
+    civics_constitution_challenge: "Civics & Constitution Challenge",
+    economics_explorer: "Economics Explorer", money_matters: "Money Matters",
+    word_builder: "Word Builder", math_sprint: "Math Sprint"
   };
   const SAMPLE_QUESTIONS = [
     {subject:"General Knowledge",prompt:"Which planet is known as the Red Planet?",options:["Venus","Mars","Jupiter","Mercury"],correct_option:1,explanation:"Mars looks reddish because of iron oxide on its surface."},
@@ -210,15 +215,7 @@
       progress = await api("get_my_progress");
       configureLanguageChoice();
       configureTinaGradeChoice();
-      const enabledGames = new Set((catalog.games || []).map((game) => game.id));
-      document.querySelectorAll(".game-card").forEach((card) => {
-        const launch = card.querySelector(".launch");
-        if (!launch) return;
-        const enabled = enabledGames.has(launch.dataset.game);
-        card.classList.toggle("game-disabled", !enabled);
-        launch.disabled = !enabled;
-        if (!enabled) launch.textContent = "Temporarily unavailable";
-      });
+      renderGameAvailability(catalog.games || []);
       renderProgress();
       renderAchievements();
       await loadLeaderboard();
@@ -402,7 +399,7 @@
       const launch = card.querySelector(".launch");
       if (!launch) return;
       const enabled = enabledGames.has(launch.dataset.game);
-      card.classList.toggle("game-disabled", !enabled);
+      card.classList.toggle("game-unavailable", !enabled);
       launch.disabled = !enabled;
       if (!enabled) launch.textContent = "Questions being prepared";
       else launch.textContent = "Play now →";
