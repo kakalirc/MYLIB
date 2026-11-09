@@ -85,10 +85,10 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
-      - name: Install Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
+      - name: Install Deno from the official npm distribution
+        run: |
+          npm install --global deno@2.9.6
+          deno --version
       - name: Type check Student/Teacher/Admin API
         run: deno check supabase/functions/knowledge-arena/index.ts
       - name: Type check generation worker
