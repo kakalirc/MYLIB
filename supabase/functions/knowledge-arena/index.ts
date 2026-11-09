@@ -999,7 +999,7 @@ Deno.serve(async (req) => {
       const leadId = String(body.lead_id || "");
       const phone = String(body.phone_number || "").trim();
       const message = String(body.message_text || "");
-      if (!leadId || !/^\\+?[0-9]{8,15}$/.test(phone.replace(/[\\s()-]/g, ""))) return errorResponse(400, "A valid recipient mobile number is required.");
+      if (!leadId || !/^\+?[0-9]{8,15}$/.test(phone.replace(/[\s()-]/g, ""))) return errorResponse(400, "A valid recipient mobile number is required.");
       if (!message.trim() || message.length > 4000) return errorResponse(400, "WhatsApp message must contain 1–4,000 characters.");
       const { data: lead, error: leadError } = await db.from("ka_guest_leads").select("id,marketing_consent,mobile_e164").eq("id", leadId).maybeSingle();
       if (leadError || !lead) return errorResponse(404, "Guest lead not found.");
