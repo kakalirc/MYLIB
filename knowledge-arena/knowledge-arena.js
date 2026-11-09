@@ -503,6 +503,7 @@
   $("export-guest-leads").addEventListener("click",exportGuestLeads);
   $("guest-lead-search").addEventListener("keydown",e=>{if(e.key==="Enter")refreshGuestLeads().catch(err=>$("guest-lead-feedback").textContent=err.message);});
   $("guest-lead-status").addEventListener("change",()=>refreshGuestLeads().catch(e=>$("guest-lead-feedback").textContent=e.message));
+  ["guest-lead-grade","guest-lead-from","guest-lead-to"].forEach(id=>$(id).addEventListener("change",()=>refreshGuestLeads().catch(e=>$("guest-lead-feedback").textContent=e.message)));
   $("guest-lead-list").addEventListener("click",e=>{const b=e.target.closest("[data-open-guest-lead]");if(b)openGuestLead(b.dataset.openGuestLead);});
   $("guest-lead-detail").addEventListener("click",e=>{const b=e.target.closest("[data-export-guest-leads]");if(b)exportGuestLeads();});
   $("guest-promotion-form").addEventListener("submit",saveGuestPromotion);
@@ -1050,7 +1051,8 @@
   }
   async function refreshGuestLeads() {
     const status=$("guest-lead-feedback"); if(status) status.textContent="Loading guest leads…";
-    const result=await api("get_admin_guest_leads",{status:$("guest-lead-status").value,search:$("guest-lead-search").value.trim(),limit:100});
+    if($("guest-lead-grade").options.length===1) $("guest-lead-grade").innerHTML='<option value="">All grades</option>'+(adminOptions?.grades||[]).map(x=>'<option value="'+escapeHtml(x)+'">'+escapeHtml(x)+'</option>').join("");
+    const result=await api("get_admin_guest_leads",{status:$("guest-lead-status").value,search:$("guest-lead-search").value.trim(),grade_label:$("guest-lead-grade").value,date_from:$("guest-lead-from").value,date_to:$("guest-lead-to").value,limit:100});
     adminGuestLeads=result.leads||[];
     const total=result.total||0, newCount=adminGuestLeads.filter(x=>x.lead_status==="New").length;
     const demoCount=adminGuestLeads.filter(x=>["Demo Booked","Demo Completed"].includes(x.lead_status)).length;
