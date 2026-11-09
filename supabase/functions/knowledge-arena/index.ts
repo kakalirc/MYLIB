@@ -89,9 +89,10 @@ function isHttpsUrl(value: string): boolean {
   try { return new URL(value).protocol === "https:"; } catch { return false; }
 }
 function normalizeGuestMobile(value: unknown): string | null {
-  const digits = String(value || "").replace(/\D/g, "");
-  const national = digits.startsWith("91") && digits.length === 12 ? digits.slice(2) : digits;
-  return /^[6-9]\d{9}$/.test(national) ? "+91" + national : null;
+  const supplied = String(value || "").trim();
+  // Require an explicit international prefix; the guest form supplies +91 by default.
+  const normalized = supplied.replace(/[\\s().-]/g, "");
+  return /^\\+[1-9]\\d{7,14}$/.test(normalized) ? normalized : null;
 }
 async function guestTokenHash(token: string): Promise<string> {
   const bytes = new TextEncoder().encode(token);
@@ -120,7 +121,7 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
     const mobile = normalizeGuestMobile(body.mobile_number);
     const grade = String(body.grade_label || "").trim();
     if (name.length < 2 || name.length > 80) return errorResponse(400, "Enter a name between 2 and 80 characters.");
-    if (!mobile) return errorResponse(400, "Enter a valid 10-digit Indian mobile number.");
+    if (!mobile) return errorResponse(400, "Enter a valid international mobile number with country code (8–15 digits).");
     if (!grade || grade.length > 80) return errorResponse(400, "Select your grade.");
     const [{ data: gradeRow, error: gradeError }, { data: existing, error: leadReadError }] = await Promise.all([
       db.from("grades").select("name").eq("name", grade).eq("archived", false).maybeSingle(),
