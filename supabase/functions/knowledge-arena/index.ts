@@ -941,8 +941,9 @@ Deno.serve(async (req) => {
       const dateFrom = String(body.date_from || "").trim();
       const dateTo = String(body.date_to || "").trim();
       const limit = Math.max(1, Math.min(100, Math.floor(safeNumber(body.limit, 50))));
+      const offset = Math.max(0, Math.floor(safeNumber(body.offset, 0)));
       let query = db.from("ka_guest_leads").select("id,mobile_e164,last_guest_name,last_grade_label,enquiry_consent,marketing_consent,lead_status,converted_student_id,first_seen_at,last_seen_at,last_activity_at,last_game_type,last_subject", { count: "exact" })
-        .order("last_seen_at", { ascending: false }).limit(limit);
+        .order("last_seen_at", { ascending: false }).range(offset, offset + limit - 1);
       if (status && GUEST_STATUSES.includes(status)) query = query.eq("lead_status", status);
       if (gradeLabel) query = query.eq("last_grade_label", gradeLabel);
       if (dateFrom && /^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) query = query.gte("first_seen_at", dateFrom + "T00:00:00+05:30");
