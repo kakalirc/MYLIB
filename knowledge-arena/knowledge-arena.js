@@ -814,6 +814,7 @@
     const allowed = new Set(["overview","setup","generation","question-bank","guests"]);
     if (!allowed.has(name)) name = "overview";
     activeAdminSection = name;
+    if (name === "question-bank") refreshQuestions();
     document.querySelectorAll("[data-admin-section]").forEach((panel) => {
       panel.classList.toggle("hidden", panel.dataset.adminSection !== name);
     });
@@ -828,8 +829,8 @@
   async function loadAdmin() {
     setStatus("ADMIN", "success");
     try {
-      const [summary, options, jobs, usage, questions, suitability] = await Promise.all([
-        api("get_admin_summary"), api("get_admin_options"), api("get_admin_jobs"), api("get_admin_usage_reviews"), api("get_admin_questions"), api("get_admin_suitability")
+      const [summary, options, jobs, usage, suitability] = await Promise.all([
+        api("get_admin_summary"), api("get_admin_options"), api("get_admin_jobs"), api("get_admin_usage_reviews"), api("get_admin_suitability")
       ]);
       adminSummary = summary.summary;
       adminOptions = options;
@@ -1103,16 +1104,29 @@
     }).join("");
   }
 
+  let questionBankRequest = null;
   async function refreshQuestions() {
+    if (questionBankRequest) return questionBankRequest;
     const feedback = $("question-feedback");
+    const list = $("admin-question-list");
     feedback.textContent = "Loading questions…";
-    try {
-      const data = await api("get_admin_questions");
-      adminQuestions = data.questions || [];
-      populateQuestionFilters();
-      renderQuestionBank();
-      feedback.textContent = "Loaded " + adminQuestions.length + " recent questions.";
-    } catch (error) { feedback.textContent = error.message; }
+    if (list) list.innerHTML = '<p class="muted">Loading questions…</p>';
+    questionBankRequest = (async () => {
+      try {
+        const data = await api("get_admin_questions");
+        if (!data || !Array.isArray(data.questions)) throw new Error("The server returned an invalid question-bank response.");
+        adminQuestions = data.questions;
+        populateQuestionFilters();
+        renderQuestionBank();
+        feedback.textContent = "Loaded " + adminQuestions.length + " most recent questions.";
+      } catch (error) {
+        feedback.textContent = "Could not load questions: " + error.message;
+        if (list) list.innerHTML = '<p class="muted">Questions could not be loaded. Use Refresh to try again.</p>';
+      } finally {
+        questionBankRequest = null;
+      }
+    })();
+    return questionBankRequest;
   }
 
   async function handleQuestionAction(event) {
@@ -1127,7 +1141,7 @@
     button.disabled = true;
     feedback.textContent = operation === "save" ? "Saving question…" : operation === "archive" ? "Removing question from play…" : "Deleting question…";
     try {
-      const payload = { operation, question_id: id };
+      const payload = { operation: operation === "save" ? "update" : operation, question_id: id };
       if (operation === "save") {
         payload.prompt = row.querySelector('[data-field="prompt"]').value;
         payload.topic = row.querySelector('[data-field="topic"]').value;
