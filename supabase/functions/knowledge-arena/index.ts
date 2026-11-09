@@ -1,6 +1,26 @@
-import { adminClient, authenticate, corsHeaders, errorResponse, indiaDate, indiaDayStartIso, json, studentContext, validGameType, safeNumber } from "../_shared/knowledge-arena.ts";
+import { adminClient, authenticate, corsHeaders, errorResponse, indiaDate, indiaDayStartIso, json, studentContext, validGameType, safeNumber, GAME_CATALOG, gameSubjects } from "../_shared/knowledge-arena.ts";
 
 const MAX_QUESTIONS_PER_ATTEMPT = 30;
+
+async function playerGrade(db: ReturnType<typeof adminClient>, profile: any, userId: string, requestedGrade?: unknown) {
+  if (profile.role === "Student") {
+    const ctx = await studentContext(db, profile);
+    if (!ctx) return null;
+    if (ctx.gradeLabel.trim().toLocaleLowerCase() === "tina student") {
+      const { data: preference, error } = await db.from("ka_student_preferences")
+        .select("selected_grade_label").eq("user_id", userId).maybeSingle();
+      if (error) throw new Error("Could not verify your saved grade.");
+      return preference?.selected_grade_label ? { gradeLabel: preference.selected_grade_label, assignedGradeLabel: ctx.gradeLabel } : null;
+    }
+    return { gradeLabel: ctx.gradeLabel, assignedGradeLabel: ctx.gradeLabel };
+  }
+  if (profile.role !== "Teacher" && profile.role !== "Admin") return null;
+  const label = String(requestedGrade || "").trim();
+  if (!label) return null;
+  const { data: grade, error } = await db.from("grades").select("name").eq("name", label).eq("archived", false).maybeSingle();
+  if (error || !grade) return null;
+  return { gradeLabel: grade.name, assignedGradeLabel: null };
+}
 
 function uniqueSubjectNames(rows: Array<{ name: unknown }> | null | undefined): string[] {
   const names = new Map<string, string>();
@@ -74,60 +94,76 @@ Deno.serve(async (req) => {
 
     if (action === "get_context") {
       if (profile.role === "Admin") return json(200, { role: "Admin" });
+      if (profile.role === "Teacher") return json(200, { role: "Teacher" });
       if (profile.role === "Student") {
         const ctx = await studentContext(db, profile);
         if (!ctx) return errorResponse(403, "A linked LIB student record is required.");
         return json(200, { role: "Student", grade_label: ctx.gradeLabel });
       }
-      return errorResponse(403, "Knowledge Arena is available only to LIB Students and Admins.");
+      return errorResponse(403, "Knowledge Arena is available to linked LIB Students, Teachers and authorised Admins.");
     }
 
     if (action === "get_catalog") {
-      const ctx = await studentContext(db, profile);
-      if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
-      const [{ data: settings, error: settingsError }, { data: subjects, error: subjectsError }, { data: stats }] = await Promise.all([
+      const resolved = await playerGrade(db, profile, user.id, body.grade_label);
+      const [{ data: settings, error: settingsError }, { data: subjects, error: subjectsError },
+        { data: stats }, { data: grades, error: gradesError }] = await Promise.all([
         db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle(),
         db.from("subjects").select("name").order("name"),
         db.from("ka_player_stats").select("game_xp,games_played,questions_answered,correct_answers,current_streak,best_streak,last_played_on").eq("user_id", user.id).maybeSingle(),
+        db.from("grades").select("name").eq("archived", false).order("sort_order"),
       ]);
-      if (settingsError || subjectsError) return errorResponse(503, "Knowledge Arena is not configured yet.");
-      if (!settings) return errorResponse(503, "Knowledge Arena database setup is pending.");
-      let preferredLanguageCode: string | null = null;
-      let selectedGradeLabel: string | null = null;
+      if (settingsError || subjectsError || gradesError || !settings) return errorResponse(503, "Knowledge Arena is not configured yet.");
+      let selectedGradeLabel: string | null = resolved?.gradeLabel || null;
+      let assignedGradeLabel: string | null = null;
       let availableGradeOptions: string[] = [];
-      if (ctx.gradeLabel.trim().toLocaleLowerCase() === "tina student") {
-        const [{ data: preference, error: preferenceError }, { data: grades, error: gradesError }] = await Promise.all([
-          db.from("ka_student_preferences").select("selected_grade_label").eq("user_id", user.id).maybeSingle(),
-          db.from("grades").select("name").eq("archived", false).order("sort_order"),
-        ]);
-        if (preferenceError || gradesError) return errorResponse(503, "Could not load your grade options.");
-        selectedGradeLabel = preference?.selected_grade_label || null;
-        availableGradeOptions = [...new Set((grades || []).map((g: any) => String(g.name || "").trim())
-          .filter((name: string) => /^(?:[1-9]|1[0-2]|PU)$/i.test(name)))];
+      let preferredLanguageCode: string | null = null;
+      if (profile.role === "Student") {
+        const ctx = await studentContext(db, profile);
+        if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
+        assignedGradeLabel = ctx.gradeLabel;
+        if (ctx.gradeLabel.trim().toLocaleLowerCase() === "language") {
+          const { data: preference, error } = await db.from("ka_student_preferences")
+            .select("preferred_language_code").eq("user_id", user.id).maybeSingle();
+          if (error) return errorResponse(503, "Could not load your saved language preference.");
+          preferredLanguageCode = preference?.preferred_language_code || "en";
+        }
+        if (ctx.gradeLabel.trim().toLocaleLowerCase() === "tina student") {
+          const { data: preference, error } = await db.from("ka_student_preferences")
+            .select("selected_grade_label").eq("user_id", user.id).maybeSingle();
+          if (error) return errorResponse(503, "Could not load your saved grade.");
+          selectedGradeLabel = preference?.selected_grade_label || null;
+          availableGradeOptions = (grades || []).map((g: any) => String(g.name));
+        }
+      } else {
+        availableGradeOptions = (grades || []).map((g: any) => String(g.name));
       }
-      if (ctx.gradeLabel.trim().toLocaleLowerCase() === "language") {
-        const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
-          .select("preferred_language_code").eq("user_id", user.id).maybeSingle();
-        if (preferenceError) return errorResponse(503, "Could not load your saved language preference.");
-        preferredLanguageCode = preference?.preferred_language_code || "en";
+      const subjectNames = uniqueSubjectNames(subjects).filter((s) => !(settings.disabled_subjects || []).includes(s));
+      let availableIds: string[] = [];
+      if (settings.games_enabled && selectedGradeLabel) {
+        const { data: questionRows, error: questionError } = await db.from("ka_questions")
+          .select("game_type,subject").eq("status", "published")
+          .in("grade_label", [selectedGradeLabel, "General"])
+          .or("expires_at.is.null,expires_at.gt." + new Date().toISOString()).limit(5000);
+        if (questionError) return errorResponse(503, "Could not check game content availability.");
+        const rows = (questionRows || []).filter((q: any) =>
+          !(settings.disabled_game_types || []).includes(q.game_type) &&
+          !(settings.disabled_subjects || []).includes(q.subject));
+        availableIds = GAME_CATALOG.filter((game) => rows.some((q: any) =>
+          q.game_type === game.id &&
+          (game.subjects.includes("*") || game.subjects.some((s: string) => s.toLocaleLowerCase() === String(q.subject).toLocaleLowerCase()))))
+          .map((game) => game.id);
       }
       return json(200, {
         games_enabled: settings.games_enabled,
-        games: [
-          { id: "word_master", name: "Word Master", category: "academic" },
-          { id: "number_quest", name: "Number Quest", category: "academic" },
-          { id: "science_explorer", name: "Science Explorer", category: "academic" },
-          { id: "quick_quiz", name: "Quick Quiz", category: "fun" },
-          { id: "brain_teaser", name: "Brain Teaser", category: "fun" },
-          { id: "memory_challenge", name: "Memory Challenge", category: "fun" },
-        ].filter((g) => settings.games_enabled && !(settings.disabled_game_types || []).includes(g.id)),
-        subjects: uniqueSubjectNames(subjects).filter((s) => !(settings.disabled_subjects || []).includes(s)),
+        games: GAME_CATALOG.filter((g) => availableIds.includes(g.id)),
+        subjects: subjectNames,
         progress: stats || { game_xp: 0, games_played: 0, questions_answered: 0, correct_answers: 0, current_streak: 0, best_streak: 0 },
-        grade_label: selectedGradeLabel || ctx.gradeLabel,
-        assigned_grade_label: ctx.gradeLabel,
+        grade_label: selectedGradeLabel || assignedGradeLabel || "",
+        assigned_grade_label: assignedGradeLabel || "",
         selected_grade_label: selectedGradeLabel,
         available_grade_options: availableGradeOptions,
         preferred_language_code: preferredLanguageCode,
+        role: profile.role,
       });
     }
 
