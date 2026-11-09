@@ -59,7 +59,7 @@ select g.name, s.name,
     when lower(s.name) in ('math','mathematics','math + science','science') then
       g.name not in ('Language','French upto class 8','French above class 8','Tina Student')
     when lower(s.name) in ('social science','history') then
-      g.name in ('5','6','7','8','9','10','11','12','PU','IGCSE above class 8')
+      g.name in ('5','6','7','8','9','10','11','12','PU','IGCSE above class 8','IGSCE upto class 7')
     when lower(s.name) in ('economics','political science','sociology') then
       g.name in ('11','12','PU')
     else false
