@@ -484,6 +484,7 @@
   $("guest-promotion-dismiss").addEventListener("click",()=>closeGuestPromotion("dismiss"));
   $("guest-promotion-cta").addEventListener("click",()=>closeGuestPromotion("click"));
   $("refresh-guest-leads").addEventListener("click",()=>refreshGuestLeads().catch(e=>$("guest-lead-feedback").textContent=e.message));
+  $("export-guest-leads").addEventListener("click",exportGuestLeads);
   $("guest-lead-search").addEventListener("keydown",e=>{if(e.key==="Enter")refreshGuestLeads().catch(err=>$("guest-lead-feedback").textContent=err.message);});
   $("guest-lead-status").addEventListener("change",()=>refreshGuestLeads().catch(e=>$("guest-lead-feedback").textContent=e.message));
   $("guest-lead-list").addEventListener("click",e=>{const b=e.target.closest("[data-open-guest-lead]");if(b)openGuestLead(b.dataset.openGuestLead);});
