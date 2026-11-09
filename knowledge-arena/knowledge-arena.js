@@ -1245,7 +1245,6 @@
           '<small class="muted">WhatsApp marketing consent has not been given. Promotional follow-up is disabled.</small>')+'</div>';
       $("close-guest-lead").addEventListener("click",()=>panel.classList.add("hidden"));
       const whatsappButton=$("open-guest-whatsapp"), sentButton=$("mark-guest-whatsapp-sent");
-      currentGuestWhatsappHistoryId=null;
       if(whatsappButton) whatsappButton.addEventListener("click",async()=>{
         const message=$("guest-whatsapp-message").value;
         const phone=String(l.mobile_e164||"").replace(/\\D/g,"");
