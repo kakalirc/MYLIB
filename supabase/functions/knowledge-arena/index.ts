@@ -86,9 +86,9 @@ const GUEST_SESSION_DAYS = 30;
 const GUEST_STATUSES = ["New","Contacted","Interested","Demo Booked","Demo Completed","Converted to Student","Not Interested"];
 
 function normalizeGuestMobile(value: unknown): string | null {
-  const digits = String(value || "").replace(/\\D/g, "");
+  const digits = String(value || "").replace(/\D/g, "");
   const national = digits.startsWith("91") && digits.length === 12 ? digits.slice(2) : digits;
-  return /^[6-9]\\d{9}$/.test(national) ? "+91" + national : null;
+  return /^[6-9]\d{9}$/.test(national) ? "+91" + national : null;
 }
 async function guestTokenHash(token: string): Promise<string> {
   const bytes = new TextEncoder().encode(token);
@@ -113,7 +113,7 @@ async function getGuestSession(db: ReturnType<typeof adminClient>, token: unknow
 async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Record<string, unknown>) {
   const action = String(body.action || "");
   if (action === "guest_register") {
-    const name = String(body.guest_name || "").trim().replace(/\\s+/g, " ");
+    const name = String(body.guest_name || "").trim().replace(/\s+/g, " ");
     const mobile = normalizeGuestMobile(body.mobile_number);
     const grade = String(body.grade_label || "").trim();
     if (name.length < 2 || name.length > 80) return errorResponse(400, "Enter a name between 2 and 80 characters.");
@@ -1041,8 +1041,8 @@ Deno.serve(async (req) => {
         targets[key] = [...new Set(value as string[])];
       }
       if (!title || title.length > 120 || !description || description.length > 500 || !ctaLabel || ctaLabel.length > 50 ||
-          !/^https:\\/\\//i.test(ctaUrl) || !["welcome","after_game","exit"].includes(trigger)) return errorResponse(400, "Enter a title, description, secure CTA URL and valid trigger.");
-      if (imageUrl && !/^https:\\/\\//i.test(imageUrl)) return errorResponse(400, "Promotion image must use HTTPS.");
+          !/^https:\/\/i.test(ctaUrl) || !["welcome","after_game","exit"].includes(trigger)) return errorResponse(400, "Enter a title, description, secure CTA URL and valid trigger.");
+      if (imageUrl && !/^https:\/\/i.test(imageUrl)) return errorResponse(400, "Promotion image must use HTTPS.");
       if (targets.target_game_types.some((x) => !validGameType(x))) return errorResponse(400, "One or more target games are invalid.");
       const payload = { title, body: description, image_url: imageUrl, cta_label: ctaLabel, cta_url: ctaUrl, trigger,
         target_grades: targets.target_grades, target_game_types: targets.target_game_types, target_subjects: targets.target_subjects,
