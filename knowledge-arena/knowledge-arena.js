@@ -451,37 +451,21 @@
       challengeId = dailyChallenge.challenge.id;
       currentGame = "quick_quiz";
     } else {
-      if (assignedGradeLabel.trim().toLocaleLowerCase() === "tina student" && !catalog?.selected_grade_label) {
-        note("Please select your school grade first.", "warning"); return;
+      if (role === "Teacher" || role === "Admin") {
+        if (!gradeLabel) { note("Select a grade before starting a game.", "warning"); showView("play"); return; }
       }
       const isLanguageStudent = assignedGradeLabel.trim().toLocaleLowerCase() === "language";
-      const selectedSubject = $("subject-select").value || "All";
-      const languageCode = isLanguageStudent
-        ? $("language-select").value
-        : (game === "word_master" ? "en" : (selectedSubject.toLocaleLowerCase() === "french" ? "fr" : "en"));
-      // Each game owns its academic subject. The page-level subject selector is
-      // only a filter for mixed Quick Quiz; it must never block another game.
-      const gameSubjects = {
-        word_master: isLanguageStudent ? LANGUAGE_OPTIONS[languageCode] : "English",
-        number_quest: "Math",
-        brain_teaser: "Math",
-        science_explorer: "Science",
-        memory_challenge: "Science"
-      };
-      const subject = Object.prototype.hasOwnProperty.call(gameSubjects, game)
-        ? gameSubjects[game]
-        : (selectedSubject.toLocaleLowerCase() === "all" ? "" : selectedSubject);
-      if (!subject && game !== "quick_quiz") {
-        note(isLanguageStudent ? "Please choose a language first." : "This game does not have a subject configured yet.", "warning");
-        return;
-      }
+      const payload = { game_type: game, limit: 10 };
+      if (role === "Teacher" || role === "Admin") payload.grade_label = gradeLabel;
+      if (isLanguageStudent && ["word_master","word_builder"].includes(game)) payload.language_code = $("language-select").value;
       try {
-        const data = await api("get_questions", { game_type: game, subject, language_code: languageCode, limit: 10 });
+        const data = await api("get_questions", payload);
         currentQuestions = (data.questions || []).sort(() => Math.random() - 0.5);
         if (!currentQuestions.length) {
-          note("There are no published questions for " + GAME_NAMES[game] + (subject ? " in " + subject : " for this grade") + " yet. Please try again later.", "info");
+          note("There are no approved questions for " + GAME_NAMES[game] + " at this grade yet. More questions can be generated from the Admin control centre.", "info");
           return;
         }
+        gradeLabel = data.grade_label || gradeLabel;
       } catch (error) {
         note(error.message, "warning");
         return;
