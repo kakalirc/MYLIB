@@ -239,9 +239,11 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
       .or("expires_at.is.null,expires_at.gt." + new Date().toISOString());
     if (languageGame) questionQuery = questionQuery.eq("language_code", languageCode);
     const { data: questions, error } = await questionQuery
-      .order("created_at", { ascending: false }).limit(10);
+      .order("created_at", { ascending: false }).limit(100);
     if (error) return errorResponse(503, "Could not load questions.");
-    return json(200, { questions: questions || [], grade_label: guest.grade_label });
+    const gradeRank = (q: any) => q.grade_label === guest.grade_label ? 0 : q.grade_label === "General" ? 1 : 2;
+    const selectedQuestions = (questions || []).sort((a: any, b: any) => gradeRank(a) - gradeRank(b)).slice(0, 10);
+    return json(200, { questions: selectedQuestions, grade_label: guest.grade_label });
   }
   if (action === "guest_submit") {
     const gameType = body.game_type;
@@ -511,12 +513,15 @@ Deno.serve(async (req) => {
         .eq("status", "published").in("grade_label", languageGame ? languageGradeLabels(effectiveGradeLabel) : [effectiveGradeLabel, "General"]).eq("game_type", gameType)
         .in("subject", allowedSubjects)
         .or("expires_at.is.null,expires_at.gt." + new Date().toISOString())
-        .order("created_at", { ascending: false }).limit(Math.min(Math.max(safeNumber(body.limit, 10), 1), 20));
+        .order("created_at", { ascending: false }).limit(100);
       if (body.difficulty) query = query.eq("difficulty", String(body.difficulty));
       if (languageCode) query = query.eq("language_code", languageCode);
       const { data, error } = await query;
       if (error) return errorResponse(503, "Could not load questions.");
-      return json(200, { questions: data || [], grade_label: effectiveGradeLabel });
+      const requestedLimit = Math.min(Math.max(safeNumber(body.limit, 10), 1), 20);
+      const gradeRank = (q: any) => q.grade_label === effectiveGradeLabel ? 0 : q.grade_label === "General" ? 1 : 2;
+      const selectedQuestions = (data || []).sort((a: any, b: any) => gradeRank(a) - gradeRank(b)).slice(0, requestedLimit);
+      return json(200, { questions: selectedQuestions, grade_label: effectiveGradeLabel });
     }
 
     if (action === "get_daily_challenge") {
