@@ -116,7 +116,7 @@ returns trigger
 language plpgsql
 security invoker
 set search_path = public
-as $
+as $$
 begin
   update public.ka_guest_sessions
     set games_completed = games_completed + 1,
@@ -136,7 +136,7 @@ begin
     where id = new.lead_id;
   return new;
 end;
-$;
+$$;
 
 drop trigger if exists ka_guest_activity_rollup_trg on public.ka_guest_activity;
 create trigger ka_guest_activity_rollup_trg
