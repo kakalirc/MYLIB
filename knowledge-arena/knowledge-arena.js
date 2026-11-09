@@ -1247,7 +1247,7 @@
       const whatsappButton=$("open-guest-whatsapp"), sentButton=$("mark-guest-whatsapp-sent");
       if(whatsappButton) whatsappButton.addEventListener("click",async()=>{
         const message=$("guest-whatsapp-message").value;
-        const phone=String(l.mobile_e164||"").replace(/\\D/g,"");
+        const phone=String(l.mobile_e164||"").replace(/\D/g,"");
         if(!phone){$("guest-lead-feedback").textContent="No valid mobile number is available for this lead.";return;}
         const whatsappWindow=window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(message),"_blank","noopener,noreferrer");
         if(!whatsappWindow){$("guest-lead-feedback").textContent="Please allow pop-ups for WhatsApp, then try again.";return;}
