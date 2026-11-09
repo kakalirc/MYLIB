@@ -140,17 +140,29 @@ Deno.serve(async (req) => {
       const subjectNames = uniqueSubjectNames(subjects).filter((s) => !(settings.disabled_subjects || []).includes(s));
       let availableIds: string[] = [];
       if (settings.games_enabled && selectedGradeLabel) {
-        const { data: questionRows, error: questionError } = await db.from("ka_questions")
-          .select("game_type,subject").eq("status", "published")
-          .in("grade_label", [selectedGradeLabel, "General"])
-          .or("expires_at.is.null,expires_at.gt." + new Date().toISOString()).limit(5000);
-        if (questionError) return errorResponse(503, "Could not check game content availability.");
+        const [{ data: questionRows, error: questionError }, { data: gradeGames, error: gradeGameError },
+          { data: gradeSubjects, error: gradeSubjectError }, { data: gameSubjectRules, error: gameSubjectError }] = await Promise.all([
+          db.from("ka_questions").select("game_type,subject").eq("status", "published")
+            .in("grade_label", [selectedGradeLabel, "General"])
+            .or("expires_at.is.null,expires_at.gt." + new Date().toISOString()).limit(5000),
+          db.from("ka_game_grade_rules").select("game_type").eq("grade_label", selectedGradeLabel).eq("enabled", true),
+          db.from("ka_grade_subject_rules").select("subject").eq("grade_label", selectedGradeLabel).eq("enabled", true),
+          db.from("ka_game_subject_rules").select("game_type,subject").eq("enabled", true),
+        ]);
+        if (questionError || gradeGameError || gradeSubjectError || gameSubjectError) return errorResponse(503, "Could not check grade and game suitability.");
+        const enabledGameIds = new Set((gradeGames || []).map((x: any) => x.game_type));
+        const enabledSubjects = new Set((gradeSubjects || []).map((x: any) => String(x.subject).toLocaleLowerCase()));
+        const gameSubjectMap = new Map<string, Set<string>>();
+        for (const rule of gameSubjectRules || []) {
+          if (!gameSubjectMap.has(rule.game_type)) gameSubjectMap.set(rule.game_type, new Set());
+          gameSubjectMap.get(rule.game_type)!.add(String(rule.subject).toLocaleLowerCase());
+        }
         const rows = (questionRows || []).filter((q: any) =>
           !(settings.disabled_game_types || []).includes(q.game_type) &&
-          !(settings.disabled_subjects || []).includes(q.subject));
-        availableIds = GAME_CATALOG.filter((game) => rows.some((q: any) =>
-          q.game_type === game.id &&
-          (game.subjects.includes("*") || game.subjects.some((s: string) => s.toLocaleLowerCase() === String(q.subject).toLocaleLowerCase()))))
+          !(settings.disabled_subjects || []).includes(q.subject) &&
+          enabledSubjects.has(String(q.subject).toLocaleLowerCase()));
+        availableIds = GAME_CATALOG.filter((game) => enabledGameIds.has(game.id) && rows.some((q: any) =>
+          q.game_type === game.id && gameSubjectMap.get(game.id)?.has(String(q.subject).toLocaleLowerCase())))
           .map((game) => game.id);
       }
       return json(200, {
@@ -208,8 +220,19 @@ Deno.serve(async (req) => {
       if (!settings?.games_enabled || (settings.disabled_game_types || []).includes(gameType)) return errorResponse(423, "This game is currently unavailable.");
       const { data: subjectRows, error: subjectError } = await db.from("subjects").select("name").order("name");
       if (subjectError) return errorResponse(503, "Could not load the subject catalogue.");
+      const [{ data: gradeGame, error: gradeGameError }, { data: gradeSubjectRows, error: gradeSubjectError },
+        { data: gameSubjectRows, error: gameSubjectError }] = await Promise.all([
+        db.from("ka_game_grade_rules").select("enabled").eq("game_type", gameType).eq("grade_label", effectiveGradeLabel).maybeSingle(),
+        db.from("ka_grade_subject_rules").select("subject").eq("grade_label", effectiveGradeLabel).eq("enabled", true),
+        db.from("ka_game_subject_rules").select("subject").eq("game_type", gameType).eq("enabled", true),
+      ]);
+      if (gradeGameError || gradeSubjectError || gameSubjectError) return errorResponse(503, "Could not verify academic suitability.");
+      if (!gradeGame?.enabled) return errorResponse(423, "This game is not configured for your selected grade.");
       const allSubjects = uniqueSubjectNames(subjectRows).filter((s) => !(settings.disabled_subjects || []).includes(s));
-      let allowedSubjects = gameSubjects(gameType, allSubjects);
+      const eligibleSubjects = new Set((gradeSubjectRows || []).map((x: any) => String(x.subject).toLocaleLowerCase()));
+      const configuredGameSubjects = new Set((gameSubjectRows || []).map((x: any) => String(x.subject).toLocaleLowerCase()));
+      let allowedSubjects = gameSubjects(gameType, allSubjects).filter((s) =>
+        eligibleSubjects.has(s.toLocaleLowerCase()) && configuredGameSubjects.has(s.toLocaleLowerCase()));
       if (profile.role === "Student" && ["word_master","word_builder"].includes(gameType)) {
         const ctx = await studentContext(db, profile);
         if (ctx?.gradeLabel.trim().toLocaleLowerCase() === "language") {
@@ -287,7 +310,17 @@ Deno.serve(async (req) => {
       const subjectSet = new Set(questions.map((q: any) => q.subject));
       const { data: subjectRows, error: subjectError } = await db.from("subjects").select("name");
       if (subjectError) return errorResponse(503, "Could not verify question subjects.");
-      const permittedSubjects = gameSubjects(gameType, uniqueSubjectNames(subjectRows));
+      const [{ data: gradeGame, error: gradeGameError }, { data: gradeSubjectRows, error: gradeSubjectError },
+        { data: gameSubjectRows, error: gameSubjectError }] = await Promise.all([
+        db.from("ka_game_grade_rules").select("enabled").eq("game_type", gameType).eq("grade_label", effectiveGradeLabel).maybeSingle(),
+        db.from("ka_grade_subject_rules").select("subject").eq("grade_label", effectiveGradeLabel).eq("enabled", true),
+        db.from("ka_game_subject_rules").select("subject").eq("game_type", gameType).eq("enabled", true),
+      ]);
+      if (gradeGameError || gradeSubjectError || gameSubjectError || !gradeGame?.enabled) return errorResponse(423, "This game is not configured for your selected grade.");
+      const eligibleSubjects = new Set((gradeSubjectRows || []).map((x: any) => String(x.subject).toLocaleLowerCase()));
+      const configuredGameSubjects = new Set((gameSubjectRows || []).map((x: any) => String(x.subject).toLocaleLowerCase()));
+      const permittedSubjects = gameSubjects(gameType, uniqueSubjectNames(subjectRows)).filter((s) =>
+        eligibleSubjects.has(s.toLocaleLowerCase()) && configuredGameSubjects.has(s.toLocaleLowerCase()));
       if (questions.some((q: any) => !permittedSubjects.some((s) => s.toLocaleLowerCase() === String(q.subject).toLocaleLowerCase()))) {
         return errorResponse(400, "One or more questions do not belong to this game's configured subjects.");
       }
@@ -484,6 +517,39 @@ Deno.serve(async (req) => {
         subjects: uniqueSubjectNames(subjects),
         game_types: GAME_CATALOG.map((game) => game.id),
       });
+    }
+
+    if (action === "get_admin_suitability") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const [{ data: gradeSubjects, error: gsError }, { data: gameGrades, error: ggError },
+        { data: gameSubjectsRows, error: gsrError }, { data: grades, error: gradesError },
+        { data: subjects, error: subjectsError }] = await Promise.all([
+        db.from("ka_grade_subject_rules").select("grade_label,subject,enabled,source").order("grade_label").order("subject"),
+        db.from("ka_game_grade_rules").select("game_type,grade_label,enabled").order("grade_label"),
+        db.from("ka_game_subject_rules").select("game_type,subject,enabled").order("game_type"),
+        db.from("grades").select("name").eq("archived", false).order("sort_order"),
+        db.from("subjects").select("name").order("name"),
+      ]);
+      if (gsError || ggError || gsrError || gradesError || subjectsError) return errorResponse(503, "Could not load suitability settings. Apply the Knowledge Arena suitability migration first.");
+      return json(200, { grade_subject_rules: gradeSubjects || [], game_grade_rules: gameGrades || [],
+        game_subject_rules: gameSubjectsRows || [], grades: [...new Set((grades || []).map((x: any) => x.name))],
+        subjects: uniqueSubjectNames(subjects), games: GAME_CATALOG });
+    }
+
+    if (action === "set_suitability") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const kind = String(body.kind || ""), enabled = body.enabled;
+      if (typeof enabled !== "boolean") return errorResponse(400, "enabled must be true or false.");
+      let table = "", key: Record<string,string> = {};
+      if (kind === "grade_subject") { table = "ka_grade_subject_rules"; key = { grade_label: String(body.grade_label || ""), subject: String(body.subject || "") }; }
+      else if (kind === "game_grade") { table = "ka_game_grade_rules"; key = { game_type: String(body.game_type || ""), grade_label: String(body.grade_label || "") }; }
+      else if (kind === "game_subject") { table = "ka_game_subject_rules"; key = { game_type: String(body.game_type || ""), subject: String(body.subject || "") }; }
+      else return errorResponse(400, "Unknown suitability rule.");
+      if (Object.values(key).some((v) => !v) || (key.game_type && !validGameType(key.game_type))) return errorResponse(400, "Invalid suitability rule details.");
+      const { error } = await db.from(table).upsert({ ...key, enabled, source: kind === "grade_subject" ? "admin" : undefined,
+        updated_at: new Date().toISOString(), updated_by: user.id });
+      if (error) return errorResponse(503, "Could not save the suitability rule.");
+      return json(200, { saved: true, kind, enabled });
     }
 
     if (action === "get_admin_questions") {
