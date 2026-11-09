@@ -38,7 +38,7 @@
   let currentAnswers = [], currentIndex = 0, currentScore = 0, challengeId = null, clientAttemptId = null;
   let gameStartedAt = 0, memoryTimer = null, memoryRevealed = false;
   let adminSummary = null, adminOptions = null, adminJobs = [], adminUsageReviews = [], adminLeadership = null, adminQuestions = [], adminSuitability = null;
-  let adminGuestLeads = [], adminGuestPromotions = [], adminGuestLeadOffset = 0, adminGuestLeadTotal = 0, currentGuestWhatsappHistoryId = null;
+  let adminGuestLeads = [], adminGuestPromotions = [], adminGuestLeadOffset = 0, adminGuestLeadTotal = 0, currentGuestWhatsappHistoryId = null, currentGuestWhatsappLeadId = null;
 
   function setStatus(label, tone) {
     const el = $("connection-status");
@@ -1220,6 +1220,7 @@
     if(status) status.textContent=total+" guest lead(s) found.";
   }
   async function openGuestLead(id) {
+    if(currentGuestWhatsappLeadId!==id){currentGuestWhatsappHistoryId=null;currentGuestWhatsappLeadId=id;}
     const panel=$("guest-lead-detail"); panel.classList.remove("hidden"); panel.textContent="Loading lead details…";
     try {
       const d=await api("get_admin_guest_lead_detail",{lead_id:id}), l=d.lead;
@@ -1240,7 +1241,7 @@
         (l.marketing_consent?
           '<div class="guest-whatsapp-followup"><h4>WhatsApp follow-up</h4><p class="muted">Edit the message if needed. Opening WhatsApp records the message in history. Mark it sent after you send it.</p>'+
           '<textarea id="guest-whatsapp-message" rows="12" maxlength="4000">'+escapeHtml("Hello!\n\nThank you for registering "+(l.last_guest_name||"your child")+" for LIB Education’s Knowledge Arena!\n\nWe hope your child enjoyed exploring our games, quizzes and learning challenges.\n\nAt LIB Education, we offer:\n📚 Academic Tuition\n🌍 Spoken Language Courses\n✏️ School Curriculum Support\n🧠 Interactive Learning Activities\n\nWe would be happy to help your child take the next step in their learning journey.\n\nWould you like to know more about our programmes or schedule a demo class?\n\nWe look forward to hearing from you.\n\nTeam LIB Education\n🌐 www.libeducation.com\n📞 +91 9845393178")+'</textarea>'+
-          '<div class="guest-whatsapp-actions"><button class="btn-secondary" id="open-guest-whatsapp" type="button">Open WhatsApp</button><button class="btn-secondary" id="mark-guest-whatsapp-sent" type="button" disabled>Mark Sent</button></div></div>':
+          '<div class="guest-whatsapp-actions"><button class="btn-secondary" id="open-guest-whatsapp" type="button">Open WhatsApp</button><button class="btn-secondary" id="mark-guest-whatsapp-sent" type="button" '+(currentGuestWhatsappHistoryId?'':'disabled')+'>Mark Sent</button></div></div>':
           '<small class="muted">WhatsApp marketing consent has not been given. Promotional follow-up is disabled.</small>')+'</div>';
       $("close-guest-lead").addEventListener("click",()=>panel.classList.add("hidden"));
       const whatsappButton=$("open-guest-whatsapp"), sentButton=$("mark-guest-whatsapp-sent");
