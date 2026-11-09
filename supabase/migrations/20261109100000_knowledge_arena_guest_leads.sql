@@ -20,7 +20,7 @@ create table if not exists public.ka_guest_leads (
   last_subject text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint ka_guest_leads_mobile_e164_check check (mobile_e164 ~ '^\\+91[6-9][0-9]{9}$')
+  constraint ka_guest_leads_mobile_e164_check check (mobile_e164 ~ '^\+91[6-9][0-9]{9}$')
 );
 
 create table if not exists public.ka_guest_sessions (
