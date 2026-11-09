@@ -2,3 +2,7 @@ project_id = "kqkojscbaycolaioyarh"
 
 [functions.knowledge-arena]
 verify_jwt = false
+
+[functions.knowledge-arena-worker]
+verify_jwt = false
+
