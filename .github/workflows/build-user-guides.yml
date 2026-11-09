@@ -47,4 +47,6 @@ jobs:
             exit 0
           fi
           git commit -m "docs: regenerate role-based PDF guides"
+          git fetch origin "${{ github.head_ref }}"
+          git rebase "origin/${{ github.head_ref }}"
           git push origin "HEAD:${{ github.head_ref }}"
