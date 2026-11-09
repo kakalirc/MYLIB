@@ -85,7 +85,7 @@ async function adminSummary(db: ReturnType<typeof adminClient>) {
 const GUEST_SESSION_DAYS = 30;
 const GUEST_STATUSES = ["New","Contacted","Interested","Demo Booked","Demo Completed","Converted to Student","Not Interested"];
 
-function normalizeGuestMobile(value: unknown): string | null {
+function isHttpsUrl(value: string): boolean {\n  try { return new URL(value).protocol === "https:"; } catch { return false; }\n}\nfunction normalizeGuestMobile(value: unknown): string | null {
   const digits = String(value || "").replace(/\D/g, "");
   const national = digits.startsWith("91") && digits.length === 12 ? digits.slice(2) : digits;
   return /^[6-9]\d{9}$/.test(national) ? "+91" + national : null;
