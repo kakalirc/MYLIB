@@ -61,6 +61,8 @@ jobs:
           GUEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/guest_ci
           psql "$GUEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/tests/schema-fixture.sql
           psql "$GUEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261109100000_knowledge_arena_guest_leads.sql
+          psql "$GUEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261109150000_knowledge_arena_international_guest_numbers.sql
+          psql "$GUEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261109160000_knowledge_arena_atomic_guest_registration.sql
           psql "$GUEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/tests/guest-leads-smoke.sql
       - name: Apply proposed Knowledge Arena schema to disposable database
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/proposed-schema.sql
