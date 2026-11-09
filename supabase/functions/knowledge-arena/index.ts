@@ -937,11 +937,17 @@ Deno.serve(async (req) => {
       if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
       const status = String(body.status || "").trim();
       const search = String(body.search || "").trim().slice(0, 100);
+      const gradeLabel = String(body.grade_label || "").trim();
+      const dateFrom = String(body.date_from || "").trim();
+      const dateTo = String(body.date_to || "").trim();
       const limit = Math.max(1, Math.min(100, Math.floor(safeNumber(body.limit, 50))));
       let query = db.from("ka_guest_leads").select("id,mobile_e164,last_guest_name,last_grade_label,enquiry_consent,marketing_consent,lead_status,converted_student_id,first_seen_at,last_seen_at,last_activity_at,last_game_type,last_subject", { count: "exact" })
         .order("last_seen_at", { ascending: false }).limit(limit);
       if (status && GUEST_STATUSES.includes(status)) query = query.eq("lead_status", status);
-      if (search) query = query.or("mobile_e164.ilike.%" + search.replace(/[(),%_]/g, "") + "%,last_guest_name.ilike.%" + search.replace(/[(),]/g, "") + "%");
+      if (gradeLabel) query = query.eq("last_grade_label", gradeLabel);
+      if (dateFrom && /^\\d{4}-\\d{2}-\\d{2}$/.test(dateFrom)) query = query.gte("first_seen_at", dateFrom + "T00:00:00+05:30");
+      if (dateTo && /^\\d{4}-\\d{2}-\\d{2}$/.test(dateTo)) query = query.lte("first_seen_at", dateTo + "T23:59:59+05:30");
+      if (search) { const term = search.replace(/[(),%_]/g, ""); query = query.or("mobile_e164.ilike.%" + term + "%,last_guest_name.ilike.%" + term + "%"); }
       const { data: leads, error, count } = await query;
       if (error) return errorResponse(503, "Could not load guest leads.");
       const ids = (leads || []).map((x: any) => x.id);
