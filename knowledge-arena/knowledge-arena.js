@@ -267,6 +267,20 @@
   async function closeGuestPromotion(type) {
     const modal=$("guest-promotion-modal"),id=modal.dataset.promotionId;modal.classList.add("hidden");
     if(id){try{await api("guest_promotion_event",{promotion_id:id,event_type:type});}catch(e){}}
+    if(guestExitPending) await finishGuestExit();
+  }
+  async function finishGuestExit() {
+    try { if(guestTokenValue) await api("guest_end"); } catch(e) {}
+    guestExitPending=false; guestTokenValue=""; guestMode=false; guestGameCount=0;
+    try { localStorage.removeItem("ka_guest_token"); } catch(e) {}
+    $("guest-exit").classList.add("hidden"); $("guest-promotion-modal").classList.add("hidden");
+    $("guest-register-feedback").textContent=""; showGuestGate();
+    try { const options=await api("guest_options"); $("guest-grade").innerHTML='<option value="">Select your grade</option>'+(options.grades||[]).map(x=>'<option value="'+escapeHtml(x)+'">'+escapeHtml(x)+'</option>').join(""); } catch(e) {}
+  }
+  async function exitGuest() {
+    guestExitPending=true;
+    await showGuestPromotion("exit");
+    if($("guest-promotion-modal").classList.contains("hidden")) await finishGuestExit();
   }
 
   async function loadStudent() {
