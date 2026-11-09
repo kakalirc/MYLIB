@@ -228,8 +228,8 @@
   }
   async function registerGuest(event) {
     event.preventDefault();
-    const feedback=$("guest-register-feedback"), button=$("guest-start-button"), mobile=$("guest-mobile").value.replace(/\\D/g,"");
-    if (!/^[6-9]\\d{9}$/.test(mobile)) { feedback.textContent="Enter a valid 10-digit Indian mobile number."; return; }
+    const feedback=$("guest-register-feedback"), button=$("guest-start-button"), mobile=$("guest-mobile").value.replace(/\D/g,"");
+    if (!/^[6-9]\d{9}$/.test(mobile)) { feedback.textContent="Enter a valid 10-digit Indian mobile number."; return; }
     feedback.textContent="Starting your guest session…"; button.disabled=true;
     try {
       const r=await api("guest_register",{guest_name:$("guest-name").value.trim(),mobile_number:mobile,grade_label:$("guest-grade").value,enquiry_consent:$("guest-enquiry-consent").checked,marketing_consent:$("guest-marketing-consent").checked});
