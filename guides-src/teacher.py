@@ -306,6 +306,16 @@ def guide():
         ('Print or Save as PDF', 'Keep a copy on your phone.'),
     ]))
 
+    g.add('knowledgearena', 'Fun Zone', 'Knowledge Arena for teachers', 'Teachers can enter player mode to try grade-appropriate games.', g2(
+        box('Enter player mode', 'Open Knowledge Arena from the available Fun Zone or Learning entry. Select a grade to play at that academic level.'),
+        box('Temporary grade selection', 'The selected grade is used only for the current browser session and does not change your LIB profile or teacher record.'),
+    ) + bullets([
+        'The subject selector is hidden. Knowledge Arena chooses suitable questions from the subjects configured for each game and grade.',
+        'Games appear only when enough approved questions are available for the selected grade.',
+        'Teachers can play the same available games as students. Admin-only question generation, suitability and question-bank controls are not available to teachers.',
+        'Game XP is separate from attendance XP and does not change attendance rewards.',
+    ]) + note('Need help?', 'Use the in-game Help / instructions panel before starting a game.', 'tip'))
+
     g.add('quickref', 'Quick reference', 'Quick reference', 'I want to… where do I go?', table(['I want to…', 'Go to'], [
         ['See what needs my action', 'Pending Action Items'],
         ['Plan my classes, set leave', 'Class Schedule, Availability'],
