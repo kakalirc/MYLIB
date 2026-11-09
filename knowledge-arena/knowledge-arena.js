@@ -31,7 +31,7 @@
   let currentView = "play", currentGame = "quick_quiz", currentQuestions = [];
   let currentAnswers = [], currentIndex = 0, currentScore = 0, challengeId = null, clientAttemptId = null;
   let gameStartedAt = 0, memoryTimer = null, memoryRevealed = false;
-  let adminSummary = null, adminOptions = null, adminJobs = [], adminUsageReviews = [], adminLeadership = null;
+  let adminSummary = null, adminOptions = null, adminJobs = [], adminUsageReviews = [], adminLeadership = null, adminQuestions = [];
 
   function setStatus(label, tone) {
     const el = $("connection-status");
@@ -651,8 +651,8 @@
   async function loadAdmin() {
     setStatus("ADMIN", "success");
     try {
-      const [summary, options, jobs, usage] = await Promise.all([
-        api("get_admin_summary"), api("get_admin_options"), api("get_admin_jobs"), api("get_admin_usage_reviews")
+      const [summary, options, jobs, usage, questions] = await Promise.all([
+        api("get_admin_summary"), api("get_admin_options"), api("get_admin_jobs"), api("get_admin_usage_reviews"), api("get_admin_questions")
       ]);
       adminSummary = summary.summary;
       adminOptions = options;
@@ -755,6 +755,92 @@
       await api("admin_control", { control: "resolve_usage_review", usage_id: usageId, actual_cost_inr: actualCost });
       await refreshAdmin();
     } catch (error) { alert(error.message); }
+  }
+
+  function populateQuestionFilters() {
+    const grades = adminOptions?.grades || [];
+    const subjects = adminOptions?.subjects || [];
+    const games = adminOptions?.game_types || Object.keys(GAME_NAMES);
+    const fill = (id, items, first) => {
+      const el = $(id);
+      if (!el) return;
+      const current = el.value;
+      el.innerHTML = '<option value="">' + first + '</option>' + items.map((x) =>
+        '<option value="' + escapeHtml(x) + '">' + escapeHtml(GAME_NAMES[x] || x) + '</option>').join("");
+      if ([...el.options].some((o) => o.value === current)) el.value = current;
+    };
+    fill("review-grade", grades, "All grades");
+    fill("review-subject", subjects, "All subjects");
+    fill("review-game", games, "All games");
+  }
+
+  function renderQuestionBank() {
+    const grade = $("review-grade")?.value || "";
+    const subject = $("review-subject")?.value || "";
+    const game = $("review-game")?.value || "";
+    const status = $("review-status")?.value || "";
+    const rows = adminQuestions.filter((q) =>
+      (!grade || q.grade_label === grade) && (!subject || q.subject === subject) &&
+      (!game || q.game_type === game) && (!status || q.status === status));
+    if (!rows.length) { $("admin-question-list").innerHTML = '<p class="muted">No questions match these filters.</p>'; return; }
+    $("admin-question-list").innerHTML = rows.map((q) => {
+      const options = Array.isArray(q.options) ? q.options : [];
+      return '<details class="admin-question" data-question-id="' + escapeHtml(q.id) + '">' +
+        '<summary><b>' + escapeHtml(q.subject) + ' · ' + escapeHtml(q.grade_label) + '</b><span>' +
+        escapeHtml(GAME_NAMES[q.game_type] || q.game_type) + ' · ' + escapeHtml(q.status) + '</span><small>' +
+        escapeHtml(q.prompt) + '</small></summary><div class="admin-question-edit">' +
+        '<label>Question<textarea data-field="prompt" rows="3">' + escapeHtml(q.prompt) + '</textarea></label>' +
+        '<label>Topic<input data-field="topic" value="' + escapeHtml(q.topic) + '"></label>' +
+        '<div class="admin-question-options">' + [0,1,2,3].map((i) =>
+          '<label>Option ' + (i+1) + '<input data-option="' + i + '" value="' + escapeHtml(options[i] || "") + '"></label>').join("") + '</div>' +
+        '<label>Correct answer<select data-field="correct_option">' + [0,1,2,3].map((i) =>
+          '<option value="' + i + '" ' + (Number(q.correct_option) === i ? 'selected' : '') + '>Option ' + (i+1) + '</option>').join("") + '</select></label>' +
+        '<label>Explanation<textarea data-field="explanation" rows="2">' + escapeHtml(q.explanation) + '</textarea></label>' +
+        '<label>Difficulty<select data-field="difficulty">' + ["easy","medium","hard"].map((x) =>
+          '<option value="' + x + '" ' + (q.difficulty === x ? 'selected' : '') + '>' + x + '</option>').join("") + '</select></label>' +
+        '<div class="admin-question-actions"><button class="btn-secondary" data-question-action="save">Save changes</button>' +
+        '<button class="btn-secondary" data-question-action="archive">Remove from play</button>' +
+        '<button class="btn-secondary" data-question-action="delete">Delete permanently</button></div></div></details>';
+    }).join("");
+  }
+
+  async function refreshQuestions() {
+    const feedback = $("question-feedback");
+    feedback.textContent = "Loading questions…";
+    try {
+      const data = await api("get_admin_questions");
+      adminQuestions = data.questions || [];
+      populateQuestionFilters();
+      renderQuestionBank();
+      feedback.textContent = "Loaded " + adminQuestions.length + " recent questions.";
+    } catch (error) { feedback.textContent = error.message; }
+  }
+
+  async function handleQuestionAction(event) {
+    const button = event.target.closest("[data-question-action]");
+    if (!button) return;
+    const row = button.closest("[data-question-id]");
+    if (!row) return;
+    const id = row.dataset.questionId;
+    const operation = button.dataset.questionAction;
+    const feedback = $("question-feedback");
+    if (operation === "delete" && !window.confirm("Permanently delete this question? Historical aggregate attempts and XP are retained.")) return;
+    button.disabled = true;
+    feedback.textContent = operation === "save" ? "Saving question…" : operation === "archive" ? "Removing question from play…" : "Deleting question…";
+    try {
+      const payload = { operation, question_id: id };
+      if (operation === "save") {
+        payload.prompt = row.querySelector('[data-field="prompt"]').value;
+        payload.topic = row.querySelector('[data-field="topic"]').value;
+        payload.options = [0,1,2,3].map((i) => row.querySelector('[data-option="' + i + '"]').value);
+        payload.correct_option = Number(row.querySelector('[data-field="correct_option"]').value);
+        payload.explanation = row.querySelector('[data-field="explanation"]').value;
+        payload.difficulty = row.querySelector('[data-field="difficulty"]').value;
+      }
+      await api("admin_question", payload);
+      feedback.textContent = operation === "delete" ? "Question deleted." : operation === "archive" ? "Question removed from play." : "Question updated.";
+      await refreshQuestions();
+    } catch (error) { feedback.textContent = error.message; button.disabled = false; }
   }
 
   async function refreshAdmin() {
@@ -913,6 +999,10 @@
   $("publish-daily").addEventListener("click", publishDaily);
   $("queue-generation").addEventListener("click", queueGeneration);
   $("refresh-jobs").addEventListener("click", () => refreshAdmin().catch((e) => $("admin-jobs").textContent = e.message));
+  $("refresh-questions").addEventListener("click", refreshQuestions);
+  ["review-grade","review-subject","review-game","review-status"].forEach((id) => $(id).addEventListener("change", renderQuestionBank));
+  $("admin-question-list").addEventListener("click", handleQuestionAction);
+  $("player-grade-select").addEventListener("change", (event) => loadRolePlayerGrade(event.target.value));
   $("refresh-leadership").addEventListener("click", refreshLeadership);
 
   initialise();
