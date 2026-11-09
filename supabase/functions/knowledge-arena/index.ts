@@ -972,17 +972,67 @@ Deno.serve(async (req) => {
       if (!leadId) return errorResponse(400, "Lead ID is required.");
       const [{ data: lead, error: leadError }, { data: sessions, error: sessionsError },
         { data: activity, error: activityError }, { data: consents, error: consentsError },
-        { data: notes, error: notesError }, { data: events, error: eventsError }] = await Promise.all([
+        { data: notes, error: notesError }, { data: events, error: eventsError },
+        { data: whatsappHistory, error: whatsappError }] = await Promise.all([
         db.from("ka_guest_leads").select("*").eq("id", leadId).maybeSingle(),
         db.from("ka_guest_sessions").select("id,guest_name,grade_label,started_at,last_seen_at,expires_at,ended_at").eq("lead_id", leadId).order("started_at", { ascending: false }).limit(100),
         db.from("ka_guest_activity").select("*").eq("lead_id", leadId).order("completed_at", { ascending: false }).limit(200),
         db.from("ka_guest_consents").select("*").eq("lead_id", leadId).order("recorded_at", { ascending: false }).limit(100),
         db.from("ka_guest_lead_notes").select("id,note,admin_user_id,created_at").eq("lead_id", leadId).order("created_at", { ascending: false }).limit(100),
-        db.from("ka_guest_promotion_events").select("promotion_id,event_type,created_at").eq("lead_id", leadId).order("created_at", { ascending: false }).limit(200)
+        db.from("ka_guest_promotion_events").select("promotion_id,event_type,created_at").eq("lead_id", leadId).order("created_at", { ascending: false }).limit(200),
+        db.from("ka_guest_lead_whatsapp_history").select("id,phone_number,message_text,send_status,opened_at,sent_at,sent_by").eq("lead_id", leadId).order("opened_at", { ascending: false }).limit(100)
       ]);
-      if (leadError || sessionsError || activityError || consentsError || notesError || eventsError) return errorResponse(503, "Could not load guest lead details.");
+      if (leadError || sessionsError || activityError || consentsError || notesError || eventsError || whatsappError) return errorResponse(503, "Could not load guest lead details.");
       if (!lead) return errorResponse(404, "Guest lead not found.");
-      return json(200, { lead, sessions: sessions || [], activity: activity || [], consents: consents || [], notes: notes || [], promotion_events: events || [] });
+      const sentByIds = [...new Set((whatsappHistory || []).map((x: any) => x.sent_by).filter(Boolean))];
+      const { data: sentByProfiles, error: sentByError } = sentByIds.length
+        ? await db.from("profiles").select("id,admin_name,username").in("id", sentByIds)
+        : { data: [], error: null };
+      if (sentByError) return errorResponse(503, "Could not load WhatsApp history details.");
+      const sentByMap = new Map((sentByProfiles || []).map((x: any) => [x.id, x.admin_name || x.username]));
+      return json(200, { lead, sessions: sessions || [], activity: activity || [], consents: consents || [], notes: notes || [],
+        promotion_events: events || [], whatsapp_history: (whatsappHistory || []).map((x: any) => ({ ...x, sent_by_name: x.sent_by ? sentByMap.get(x.sent_by) || "Admin" : null })) });
+    }
+
+    if (action === "admin_record_guest_whatsapp_open") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const leadId = String(body.lead_id || "");
+      const phone = String(body.phone_number || "").trim();
+      const message = String(body.message_text || "");
+      if (!leadId || !/^\\+?[0-9]{8,15}$/.test(phone.replace(/[\\s()-]/g, ""))) return errorResponse(400, "A valid recipient mobile number is required.");
+      if (!message.trim() || message.length > 4000) return errorResponse(400, "WhatsApp message must contain 1–4,000 characters.");
+      const { data: lead, error: leadError } = await db.from("ka_guest_leads").select("id,marketing_consent,mobile_e164").eq("id", leadId).maybeSingle();
+      if (leadError || !lead) return errorResponse(404, "Guest lead not found.");
+      if (!lead.marketing_consent) return errorResponse(403, "WhatsApp marketing consent has not been given.");
+      if (lead.mobile_e164 !== phone) return errorResponse(400, "Recipient mobile number does not match this Guest Lead.");
+      const { data: history, error } = await db.from("ka_guest_lead_whatsapp_history").insert({
+        lead_id: leadId, phone_number: phone, message_text: message, send_status: "opened"
+      }).select("id").single();
+      if (error || !history) return errorResponse(503, "Could not save WhatsApp history.");
+      return json(200, { history_id: history.id, recorded: true });
+    }
+
+    if (action === "admin_mark_guest_whatsapp_sent") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const historyId = String(body.history_id || "");
+      if (!historyId) return errorResponse(400, "WhatsApp history ID is required.");
+      const { data: history, error } = await db.from("ka_guest_lead_whatsapp_history").update({
+        send_status: "sent", sent_at: new Date().toISOString(), sent_by: user.id, updated_at: new Date().toISOString()
+      }).eq("id", historyId).select("id,send_status,sent_at").maybeSingle();
+      if (error || !history) return errorResponse(404, "WhatsApp history entry could not be updated.");
+      return json(200, { history });
+    }
+
+    if (action === "admin_save_guest_lead_note") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const leadId = String(body.lead_id || "");
+      const note = String(body.note || "").trim();
+      if (!leadId || !note || note.length > 2000) return errorResponse(400, "Enter a follow-up note of 1–2,000 characters.");
+      const { data: lead, error: leadError } = await db.from("ka_guest_leads").select("id").eq("id", leadId).maybeSingle();
+      if (leadError || !lead) return errorResponse(404, "Guest lead not found.");
+      const { error } = await db.from("ka_guest_lead_notes").insert({ lead_id: leadId, admin_user_id: user.id, note });
+      if (error) return errorResponse(503, "Could not save the follow-up note.");
+      return json(200, { saved: true });
     }
 
     if (action === "admin_update_guest_lead") {
@@ -1002,10 +1052,6 @@ Deno.serve(async (req) => {
         lead_status: status, ...(studentId ? { converted_student_id: studentId } : {}), updated_at: new Date().toISOString()
       }).eq("id", leadId).select("id,lead_status,converted_student_id").maybeSingle();
       if (error || !updated) return errorResponse(404, "Guest lead could not be updated.");
-      if (note) {
-        const { error: noteError } = await db.from("ka_guest_lead_notes").insert({ lead_id: leadId, admin_user_id: user.id, note });
-        if (noteError) return errorResponse(503, "Lead status was updated, but the note could not be saved.");
-      }
       return json(200, { lead: updated });
     }
 
