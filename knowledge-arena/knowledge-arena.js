@@ -805,6 +805,22 @@
     showView("admin");
   }
 
+  let activeAdminSection = "overview";
+  function showAdminSection(name) {
+    const allowed = new Set(["overview","setup","generation","question-bank","guests"]);
+    if (!allowed.has(name)) name = "overview";
+    activeAdminSection = name;
+    document.querySelectorAll("[data-admin-section]").forEach((panel) => {
+      panel.classList.toggle("hidden", panel.dataset.adminSection !== name);
+    });
+    document.querySelectorAll("[data-admin-target]").forEach((button) => {
+      const active = button.dataset.adminTarget === name;
+      button.classList.toggle("active", active);
+      if (active) button.setAttribute("aria-current", "page");
+      else button.removeAttribute("aria-current");
+    });
+  }
+
   async function loadAdmin() {
     setStatus("ADMIN", "success");
     try {
@@ -817,6 +833,7 @@
       adminJobs = jobs.jobs || [];
       adminUsageReviews = usage.reviews || [];
       renderAdmin();
+      showAdminSection(activeAdminSection);
       await refreshLeadership();
       try { await Promise.all([refreshGuestLeads(), refreshGuestPromotions()]); }
       catch (guestError) {
@@ -827,12 +844,12 @@
       usePreview("Admin API/database setup is pending: " + error.message);
       $("admin-nav").classList.remove("hidden");
       renderAdminPreview(error.message);
+      showAdminSection(activeAdminSection);
     }
   }
 
-  function renderAdmin() {
+  function renderAdminMetrics() {
     const a = adminSummary || {};
-    const settings = a.automation || {};
     $("admin-metrics").innerHTML = [
       ["Registered players",a.registered_players],["Active today",a.active_players_today],
       ["Games today",a.games_played_today],["Published questions",a.question_bank_published],
@@ -840,6 +857,12 @@
       ["AI spend today",money(a.ai_cost_inr_today)],["AI spend this month",money(a.ai_cost_inr_month)],
       ["Unsettled AI reserve",money(a.ai_cost_inr_reserved_today)],["Generation failures (24h)",a.generation_failures_24h]
     ].map((m) => '<article class="metric"><small>' + m[0] + '</small><strong>' + (m[1] == null ? "—" : m[1]) + '</strong></article>').join("");
+  }
+
+  function renderAdmin() {
+    const a = adminSummary || {};
+    const settings = a.automation || {};
+    renderAdminMetrics();
     $("admin-games-enabled").checked = !!settings.games_enabled;
     $("admin-generation-enabled").checked = !!settings.generation_enabled;
     $("admin-daily-enabled").checked = !!settings.daily_challenge_enabled;
@@ -1122,8 +1145,13 @@
     adminSummary = summary.summary;
     adminJobs = jobs.jobs || [];
     adminUsageReviews = usage.reviews || [];
-    renderAdmin();
-    await refreshLeadership();
+    // Update only live data regions. Do not rebuild setup forms or reset filters,
+    // the selected Admin submenu, scroll position or unsaved input values.
+    renderAdminMetrics();
+    renderJobs();
+    renderUsageReviews();
+    renderGenerationStatus();
+    if (activeAdminSection === "overview") await refreshLeadership();
   }
   async function refreshLeadership() {
     const feedback = $("leadership-feedback");
@@ -1368,6 +1396,9 @@
   $("save-ai-budgets").addEventListener("click", saveBudgets);
   $("publish-daily").addEventListener("click", publishDaily);
   $("queue-generation").addEventListener("click", queueGeneration);
+  document.querySelectorAll("[data-admin-target]").forEach((button) => {
+    button.addEventListener("click", () => showAdminSection(button.dataset.adminTarget));
+  });
   $("refresh-jobs").addEventListener("click", () => refreshAdmin().catch((e) => $("admin-jobs").textContent = e.message));
   $("refresh-generation-status").addEventListener("click", () => refreshAdmin().catch((e) => $("generation-status-feedback").textContent = e.message));
   $("refresh-questions").addEventListener("click", refreshQuestions);

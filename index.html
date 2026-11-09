@@ -887,7 +887,7 @@ function setLoginStep(step) {
 
 // "Today" in the user's own time zone (India). toISOString() would give the UTC date, which is still YESTERDAY from
 // midnight to 5:30 am IST - and the database's expiry run works on the Indian date, so the two must agree.
-const todayStr = (() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })();
+let todayStr = (() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })();
 
 // Display database timestamps consistently in India Standard Time.
 function formatTimestampIST(value) {
@@ -8178,11 +8178,10 @@ async function refreshAllData(silent) {
     refreshMsg = 'Could not refresh: ' + (e && e.message ? e.message : 'unknown error');
   } finally {
     isRefreshing = false;
-    // Knowledge Arena is hosted in an iframe. Re-rendering the parent app after
-    // a silent background refresh replaces that iframe and restarts the arena.
-    // Keep the embedded page mounted; explicit/manual refreshes still render.
-    const keepKnowledgeArenaMounted = silent && currentTab === 'knowledgearena';
-    if (!keepKnowledgeArenaMounted) {
+    // Silent background refreshes update data only. Rebuilding the portal on a timer
+    // interrupts student games, teacher attendance entry, Admin work and scroll position.
+    // Explicit/manual refreshes still render and show their confirmation.
+    if (!silent) {
       render();
       if (refreshMsg) refreshMsgTimer = setTimeout(() => { refreshMsg = ''; refreshMsgTimer = null; render(); }, 4000);
     }
@@ -8215,8 +8214,11 @@ function hasUnsavedEditInProgress() {
 // "Today" (todayStr) is worked out once when the page loads and many screens default to it. A phone can keep the
 // app open past midnight, so when the date has moved on, reload the page (only when nothing is being typed).
 function reloadIfDayChanged() {
-  if (localDateFromToday(0) === todayStr || hasUnsavedEditInProgress()) return false;
-  location.reload();
+  const currentDate = localDateFromToday(0);
+  if (currentDate === todayStr || hasUnsavedEditInProgress()) return false;
+  // Update the date in place instead of reloading the entire application.
+  todayStr = currentDate;
+  refreshAllData(true).then(() => render()).catch(error => console.warn('Date rollover refresh failed:', error));
   return true;
 }
 setInterval(() => { if (document.visibilityState === 'visible') reloadIfDayChanged(); }, 5 * 60 * 1000);
