@@ -242,7 +242,6 @@
     select.innerHTML = '<option value="">Select your grade</option>' + options.map((name) =>
       '<option value="' + escapeHtml(name) + '">' + escapeHtml(name) + '</option>').join("");
     select.value = catalog?.selected_grade_label || "";
-    $("academic-subject-choice").classList.toggle("hidden", !select.value);
     $("language-subject-choice").classList.add("hidden");
     if (!select.value) note("Please select your school grade before starting a game.", "info");
   }
@@ -565,7 +564,6 @@
       const payload = {
         client_attempt_id: clientAttemptId,
         game_type: currentGame,
-        client_attempt_id: clientAttemptId,
         answers: currentAnswers,
         duration_seconds: Math.max(0, Math.round((Date.now() - gameStartedAt) / 1000))
       };
