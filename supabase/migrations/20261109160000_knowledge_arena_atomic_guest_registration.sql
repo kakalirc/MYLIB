@@ -25,7 +25,7 @@ begin
   if coalesce(auth.role(), '') <> 'service_role' then
     raise exception 'Not authorised';
   end if;
-  if p_mobile_e164 is null or p_mobile_e164 !~ '^\+[1-9][0-9]{7,14} then
+  if p_mobile_e164 is null or p_mobile_e164 !~ '^\+[1-9][0-9]{7,14}$' then
     raise exception 'Invalid international mobile number';
   end if;
   if p_guest_name is null or length(btrim(p_guest_name)) not between 2 and 80 then
