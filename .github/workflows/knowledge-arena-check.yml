@@ -6,6 +6,7 @@ on:
       - "supabase/functions/knowledge-arena/**"
       - "supabase/functions/knowledge-arena-worker/**"
       - "supabase/functions/_shared/knowledge-arena.ts"
+      - "supabase/migrations/**"
       - "knowledge-arena/**"
       - "student-portal-tabs.js"
       - "student-portal-tabs.css"
@@ -75,10 +76,12 @@ jobs:
         uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - name: Type check Student/Admin API
+      - name: Type check Student/Teacher/Admin API
         run: deno check supabase/functions/knowledge-arena/index.ts
       - name: Type check generation worker
         run: deno check supabase/functions/knowledge-arena-worker/index.ts
+      - name: Test game catalogue and subject routing
+        run: deno test supabase/functions/_shared/knowledge-arena_test.ts
       - name: Test AI JSON response parsing and malformed-output handling
         run: deno test supabase/functions/knowledge-arena-worker/json-response_test.ts
       - name: Parse browser JavaScript
