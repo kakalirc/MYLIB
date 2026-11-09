@@ -289,7 +289,17 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
       question_count: answers.length, correct_count: correct, accuracy: Math.round(correct / answers.length * 10000) / 100,
       duration_seconds: Math.max(0, Math.min(3600, safeNumber(body.duration_seconds, 0))), completed_at: now
     });
-    if (activityError) return errorResponse(503, "Could not save guest activity.");
+    if (activityError) {
+      if (activityError.code === "23505") {
+        const { data: savedAttempt, error: savedAttemptError } = await db.from("ka_guest_activity")
+          .select("correct_count,question_count,accuracy").eq("session_id", guest.id).eq("client_attempt_id", attemptId).maybeSingle();
+        if (!savedAttemptError && savedAttempt) return json(200, {
+          correct_count: savedAttempt.correct_count, question_count: savedAttempt.question_count,
+          accuracy: savedAttempt.accuracy, feedback
+        });
+      }
+      return errorResponse(503, "Could not save guest activity.");
+    }
     // The database trigger increments aggregate counters atomically for concurrent submissions.
     return json(200, { correct_count: correct, question_count: answers.length, accuracy: Math.round(correct / answers.length * 10000) / 100, feedback });
   }
