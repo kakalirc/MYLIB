@@ -11,6 +11,7 @@ on:
       - "student-portal-tabs.js"
       - "student-portal-tabs.css"
       - ".github/workflows/knowledge-arena-check.yml"
+      - ".github/workflows/build-user-guides.yml"
   push:
     branches:
       - "feature/knowledge-arena"
