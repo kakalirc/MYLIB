@@ -213,7 +213,7 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
       counts.set(q.game_type, (counts.get(q.game_type) || 0) + 1);
     }
     const games = settings.games_enabled ? GAME_CATALOG.filter(g => (counts.get(g.id) || 0) >= 5) : [];
-    return json(200, { games, subjects: uniqueSubjectNames(subjects).filter((x) => !(settings.disabled_subjects || []).includes(x)), grade_label: guest.grade_label });
+    return json(200, { games_enabled: settings.games_enabled, games, subjects: uniqueSubjectNames(subjects).filter((x) => !(settings.disabled_subjects || []).includes(x)), grade_label: guest.grade_label });
   }
   if (action === "guest_questions") {
     const gameType = body.game_type;
@@ -990,6 +990,7 @@ Deno.serve(async (req) => {
       const studentId = body.converted_student_id ? String(body.converted_student_id) : null;
       if (!leadId || !GUEST_STATUSES.includes(status)) return errorResponse(400, "Choose a valid lead status.");
       if (note.length > 2000) return errorResponse(400, "Notes must be 2,000 characters or fewer.");
+      if (status === "Converted to Student" && !studentId) return errorResponse(400, "Select the existing LIB student record before marking this lead as converted.");
       if (studentId) {
         const { data: student, error: studentError } = await db.from("students").select("id").eq("id", studentId).eq("archived", false).maybeSingle();
         if (studentError || !student) return errorResponse(400, "Select a valid active LIB student.");
