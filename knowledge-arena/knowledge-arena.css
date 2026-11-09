@@ -37,3 +37,8 @@ footer{background:var(--navy);color:#fff;padding:22px max(24px,calc((100vw - 120
 .danger-text{color:#a13d39!important}
 .admin-job{align-items:start}
 @media(max-width:600px){.generation-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.generation-budget-line{flex-direction:column;gap:6px}.job-actions{flex-wrap:wrap}}
+
+/* Make the guest exit action clearly legible against the dark header. */
+#guest-exit{background:#e7b94c;color:#101d3a;border-color:#e7b94c}
+#guest-exit:hover{background:#f0ca70;border-color:#f0ca70}
+#guest-exit:disabled{opacity:.7;cursor:wait}
