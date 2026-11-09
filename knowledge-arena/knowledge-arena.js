@@ -31,7 +31,7 @@
   let currentView = "play", currentGame = "quick_quiz", currentQuestions = [];
   let currentAnswers = [], currentIndex = 0, currentScore = 0, challengeId = null, clientAttemptId = null;
   let gameStartedAt = 0, memoryTimer = null, memoryRevealed = false;
-  let adminSummary = null, adminOptions = null, adminJobs = [], adminUsageReviews = [], adminLeadership = null, adminQuestions = [];
+  let adminSummary = null, adminOptions = null, adminJobs = [], adminUsageReviews = [], adminLeadership = null, adminQuestions = [], adminSuitability = null;
 
   function setStatus(label, tone) {
     const el = $("connection-status");
@@ -651,8 +651,8 @@
   async function loadAdmin() {
     setStatus("ADMIN", "success");
     try {
-      const [summary, options, jobs, usage, questions] = await Promise.all([
-        api("get_admin_summary"), api("get_admin_options"), api("get_admin_jobs"), api("get_admin_usage_reviews"), api("get_admin_questions")
+      const [summary, options, jobs, usage, questions, suitability] = await Promise.all([
+        api("get_admin_summary"), api("get_admin_options"), api("get_admin_jobs"), api("get_admin_usage_reviews"), api("get_admin_questions"), api("get_admin_suitability")
       ]);
       adminSummary = summary.summary;
       adminOptions = options;
@@ -755,6 +755,58 @@
       await api("admin_control", { control: "resolve_usage_review", usage_id: usageId, actual_cost_inr: actualCost });
       await refreshAdmin();
     } catch (error) { alert(error.message); }
+  }
+
+  function renderSuitability() {
+    if (!adminSuitability) return;
+    const s = adminSuitability;
+    const fill = (id, values, current) => {
+      const el = $(id);
+      const selected = current || el.value;
+      el.innerHTML = values.map((x) => '<option value="' + escapeHtml(x) + '">' + escapeHtml(x) + '</option>').join("");
+      if (values.includes(selected)) el.value = selected;
+    };
+    fill("suitability-grade", s.grades || [], $("suitability-grade").value || s.grades?.[0]);
+    fill("suitability-game-grade", s.grades || [], $("suitability-game-grade").value || s.grades?.[0]);
+    fill("suitability-game", (s.games || []).map((x) => x.id), $("suitability-game").value || s.games?.[0]?.id);
+    const grade = $("suitability-grade").value;
+    const gameGrade = $("suitability-game-grade").value;
+    const game = $("suitability-game").value;
+    const gs = new Set((s.grade_subject_rules || []).filter((x) => x.grade_label === grade && x.enabled).map((x) => x.subject.toLocaleLowerCase()));
+    const gg = new Set((s.game_grade_rules || []).filter((x) => x.grade_label === gameGrade && x.enabled).map((x) => x.game_type));
+    const gsr = new Set((s.game_subject_rules || []).filter((x) => x.game_type === game && x.enabled).map((x) => x.subject.toLocaleLowerCase()));
+    $("suitability-subject-list").innerHTML = (s.subjects || []).filter((x) => x.toLocaleLowerCase() !== "all").map((x) =>
+      '<label><input type="checkbox" data-suitability="grade_subject" data-subject="' + escapeHtml(x) + '" ' +
+      (gs.has(x.toLocaleLowerCase()) ? 'checked' : '') + '> ' + escapeHtml(x) + '</label>').join("");
+    $("suitability-game-grade-list").innerHTML = (s.games || []).map((x) =>
+      '<label><input type="checkbox" data-suitability="game_grade" data-game="' + escapeHtml(x.id) + '" ' +
+      (gg.has(x.id) ? 'checked' : '') + '> ' + escapeHtml(x.name) + '</label>').join("");
+    $("suitability-game-subject-list").innerHTML = (s.subjects || []).filter((x) => x.toLocaleLowerCase() !== "all").map((x) =>
+      '<label><input type="checkbox" data-suitability="game_subject" data-subject="' + escapeHtml(x) + '" ' +
+      (gsr.has(x.toLocaleLowerCase()) ? 'checked' : '') + '> ' + escapeHtml(x) + '</label>').join("");
+  }
+
+  async function saveSuitabilityToggle(event) {
+    const input = event.target.closest("[data-suitability]");
+    if (!input || !adminSuitability) return;
+    const kind = input.dataset.suitability;
+    const payload = { kind, enabled: input.checked };
+    if (kind === "grade_subject") { payload.grade_label = $("suitability-grade").value; payload.subject = input.dataset.subject; }
+    if (kind === "game_grade") { payload.grade_label = $("suitability-game-grade").value; payload.game_type = input.dataset.game; }
+    if (kind === "game_subject") { payload.game_type = $("suitability-game").value; payload.subject = input.dataset.subject; }
+    const feedback = $("suitability-feedback");
+    feedback.textContent = "Saving suitability…";
+    input.disabled = true;
+    try {
+      await api("set_suitability", payload);
+      feedback.textContent = "Suitability updated.";
+      const data = await api("get_admin_suitability");
+      adminSuitability = data;
+      renderSuitability();
+    } catch (error) {
+      input.checked = !input.checked;
+      feedback.textContent = error.message;
+    } finally { input.disabled = false; }
   }
 
   function populateQuestionFilters() {
@@ -1002,6 +1054,8 @@
   $("refresh-questions").addEventListener("click", refreshQuestions);
   ["review-grade","review-subject","review-game","review-status"].forEach((id) => $(id).addEventListener("change", renderQuestionBank));
   $("admin-question-list").addEventListener("click", handleQuestionAction);
+  ["suitability-grade","suitability-game-grade","suitability-game"].forEach((id) => $(id).addEventListener("change", renderSuitability));
+  ["suitability-subject-list","suitability-game-grade-list","suitability-game-subject-list"].forEach((id) => $(id).addEventListener("change", saveSuitabilityToggle));
   $("player-grade-select").addEventListener("change", (event) => loadRolePlayerGrade(event.target.value));
   $("refresh-leadership").addEventListener("click", refreshLeadership);
 
