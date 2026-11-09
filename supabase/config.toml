@@ -1,0 +1,4 @@
+project_id = "kqkojscbaycolaioyarh"
+
+[functions.knowledge-arena]
+verify_jwt = false
