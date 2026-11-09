@@ -161,9 +161,14 @@ Deno.serve(async (req) => {
           !(settings.disabled_game_types || []).includes(q.game_type) &&
           !(settings.disabled_subjects || []).includes(q.subject) &&
           enabledSubjects.has(String(q.subject).toLocaleLowerCase()));
-        availableIds = GAME_CATALOG.filter((game) => enabledGameIds.has(game.id) && rows.some((q: any) =>
-          q.game_type === game.id && gameSubjectMap.get(game.id)?.has(String(q.subject).toLocaleLowerCase())))
-          .map((game) => game.id);
+        const questionCounts = new Map<string, number>();
+        for (const q of rows) {
+          if (!enabledGameIds.has(q.game_type) || !enabledSubjects.has(String(q.subject).toLocaleLowerCase()) ||
+              !gameSubjectMap.get(q.game_type)?.has(String(q.subject).toLocaleLowerCase())) continue;
+          questionCounts.set(q.game_type, (questionCounts.get(q.game_type) || 0) + 1);
+        }
+        // Show a game only when at least five suitable, published questions are available.
+        availableIds = GAME_CATALOG.filter((game) => (questionCounts.get(game.id) || 0) >= 5).map((game) => game.id);
       }
       return json(200, {
         games_enabled: settings.games_enabled,
@@ -709,6 +714,14 @@ Deno.serve(async (req) => {
         }
         const { data: subjectRow } = await db.from("subjects").select("name").eq("name", subject).maybeSingle();
         if (!subjectRow) return errorResponse(400, "Unknown subject.");
+        const [{ data: gradeGame }, { data: gradeSubject }, { data: gameSubject }] = await Promise.all([
+          db.from("ka_game_grade_rules").select("enabled").eq("game_type", gameType).eq("grade_label", gradeLabel).maybeSingle(),
+          db.from("ka_grade_subject_rules").select("enabled").eq("grade_label", gradeLabel).eq("subject", subject).maybeSingle(),
+          db.from("ka_game_subject_rules").select("enabled").eq("game_type", gameType).eq("subject", subject).maybeSingle(),
+        ]);
+        if (!gradeGame?.enabled || !gradeSubject?.enabled || !gameSubject?.enabled) {
+          return errorResponse(423, "This subject and game combination is not enabled for the selected grade.");
+        }
         const { data: job, error } = await db.from("ka_generation_jobs").insert({
           status: "queued", subject, topic: String(body.topic || subject).slice(0, 120),
           grade_label: gradeLabel, language_code: languageCode,
