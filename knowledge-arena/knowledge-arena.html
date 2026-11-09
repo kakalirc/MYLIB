@@ -176,8 +176,15 @@
       <section id="view-admin" class="view hidden">
         <div class="section-head"><div><p class="eyebrow">ADMINISTRATOR VIEW</p><h2>Knowledge Arena control centre</h2></div><span class="tag">ADMIN ONLY</span></div>
         <p class="muted admin-note">Summary-level reporting only. No individual question, answer, or question-level history is shown here.</p>
+<nav class="admin-subnav" id="admin-subnav" aria-label="Knowledge Arena Admin sections">
+  <button type="button" class="admin-subnav-btn active" data-admin-target="overview" aria-current="page">Overview</button>
+  <button type="button" class="admin-subnav-btn" data-admin-target="setup">Game &amp; Academic Setup</button>
+  <button type="button" class="admin-subnav-btn" data-admin-target="generation">Question Generation</button>
+  <button type="button" class="admin-subnav-btn" data-admin-target="question-bank">Question Bank</button>
+  <button type="button" class="admin-subnav-btn" data-admin-target="guests">Guest Management</button>
+</nav>
 
-        <div class="panel admin-panel leadership-panel">
+        <div class="panel admin-panel leadership-panel" data-admin-section="overview">
           <div class="admin-panel-head"><div><h3>Student Leadership</h3><p class="muted">A read-only overview of Knowledge Arena achievements, kept separate from existing attendance rewards.</p></div><button class="btn-secondary" id="refresh-leadership">Refresh</button></div>
           <div class="metric-grid leadership-metrics" id="leadership-metrics"><article class="metric"><small>Game players</small><strong>—</strong></article><article class="metric"><small>Total Game XP</small><strong>—</strong></article><article class="metric"><small>Game achievements</small><strong>—</strong></article></div>
           <div class="leadership-section-head"><h4>Knowledge Arena — Game Rewards</h4><span class="tag">GAME XP ONLY</span></div>
@@ -185,9 +192,9 @@
           <p class="admin-feedback" id="leadership-feedback" role="status"></p>
         </div>
 
-        <div class="metric-grid" id="admin-metrics"></div>
+        <div class="metric-grid" id="admin-metrics" data-admin-section="overview"></div>
 
-        <div class="panel admin-panel">
+        <div class="panel admin-panel" data-admin-section="setup">
           <h3>Platform controls</h3>
           <div class="admin-toggle-grid">
             <label><input type="checkbox" id="admin-games-enabled"> Games enabled</label>
@@ -205,7 +212,7 @@
           <span class="admin-feedback" id="platform-feedback" role="status"></span>
         </div>
 
-        <div class="panel admin-panel">
+        <div class="panel admin-panel" data-admin-section="setup">
           <h3>Grade &amp; Subject Suitability</h3>
           <p>Configure which subjects and games are suitable for each grade. New subjects remain unavailable until enabled. Changes are enforced by the Knowledge Arena API.</p>
           <label>Configure academic subjects for grade<select id="suitability-grade"></select></label>
@@ -217,7 +224,7 @@
           <p class="admin-feedback" id="suitability-feedback" role="status"></p>
         </div>
 
-        <div class="panel admin-panel">
+        <div class="panel admin-panel" data-admin-section="setup">
           <h3>Shared AI budget</h3>
           <p>One combined budget for all students and all Knowledge Arena AI generation. Costs are tracked in INR using the configured exchange rate.</p>
           <div class="admin-budget-grid">
@@ -228,13 +235,13 @@
           <span class="admin-feedback" id="budget-feedback" role="status"></span>
         </div>
 
-        <div class="panel admin-panel">
+        <div class="panel admin-panel" data-admin-section="generation">
           <div class="admin-panel-head"><h3>Publish today's daily challenge</h3><button class="btn-secondary" id="publish-daily">Publish 10 questions per grade</button></div>
           <p>Publishes only when ten suitable questions are available for each active grade. Students across grades remain on one common Game XP leaderboard.</p>
           <span class="admin-feedback" id="daily-publish-feedback" role="status"></span>
         </div>
 
-        <div class="panel admin-panel">
+        <div class="panel admin-panel" data-admin-section="generation">
           <h3>Queue AI question generation</h3>
           <div class="admin-queue-grid">
             <label>Grade / class<select id="queue-grade"></select></label>
@@ -249,7 +256,7 @@
           <span class="admin-feedback" id="queue-feedback" role="status"></span>
         </div>
 
-        <div class="panel admin-panel generation-status-panel">
+        <div class="panel admin-panel generation-status-panel" data-admin-section="generation">
           <div class="admin-panel-head"><div><h3>Question Generation Status</h3><p class="muted">Live queue health, published content and AI budget usage. Refreshes automatically while this Admin page is open.</p></div><button class="btn-secondary" id="refresh-generation-status">Refresh status</button></div>
           <div id="admin-generation-summary" class="metric-grid generation-metrics"><article class="metric"><small>Loading generation status</small><strong>—</strong></article></div>
           <div class="generation-budget-line" id="admin-generation-budget"></div>
@@ -258,13 +265,13 @@
           <p class="admin-feedback" id="generation-status-feedback" role="status"></p>
         </div>
 
-        <div class="panel admin-panel">
+        <div class="panel admin-panel" data-admin-section="generation">
           <div class="admin-panel-head"><h3>Generation job controls</h3><button class="text-btn" id="refresh-jobs">Refresh</button></div>
           <p class="muted">Requeue retries only the missing questions. Regenerate starts a new batch. Delete removes a job from this list but retains its AI usage and generated questions.</p>
           <div id="admin-jobs"><p class="muted">Loading jobs…</p></div>
         </div>
 
-        <div class="panel admin-panel">
+        <div class="panel admin-panel" data-admin-section="question-bank">
           <div class="admin-panel-head"><div><h3>Question Bank Review</h3><p class="muted">Questions are published automatically after validation. You can edit, remove from play or delete them here.</p></div><button class="btn-secondary" id="refresh-questions">Refresh</button></div>
           <div class="admin-queue-grid">
             <label>Grade<select id="review-grade"><option value="">All grades</option></select></label>
@@ -276,19 +283,19 @@
           <p class="admin-feedback" id="question-feedback" role="status"></p>
         </div>
 
-        <div class="panel admin-panel">
+        <div class="panel admin-panel" data-admin-section="generation">
           <h3>AI usage reservations requiring review</h3>
           <p>Interrupted or uncertain provider calls remain reserved against the shared budget. Confirm the actual provider cost before settling a reservation; the default value remains the conservative reserved amount.</p>
           <div id="admin-usage-reviews"><p class="muted">Loading AI usage reviews…</p></div>
         </div>
 
-        <div class="panel admin-panel" id="guest-leads-panel">
+        <div class="panel admin-panel" id="guest-leads-panel" data-admin-section="guests">
           <div class="admin-panel-head"><div><h3>Knowledge Arena Guest Leads</h3><p class="muted">One lead per mobile number. Guest registrations, sessions, game activity and consent are retained separately.</p></div><div><button class="btn-secondary" id="refresh-guest-leads">Refresh leads</button> <button class="btn-secondary" id="export-guest-leads">Export CSV</button></div></div>
           <div class="guest-lead-filters"><input id="guest-lead-search" type="search" placeholder="Search name or mobile"><select id="guest-lead-grade"><option value="">All grades</option></select><input id="guest-lead-from" type="date" aria-label="Registered from"><input id="guest-lead-to" type="date" aria-label="Registered to"><select id="guest-lead-status"><option value="">All statuses</option><option>New</option><option>Contacted</option><option>Interested</option><option>Demo Booked</option><option>Demo Completed</option><option>Converted to Student</option><option>Not Interested</option></select></div>
           <div id="guest-lead-metrics" class="metric-grid"></div><div id="guest-lead-list" class="guest-lead-list"><p class="muted">Loading guest leads…</p></div><div id="guest-lead-pagination" class="guest-lead-pagination"></div>
           <div id="guest-lead-detail" class="guest-lead-detail hidden"></div><p id="guest-lead-feedback" class="admin-feedback" role="status"></p>
         </div>
-        <div class="panel admin-panel" id="guest-promotions-panel">
+        <div class="panel admin-panel" id="guest-promotions-panel" data-admin-section="guests">
           <div class="admin-panel-head"><div><h3>Guest Marketing Promotions</h3><p class="muted">Create dismissible course promotions. Promotions never interrupt an active question.</p></div><button class="btn-secondary" id="refresh-guest-promotions">Refresh promotions</button></div>
           <form id="guest-promotion-form" class="guest-promotion-form">
             <input id="promotion-id" type="hidden"><label>Promotion title<input id="promotion-title" maxlength="120" required></label>
@@ -302,7 +309,7 @@
           </form><div id="guest-promotion-list" class="guest-lead-list"></div><p id="guest-promotion-feedback" class="admin-feedback" role="status"></p>
         </div>
 
-        <div class="panel admin-panel">
+        <div class="panel admin-panel" data-admin-section="overview">
           <h3>Attendance gamification (read-only integration)</h3>
           <p>Attendance XP, levels, badges, streaks and the existing attendance leaderboard remain separate. This Knowledge Arena page does not recalculate or modify attendance rewards.</p>
           <div class="status-line"><span class="status-dot amber"></span> Existing attendance summary integration remains a separate follow-up.</div>
