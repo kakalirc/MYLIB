@@ -574,6 +574,14 @@ Deno.serve(async (req) => {
       else if (kind === "game_subject") { table = "ka_game_subject_rules"; key = { game_type: String(body.game_type || ""), subject: String(body.subject || "") }; }
       else return errorResponse(400, "Unknown suitability rule.");
       if (Object.values(key).some((v) => !v) || (key.game_type && !validGameType(key.game_type))) return errorResponse(400, "Invalid suitability rule details.");
+      if (key.grade_label) {
+        const { data: grade } = await db.from("grades").select("name").eq("name", key.grade_label).eq("archived", false).maybeSingle();
+        if (!grade || String(key.grade_label).toLocaleLowerCase() === "tina student") return errorResponse(400, "Choose a valid academic grade.");
+      }
+      if (key.subject) {
+        const { data: subject } = await db.from("subjects").select("name").eq("name", key.subject).maybeSingle();
+        if (!subject || ["all","math + science"].includes(String(key.subject).toLocaleLowerCase())) return errorResponse(400, "Choose an individual LIB subject.");
+      }
       const { error } = await db.from(table).upsert({ ...key, enabled, source: kind === "grade_subject" ? "admin" : undefined,
         updated_at: new Date().toISOString(), updated_by: user.id });
       if (error) return errorResponse(503, "Could not save the suitability rule.");
