@@ -1066,6 +1066,7 @@
         '<h4>Guest sessions</h4><div class="guest-detail-list">'+(d.sessions||[]).map(x=>'<p><b>'+escapeHtml(x.guest_name)+'</b> · '+escapeHtml(x.grade_label)+' · '+escapeHtml(new Date(x.started_at).toLocaleString("en-IN"))+'</p>').join("")+'</div>'+
         '<h4>Game activity</h4><div class="guest-detail-list">'+(d.activity||[]).map(x=>'<p>'+escapeHtml(GAME_NAMES[x.game_type]||x.game_type)+' · '+escapeHtml(x.subject||"")+' · '+x.correct_count+'/'+x.question_count+' correct · '+escapeHtml(new Date(x.completed_at).toLocaleString("en-IN"))+'</p>').join("")+'</div>'+
         '<h4>Consent history</h4><div class="guest-detail-list">'+(d.consents||[]).map(x=>'<p>'+escapeHtml(x.consent_type)+' · '+(x.granted?"Granted":"Withdrawn")+' · '+escapeHtml(new Date(x.recorded_at).toLocaleString("en-IN"))+'</p>').join("")+'</div>'+
+        '<h4>Promotion engagement</h4><div class="guest-detail-list">'+(d.promotion_events||[]).map(x=>'<p>'+escapeHtml(x.event_type)+' · '+escapeHtml(x.promotion_id)+' · '+escapeHtml(new Date(x.created_at).toLocaleString("en-IN"))+'</p>').join("")+'</div>'+
         '<h4>Follow-up notes</h4><div class="guest-detail-list">'+(d.notes||[]).map(x=>'<p>'+escapeHtml(x.note)+' <small>'+escapeHtml(new Date(x.created_at).toLocaleString("en-IN"))+'</small></p>').join("")+'</div>'+
         '<div class="guest-lead-edit"><label>Lead status<select id="guest-detail-status">'+["New","Contacted","Interested","Demo Booked","Demo Completed","Converted to Student","Not Interested"].map(x=>'<option '+(x===l.lead_status?"selected":"")+'>'+x+'</option>').join("")+'</select></label>'+
         '<label>LIB Student ID (optional, for conversion)<input id="guest-detail-student" value="'+escapeHtml(l.converted_student_id||"")+'" placeholder="Existing student UUID"></label>'+
@@ -1089,7 +1090,7 @@
   }
   async function refreshGuestPromotions() {
     const r=await api("get_admin_guest_promotions");adminGuestPromotions=r.promotions||[];
-    $("guest-promotion-list").innerHTML=adminGuestPromotions.length?adminGuestPromotions.map(p=>'<div class="guest-promotion-admin-row"><div><b>'+escapeHtml(p.title)+'</b><small>'+escapeHtml(p.trigger)+' · '+(p.active?"Active":"Inactive")+' · Views '+p.metrics.view+' · Clicks '+p.metrics.click+'</small></div><div><button class="text-btn" data-edit-promotion="'+p.id+'">Edit</button> <button class="text-btn" data-delete-promotion="'+p.id+'">Delete</button></div></div>').join(""):'<p class="muted">No promotions configured yet.</p>';
+    $("guest-promotion-list").innerHTML=adminGuestPromotions.length?adminGuestPromotions.map(p=>'<div class="guest-promotion-admin-row"><div><b>'+escapeHtml(p.title)+'</b><small>'+escapeHtml(p.trigger)+' · '+(p.active?"Active":"Inactive")+' · Views '+p.metrics.view+' · Clicks '+p.metrics.click+'</small></div><div><button class="text-btn" data-edit-promotion="'+p.id+'">Edit</button> <button class="text-btn" data-delete-promotion="'+p.id+'">Deactivate</button></div></div>').join(""):'<p class="muted">No promotions configured yet.</p>';
   }
   function resetPromotionForm() {
     $("guest-promotion-form").reset();$("promotion-id").value="";$("promotion-cta-label").value="Explore courses";$("promotion-order").value="100";
@@ -1111,7 +1112,7 @@
     $("guest-promotions-panel").scrollIntoView({behavior:"smooth",block:"start"});
   }
   async function deleteGuestPromotion(id) {
-    if(!confirm("Delete this guest promotion?"))return;
+    if(!confirm("Deactivate this guest promotion? Its reporting history will be retained."))return;
     try{await api("admin_delete_guest_promotion",{id});await refreshGuestPromotions();}catch(e){$("guest-promotion-feedback").textContent=e.message;}
   }
 
