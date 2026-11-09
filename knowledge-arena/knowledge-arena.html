@@ -229,6 +229,18 @@
         </div>
 
         <div class="panel admin-panel">
+          <div class="admin-panel-head"><div><h3>Question Bank Review</h3><p class="muted">Questions are published automatically after validation. You can edit, remove from play or delete them here.</p></div><button class="btn-secondary" id="refresh-questions">Refresh</button></div>
+          <div class="admin-queue-grid">
+            <label>Grade<select id="review-grade"><option value="">All grades</option></select></label>
+            <label>Subject<select id="review-subject"><option value="">All subjects</option></select></label>
+            <label>Game<select id="review-game"><option value="">All games</option></select></label>
+            <label>Status<select id="review-status"><option value="">All statuses</option><option value="published">Published</option><option value="rejected">Removed from play</option></select></label>
+          </div>
+          <div id="admin-question-list"><p class="muted">Loading questions…</p></div>
+          <p class="admin-feedback" id="question-feedback" role="status"></p>
+        </div>
+
+        <div class="panel admin-panel">
           <h3>AI usage reservations requiring review</h3>
           <p>Interrupted or uncertain provider calls remain reserved against the shared budget. Confirm the actual provider cost before settling a reservation; the default value remains the conservative reserved amount.</p>
           <div id="admin-usage-reviews"><p class="muted">Loading AI usage reviews…</p></div>
