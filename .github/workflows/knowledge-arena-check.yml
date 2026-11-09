@@ -57,7 +57,7 @@ jobs:
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/tests/schema-fixture.sql
       - name: Test guest lead migration in a separate disposable database
         run: |
-          createdb guest_ci
+          createdb --maintenance-db="$DATABASE_URL" guest_ci
           GUEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/guest_ci
           psql "$GUEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/tests/schema-fixture.sql
           psql "$GUEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261109100000_knowledge_arena_guest_leads.sql
