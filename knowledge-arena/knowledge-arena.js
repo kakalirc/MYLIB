@@ -30,7 +30,7 @@
   ];
 
   let client = null, session = null, role = "", gradeLabel = "", assignedGradeLabel = "", lockedOut = false;
-  let guestMode = false, guestTokenValue = "", guestGameCount = 0;
+  let guestMode = false, guestTokenValue = "", guestGameCount = 0, guestExitPending = false;
   const LANGUAGE_OPTIONS = { en: "English", hi: "Hindi", kn: "Kannada", sa: "Sanskrit", fr: "French" };
   let previewMode = false, previewReason = "";
   let catalog = null, progress = null, leaderboard = [], dailyChallenge = null;
@@ -243,6 +243,7 @@
     $("guest-gate").classList.add("hidden"); showShell();
     $("main-nav").querySelectorAll(".nav-btn").forEach(b=>b.classList.toggle("hidden",b.id!=="play-nav"));
     $("hero-xp").closest(".hero-score").classList.add("hidden");
+    $("guest-exit").classList.remove("hidden");
     $("welcome-line").textContent="Welcome to Knowledge Arena. Choose a game and start learning!";
     $("grade-label").textContent="Your selected class: "+gradeLabel;
     renderGameAvailability(data.games||[]); setStatus("GUEST PLAY","success"); showView("play");
@@ -480,6 +481,7 @@
     $("quiz").classList.add("hidden");
     $("results").classList.add("hidden");
     $("guest-register-form").addEventListener("submit", registerGuest);
+  $("guest-exit").addEventListener("click",exitGuest);
   $("guest-promotion-close").addEventListener("click",()=>closeGuestPromotion("dismiss"));
   $("guest-promotion-dismiss").addEventListener("click",()=>closeGuestPromotion("dismiss"));
   $("guest-promotion-cta").addEventListener("click",()=>closeGuestPromotion("click"));
