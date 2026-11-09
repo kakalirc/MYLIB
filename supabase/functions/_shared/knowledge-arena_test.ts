@@ -3,7 +3,7 @@ import { GAME_CATALOG, gameSubjects, validGameType } from "./knowledge-arena.ts"
 
 Deno.test("catalogue contains the 14 approved named games", () => {
   assertEquals(GAME_CATALOG.length, 14);
-  assertEquals(GAME_CATALOG.some((game) => game.id === "coding_logic"), false);
+  assertEquals(GAME_CATALOG.some((game) => String(game.id) === "coding_logic"), false);
 });
 
 Deno.test("all approved game IDs pass validation", () => {
