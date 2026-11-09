@@ -193,16 +193,17 @@
         showGate("access", error.message);
         setStatus("ACCESS DENIED", "danger");
       } else {
+        // The LIB session is authenticated, but the Knowledge Arena API could not
+        // resolve the role. Show a read-only Admin preview instead of silently
+        // leaving Admin users on the player screen. A 403 above still blocks
+        // users whose role was explicitly rejected by the API.
         showShell();
-        const requestedView = new URLSearchParams(location.search).get("view");
-        if (requestedView === "admin") {
-          role = "AdminPreview";
-          prepareAdminLayout();
-          usePreview(error.message || "The Knowledge Arena API is not deployed yet.");
-          renderAdminPreview(error.message || "The Knowledge Arena API is not deployed yet.");
-        } else {
-          usePreview(error.message || "The Knowledge Arena API is not deployed yet.");
-        }
+        role = "AdminPreview";
+        prepareAdminLayout();
+        const previewMessage = "Your LIB login is active, but the Knowledge Arena Admin service could not verify the role or load its data. " +
+          (error.message || "The Knowledge Arena API is temporarily unavailable.");
+        usePreview(previewMessage);
+        renderAdminPreview(previewMessage);
       }
     }
   }
