@@ -871,6 +871,7 @@
     const active = Number(totals.queued || 0) + Number(totals.running || 0);
     $("admin-generation-summary").innerHTML = [
       ["Questions requested", totals.requested],
+      ["Generated", totals.generated],
       ["Published", totals.published],
       ["Awaiting processing", totals.queued ? jobs.filter(x => x.status === "queued").reduce((n,x)=>n+Math.max(0,Number(x.requested_count||0)-Number(x.published_count||0)),0) : 0],
       ["Jobs in progress / queue", active],
@@ -1357,7 +1358,7 @@
   // Refresh only the Admin dashboard data; never reload the full Knowledge Arena page.
   setInterval(() => {
     const adminView = $("view-admin");
-    if (role === "Admin" && adminView && !adminView.classList.contains("hidden")) {
+    if (!previewMode && role === "Admin" && adminView && !adminView.classList.contains("hidden")) {
       refreshAdmin().catch((error) => {
         const feedback = $("generation-status-feedback");
         if (feedback) feedback.textContent = "Automatic status refresh failed: " + error.message;
