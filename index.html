@@ -17593,12 +17593,12 @@ function wixConvertedDemoFor(b) {
     || (ph && phoneKey(d.parentMobile) === ph) || (nm && (d.studentName || '').trim().toLowerCase() === nm))) || null;
 }
 function renderWixBookings() {
-  const filters = ['New', 'Scheduled', 'Done', 'Converted', 'Lost', 'Cancelled', 'All'].concat(wixCallsReady ? ['Calls due'] : []);
+  const filters = ['Paid New', 'Not Paid New', 'Scheduled', 'Done', 'Converted', 'Lost', 'Cancelled', 'All'].concat(wixCallsReady ? ['Calls due'] : []);
   const newCount = data.wixBookings.filter(b => b.status === 'New').length;
-  const paidCount = data.wixBookings.filter(b => !!b.paid).length;
-  const notPaidCount = data.wixBookings.filter(b => !b.paid && Number(b.amount || 0) > 0).length;
-  const wixFilterMatch = (b, f) => f === 'All' || (f === 'Calls due' ? !!wixCallDueOn(b) : b.status === f);
-  const list = data.wixBookings.filter(b => wixFilterMatch(b, wixBookingsFilter) && (!wixPaidReady || wixPaidFilter === 'All' || (wixPaidFilter === 'Paid' ? !!b.paid : (!b.paid && Number(b.amount || 0) > 0))));
+  const paidNewCount = data.wixBookings.filter(b => b.status === 'New' && !!b.paid).length;
+  const notPaidNewCount = data.wixBookings.filter(b => b.status === 'New' && !b.paid && Number(b.amount || 0) > 0).length;
+  const wixFilterMatch = (b, f) => f === 'All' || (f === 'Calls due' ? !!wixCallDueOn(b) : f === 'Paid New' ? b.status === 'New' && !!b.paid : f === 'Not Paid New' ? b.status === 'New' && !b.paid && Number(b.amount || 0) > 0 : b.status === f);
+  const list = data.wixBookings.filter(b => wixFilterMatch(b, wixBookingsFilter));
   const d = wixBookingScheduleDraft;
   const ed = wixBookingEditDraft;
   const statusColor = s => s === 'New' ? 'var(--brick)' : s === 'Scheduled' ? 'var(--accent)' : s === 'Done' ? '#6b5ca5' : s === 'Converted' ? 'var(--forest)' : s === 'Lost' ? '#a0522d' : '#888';
@@ -17756,7 +17756,7 @@ function renderWixBookings() {
       ${wixBookingsMsg ? `<div style="margin-bottom:10px;font-size:13px;font-weight:500;${wixBookingsMsg.includes('✓') ? 'color:var(--forest)' : 'color:var(--brick)'}">${esc(wixBookingsMsg)}</div>` : ''}
       <div class="row-form" style="gap:6px;flex-wrap:wrap;margin-bottom:14px">
         ${filters.map(f => { const cnt = data.wixBookings.filter(b => wixFilterMatch(b, f)).length; return `<button class="btn-small ${wixBookingsFilter===f?'btn-primary':''}" onclick="wixBookingsFilter='${f}';wixBookingsMsg='';wixBookingActionId=null;wixBookingEditId=null;render()">${f}${cnt > 0 ? ` (${cnt})` : ''}</button>`; }).join('')}
-        ${wixPaidReady ? `<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:100%;margin:0 0 8px"><button type="button" onclick="wixPaidFilter='Paid';render()" aria-pressed="${wixPaidFilter === 'Paid'}" style="text-align:left;padding:12px;border:1px solid ${wixPaidFilter === 'Paid' ? 'var(--forest)' : 'var(--border)'};border-radius:8px;background:${wixPaidFilter === 'Paid' ? 'rgba(60,94,66,.10)' : 'var(--card)'};cursor:pointer"><span style="display:block;font-size:12px;color:var(--forest);font-weight:700">✓ PAID</span><strong style="display:block;font-size:22px;margin-top:3px">${paidCount}</strong><span class="hint" style="font-size:11px">Razorpay-confirmed bookings</span></button><button type="button" onclick="wixPaidFilter='Not paid';render()" aria-pressed="${wixPaidFilter === 'Not paid'}" style="text-align:left;padding:12px;border:1px solid ${wixPaidFilter === 'Not paid' ? 'var(--brick)' : 'var(--border)'};border-radius:8px;background:${wixPaidFilter === 'Not paid' ? 'rgba(166,67,46,.08)' : 'var(--card)'};cursor:pointer"><span style="display:block;font-size:12px;color:var(--brick);font-weight:700">◷ NOT PAID</span><strong style="display:block;font-size:22px;margin-top:3px">${notPaidCount}</strong><span class="hint" style="font-size:11px">Payment not yet confirmed</span></button></div><button type="button" class="text-btn" style="font-size:11px;margin-bottom:8px" onclick="wixPaidFilter='All';render()">Show all payment statuses</button>` : ''}
+
         <button class="btn-small" style="margin-left:auto" onclick="loadWixBookings().then(()=>{wixBookingsMsg='';render()})">↻ Refresh</button>
       </div>
       ${razorpayWaitingHtml()}
