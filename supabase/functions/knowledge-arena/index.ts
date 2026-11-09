@@ -110,7 +110,7 @@ async function getGuestSession(db: ReturnType<typeof adminClient>, token: unknow
     .eq("session_token_hash", hash).is("ended_at", null).gt("expires_at", new Date().toISOString()).maybeSingle();
   if (error || !data) return null;
   await db.from("ka_guest_sessions").update({ last_seen_at: new Date().toISOString() }).eq("id", data.id);
-  await db.from("ka_guest_leads").update({ last_seen_at: new Date().toISOString() }).eq("id", data.lead_id);
+  await db.from("ka_guest_leads").update({ last_seen_at: new Date().toISOString(), last_activity_at: new Date().toISOString() }).eq("id", data.lead_id);
   return data;
 }
 async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Record<string, unknown>) {
@@ -132,7 +132,7 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
     let lead: any = null;
     if (existing) {
       const { data, error } = await db.from("ka_guest_leads").update({
-        last_seen_at: now, updated_at: now,
+        last_seen_at: now, last_activity_at: now, updated_at: now,
         enquiry_consent: !!existing.enquiry_consent || body.enquiry_consent === true,
         marketing_consent: !!existing.marketing_consent || body.marketing_consent === true
       }).eq("id", existing.id).select("id").single();
@@ -155,7 +155,7 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
       grade_label: grade, expires_at: expires
     }).select("id,guest_name,grade_label,expires_at").single();
     if (sessionError || !session) return errorResponse(503, "Could not start the guest session.");
-    await db.from("ka_guest_leads").update({ last_guest_name: name, last_grade_label: grade }).eq("id", lead.id);
+    await db.from("ka_guest_leads").update({ last_guest_name: name, last_grade_label: grade, last_activity_at: now, last_seen_at: now, updated_at: now }).eq("id", lead.id);
     const consentEvents = [];
     if (!existing) {
       consentEvents.push({ lead_id: lead.id, session_id: session.id, consent_type: "enquiry", granted: body.enquiry_consent === true, source: "knowledge_arena_guest" });
@@ -1016,7 +1016,7 @@ Deno.serve(async (req) => {
         if (studentError || !student) return errorResponse(400, "Select a valid active LIB student.");
       }
       const { data: updated, error } = await db.from("ka_guest_leads").update({
-        lead_status: status, converted_student_id: studentId, updated_at: new Date().toISOString()
+        lead_status: status, ...(studentId ? { converted_student_id: studentId } : {}), updated_at: new Date().toISOString()
       }).eq("id", leadId).select("id,lead_status,converted_student_id").maybeSingle();
       if (error || !updated) return errorResponse(404, "Guest lead could not be updated.");
       if (note) {
