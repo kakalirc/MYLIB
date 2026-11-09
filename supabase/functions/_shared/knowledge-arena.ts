@@ -67,7 +67,7 @@ export const GAME_CATALOG = [
   { id: "society_culture_challenge", name: "Society & Culture Challenge", category: "academic", subjects: ["Sociology", "Social Science"] },
   { id: "civics_constitution_challenge", name: "Civics & Constitution Challenge", category: "academic", subjects: ["Political Science", "Social Science"] },
   { id: "economics_explorer", name: "Economics Explorer", category: "academic", subjects: ["Economics"] },
-  { id: "money_matters", name: "Money Matters", category: "academic", subjects: ["Economics", "Mathematics"] },
+  { id: "money_matters", name: "Money Matters", category: "academic", subjects: ["Economics", "Math", "Mathematics"] },
   { id: "word_builder", name: "Word Builder", category: "academic", subjects: ["English", "Hindi", "Kannada", "Sanskrit", "French"] },
   { id: "math_sprint", name: "Math Sprint", category: "academic", subjects: ["Math", "Mathematics"] },
 ] as const;
