@@ -1059,9 +1059,9 @@ Deno.serve(async (req) => {
       if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
       const id = String(body.id || "");
       if (!id) return errorResponse(400, "Promotion ID is required.");
-      const { error } = await db.from("ka_guest_promotions").delete().eq("id", id);
-      if (error) return errorResponse(503, "Could not delete the promotion.");
-      return json(200, { deleted: true });
+      const { error } = await db.from("ka_guest_promotions").update({ active: false, updated_at: new Date().toISOString() }).eq("id", id);
+      if (error) return errorResponse(503, "Could not deactivate the promotion.");
+      return json(200, { deactivated: true });
     }
 
     if (action === "admin_control") {
