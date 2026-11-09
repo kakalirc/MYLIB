@@ -1041,7 +1041,6 @@ Deno.serve(async (req) => {
       const status = String(body.lead_status || "");
       const studentId = body.converted_student_id ? String(body.converted_student_id) : null;
       if (!leadId || !GUEST_STATUSES.includes(status)) return errorResponse(400, "Choose a valid lead status.");
-      if (note.length > 2000) return errorResponse(400, "Notes must be 2,000 characters or fewer.");
       if (status === "Converted to Student" && !studentId) return errorResponse(400, "Select the existing LIB student record before marking this lead as converted.");
       if (studentId) {
         const { data: student, error: studentError } = await db.from("students").select("id").eq("id", studentId).eq("archived", false).maybeSingle();
