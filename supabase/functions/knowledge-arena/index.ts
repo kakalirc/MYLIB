@@ -196,58 +196,39 @@ Deno.serve(async (req) => {
     }
 
     if (action === "get_questions") {
-      const ctx = await studentContext(db, profile);
-      if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
       const gameType = body.game_type;
       if (!validGameType(gameType)) return errorResponse(400, "Invalid game type.");
-      let subject = typeof body.subject === "string" ? body.subject.trim() : "";
-      const isLanguageStudent = ctx.gradeLabel.trim().toLocaleLowerCase() === "language";
-      // Enforce game-to-subject routing on the server as well as in the UI.
-      // Quick Quiz may intentionally load across all subjects.
-      if (!isLanguageStudent) {
-        const gameSubjects: Record<string, string> = {
-          word_master: "English",
-          number_quest: "Math",
-          brain_teaser: "Math",
-          science_explorer: "Science",
-          memory_challenge: "Science",
-        };
-        if (gameSubjects[gameType]) subject = gameSubjects[gameType];
-        else if (subject.toLocaleLowerCase() === "all") subject = "";
-      }
-      if (!subject && gameType !== "quick_quiz") return errorResponse(400, "A subject is required for this game.");
-      let effectiveGradeLabel = ctx.gradeLabel;
-      if (ctx.gradeLabel.trim().toLocaleLowerCase() === "tina student") {
-        const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
-          .select("selected_grade_label").eq("user_id", user.id).maybeSingle();
-        if (preferenceError) return errorResponse(503, "Could not verify your saved grade.");
-        if (!preference?.selected_grade_label) return errorResponse(400, "Please select your school grade first.");
-        effectiveGradeLabel = preference.selected_grade_label;
-      }
-      const difficulty = body.difficulty === undefined ? "" : String(body.difficulty);
+      const resolved = await playerGrade(db, profile, user.id, body.grade_label);
+      if (!resolved) return errorResponse(400, "Select a valid grade before starting a game.");
+      const effectiveGradeLabel = resolved.gradeLabel;
       let languageCode = body.language_code === undefined ? "" : String(body.language_code);
-      if (difficulty && !["easy", "medium", "hard"].includes(difficulty)) return errorResponse(400, "Invalid difficulty.");
       if (languageCode && !["en","hi","kn","sa","fr"].includes(languageCode)) return errorResponse(400, "Invalid question language.");
-      if (isLanguageStudent) {
-        const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
-          .select("preferred_language_code").eq("user_id", user.id).maybeSingle();
-        if (preferenceError) return errorResponse(503, "Could not verify your saved language preference.");
-        const savedCode = preference?.preferred_language_code || "en";
-        const languageNames: Record<string, string> = { en: "English", hi: "Hindi", kn: "Kannada", sa: "Sanskrit", fr: "French" };
-        if (languageCode && languageCode !== savedCode) return errorResponse(403, "Your selected language does not match your saved preference.");
-        if (subject !== languageNames[savedCode]) return errorResponse(403, "Choose your saved language before starting Word Master.");
-        languageCode = savedCode;
-      }
+      if (body.difficulty && !["easy","medium","hard"].includes(String(body.difficulty))) return errorResponse(400, "Invalid difficulty.");
       const { data: settings } = await db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle();
       if (!settings?.games_enabled || (settings.disabled_game_types || []).includes(gameType)) return errorResponse(423, "This game is currently unavailable.");
-      if (subject && (settings.disabled_subjects || []).includes(subject)) return errorResponse(423, "This subject is currently unavailable.");
+      const { data: subjectRows, error: subjectError } = await db.from("subjects").select("name").order("name");
+      if (subjectError) return errorResponse(503, "Could not load the subject catalogue.");
+      const allSubjects = uniqueSubjectNames(subjectRows).filter((s) => !(settings.disabled_subjects || []).includes(s));
+      let allowedSubjects = gameSubjects(gameType, allSubjects);
+      if (profile.role === "Student" && ["word_master","word_builder"].includes(gameType)) {
+        const ctx = await studentContext(db, profile);
+        if (ctx?.gradeLabel.trim().toLocaleLowerCase() === "language") {
+          const { data: preference, error } = await db.from("ka_student_preferences")
+            .select("preferred_language_code").eq("user_id", user.id).maybeSingle();
+          if (error) return errorResponse(503, "Could not verify your saved language preference.");
+          languageCode = preference?.preferred_language_code || "en";
+          const languageNames: Record<string, string> = { en: "English", hi: "Hindi", kn: "Kannada", sa: "Sanskrit", fr: "French" };
+          allowedSubjects = allowedSubjects.filter((s) => s.toLocaleLowerCase() === languageNames[languageCode].toLocaleLowerCase());
+        }
+      }
+      if (!allowedSubjects.length) return json(200, { questions: [], grade_label: effectiveGradeLabel });
       let query = db.from("ka_questions")
         .select("id,subject,topic,grade_label,language_code,difficulty,game_type,prompt,options")
         .eq("status", "published").in("grade_label", [effectiveGradeLabel, "General"]).eq("game_type", gameType)
+        .in("subject", allowedSubjects)
         .or("expires_at.is.null,expires_at.gt." + new Date().toISOString())
         .order("created_at", { ascending: false }).limit(Math.min(Math.max(safeNumber(body.limit, 10), 1), 20));
-      if (subject) query = query.eq("subject", subject);
-      if (difficulty) query = query.eq("difficulty", difficulty);
+      if (body.difficulty) query = query.eq("difficulty", String(body.difficulty));
       if (languageCode) query = query.eq("language_code", languageCode);
       const { data, error } = await query;
       if (error) return errorResponse(503, "Could not load questions.");
@@ -279,8 +260,6 @@ Deno.serve(async (req) => {
     }
 
     if (action === "submit_attempt") {
-      const ctx = await studentContext(db, profile);
-      if (!ctx) return errorResponse(403, "A linked LIB student record and grade are required.");
       const gameType = body.game_type;
       if (!validGameType(gameType)) return errorResponse(400, "Invalid game type.");
       const selections = body.answers;
@@ -295,14 +274,9 @@ Deno.serve(async (req) => {
         seen.add(item.question_id);
       }
       const ids = [...seen];
-      let effectiveGradeLabel = ctx.gradeLabel;
-      if (ctx.gradeLabel.trim().toLocaleLowerCase() === "tina student") {
-        const { data: preference, error: preferenceError } = await db.from("ka_student_preferences")
-          .select("selected_grade_label").eq("user_id", user.id).maybeSingle();
-        if (preferenceError) return errorResponse(503, "Could not verify your saved grade.");
-        if (!preference?.selected_grade_label) return errorResponse(400, "Please select your school grade first.");
-        effectiveGradeLabel = preference.selected_grade_label;
-      }
+      const resolved = await playerGrade(db, profile, user.id, body.grade_label);
+      if (!resolved) return errorResponse(400, "Select a valid grade before submitting this game.");
+      const effectiveGradeLabel = resolved.gradeLabel;
       const { data: questions, error: questionError } = await db.from("ka_questions")
         .select("id,subject,topic,grade_label,difficulty,game_type,prompt,options,explanation")
         .in("id", ids).eq("status", "published").in("grade_label", [effectiveGradeLabel, "General"])
@@ -311,7 +285,12 @@ Deno.serve(async (req) => {
       const challengeId = typeof body.challenge_id === "string" ? body.challenge_id : null;
       if (questions.some((q: any) => q.game_type !== gameType)) return errorResponse(400, "Questions do not match the selected game.");
       const subjectSet = new Set(questions.map((q: any) => q.subject));
-      if (!challengeId && subjectSet.size !== 1) return errorResponse(400, "A practice attempt must contain questions from one subject.");
+      const { data: subjectRows, error: subjectError } = await db.from("subjects").select("name");
+      if (subjectError) return errorResponse(503, "Could not verify question subjects.");
+      const permittedSubjects = gameSubjects(gameType, uniqueSubjectNames(subjectRows));
+      if (questions.some((q: any) => !permittedSubjects.some((s) => s.toLocaleLowerCase() === String(q.subject).toLocaleLowerCase()))) {
+        return errorResponse(400, "One or more questions do not belong to this game's configured subjects.");
+      }
       const { data: gameSettings } = await db.from("ka_settings").select("games_enabled,disabled_game_types,disabled_subjects").eq("id", 1).maybeSingle();
       if (!gameSettings?.games_enabled ||
           questions.some((q: any) => (gameSettings.disabled_game_types || []).includes(q.game_type)) ||
