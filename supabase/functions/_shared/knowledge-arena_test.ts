@@ -26,3 +26,21 @@ Deno.test("Money Matters routes both live Math and Economics subject labels", ()
 Deno.test("multi-subject games can use the enabled LIB subject catalogue", () => {
   assertEquals(gameSubjects("quick_quiz", ["English", "Economics"]), ["English", "Economics"]);
 });
+
+
+import { isLanguageGame, languageGradeLabels, languageSubject } from "./knowledge-arena.ts";
+Deno.test("language games are independent of academic grade", () => {
+  assertEquals(isLanguageGame("word_master"), true);
+  assertEquals(isLanguageGame("word_builder"), true);
+  assertEquals(isLanguageGame("quick_quiz"), false);
+  assertEquals(languageGradeLabels("11"), ["11", "General", "Language"]);
+  assertEquals(languageGradeLabels("Language"), ["Language", "General"]);
+});
+Deno.test("language codes map to exact LIB subject labels", () => {
+  assertEquals(languageSubject("en"), "English");
+  assertEquals(languageSubject("hi"), "Hindi");
+  assertEquals(languageSubject("kn"), "Kannada");
+  assertEquals(languageSubject("sa"), "Sanskrit");
+  assertEquals(languageSubject("fr"), "French");
+  assertEquals(languageSubject("xx"), null);
+});
