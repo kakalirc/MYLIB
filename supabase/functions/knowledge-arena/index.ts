@@ -1039,7 +1039,6 @@ Deno.serve(async (req) => {
       if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
       const leadId = String(body.lead_id || "");
       const status = String(body.lead_status || "");
-      const note = String(body.note || "").trim();
       const studentId = body.converted_student_id ? String(body.converted_student_id) : null;
       if (!leadId || !GUEST_STATUSES.includes(status)) return errorResponse(400, "Choose a valid lead status.");
       if (note.length > 2000) return errorResponse(400, "Notes must be 2,000 characters or fewer.");
