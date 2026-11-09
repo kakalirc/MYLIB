@@ -3,23 +3,23 @@
 The Knowledge Arena is a separate student activity area, entered from **My LIB → Fun Zone**. It is deliberately isolated from the existing Question Bank, Online Assessment and attendance reward calculations.
 
 ## Current files
-- `knowledge-arena.html`, `knowledge-arena.css`, `knowledge-arena-live.css`, `knowledge-arena.js`: responsive student and Admin screens, Supabase session reuse, authenticated API client, quiz flow, memory recall interaction, Game XP/achievements/leaderboard and Admin controls.
+- `knowledge-arena.html`, `knowledge-arena.css`, `knowledge-arena-live.css`, `knowledge-arena.js`: responsive Student, Teacher and Admin player screens, authenticated API client, grade-based game catalogue, subject-free player flow, quiz flow, Game XP/achievements/leaderboard and Admin controls.
 - `proposed-schema.sql`: isolated database design draft. It is **not** in the Supabase migrations directory and has not been applied.
 - `BACKEND-CONTRACT.md`: API, scoring, security and AI-worker contract.
 - `EDGE-FUNCTIONS.md`: Edge Function actions, configuration, deployment sequence and outstanding rollout gates.
-- `supabase/functions/knowledge-arena/index.ts`: isolated Student/Admin API Edge Function.
+- `supabase/functions/knowledge-arena/index.ts`: isolated Student/Teacher/Admin API Edge Function.
 - `supabase/functions/knowledge-arena-worker/index.ts`: one-job-per-run AI generation worker and scheduled daily-challenge publication action.
 - `supabase/functions/_shared/knowledge-arena.ts`: shared server-side authentication and utility functions.
 - `student-portal-tabs.js`, `student-portal-tabs.css`: separate My Learning, Fun Zone and Settings navigation in Student Login.
 
 ## Current status
-The student UI is now wired to the authenticated Knowledge Arena API contract. It reuses the existing Supabase browser session for the same origin and responds to My LIB cross-tab logout. Student requests are authenticated and checked against the exact LIB Student role and linked student record. Practice and Admin generation support English, Hindi, Kannada and Sanskrit; the common daily challenge is English Quick Quiz content. The Admin view is available only to an authenticated Admin role.
+The player experience is available to linked Students, Teachers and Admins. Students use their LIB grade (Tina Student selects and saves a school grade); Teachers and Admins select a temporary grade for player mode. The subject selector is hidden from all players. Grade/subject/game suitability is stored in dedicated `ka_*` configuration tables and enforced by the authenticated API. The 14 named games are generated through the validated question pipeline. New game types initially use the existing four-option MCQ engine; matching, ordering and other richer interaction formats remain a separate extension phase.
 
 If the Edge Function or isolated schema is not yet deployed, the UI falls back to a clearly labelled sample preview. Preview scores are never submitted or persisted. The live student experience loads published grade-matched questions, submits selected option indexes for server-side evaluation, then refreshes saved Game XP, achievements and the common leaderboard. Correct answers remain server-side until the attempt is submitted.
 
-The Admin screen includes summary-only metrics, master switches for games/generation/daily challenges, individual game and subject availability controls, shared INR budget controls, generation job queue/pause/resume, daily challenge publication and Admin review of unsettled AI cost reservations. It does not show individual questions, selected answers or question-level history.
+The Admin screen includes grade/subject/game suitability controls, AI generation queue, automatic publishing after structural and independent AI validation, optional question review/edit/archive/delete, shared INR budgets, job controls and daily challenge publication. It does not expose students’ selected answers or question-level attempt history.
 
-The schema remains a design artifact only. No production table, policy, function, trigger, setting, secret or schedule has been changed. Neither Edge Function has been deployed. No PR merge or production deployment has occurred.
+The branch includes reviewed SQL migrations for the three suitability tables, expanded game-type constraints and Teacher/Admin player-attempt authorization. These migrations have not been applied to production. No production table, policy, function, trigger, setting, secret or schedule has been changed. Neither Edge Function has been deployed. No PR merge or production deployment has occurred.
 
 ## Database design and safeguards
 The proposed model uses a dedicated `ka_*` namespace for question content, private answer keys, generation jobs, an auditable AI usage ledger, aggregate attempts, grade-specific daily challenges, player statistics, achievements and settings. Individual selected answers are evaluated in trusted server code and are not persisted. Each game attempt has a client-generated idempotency ID, so a retry after a network timeout cannot award duplicate Game XP.
@@ -78,3 +78,10 @@ The Play screen includes a collapsible **How do the games and subjects work?** h
 - Science Explorer and Memory Challenge: Science.
 - Quick Quiz: selected subject; All means no subject restriction.
 - A Knowledge Arena grade preference does not modify the LIB student profile grade.
+
+## Expanded game catalogue and subject rules
+The 14 named games are: Word Master, Number Quest, Science Explorer, Quick Quiz, Brain Teaser, Memory Challenge, World Explorer, History Quest, Society & Culture Challenge, Civics & Constitution Challenge, Economics Explorer, Money Matters, Word Builder and Math Sprint. Coding Logic is not included.
+
+The subject source is the existing LIB subject catalogue: English, Hindi, Kannada, Sanskrit, French, Mathematics (stored as Math), Science, Social Science, History, Economics, Political Science and Sociology. Math + Science remains a combined course selection and is not a standalone question-bank subject. The seed migration applies initial grade suitability defaults; Admin can override grade-subject, game-grade and game-subject rules.
+
+A game is exposed to a player only when at least five published, unexpired questions match its game type, the player's effective grade, enabled grade-subject rules and enabled game-subject rules. AI generation remains four-option MCQ in this first build. Richer interaction formats such as Match Pairs, Arrange in Order, Case Study interactions, Find the Error, Complete the Sequence, Picture Identification and Timeline Challenge are not yet implemented as separate response schemas.
