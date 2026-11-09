@@ -149,6 +149,14 @@ async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Recor
     }
     return json(200, { guest_token: token, session_id: session.id, guest_name: name, grade_label: grade, expires_at: expires, returning_lead: !!existing });
   }
+  if (action === "guest_options") {
+    const [{ data: grades, error: gradeError }, { data: settings, error: settingsError }] = await Promise.all([
+      db.from("grades").select("name").eq("archived", false).order("sort_order"),
+      db.from("ka_settings").select("games_enabled").eq("id", 1).maybeSingle()
+    ]);
+    if (gradeError || settingsError || !settings) return errorResponse(503, "Guest registration is temporarily unavailable.");
+    return json(200, { grades: (grades || []).map((x: any) => x.name).filter((x: string) => x.toLocaleLowerCase() !== "tina student"), games_enabled: settings.games_enabled });
+  }
   const guest = await getGuestSession(db, body.guest_token);
   if (!guest) return errorResponse(401, "Guest session expired. Please register again.");
   if (action === "guest_resume") return json(200, { session_id: guest.id, guest_name: guest.guest_name, grade_label: guest.grade_label, expires_at: guest.expires_at });
