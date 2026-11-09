@@ -249,8 +249,18 @@
           <span class="admin-feedback" id="queue-feedback" role="status"></span>
         </div>
 
+        <div class="panel admin-panel generation-status-panel">
+          <div class="admin-panel-head"><div><h3>Question Generation Status</h3><p class="muted">Live queue health, published content and AI budget usage. Refreshes automatically while this Admin page is open.</p></div><button class="btn-secondary" id="refresh-generation-status">Refresh status</button></div>
+          <div id="admin-generation-summary" class="metric-grid generation-metrics"><article class="metric"><small>Loading generation status</small><strong>—</strong></article></div>
+          <div class="generation-budget-line" id="admin-generation-budget"></div>
+          <h4>Progress by game</h4>
+          <div id="admin-generation-games" class="generation-table-wrap"><p class="muted">Loading game-wise progress…</p></div>
+          <p class="admin-feedback" id="generation-status-feedback" role="status"></p>
+        </div>
+
         <div class="panel admin-panel">
-          <div class="admin-panel-head"><h3>Recent generation jobs</h3><button class="text-btn" id="refresh-jobs">Refresh</button></div>
+          <div class="admin-panel-head"><h3>Generation job controls</h3><button class="text-btn" id="refresh-jobs">Refresh</button></div>
+          <p class="muted">Requeue retries only the missing questions. Regenerate starts a new batch. Delete removes a job from this list but retains its AI usage and generated questions.</p>
           <div id="admin-jobs"><p class="muted">Loading jobs…</p></div>
         </div>
 

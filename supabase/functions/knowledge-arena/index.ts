@@ -919,8 +919,8 @@ Deno.serve(async (req) => {
     if (action === "get_admin_jobs") {
       if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
       const { data, error } = await db.from("ka_generation_jobs")
-        .select("id,status,subject,topic,grade_label,language_code,game_type,difficulty,requested_count,published_count,created_at,started_at,completed_at,error_code,error_summary,estimated_cost_inr")
-        .order("created_at", { ascending: false }).limit(50);
+        .select("id,status,subject,topic,grade_label,language_code,game_type,difficulty,requested_count,generated_count,validated_count,published_count,rejected_count,created_at,started_at,completed_at,error_code,error_summary,estimated_cost_inr")
+        .is("archived_at", null).order("created_at", { ascending: false }).limit(500);
       if (error) return errorResponse(503, "Could not load generation jobs.");
       return json(200, { jobs: data || [] });
     }
@@ -1117,9 +1117,52 @@ Deno.serve(async (req) => {
         const targetStatus = control === "pause_job" ? "paused" : "queued";
         const allowedStatuses = control === "pause_job" ? ["queued"] : ["paused"];
         const { data, error } = await db.from("ka_generation_jobs").update({ status: targetStatus })
-          .eq("id", body.job_id).in("status", allowedStatuses).select("id,status").maybeSingle();
+          .eq("id", body.job_id).is("archived_at", null).in("status", allowedStatuses).select("id,status").maybeSingle();
         if (error || !data) return errorResponse(409, "Job could not be updated; it may already be running or complete.");
         return json(200, { job: data });
+      } else if (control === "requeue_job" || control === "regenerate_job") {
+        if (!current.generation_enabled) return errorResponse(423, "AI generation is paused.");
+        const jobId = typeof body.job_id === "string" ? body.job_id : "";
+        if (!jobId) return errorResponse(400, "job_id is required.");
+        const { data: source, error: sourceError } = await db.from("ka_generation_jobs")
+          .select("id,status,subject,topic,grade_label,language_code,game_type,difficulty,requested_count,published_count")
+          .eq("id", jobId).is("archived_at", null).maybeSingle();
+        if (sourceError || !source) return errorResponse(404, "Generation job not found.");
+        if (source.status === "running" || (control === "requeue_job" && !["partial","failed","paused"].includes(source.status))) {
+          return errorResponse(409, "This job cannot be retried in its current state.");
+        }
+        const requested = control === "requeue_job"
+          ? Math.max(0, Number(source.requested_count || 0) - Number(source.published_count || 0))
+          : Number(source.requested_count || 0);
+        if (!Number.isInteger(requested) || requested < 1 || requested > 500) {
+          return errorResponse(409, "There are no missing questions left to requeue.");
+        }
+        if ((current.disabled_game_types || []).includes(source.game_type) || (current.disabled_subjects || []).includes(source.subject)) {
+          return errorResponse(423, "This game or subject is currently disabled.");
+        }
+        const { data: created, error: createError } = await db.from("ka_generation_jobs").insert({
+          status: "queued", subject: source.subject, topic: source.topic, grade_label: source.grade_label,
+          language_code: source.language_code, game_type: source.game_type, difficulty: source.difficulty,
+          requested_count: requested,
+        }).select("id,status,requested_count,created_at").single();
+        if (createError || !created) return errorResponse(503, "Could not create the retry generation job.");
+        return json(200, { job: created, retried_from: source.id, operation: control });
+      } else if (control === "delete_job") {
+        const jobId = typeof body.job_id === "string" ? body.job_id : "";
+        if (!jobId) return errorResponse(400, "job_id is required.");
+        const { data: target, error: targetError } = await db.from("ka_generation_jobs")
+          .select("id,status").eq("id", jobId).is("archived_at", null).maybeSingle();
+        if (targetError || !target) return errorResponse(404, "Generation job not found.");
+        if (target.status === "running") return errorResponse(409, "A running job cannot be removed.");
+        const archivePatch: Record<string, unknown> = { archived_at: new Date().toISOString(), archived_by: user.id };
+        // A queued job must be stopped before it is hidden from the active queue.
+        // Preserve completed/partial/failed status for audit accuracy.
+        if (target.status === "queued") archivePatch.status = "paused";
+        const { data: removed, error: removeError } = await db.from("ka_generation_jobs")
+          .update(archivePatch).eq("id", jobId).eq("status", target.status).is("archived_at", null)
+          .select("id,status,archived_at").maybeSingle();
+        if (removeError || !removed) return errorResponse(409, "Job could not be removed; its status may have changed.");
+        return json(200, { removed: true, job: removed, audit_history_retained: true });
       } else if (control === "queue_generation") {
         if (!current.generation_enabled) return errorResponse(423, "AI generation is paused.");
         const gameType = body.game_type;
