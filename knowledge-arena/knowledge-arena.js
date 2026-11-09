@@ -851,6 +851,7 @@
         '<label>Difficulty<select data-field="difficulty">' + ["easy","medium","hard"].map((x) =>
           '<option value="' + x + '" ' + (q.difficulty === x ? 'selected' : '') + '>' + x + '</option>').join("") + '</select></label>' +
         '<div class="admin-question-actions"><button class="btn-secondary" data-question-action="save">Save changes</button>' +
+        (q.status !== "published" ? '<button class="btn-secondary" data-question-action="publish">Publish</button>' : '') +
         '<button class="btn-secondary" data-question-action="archive">Remove from play</button>' +
         '<button class="btn-secondary" data-question-action="delete">Delete permanently</button></div></div></details>';
     }).join("");
@@ -890,7 +891,7 @@
         payload.difficulty = row.querySelector('[data-field="difficulty"]').value;
       }
       await api("admin_question", payload);
-      feedback.textContent = operation === "delete" ? "Question deleted." : operation === "archive" ? "Question removed from play." : "Question updated.";
+      feedback.textContent = operation === "delete" ? "Question deleted." : operation === "archive" ? "Question removed from play." : operation === "publish" ? "Question published." : "Question updated.";
       await refreshQuestions();
     } catch (error) { feedback.textContent = error.message; button.disabled = false; }
   }
