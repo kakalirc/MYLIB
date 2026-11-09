@@ -160,8 +160,11 @@
     try {
       const context = await api("get_context");
       role = context.role || "";
+      const isLearningRole = role === "Student" || role === "Teacher";
       const backToLearning = $("back-learning");
-      if (backToLearning) backToLearning.classList.toggle("hidden", role !== "Student" && role !== "Teacher");
+      const supportButton = $("knowledge-arena-support");
+      if (backToLearning) backToLearning.classList.toggle("hidden", !isLearningRole);
+      if (supportButton) supportButton.classList.toggle("hidden", !isLearningRole);
       gradeLabel = context.grade_label || "";
       assignedGradeLabel = gradeLabel;
       if (role !== "Student" && role !== "Teacher" && role !== "Admin") {
