@@ -38,7 +38,7 @@
   let currentAnswers = [], currentIndex = 0, currentScore = 0, challengeId = null, clientAttemptId = null;
   let gameStartedAt = 0, memoryTimer = null, memoryRevealed = false;
   let adminSummary = null, adminOptions = null, adminJobs = [], adminUsageReviews = [], adminLeadership = null, adminQuestions = [], adminSuitability = null;
-  let adminGuestLeads = [], adminGuestPromotions = [];
+  let adminGuestLeads = [], adminGuestPromotions = [], adminGuestLeadOffset = 0, adminGuestLeadTotal = 0;
 
   function setStatus(label, tone) {
     const el = $("connection-status");
@@ -499,11 +499,10 @@
   $("guest-promotion-close").addEventListener("click",()=>closeGuestPromotion("dismiss"));
   $("guest-promotion-dismiss").addEventListener("click",()=>closeGuestPromotion("dismiss"));
   $("guest-promotion-cta").addEventListener("click",()=>closeGuestPromotion("click"));
-  $("refresh-guest-leads").addEventListener("click",()=>refreshGuestLeads().catch(e=>$("guest-lead-feedback").textContent=e.message));
+  $("refresh-guest-leads").addEventListener("click",()=>{adminGuestLeadOffset=0;refreshGuestLeads().catch(e=>$("guest-lead-feedback").textContent=e.message);});
   $("export-guest-leads").addEventListener("click",exportGuestLeads);
-  $("guest-lead-search").addEventListener("keydown",e=>{if(e.key==="Enter")refreshGuestLeads().catch(err=>$("guest-lead-feedback").textContent=err.message);});
-  $("guest-lead-status").addEventListener("change",()=>refreshGuestLeads().catch(e=>$("guest-lead-feedback").textContent=e.message));
-  ["guest-lead-grade","guest-lead-from","guest-lead-to"].forEach(id=>$(id).addEventListener("change",()=>refreshGuestLeads().catch(e=>$("guest-lead-feedback").textContent=e.message)));
+  $("guest-lead-search").addEventListener("keydown",e=>{if(e.key==="Enter"){adminGuestLeadOffset=0;refreshGuestLeads().catch(err=>$("guest-lead-feedback").textContent=err.message);}});
+  ["guest-lead-grade","guest-lead-from","guest-lead-to","guest-lead-status"].forEach(id=>$(id).addEventListener("change",()=>{adminGuestLeadOffset=0;refreshGuestLeads().catch(e=>$("guest-lead-feedback").textContent=e.message);}));
   $("guest-lead-list").addEventListener("click",e=>{const b=e.target.closest("[data-open-guest-lead]");if(b)openGuestLead(b.dataset.openGuestLead);});
   $("guest-lead-detail").addEventListener("click",e=>{const b=e.target.closest("[data-export-guest-leads]");if(b)exportGuestLeads();});
   $("guest-promotion-form").addEventListener("submit",saveGuestPromotion);
@@ -1049,17 +1048,22 @@
     const attendance = data.attendance_rewards || {};
     $("leadership-attendance").innerHTML = '<strong>Attendance rewards remain separate.</strong><p class="muted">' + escapeHtml(attendance.message || "The existing attendance reward source has not yet been connected.") + '</p>';
   }
+  function guestLeadFilters(offset=0) { return {status: $("guest-lead-status").value, search: $("guest-lead-search").value.trim(), grade_label: $("guest-lead-grade").value, date_from: $("guest-lead-from").value, date_to: $("guest-lead-to").value, limit: 100, offset}; }
   async function refreshGuestLeads() {
     const status=$("guest-lead-feedback"); if(status) status.textContent="Loading guest leads…";
     if($("guest-lead-grade").options.length===1) $("guest-lead-grade").innerHTML='<option value="">All grades</option>'+(adminOptions?.grades||[]).map(x=>'<option value="'+escapeHtml(x)+'">'+escapeHtml(x)+'</option>').join("");
-    const result=await api("get_admin_guest_leads",{status:$("guest-lead-status").value,search:$("guest-lead-search").value.trim(),grade_label:$("guest-lead-grade").value,date_from:$("guest-lead-from").value,date_to:$("guest-lead-to").value,limit:100});
-    adminGuestLeads=result.leads||[];
-    const total=result.total||0, newCount=adminGuestLeads.filter(x=>x.lead_status==="New").length;
+    const result=await api("get_admin_guest_leads",guestLeadFilters(adminGuestLeadOffset));
+    adminGuestLeads=result.leads||[]; adminGuestLeadTotal=result.total||0;
+    const total=adminGuestLeadTotal, newCount=adminGuestLeads.filter(x=>x.lead_status==="New").length;
     const demoCount=adminGuestLeads.filter(x=>["Demo Booked","Demo Completed"].includes(x.lead_status)).length;
     $("guest-lead-metrics").innerHTML=[["Total matching",total],["New in this view",newCount],["Demo booked / completed",demoCount]].map(x=>'<article class="metric"><small>'+x[0]+'</small><strong>'+x[1]+'</strong></article>').join("");
     $("guest-lead-list").innerHTML=adminGuestLeads.length?'<div class="guest-lead-table">'+
       '<div class="guest-lead-row guest-lead-head"><span>Guest / mobile</span><span>Grade</span><span>Sessions / games</span><span>Status</span><span>Last seen</span><span></span></div>'+
       adminGuestLeads.map(x=>'<div class="guest-lead-row"><span><b>'+escapeHtml(x.last_guest_name||"Guest")+'</b><small>'+escapeHtml(x.mobile_e164)+'</small></span><span>'+escapeHtml(x.last_grade_label||"—")+'</span><span>'+x.sessions_count+' / '+x.games_completed+'</span><span>'+escapeHtml(x.lead_status)+'</span><span>'+escapeHtml(new Date(x.last_seen_at).toLocaleString("en-IN"))+'</span><span><button class="text-btn" data-open-guest-lead="'+x.id+'">View</button></span></div>').join("")+'</div>':'<p class="muted">No guest leads match these filters.</p>';
+    const page=Math.floor(adminGuestLeadOffset/100)+1,pages=Math.max(1,Math.ceil(total/100));
+    $("guest-lead-pagination").innerHTML="<button class=\"btn-secondary\" id=\"guest-lead-prev\" "+(page<=1?"disabled":"")+">Previous</button><span>Page "+page+" of "+pages+" · "+total+" leads</span><button class=\"btn-secondary\" id=\"guest-lead-next\" "+(page>=pages?"disabled":"")+">Next</button>";
+    $("guest-lead-pagination").querySelector("#guest-lead-prev").addEventListener("click",()=>{adminGuestLeadOffset=Math.max(0,adminGuestLeadOffset-100);refreshGuestLeads().catch(e=>status.textContent=e.message);});
+    $("guest-lead-pagination").querySelector("#guest-lead-next").addEventListener("click",()=>{adminGuestLeadOffset+=100;refreshGuestLeads().catch(e=>status.textContent=e.message);});
     if(status) status.textContent=total+" guest lead(s) found.";
   }
   async function openGuestLead(id) {
@@ -1088,9 +1092,10 @@
     } catch(e){panel.textContent=e.message;}
   }
   function csvCell(value){return '"'+String(value??"").replace(/"/g,'""')+'"';}
-  function exportGuestLeads() {
+  async function exportGuestLeads() {
+    const button=$("export-guest-leads");button.disabled=true;button.textContent="Preparing CSV…";
     const rows=[["Name","Mobile","Grade","Status","First seen","Last seen","Sessions","Games","Enquiry consent","WhatsApp marketing consent"]];
-    adminGuestLeads.forEach(x=>rows.push([x.last_guest_name,x.mobile_e164,x.last_grade_label,x.lead_status,x.first_seen_at,x.last_seen_at,x.sessions_count,x.games_completed,x.enquiry_consent,x.marketing_consent]));
+    try { for(let offset=0;offset<adminGuestLeadTotal;offset+=100){const page=await api("get_admin_guest_leads",guestLeadFilters(offset));(page.leads||[]).forEach(x=>rows.push([x.last_guest_name,x.mobile_e164,x.last_grade_label,x.lead_status,x.first_seen_at,x.last_seen_at,x.sessions_count,x.games_completed,x.enquiry_consent,x.marketing_consent]));} } catch(e) { $("guest-lead-feedback").textContent="CSV export failed: "+e.message; return; } finally {button.disabled=false;button.textContent="Export CSV";}
     const blob=new Blob([rows.map(r=>r.map(csvCell).join(",")).join("\r\n")],{type:"text/csv;charset=utf-8"});
     const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="knowledge-arena-guest-leads.csv";a.click();URL.revokeObjectURL(url);
   }
