@@ -34,7 +34,6 @@
     const demos=filtered(all.demos||[],'created_at');
     const regs=filtered(all.registrations||[],'created_at');
     const calls=filtered(all.calls||[],'called_at');
-    const leads=filtered(all.leads||[],'created_at');
     const paid=bookings.filter(x=>x.paid===true || Number(x.amount||0)>0 && !!x.paid_at).length;
     const converted=bookings.filter(x=>!!x.converted_student_id || String(x.status||'').toLowerCase()==='converted').length;
     const accepted=regs.filter(x=>String(x.status||'').toLowerCase()==='accepted').length;
@@ -52,7 +51,7 @@
       + '<article class="ai-panel"><h2>Demo booking status</h2>'+barRows(statuses,bookings.length)+'</article>'
       + '<article class="ai-panel"><h2>Registration sources</h2><p class="ai-sub">Based on the existing “heard from” field.</p>'+barRows(regSources,regs.length)+'</article>'
       + '<article class="ai-panel"><h2>Course interest</h2>'+barRows(subjects,bookings.length)+'</article></section>'
-      + '<section class="ai-grid ai-grid-small">'+metric('Demo logs',demos.length,'Recorded demo outcomes')+metric('Follow-up calls',calls.length,'Existing call history')+metric('Knowledge Arena leads',leads.length,'Guest leads recorded')+metric('Distinct converted students',activeLinked,'From demo booking links')+'</section>'
+      + '<section class="ai-grid ai-grid-small">'+metric('Demo logs',demos.length,'Recorded demo outcomes')+metric('Follow-up calls',calls.length,'Existing call history')+metric('Distinct converted students',activeLinked,'From demo booking links')+'</section>'
       + '<section class="ai-panel"><h2>Recent admissions activity</h2><div class="ai-table-wrap"><table><thead><tr><th>Date</th><th>Prospect</th><th>Record</th><th>Interest</th><th>Source</th><th>Status</th></tr></thead><tbody>'
       +(recent.length?recent.map(x=>'<tr><td>'+dateText(x.date)+'</td><td>'+esc(x.name||'—')+'</td><td>'+esc(x.kind)+'</td><td>'+esc(x.subject||'—')+'</td><td>'+esc(x.source||'Unknown')+'</td><td><span class="ai-status">'+esc(x.status||'—')+'</span></td></tr>').join(''):'<tr><td colspan="6" class="ai-empty">No activity in this period.</td></tr>')
       + '</tbody></table></div></section>'
@@ -66,8 +65,7 @@
       ['bookings','wix_demo_bookings','id,order_number,submitted_at,student_name,email,phone,subject,class_mode,status,amount,paid,paid_at,converted_student_id,source'],
       ['demos','demo_logs','id,created_at,date,student_name,parent_mobile,subject_id,status,linked_student_id,converted_at,lost_at'],
       ['calls','wix_booking_calls','id,booking_id,called_at,outcome,comment,call_again_on,student_id'],
-      ['registrations','registrations','id,created_at,student_name,subjects,heard_from,status,student_id,decided_at'],
-      ['leads','ka_guest_leads','id,created_at,first_seen_at,last_seen_at,lead_status,converted_student_id,games_completed']
+      ['registrations','registrations','id,created_at,student_name,subjects,heard_from,status,student_id,decided_at']
     ];
     const results=await Promise.all(specs.map(async ([key,table,columns])=>{
       const {data,error}=await client.from(table).select(columns).order(key==='demos'?'created_at':key==='calls'?'called_at':key==='leads'?'created_at':key==='registrations'?'created_at':'submitted_at',{ascending:false}).limit(5000);
