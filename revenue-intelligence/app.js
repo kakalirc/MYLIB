@@ -1,1 +1,217 @@
-(()=>{'use strict';const U='https://kqkojscbaycolaioyarh.supabase.co',K='sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq',root=document.getElementById('ri');let db,D={},tab='overview',from=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'}).slice(0,7),to=from;const e=x=>String(x??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])),m=x=>'₹'+(Number(x)||0).toLocaleString('en-IN',{maximumFractionDigits:2}),dt=x=>String(x||'').slice(0,10),mo=x=>dt(x).slice(0,7),nm=(a,id)=>a.find(x=>String(x.id)===String(id))?.name||'Unknown';async function read(t,c,o='id'){let a=[],n=0;while(true){let r=await db.from(t).select(c).order(o,{ascending:false}).range(n,n+999);if(r.error)throw Error(t+': '+r.error.message);a.push(...r.data||[]);if(!r.data||r.data.length<1000)break;n+=1000;if(n>50000)throw Error(t+' report limit')}return a}function fail(s){root.textContent=s}function ct(x){return String(x||'').toLowerCase().includes('individual')?'Individual':'Group'}function md(x){return String(x||'').toLowerCase().includes('offline')?'Offline':'Online'}function cat(id){let x=D.subjects.find(y=>String(y.id)===String(id));return x?.category||x?.category_id}function rate(x,student){if(student){let a=D.rates.filter(r=>String(r.student_id)===String(x.student_id)&&String(r.subject_id)===String(x.subject_id)&&ct(r.class_type)===ct(x.class_type)&&dt(r.from_date)<=dt(x.date)&&(!r.to_date||dt(r.to_date)>=dt(x.date))).sort((a,b)=>dt(b.from_date).localeCompare(dt(a.from_date)))[0];if(a)return Number(md(x.mode)==='Offline'?a.offline_rate:a.rate);let z=D.settings?.rates||{},c=cat(x.subject_id);for(let k of [c+'_'+ct(x.class_type)+'_'+md(x.mode),c+'_'+ct(x.class_type)])if(z[k]!=null)return Number(z[k]);return null}let t=D.teachers.find(y=>String(y.id)===String(x.teacher_id)),v=t?.rates?.[cat(x.subject_id)+'_'+ct(x.class_type)+'_'+md(x.mode)];return v==null?null:Number(v)}function calc(){let sessionMap=new Map(D.sessions.map(s=>[String(s.id),s]));let cls=D.schedules.map(x=>{let s=sessionMap.get(String(x.linked_session_id));return {...x,mode:x.mode||s?.mode||'Online',teacher_id:x.teacher_id||s?.teacher_id}}).filter(x=>['present','completed','done'].includes(String(x.status||'').toLowerCase())&&mo(x.date)>=from&&mo(x.date)<=to),earned=0,cost=0,issues=[],maps={students:new Map(),teachers:new Map(),subjects:new Map()};for(let x of cls){let r=rate(x,true),c=rate(x,false);if(r==null||!Number.isFinite(r))issues.push(['Missing student rate',dt(x.date),nm(D.students,x.student_id),nm(D.teachers,x.teacher_id),nm(D.subjects,x.subject_id)]);else earned+=r;if(c==null||!Number.isFinite(c))issues.push(['Missing teacher rate',dt(x.date),nm(D.students,x.student_id),nm(D.teachers,x.teacher_id),nm(D.subjects,x.subject_id)]);else cost+=c;for(let [k,id] of [['students',x.student_id],['teachers',x.teacher_id],['subjects',x.subject_id]]){let v=maps[k].get(String(id))||{n:0,r:0,c:0};v.n++;if(r!=null&&Number.isFinite(r))v.r+=r;if(c!=null&&Number.isFinite(c))v.c+=c;maps[k].set(String(id),v)}}let pay=D.subs.filter(x=>String(x.kind||'payment').toLowerCase()==='payment'&&!String(x.payment_remarks||'').toLowerCase().includes('carry forward')&&mo(x.date)>=from&&mo(x.date)<=to),refund=D.subs.filter(x=>String(x.kind||'').toLowerCase()==='refund'&&mo(x.date)>=from&&mo(x.date)<=to),received=[...pay,...refund].reduce((a,x)=>a+Number(x.amount_paid||0),0),expenses=D.expenses.filter(x=>mo(x.date)>=from&&mo(x.date)<=to).reduce((a,x)=>a+Number(x.amount||0),0);return{cls,earned,cost,issues,pay,refund,received,expenses,maps,net:earned-cost-expenses}}function table(h,rows){return '<div class="scroll"><table><thead><tr>'+h.map(x=>'<th>'+e(x)+'</th>').join('')+'</tr></thead><tbody>'+(rows.length?rows.map(r=>'<tr>'+r.map(x=>'<td>'+e(x)+'</td>').join('')+'</tr>').join(''):'<tr><td colspan="'+h.length+'">No records</td></tr>')+'</tbody></table></div>'}function render(){let x=calc(),tabs=[['overview','Financial Overview'],['collections','Collections & Receivables'],['students','Student Profitability'],['teachers','Teacher Profitability'],['subjects','Subject & Class Profitability'],['packages','Packages & Forecast'],['quality','Financial Data Quality'],['audit','Financial Audit Trail']],metric=(a,b,c)=>'<article class="metric"><span>'+a+'</span><strong>'+b+'</strong><small>'+c+'</small></article>',body='';if(tab==='overview')body='<div class="grid">'+metric('Payments Received',m(x.received),'Subscription History payment date')+metric('Revenue Earned',m(x.earned),'Completed classes by delivery date')+metric('Teacher Delivery Cost',m(x.cost),'Per student-class; Group multiplied per student')+metric('Other Expenses',m(x.expenses),'Expenses module')+metric('Net Operating Result',m(x.net),'Earned revenue less delivery cost and expenses')+metric('Delivered student-classes',x.cls.length,'Completed records')+'</div><p class="note">Advance payments are recorded on payment date; revenue is earned as classes are delivered. Group teacher cost is calculated per student per class. Missing rates are excluded and listed in Data Quality.</p>';if(tab==='collections')body=table(['Date','Student','Subject','Type','Amount','Reference'],[...x.pay,...x.refund].map(a=>[dt(a.date),nm(D.students,a.student_id),nm(D.subjects,a.subject_id),a.kind||'Payment',m(a.amount_paid),a.payment_reference||a.payment_remarks||'—']));for(let k of ['students','teachers','subjects'])if(tab===k)body=table([k,'Student-classes','Revenue','Teacher cost','Contribution'],[...x.maps[k]].map(([id,v])=>[nm(D[k],id),v.n,m(v.r),m(v.c),m(v.r-v.c)]));if(tab==='packages')body='<p class="note">Package receipts use Subscription History payment dates. Earned revenue uses delivered classes. Incomplete historical batch discount, transfer and expiry lineage means outstanding package valuation is not fabricated.</p>'+table(['Payment date','Student','Subject','Classes','Amount','Expiry'],D.subs.filter(a=>String(a.kind||'payment').toLowerCase()==='payment'&&Number(a.classes)>0&&mo(a.date)>=from&&mo(a.date)<=to).map(a=>[dt(a.date),nm(D.students,a.student_id),nm(D.subjects,a.subject_id),a.classes,m(a.amount_paid),dt(a.expires_on)||'—']));if(tab==='quality')body=table(['Issue','Date','Student','Teacher','Subject'],x.issues);if(tab==='audit')body=table(['Source','Rows','Purpose'],[['subscriptions',D.subs.length,'Student Maintenance → Subscription History'],['scheduled_classes',D.schedules.length,'Completed delivery'],['sessions',D.sessions.length,'Attendance context'],['expenses',D.expenses.length,'Institute-wide expenses'],['teacher_payroll_records',D.payroll.length,'Payroll records'],['student_fee_rates',D.rates.length,'Student rate overrides']]);root.innerHTML='<main class="wrap"><h1>Revenue Intelligence</h1><p>Admin-only · read-only financial analytics</p><div class="filters"><label>From<input id="from" type="month" value="'+from+'"></label><label>To<input id="to" type="month" value="'+to+'"></label><button id="export">Export collections CSV</button></div><nav class="tabs">'+tabs.map(a=>'<button data-tab="'+a[0]+'" class="'+(tab===a[0]?'active':'')+'">'+a[1]+'</button>').join('')+'</nav><section class="panel">'+body+'</section><footer>Subscription History is authoritative. Razorpay payments excluded. Group teacher cost = rate × student count.</footer></main>';root.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;render()});document.getElementById('from').onchange=v=>{from=v.target.value;render()};document.getElementById('to').onchange=v=>{to=v.target.value;render()};document.getElementById('export').onclick=()=>{let rows=[['Date','Student','Subject','Kind','Amount','Reference'],...x.pay.concat(x.refund).map(a=>[dt(a.date),nm(D.students,a.student_id),nm(D.subjects,a.subject_id),a.kind||'Payment',a.amount_paid,a.payment_reference||a.payment_remarks||''])],csv=rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n'),a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='lib-revenue-collections.csv';a.click();URL.revokeObjectURL(a.href)}}async function init(){if(!window.supabase){fail('Supabase client unavailable');return}db=window.supabase.createClient(U,K);try{let {data:{session}}=await db.auth.getSession();if(!session){fail('Sign in to My LIB first.');return}let p=await db.from('profiles').select('role,archived').eq('id',session.user.id).single();if(p.error||p.data?.role!=='Admin'||p.data?.archived){fail('Access restricted. Active Admin accounts only.');return}root.textContent='Loading financial records…';let q=await Promise.all([read('subscriptions','id,student_id,subject_id,type,classes,amount_paid,date,kind,payment_reference,payment_remarks,transfer_group_id,expires_on,base_amount,discount_percent,discount_basis,discount_classes,discount_group','date'),read('students','id,name,archived','name'),read('teachers','id,name,archived,rates','name'),read('subjects','id,name,category,category_id','name'),read('scheduled_classes','id,date,time,student_id,teacher_id,subject_id,class_type,status,linked_session_id','date'),read('sessions','id,date,student_id,teacher_id,subject_id,class_type,status,mode','date'),read('expenses','id,date,category,amount,notes','date'),read('teacher_payroll_records','id,teacher_id,month,paid,paid_date,paid_amount,adjustment','month'),read('student_fee_rates','id,student_id,subject_id,class_type,rate,offline_rate,from_date,to_date','from_date'),db.from('fee_settings').select('rates').limit(1).maybeSingle()]);['subs','students','teachers','subjects','schedules','sessions','expenses','payroll','rates'].forEach((k,i)=>D[k]=q[i]);D.settings=q[9].data||{};D.students=D.students.filter(a=>!a.archived);D.teachers=D.teachers.filter(a=>!a.archived);render()}catch(err){fail(err.message)}}init()})();
+/* Revenue Intelligence — Admin-only, read-only reporting over attendance and maintained rates. */
+(function () {
+  'use strict';
+  const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
+  const root = document.getElementById('ri');
+  const number = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 });
+  const state = { from: new Date().toLocaleDateString('en-CA', {timeZone:'Asia/Kolkata'}).slice(0,7), to: new Date().toLocaleDateString('en-CA', {timeZone:'Asia/Kolkata'}).slice(0,7), tab:'overview', teacher:'all', student:'all', subject:'all', type:'all', mode:'all' };
+  let db, data = {};
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const monthOf = v => String(v || '').slice(0,7);
+  const dateOf = v => String(v || '').slice(0,10);
+  const monthInRange = v => monthOf(v) >= state.from && monthOf(v) <= state.to;
+  const money = v => v == null ? '—' : new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(v);
+  const pct = v => v == null || !Number.isFinite(v) ? '—' : v.toFixed(1)+'%';
+
+  function fail(message) {
+    root.innerHTML = '<main class="ri-shell"><div class="ri-alert ri-error">'+esc(message)+'</div></main>';
+  }
+  async function readAll(table, columns, orderField) {
+    const rows = [];
+    for (let offset=0; offset<50000; offset+=1000) {
+      const result = await db.from(table).select(columns).order(orderField,{ascending:true}).order('id',{ascending:true}).range(offset,offset+999);
+      if (result.error) throw new Error('Could not load '+table+': '+result.error.message);
+      rows.push.apply(rows,result.data||[]);
+      if (!result.data || result.data.length<1000) return rows;
+    }
+    throw new Error('The '+table+' report exceeded the 50,000-row safety limit.');
+  }
+  async function readAudit(tableName) {
+    const rows=[];
+    for(let offset=0;offset<10000;offset+=1000){
+      const result=await db.from('audit_log').select('table_name,record_id,old_data,new_data,created_at').eq('table_name',tableName).order('created_at',{ascending:true}).order('id',{ascending:true}).range(offset,offset+999);
+      if(result.error){data.auditWarning=true;return rows;}
+      rows.push.apply(rows,result.data||[]);
+      if(!result.data||result.data.length<1000)return rows;
+    }
+    return rows;
+  }
+  function ratesSnapshot(events,currentRates,date) {
+    const day=dateOf(date);
+    const usable=(events||[]).filter(e=>(e.new_data&&e.new_data.rates)||(e.old_data&&e.old_data.rates));
+    const past=usable.filter(e=>dateOf(e.created_at)<=day);
+    if(past.length){const rates=past[past.length-1].new_data&&past[past.length-1].new_data.rates;if(rates)return rates;}
+    const future=usable.find(e=>dateOf(e.created_at)>day);
+    if(future&&future.old_data&&future.old_data.rates)return future.old_data.rates;
+    return currentRates||{};
+  }
+  function rateValue(v){if(v===undefined||v===null||v==='')return null;const n=Number(v);return Number.isFinite(n)?n:null;}
+  function feeFor(s,subject){
+    const overrides=data.studentRates.filter(r=>String(r.student_id)===String(s.student_id)&&String(r.subject_id)===String(s.subject_id)&&r.class_type===s.class_type&&dateOf(r.from_date)<=dateOf(s.date)&&(!r.to_date||dateOf(r.to_date)>=dateOf(s.date))).sort((a,b)=>dateOf(b.from_date).localeCompare(dateOf(a.from_date)));
+    if(overrides.length){const r=overrides[0],v=rateValue(s.mode==='Offline'?r.offline_rate:r.rate);if(v!==null)return{value:v,source:'Individual fee'};}
+    if(!subject||!subject.category)return{value:null,source:'Missing subject category'};
+    const rates=ratesSnapshot(data.feeRateHistory,data.feeSettings&&data.feeSettings.rates,s.date);
+    const v=rateValue(rates[subject.category+'_'+s.class_type+'_'+s.mode]);
+    return{value:v,source:v===null?'Missing app fee':'App-level fee'};
+  }
+  function teacherRateFor(s,subject){
+    const teacher=data.teacherById.get(String(s.teacher_id));
+    if(!teacher)return{value:null,source:'Missing teacher'};
+    if(!subject||!subject.category)return{value:null,source:'Missing subject category'};
+    const events=data.teacherRateEvents.get(String(s.teacher_id))||[];
+    const rates=ratesSnapshot(events,teacher.rates,s.date);
+    const v=rateValue(rates[subject.category+'_'+s.class_type+'_'+s.mode]);
+    return{value:v,source:v===null?'Missing teacher rate':'Teacher maintenance'};
+  }
+  function buildRows(){
+    const rows=[],issues=[];
+    data.sessions.forEach(s=>{
+      if(s.status!=='Present'&&s.status!=='Absent')return;
+      const subject=data.subjectById.get(String(s.subject_id)),student=data.studentById.get(String(s.student_id)),teacher=data.teacherById.get(String(s.teacher_id)),category=subject&&data.categoryById.get(String(subject.category));
+      const count=Number(s.count),validCount=Number.isFinite(count)&&count>0,fee=feeFor(s,subject),pay=teacherRateFor(s,subject);
+      const revenue=validCount&&fee.value!==null?fee.value*count:null,cost=validCount&&pay.value!==null?pay.value*count:null,contribution=revenue!==null&&cost!==null?revenue-cost:null;
+      const row={id:s.id,date:dateOf(s.date),month:monthOf(s.date),studentId:s.student_id,student:student?student.name:'Unknown student',teacherId:s.teacher_id,teacher:teacher?teacher.name:'Unknown teacher',subjectId:s.subject_id,subject:subject?subject.name:'Deleted subject',category:category?category.name:'Uncategorised',classType:s.class_type||'Unknown',mode:s.mode||'Unknown',status:s.status,count:validCount?count:0,feeRate:fee.value,feeSource:fee.source,teacherRate:pay.value,teacherRateSource:pay.source,revenue,cost,contribution};
+      rows.push(row);
+      if(!validCount)issues.push({issue:'Invalid class count',row});
+      if(fee.value===null)issues.push({issue:fee.source,row});
+      if(pay.value===null)issues.push({issue:pay.source,row});
+      if(pay.value===0)issues.push({issue:'Zero teacher rate configured',row});
+      if(!subject||!subject.category)issues.push({issue:'Missing subject/category mapping',row});
+    });
+    return{rows,issues};
+  }
+  function filteredRows(){
+    return data.attendanceRows.filter(r=>monthInRange(r.date)&&(state.teacher==='all'||String(r.teacherId)===state.teacher)&&(state.student==='all'||String(r.studentId)===state.student)&&(state.subject==='all'||String(r.subjectId)===state.subject)&&(state.type==='all'||r.classType===state.type)&&(state.mode==='all'||r.mode===state.mode));
+  }
+  function aggregate(rows,key){
+    const map=new Map();
+    rows.forEach(r=>{
+      const id=String(r[key]||'unknown');let x=map.get(id);
+      if(!x){x={id,name:r[key==='studentId'?'student':key==='teacherId'?'teacher':'subject'],sessions:0,units:0,present:0,absent:0,revenue:0,cost:0,contribution:0,contributionRevenue:0};map.set(id,x);}
+      x.sessions++;x.units+=r.count;if(r.status==='Present')x.present++;if(r.status==='Absent')x.absent++;
+      if(r.revenue!==null)x.revenue+=r.revenue;if(r.cost!==null)x.cost+=r.cost;
+      if(r.contribution!==null){x.contribution+=r.contribution;x.contributionRevenue+=r.revenue;}
+    });
+    return Array.from(map.values()).map(x=>Object.assign(x,{margin:x.contributionRevenue?x.contribution/x.contributionRevenue*100:null})).sort((a,b)=>b.contribution-a.contribution);
+  }
+  function payrollRows(){return data.payroll.filter(r=>monthInRange(r.month));}
+  function payrollByTeacher(){
+    const map=new Map();
+    payrollRows().forEach(r=>{const id=String(r.teacher_id);let x=map.get(id)||{paid:0,adjustment:0,paidRows:0,missingPaidAmount:0};if(r.paid){x.paidRows++;if(r.paid_amount==null)x.missingPaidAmount++;else x.paid+=Number(r.paid_amount)||0;}x.adjustment+=Number(r.adjustment)||0;map.set(id,x);});
+    return map;
+  }
+  function cashRows(){return data.subscriptions.filter(r=>monthInRange(r.date)&&(r.kind==='Payment'||r.kind==='Refund'));}
+  function expenseRows(){return data.expenses.filter(r=>monthInRange(r.expense_date));}
+  function metrics(rows){
+    const x={sessions:rows.length,units:0,present:0,absent:0,revenue:0,cost:0,contribution:0,contributionRevenue:0,missingFee:0,missingCost:0,zeroCost:0,fullyRatedUnits:0};
+    rows.forEach(r=>{x.units+=r.count;if(r.status==='Present')x.present++;if(r.status==='Absent')x.absent++;if(r.revenue===null)x.missingFee+=r.count;else x.revenue+=r.revenue;if(r.cost===null)x.missingCost+=r.count;else x.cost+=r.cost;if(r.teacherRate===0)x.zeroCost+=r.count;if(r.contribution!==null){x.contribution+=r.contribution;x.contributionRevenue+=r.revenue;x.fullyRatedUnits+=r.count;}});
+    x.margin=x.contributionRevenue?x.contribution/x.contributionRevenue*100:0;return x;
+  }
+  function cell(v){return '<td>'+esc(v)+'</td>';}
+  function table(headers,rows,empty){
+    return '<div class="ri-table-wrap"><table class="ri-table"><thead><tr>'+headers.map(h=>'<th>'+esc(h)+'</th>').join('')+'</tr></thead><tbody>'+(rows.length?rows.map(r=>'<tr>'+r.map(cell).join('')+'</tr>').join(''):'<tr><td colspan="'+headers.length+'" class="ri-empty">'+esc(empty||'No records for this period.')+'</td></tr>')+'</tbody></table></div>';
+  }
+  function metric(label,value,note){return '<article class="ri-metric"><span>'+esc(label)+'</span><strong>'+esc(value)+'</strong><small>'+esc(note)+'</small></article>';}
+  function options(items,selected,label){return '<option value="all">All '+esc(label)+'</option>'+items.map(x=>'<option value="'+esc(x.id)+'"'+(String(x.id)===String(selected)?' selected':'')+'>'+esc(x.name)+'</option>').join('');}
+  function trend(rows){
+    const map=new Map();rows.forEach(r=>{let x=map.get(r.month)||{month:r.month,revenue:0,cost:0,contribution:0};if(r.revenue!==null)x.revenue+=r.revenue;if(r.cost!==null)x.cost+=r.cost;if(r.contribution!==null)x.contribution+=r.contribution;map.set(r.month,x);});
+    const items=Array.from(map.values()).sort((a,b)=>a.month.localeCompare(b.month)).slice(-6);if(!items.length)return '<div class="ri-empty">No attendance in the selected period.</div>';
+    const max=Math.max(1,...items.map(x=>Math.max(x.revenue,x.cost,x.contribution)));
+    return '<div class="ri-trend">'+items.map(x=>'<div class="ri-trend-row"><span>'+esc(new Date(x.month+'-01T00:00:00').toLocaleDateString('en-IN',{month:'short',year:'2-digit'}))+'</span><div class="ri-trend-bars"><i class="revenue" style="width:'+(x.revenue/max*100)+'%"></i><i class="cost" style="width:'+(x.cost/max*100)+'%"></i><i class="contribution" style="width:'+(x.contribution/max*100)+'%"></i></div><b>'+money(x.contribution)+'</b></div>').join('')+'</div><div class="ri-legend"><span><i class="revenue"></i>Fee value</span><span><i class="cost"></i>Teacher cost</span><span><i class="contribution"></i>Gross contribution</span></div>';
+  }
+  function renderOverview(rows,t){
+    const cash=cashRows().reduce((a,r)=>a+(Number(r.amount_paid)||0),0),payroll=payrollRows().filter(r=>r.paid&&r.paid_amount!=null).reduce((a,r)=>a+(Number(r.paid_amount)||0),0);
+    const mix=new Map();rows.forEach(r=>{const k=r.classType+' · '+r.mode;let x=mix.get(k)||{label:k,units:0,revenue:0,cost:0,contribution:0};x.units+=r.count;if(r.revenue!==null)x.revenue+=r.revenue;if(r.cost!==null)x.cost+=r.cost;if(r.contribution!==null)x.contribution+=r.contribution;mix.set(k,x);});
+    const mixRows=Array.from(mix.values()).sort((a,b)=>a.label.localeCompare(b.label)).map(x=>[x.label,number.format(x.units),money(x.revenue),money(x.cost),money(x.contribution)]);
+    return '<section class="ri-metrics">'+metric('Fee value of consumed classes',money(t.revenue),'Effective student fee × class count')+metric('Teacher delivery cost',money(t.cost),'Teacher Maintenance rate × class count')+metric('Gross contribution',money(t.contribution),'Fee value less teacher delivery cost')+metric('Contribution margin',pct(t.margin),'Contribution ÷ fully rated fee value')+metric('Actual student collections',money(cash),'Period total; transaction-date basis')+metric('Actual teacher payroll paid',money(payroll),'Period total; all teachers')+'</section>'+
+      '<section class="ri-panel"><h2>Contribution by class type and mode</h2><p>Attendance determines the class type and delivery mode.</p>'+table(['Class type · mode','Class units','Fee value','Teacher cost','Gross contribution'],mixRows,'No class mix in this period.')+'</section>'+
+      '<section class="ri-panel"><h2>Monthly contribution trend</h2><p>Last six months within the selected period.</p>'+trend(rows)+'</section>'+
+      '<section class="ri-note"><b>Calculation rules</b><p>Student revenue uses an effective-dated individual fee override where available; otherwise the app-level fee by subject category, class type and mode. Teacher cost uses the teacher-maintained rate for the same category, class type and mode. Each attendance row represents a student; Group teacher cost is therefore calculated per student per class. Both Present and Absent sessions count because both consume class credits. The attendance count (including fractional or multiple class units) multiplies both rates.</p><p>Actual collections and actual payroll paid are shown separately on a cash basis. Recorded expenses are not deducted from gross contribution. Missing rates are excluded from the relevant amount and listed under Data Quality.</p></section>';
+  }
+  function renderStudents(rows){
+    return '<section class="ri-panel"><h2>Student profitability</h2><p>Contribution by student. Group teacher cost is calculated directly for each student attendance record.</p>'+table(['Student','Sessions','Class units','Fee value','Teacher cost','Gross contribution','Margin'],aggregate(rows,'studentId').map(x=>[x.name,x.sessions,number.format(x.units),money(x.revenue),money(x.cost),money(x.contribution),pct(x.margin)]),'No student attendance records.')+'</section>';
+  }
+  function renderTeachers(rows){
+    const payroll=payrollByTeacher();
+    return '<section class="ri-panel"><h2>Teacher profitability</h2><p>Rate-based delivery cost is calculated from attendance. Payroll paid is a separate monthly cash figure and is not allocated to student or subject rows.</p>'+table(['Teacher','Sessions','Class units','Fee value','Rate-based delivery cost','Gross contribution','Payroll actually paid','Payroll adjustment'],aggregate(rows,'teacherId').map(x=>{const p=payroll.get(x.id)||{paid:0,adjustment:0};return[x.name,x.sessions,number.format(x.units),money(x.revenue),money(x.cost),money(x.contribution),money(p.paid),money(p.adjustment)];}),'No teacher attendance records.')+'<div class="ri-note">Payroll paid comes from Teacher Payroll records marked Paid. It can include adjustments or demo bonuses and is shown separately, not substituted for per-class teacher cost.</div></section>';
+  }
+  function renderSubjects(rows){
+    return '<section class="ri-panel"><h2>Subject profitability</h2><p>Subject-level contribution using each student’s applicable fee and the teacher’s maintained rate for the subject category.</p>'+table(['Subject','Sessions','Class units','Fee value','Teacher cost','Gross contribution','Margin'],aggregate(rows,'subjectId').map(x=>[x.name,x.sessions,number.format(x.units),money(x.revenue),money(x.cost),money(x.contribution),pct(x.margin)]),'No subject attendance records.')+'</section>';
+  }
+  function renderCash(){
+    const collections=cashRows().sort((a,b)=>dateOf(b.date).localeCompare(dateOf(a.date))),payroll=payrollRows().sort((a,b)=>String(b.month).localeCompare(String(a.month))),expenses=expenseRows().sort((a,b)=>dateOf(b.expense_date).localeCompare(dateOf(a.expense_date)));
+    const cash=collections.reduce((a,r)=>a+(Number(r.amount_paid)||0),0),paid=payroll.filter(r=>r.paid&&r.paid_amount!=null).reduce((a,r)=>a+(Number(r.paid_amount)||0),0),spent=expenses.reduce((a,r)=>a+(Number(r.amount)||0),0);
+    return '<section class="ri-metrics">'+metric('Net student collections',money(cash),'Payments plus refunds')+metric('Teacher payroll paid',money(paid),'Only records marked Paid')+metric('Recorded expenses',money(spent),'Expenses register; not deducted from gross contribution')+'</section><div class="ri-note">Cash, payroll and expense totals are period-wide. Attendance filters do not reallocate these financial transactions.</div>'+
+      '<section class="ri-panel"><h2>Student collections</h2><p>Cash receipts are based on Payment and Refund entries by transaction date, not class delivery date.</p>'+table(['Date','Student','Subject','Type','Amount','Reference'],collections.map(r=>[dateOf(r.date),(data.studentById.get(String(r.student_id))||{}).name||'Unknown student',(data.subjectById.get(String(r.subject_id))||{}).name||'—',r.kind,money(Number(r.amount_paid)||0),r.payment_reference||r.payment_remarks||'—']),'No payment or refund transactions.')+'</section>'+
+      '<section class="ri-panel"><h2>Teacher payroll</h2><p>Monthly payment records; not assigned to individual students or subjects.</p>'+table(['Month','Teacher','Status','Paid amount','Adjustment','Paid date'],payroll.map(r=>[r.month,(data.teacherById.get(String(r.teacher_id))||{}).name||'Unknown teacher',r.paid?'Paid':'Not marked paid',money(r.paid_amount),money(r.adjustment),dateOf(r.paid_date)||'—']),'No payroll records.')+'</section>'+
+      '<section class="ri-panel"><h2>Recorded expenses</h2><p>Shown for context only. This dashboard reports gross contribution, not full net profit.</p>'+table(['Date','Category','Amount','Notes'],expenses.map(r=>[dateOf(r.expense_date),r.category,money(r.amount),r.notes||'—']),'No recorded expenses.')+'</section>';
+  }
+  function renderQuality(rows){
+    const issues=data.issues.filter(i=>monthInRange(i.row.date)&&(state.teacher==='all'||String(i.row.teacherId)===state.teacher)&&(state.student==='all'||String(i.row.studentId)===state.student)&&(state.subject==='all'||String(i.row.subjectId)===state.subject)&&(state.type==='all'||i.row.classType===state.type)&&(state.mode==='all'||i.row.mode===state.mode));
+    const missingFee=issues.filter(i=>i.issue==='Missing app fee'||i.issue==='Missing subject category').length,missingTeacher=issues.filter(i=>i.issue==='Missing teacher rate'||i.issue==='Missing teacher').length,zero=issues.filter(i=>i.issue==='Zero teacher rate configured').length,invalid=issues.filter(i=>i.issue==='Invalid class count').length;
+    return '<section class="ri-metrics">'+metric('Missing student fee',String(missingFee),'Attendance rows without fee rate')+metric('Missing teacher rate',String(missingTeacher),'Attendance rows without teacher rate')+metric('Zero teacher rate',String(zero),'Configured zero rates; verify intent')+metric('Invalid class count',String(invalid),'Rows excluded from rate multiplication')+'</section>'+
+      '<section class="ri-panel"><h2>Financial data quality</h2><p>Resolve missing mappings or rates before relying on profitability totals.</p>'+table(['Issue','Date','Student','Teacher','Subject','Class type · mode','Class units'],issues.map(i=>[i.issue,i.row.date,i.row.student,i.row.teacher,i.row.subject,i.row.classType+' · '+i.row.mode,number.format(i.row.count)]),'No rate or class-count issues for this period.')+'</section>'+
+      '<section class="ri-note"><b>Rate mapping</b><p>Student fee overrides are effective-dated and subject-specific. App fees and teacher payment rates are keyed by subject category, class type and delivery mode. Historical snapshots are taken from Audit Log where available.'+(data.auditWarning?' Audit Log history could not be read; current maintenance rates are used.':'')+'</p></section>';
+  }
+  function render(){
+    const rows=filteredRows(),totals=metrics(rows),tabs=[['overview','Overview'],['students','Student Profitability'],['teachers','Teacher Profitability'],['subjects','Subject Profitability'],['cash','Collections & Costs'],['quality','Data Quality']];
+    const body=state.tab==='students'?renderStudents(rows):state.tab==='teachers'?renderTeachers(rows):state.tab==='subjects'?renderSubjects(rows):state.tab==='cash'?renderCash():state.tab==='quality'?renderQuality(rows):renderOverview(rows,totals);
+    const teachers=data.teachers.filter(x=>!x.archived).sort((a,b)=>a.name.localeCompare(b.name)),students=data.students.filter(x=>!x.archived).sort((a,b)=>a.name.localeCompare(b.name)),subjects=data.subjects.slice().sort((a,b)=>a.name.localeCompare(b.name));
+    root.innerHTML='<main class="ri-shell"><header class="ri-header"><div><div class="ri-eyebrow">LIB EDUCATION · ADMIN ANALYTICS</div><h1>Revenue Intelligence</h1><p>Class-level fee value, teacher delivery cost and gross contribution.</p></div><button type="button" id="ri-refresh">Refresh</button></header>'+
+      '<section class="ri-filters"><label>From month<input id="ri-from" type="month" value="'+esc(state.from)+'"></label><label>To month<input id="ri-to" type="month" value="'+esc(state.to)+'"></label>'+
+      '<label>Teacher<select id="ri-teacher">'+options(teachers,state.teacher,'teachers')+'</select></label><label>Student<select id="ri-student">'+options(students,state.student,'students')+'</select></label><label>Subject<select id="ri-subject">'+options(subjects,state.subject,'subjects')+'</select></label>'+
+      '<label>Class type<select id="ri-type"><option value="all">All types</option><option value="Group"'+(state.type==='Group'?' selected':'')+'>Group</option><option value="Individual"'+(state.type==='Individual'?' selected':'')+'>Individual</option></select></label>'+
+      '<label>Mode<select id="ri-mode"><option value="all">Online + Offline</option><option value="Online"'+(state.mode==='Online'?' selected':'')+'>Online</option><option value="Offline"'+(state.mode==='Offline'?' selected':'')+'>Offline</option></select></label><button type="button" id="ri-export">Export class-level CSV</button></section>'+
+      '<nav class="ri-tabs">'+tabs.map(x=>'<button type="button" data-tab="'+x[0]+'" class="'+(state.tab===x[0]?'active':'')+'">'+x[1]+'</button>').join('')+'</nav>'+
+      ((totals.missingFee||totals.missingCost)?'<div class="ri-alert ri-warning">Some attendance class units have missing rates. Gross contribution includes only rows with both fee and teacher rates; see Data Quality.</div>':'')+
+      body+'<footer class="ri-foot">Read-only report. Attendance is the source of truth for class type, delivery mode and class count. Present and Absent sessions are included; pending schedule rows are excluded. Cash collections, payroll payments and recorded expenses are separate from class-level gross contribution.</footer></main>';
+    root.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{state.tab=b.dataset.tab;render();}));
+    ['from','to','teacher','student','subject','type','mode'].forEach(key=>{const el=document.getElementById('ri-'+key);if(el)el.addEventListener('change',ev=>{state[key]=ev.target.value;if(key==='from'&&state.from>state.to)state.to=state.from;if(key==='to'&&state.to<state.from)state.from=state.to;render();});});
+    document.getElementById('ri-refresh').addEventListener('click',load);
+    document.getElementById('ri-export').addEventListener('click',()=>exportCsv(rows));
+  }
+  function exportCsv(rows){
+    const header=['Date','Student','Teacher','Subject','Category','Class type','Mode','Attendance status','Class units','Student fee rate','Fee source','Fee value','Teacher rate','Teacher rate source','Teacher cost','Gross contribution'];
+    const records=rows.map(r=>[r.date,r.student,r.teacher,r.subject,r.category,r.classType,r.mode,r.status,r.count,r.feeRate==null?'':r.feeRate,r.feeSource,r.revenue==null?'':r.revenue,r.teacherRate==null?'':r.teacherRate,r.teacherRateSource,r.cost==null?'':r.cost,r.contribution==null?'':r.contribution]);
+    const csv=[header].concat(records).map(row=>row.map(v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"').join(',')).join('\r\n');
+    const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})),link=document.createElement('a');
+    link.href=url;link.download='lib-revenue-intelligence-'+state.from+'-to-'+state.to+'.csv';link.click();URL.revokeObjectURL(url);
+  }
+  async function load(){
+    root.innerHTML='<main class="ri-shell"><div class="ri-loading">Loading attendance, fee rates and payroll records…</div></main>';
+    const r=await Promise.all([
+      readAll('sessions','id,date,student_id,teacher_id,subject_id,class_type,mode,status,count,created_at','date'),
+      readAll('students','id,name,archived','name'),
+      readAll('teachers','id,name,archived,rates','name'),
+      readAll('subjects','id,name,category','name'),
+      readAll('categories','id,name,archived','name'),
+      readAll('student_fee_rates','id,student_id,subject_id,class_type,rate,offline_rate,from_date,to_date','from_date'),
+      readAll('fee_settings','id,rates,updated_at','updated_at'),
+      readAll('subscriptions','id,student_id,subject_id,classes,amount_paid,date,kind,payment_reference,payment_remarks,transfer_group_id,expires_on','date'),
+      readAll('teacher_payroll_records','id,teacher_id,month,adjustment,paid,paid_date,paid_reference,paid_amount','month'),
+      readAll('expenses','id,expense_date,category,amount,notes','expense_date'),
+      readAudit('teachers'),readAudit('fee_settings')
+    ]);
+    data.sessions=r[0];data.students=r[1];data.teachers=r[2];data.subjects=r[3];data.categories=r[4];data.studentRates=r[5];
+    data.feeSettings=r[6].slice().sort((a,b)=>String(a.updated_at).localeCompare(String(b.updated_at))).slice(-1)[0]||{};
+    data.subscriptions=r[7];data.payroll=r[8];data.expenses=r[9];data.teacherRateHistory=r[10];data.feeRateHistory=r[11];
+    data.teacherById=new Map(data.teachers.map(x=>[String(x.id),x]));data.studentById=new Map(data.students.map(x=>[String(x.id),x]));
+    data.subjectById=new Map(data.subjects.map(x=>[String(x.id),x]));data.categoryById=new Map(data.categories.map(x=>[String(x.id),x]));
+    data.teacherRateEvents=new Map();
+    data.teacherRateHistory.forEach(e=>{const id=String(e.record_id);if(!data.teacherRateEvents.has(id))data.teacherRateEvents.set(id,[]);data.teacherRateEvents.get(id).push(e);});
+    const built=buildRows();data.attendanceRows=built.rows;data.issues=built.issues;render();
+  }
+  async function init(){
+    if(!window.supabase||!window.supabase.createClient){fail('Supabase client did not load. Refresh and try again.');return;}
+    db=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+    try{
+      const auth=await db.auth.getSession();
+      if(auth.error||!auth.data||!auth.data.session){fail('Sign in to My LIB first, then open Revenue Intelligence.');return;}
+      const profile=await db.from('profiles').select('role,archived').eq('id',auth.data.session.user.id).single();
+      if(profile.error||!profile.data||profile.data.role!=='Admin'||profile.data.archived){fail('Access restricted. Revenue Intelligence is available to active Admin accounts only.');return;}
+      await load();
+    }catch(error){fail(error&&error.message?error.message:'Could not load Revenue Intelligence.');}
+  }
+  init();
+})();
