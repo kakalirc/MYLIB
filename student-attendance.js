@@ -44,7 +44,7 @@
         result.push({ date: date, subjectId: r.subjectId, teacherId: r.teacherId, classType: r.classType, status: 'Pending Overdue' });
       }
     });
-    return result.filter(function (r) { return /^\\d{4}-\\d{2}-\\d{2}$/.test(r.date); });
+    return result.filter(function (r) { return /^\d{4}-\d{2}-\d{2}$/.test(r.date); });
   }
   function panel(student) {
     var id = String(student.id);
