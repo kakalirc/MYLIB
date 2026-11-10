@@ -22393,7 +22393,7 @@ function renderTeacherPortal() {
     ['setup', 'Setup'],
   ];
   teacherMobileTabsList.push(['teacherperformance', 'Teacher Performance Intelligence']);
-  const pendingTotal = teacherPendingItems(teacher).total
+  const pendingTotal = teacherPendingItems(teacher).total;
   const pendingBadge = pendingTotal ? ` <span style="color:var(--gold-dark,#b8860b)">(${pendingTotal})</span>` : '';
   teacherMobileTabsList[1] = ['pendingactions', 'Pending Action Items' + (pendingTotal ? ` (${pendingTotal})` : '')];
   let starEarn = 0;
