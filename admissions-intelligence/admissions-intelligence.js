@@ -142,7 +142,7 @@
   root.addEventListener('click',e=>{
     const stageButton=e.target.closest('[data-stage]');
     if(stageButton){openStage(stageButton.getAttribute('data-stage'));return;}
-    if(e.target.closest('[data-close-modal]')){const modal=root.querySelector('.ai-modal-backdrop');if(modal)modal.remove();}
+    if(e.target.matches('[data-close-modal]')){const modal=root.querySelector('.ai-modal-backdrop');if(modal)modal.remove();}
   });
   init();
 })();
