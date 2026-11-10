@@ -91,8 +91,8 @@ function currentData(){
    else if(count>expected)dq.push({type:'Potential excess schedules',id:first.id,detail:name(students,first.student_id)+' · '+name(subjects,first.subject_id)+' · '+dateText(first.date)+': '+count+' scheduled; '+expected+' configured for this weekday'});
    const savedByType=fr.weekly_times&&typeof fr.weekly_times==='object'?fr.weekly_times:{};
    const savedSlots=Array.isArray(savedByType[first.class_type])?savedByType[first.class_type]:[];
-   const configuredTimes=savedSlots.filter(slot=>Number(slot.weekday)===weekday&&/^([01]\\d|2[0-3]):[0-5]\\d$/.test(String(slot.time||'').slice(0,5))&&String(slot.time).slice(0,5)!=='00:00').map(slot=>String(slot.time).slice(0,5)).sort();
-   const actualTimes=rows.map(row=>String(row.time||'').slice(0,5)).filter(time=>/^([01]\\d|2[0-3]):[0-5]\\d$/.test(time)&&time!=='00:00').sort();
+   const configuredTimes=savedSlots.filter(slot=>Number(slot.weekday)===weekday&&/^([01]\d|2[0-3]):[0-5]\d$/.test(String(slot.time||'').slice(0,5))&&String(slot.time).slice(0,5)!=='00:00').map(slot=>String(slot.time).slice(0,5)).sort();
+   const actualTimes=rows.map(row=>String(row.time||'').slice(0,5)).filter(time=>/^([01]\d|2[0-3]):[0-5]\d$/.test(time)&&time!=='00:00').sort();
    if(configuredTimes.length===rows.length&&actualTimes.length===rows.length&&configuredTimes.some((time,i)=>time!==actualTimes[i])){
     dq.push({type:'Configured class time mismatch',id:first.id,detail:name(students,first.student_id)+' · '+dateText(first.date)+': saved '+configuredTimes.join(', ')+'; scheduled '+actualTimes.join(', ')});
    }
