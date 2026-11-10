@@ -2,5 +2,31 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Student Engagement Intelligence | My LIB</title><link rel="stylesheet" href="student-engagement-intelligence.css"></head>
 <body style="margin:0;background:#f7f7f4"><div id="sei-app"><main class="sei-shell"><div class="sei-message">Opening Student Engagement Intelligence…</div></main></div>
 <script>
-(function(){var root=document.getElementById('sei-app');function fail(s){root.innerHTML='<main class="sei-shell"><div class="sei-message">'+String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];})+'</div></main>';}function app(){if(!window.supabase||!window.supabase.createClient){fail('Supabase client is unavailable. Refresh and try again.');return;}var s=document.createElement('script');s.src='student-engagement-intelligence.js?v=1';s.onerror=function(){fail('Could not load Student Engagement Intelligence. Refresh in a moment.');};document.body.appendChild(s);}var p=document.createElement('script');p.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';p.onload=app;p.onerror=function(){var f=document.createElement('script');f.src='https://unpkg.com/@supabase/supabase-js@2';f.onload=app;f.onerror=function(){fail('Could not load the Supabase browser library.');};document.head.appendChild(f);};document.head.appendChild(p);})();
+(function(){
+  var root=document.getElementById('sei-app'), started=false, primaryTimer, fallbackTimer;
+  function fail(s){if(started)return;root.innerHTML='<main class="sei-shell"><div class="sei-message">'+String(s).replace(/[&<>\"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];})+'</div></main>';}
+  function app(){
+    if(started)return;started=true;clearTimeout(primaryTimer);clearTimeout(fallbackTimer);
+    if(!window.supabase||!window.supabase.createClient){root.innerHTML='<main class="sei-shell"><div class="sei-message">Supabase client is unavailable. Refresh and try again.</div></main>';return;}
+    var s=document.createElement('script');s.src='student-engagement-intelligence.js?v=2';
+    s.onload=function(){clearTimeout(appTimer);};
+    s.onerror=function(){clearTimeout(appTimer);root.innerHTML='<main class="sei-shell"><div class="sei-message">Could not load Student Engagement Intelligence code. Refresh the preview deployment and try again.</div></main>';};
+    var appTimer=setTimeout(function(){root.innerHTML='<main class="sei-shell"><div class="sei-message">Student Engagement Intelligence code is taking too long to load. Refresh the preview and try again.</div></main>';},10000);
+    document.body.appendChild(s);
+  }
+  function loadFallback(){
+    if(started)return;clearTimeout(primaryTimer);
+    var f=document.createElement('script'),fallbackStarted=false;
+    f.src='https://unpkg.com/@supabase/supabase-js@2';
+    f.onload=function(){if(fallbackStarted||started)return;fallbackStarted=true;app();};
+    f.onerror=function(){if(fallbackStarted||started)return;fallbackStarted=true;clearTimeout(fallbackTimer);fail('Could not load the Supabase browser library from either CDN. Check the preview network or browser content blocker.');};
+    fallbackTimer=setTimeout(function(){if(fallbackStarted||started)return;fallbackStarted=true;fail('Supabase browser library did not respond. The preview cannot reach the required CDN.');},8000);
+    document.head.appendChild(f);
+  }
+  var p=document.createElement('script');p.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+  p.onload=function(){if(started)return;app();};
+  p.onerror=loadFallback;
+  primaryTimer=setTimeout(loadFallback,8000);
+  document.head.appendChild(p);
+})();
 </script></body></html>
