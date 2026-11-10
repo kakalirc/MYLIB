@@ -13,7 +13,7 @@ function message(s,bad){root.innerHTML='<main class="cdi-shell"><div class="cdi-
 async function readAll(table,columns,orderField){
  let out=[],start=0;
  while(true){
-  const q=client.from(table).select(columns).order(orderField,{ascending:false}).range(start,start+999);
+  const q=client.from(table).select(columns).order(orderField,{ascending:false}).order('id',{ascending:true}).range(start,start+999);
   const {data,error}=await q;
   if(error)throw new Error('Could not load '+table+': '+error.message);
   out=out.concat(data||[]);
