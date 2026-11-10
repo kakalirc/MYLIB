@@ -100,3 +100,25 @@ DROP TRIGGER IF EXISTS teacher_appraisal_period_delete_guard_trg ON public.teach
 CREATE TRIGGER teacher_appraisal_period_delete_guard_trg
 BEFORE DELETE ON public.teacher_appraisal_periods
 FOR EACH ROW EXECUTE FUNCTION public.teacher_appraisal_period_delete_guard();
+
+CREATE OR REPLACE FUNCTION public.teacher_appraisal_guard_finalised()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.status <> 'draft' THEN
+      RAISE EXCEPTION 'Only Draft appraisals can be deleted. Finalised, reopened, and review records are protected.';
+    END IF;
+    RETURN OLD;
+  END IF;
+  IF OLD.status = 'finalised' THEN
+    IF NEW.status <> 'reopened' OR NEW.reopen_reason IS NULL OR length(trim(NEW.reopen_reason)) = 0 OR NEW.reopened_by IS NULL THEN
+      RAISE EXCEPTION 'A finalised appraisal is immutable. Reopen it with an Admin reason before editing.';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
