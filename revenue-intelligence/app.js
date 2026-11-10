@@ -139,6 +139,23 @@
   function renderSubjects(rows){
     return '<section class="ri-panel"><h2>Subject profitability</h2><p>Subject-level contribution using each student’s applicable fee and the teacher’s maintained rate for the subject category.</p>'+table(['Subject','Category','Sessions','Class units','Fee value','Teacher cost','Gross contribution','Margin'],aggregate(rows,'subjectId').map(x=>[x.name,x.category,x.sessions,number.format(x.units),money(x.revenue),money(x.cost),money(x.contribution),pct(x.margin)]),'No subject attendance records.')+'</section>';
   }
+  function renderPayrollReconciliation(){
+    const paidInPeriod=data.payroll.filter(r=>r.paid&&r.paid_date&&monthInRange(r.paid_date));
+    const unpaidCarry=data.payroll.filter(r=>!r.paid&&String(r.month)<state.from);
+    const paidTotal=paidInPeriod.reduce((a,r)=>a+(Number(r.paid_amount)||0),0);
+    const outstanding=unpaidCarry.reduce((a,r)=>a+(Number(r.paid_amount)||0),0);
+    const months=new Map();
+    const add=(r,kind)=>{const key=String(r.month||'Unknown');let x=months.get(key)||{month:key,paid:0,paidCount:0,outstanding:0,outstandingCount:0,adjustment:0};if(kind==='paid'){x.paid+=Number(r.paid_amount)||0;x.paidCount++;}else{x.outstanding+=Number(r.paid_amount)||0;x.outstandingCount++;}x.adjustment+=Number(r.adjustment)||0;months.set(key,x);};
+    paidInPeriod.forEach(r=>add(r,'paid'));unpaidCarry.forEach(r=>add(r,'outstanding'));
+    const summary=Array.from(months.values()).sort((a,b)=>b.month.localeCompare(a.month)).map(x=>[x.month,x.paidCount,money(x.paid),x.outstandingCount,money(x.outstanding),money(x.adjustment)]);
+    const details=paidInPeriod.map(r=>[r.month,(data.teacherById.get(String(r.teacher_id))||{}).name||'Unknown teacher',dateOf(r.paid_date),money(r.paid_amount),money(r.adjustment),r.paid_reference||'—']);
+    const pending=unpaidCarry.map(r=>[r.month,(data.teacherById.get(String(r.teacher_id))||{}).name||'Unknown teacher','Not marked paid',money(r.paid_amount),money(r.adjustment),'—']);
+    return '<section class="ri-metrics">'+metric('Payroll paid in selected period',money(paidTotal),'Actual payment date falls within selected month range')+metric('Earlier-month payroll still unpaid',money(outstanding),'Unpaid payroll records for delivery months before the selected period')+'</section>'+
+      '<section class="ri-panel"><h2>Payroll & delivery-month reconciliation</h2><p>This view separates the month the classes were delivered (Payroll month) from the date the teacher was actually paid (Paid date). For example, a payroll record for October marked Paid on 5 November appears as October delivery payroll paid during November.</p>'+table(['Classes delivered in','Teachers paid in selected period','Amount paid in selected period','Unpaid teacher records','Outstanding amount','Payroll adjustments'],summary,'No payroll payments or earlier-month unpaid payroll records for this period.')+'</section>'+
+      '<section class="ri-panel"><h2>Payments made in selected period</h2><p>Actual paid amounts, grouped by the payroll month they relate to.</p>'+table(['Delivery month','Teacher','Paid date','Paid amount','Adjustment','Payment reference'],details,'No teacher payroll payments were recorded in the selected payment period.')+'</section>'+
+      '<section class="ri-panel"><h2>Earlier delivery months still unpaid</h2><p>Payroll records for months before the selected period that are not marked Paid. Outstanding amounts use the stored payroll amount; where it is blank, the dashboard displays zero and the record remains visible for follow-up.</p>'+table(['Delivery month','Teacher','Status','Stored amount','Adjustment','Payment reference'],pending,'No earlier-month unpaid payroll records.')+'</section>'+
+      '<div class="ri-note">This reconciliation uses teacher_payroll_records.month as the class-delivery/payroll month and paid_date as the cash-payment date. It does not infer payroll payment from attendance rates and does not change gross contribution or projected delivery cost.</div>';
+  }
   function renderCash(){
     const collections=cashRows().sort((a,b)=>dateOf(b.date).localeCompare(dateOf(a.date))),payroll=payrollRows().sort((a,b)=>String(b.month).localeCompare(String(a.month))),expenses=expenseRows().sort((a,b)=>dateOf(b.expense_date).localeCompare(dateOf(a.expense_date)));
     const cash=collections.reduce((a,r)=>a+(Number(r.amount_paid)||0),0),paid=payroll.filter(r=>r.paid&&r.paid_amount!=null).reduce((a,r)=>a+(Number(r.paid_amount)||0),0),spent=expenses.reduce((a,r)=>a+(Number(r.amount)||0),0);
@@ -155,8 +172,8 @@
       '<section class="ri-note"><b>Rate mapping</b><p>Student fee overrides are effective-dated and subject-specific. App fees and teacher payment rates are keyed by subject category, class type and delivery mode. Historical snapshots are taken from Audit Log where available.'+(data.auditWarning?' Audit Log history could not be read; current maintenance rates are used.':'')+'</p></section>';
   }
   function render(){
-    const rows=filteredRows(),totals=metrics(rows),tabs=[['overview','Overview'],['students','Student Profitability'],['teachers','Teacher Profitability'],['subjects','Subject Profitability'],['cash','Collections & Costs'],['quality','Data Quality']];
-    const body=state.tab==='students'?renderStudents(rows):state.tab==='teachers'?renderTeachers(rows):state.tab==='subjects'?renderSubjects(rows):state.tab==='cash'?renderCash():state.tab==='quality'?renderQuality(rows):renderOverview(rows,totals);
+    const rows=filteredRows(),totals=metrics(rows),tabs=[['overview','Overview'],['students','Student Profitability'],['teachers','Teacher Profitability'],['subjects','Subject Profitability'],['cash','Collections & Costs'],['payroll-recon','Payroll Reconciliation'],['quality','Data Quality']];
+    const body=state.tab==='students'?renderStudents(rows):state.tab==='teachers'?renderTeachers(rows):state.tab==='subjects'?renderSubjects(rows):state.tab==='cash'?renderCash():state.tab==='payroll-recon'?renderPayrollReconciliation():state.tab==='quality'?renderQuality(rows):renderOverview(rows,totals);
     const teachers=data.teachers.filter(x=>!x.archived).sort((a,b)=>a.name.localeCompare(b.name)),students=data.students.filter(x=>!x.archived).sort((a,b)=>a.name.localeCompare(b.name)),subjects=data.subjects.slice().sort((a,b)=>a.name.localeCompare(b.name));
     root.innerHTML='<main class="ri-shell"><header class="ri-header"><div><div class="ri-eyebrow">LIB EDUCATION · ADMIN ANALYTICS</div><h1>Revenue Intelligence</h1><p>Class-level fee value, teacher delivery cost and gross contribution.</p></div><button type="button" id="ri-refresh">Refresh</button></header>'+
       '<section class="ri-filters"><label>From month<input id="ri-from" type="month" value="'+esc(state.from)+'"></label><label>To month<input id="ri-to" type="month" value="'+esc(state.to)+'"></label>'+
