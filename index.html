@@ -19758,8 +19758,8 @@ function studentAttendanceHtml(student) {
   return '<section class="card student-attendance-card" aria-labelledby="student-attendance-title">'
     + '<div class="student-attendance-header"><div><h2 id="student-attendance-title">📊 My Attendance</h2><p>Track your attendance overall and by subject.</p></div>'
     + '<div class="student-attendance-period" role="group" aria-label="Attendance period">'
-    + '<button type="button" class="' + (period === 'month' ? 'active' : '') + '" aria-pressed="' + (period === 'month') + '" onclick="studentAttendanceSetPeriod(\\'month\\')">This Month</button>'
-    + '<button type="button" class="' + (period === 'all' ? 'active' : '') + '" aria-pressed="' + (period === 'all') + '" onclick="studentAttendanceSetPeriod(\\'all\\')">All Time</button></div></div>'
+    + '<button type="button" class="' + (period === 'month' ? 'active' : '') + '" aria-pressed="' + (period === 'month') + '" onclick="studentAttendanceSetPeriod(\'month\')">This Month</button>'
+    + '<button type="button" class="' + (period === 'all' ? 'active' : '') + '" aria-pressed="' + (period === 'all') + '" onclick="studentAttendanceSetPeriod(\'all\')">All Time</button></div></div>'
     + '<div class="student-attendance-period-label">' + (period === 'month' ? esc(monthLabel) : 'Since your first recorded class') + '</div>'
     + '<div class="student-attendance-overall"><div><span>Overall attendance</span><strong>' + (overall.rate == null ? '—' : overall.rate + '%') + '</strong></div>'
     + (overall.denominator ? studentAttendanceBarHtml(overall) : '<div class="student-attendance-no-data">No attendance data yet</div>')
