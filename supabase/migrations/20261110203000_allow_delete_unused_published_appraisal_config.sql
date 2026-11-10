@@ -1,4 +1,4 @@
--- Allow deletion of Published scoring configurations only when no appraisal period uses them.
+-- Restrict deletion to unused Draft and Archived scoring configurations.
 -- The audit insert remains atomic with the DELETE; a rejected DELETE leaves no audit row.
 CREATE OR REPLACE FUNCTION public.audit_teacher_appraisal_config_delete()
 RETURNS trigger
@@ -7,8 +7,8 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
-  IF OLD.status NOT IN ('draft','archived','published') THEN
-    RAISE EXCEPTION 'This scoring configuration status cannot be deleted.';
+  IF OLD.status NOT IN ('draft','archived') THEN
+    RAISE EXCEPTION 'Only Draft or Archived scoring configurations can be deleted.';
   END IF;
 
   IF EXISTS (
