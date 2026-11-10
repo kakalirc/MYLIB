@@ -8123,9 +8123,22 @@ async function attemptLoginSteps(u, p) {
 let isRefreshing = false;
 let refreshMsg = '';
 let refreshMsgTimer = null;
+let refreshWatchdog = null;
+let refreshGeneration = 0;
 async function refreshAllData(silent) {
   if (!isLoggedIn || isRefreshing) return;
+  const thisRefresh = ++refreshGeneration;
   isRefreshing = true;
+  if (refreshWatchdog) clearTimeout(refreshWatchdog);
+  // A stalled network request must not leave the global Refresh control disabled forever.
+  refreshWatchdog = setTimeout(() => {
+    if (thisRefresh !== refreshGeneration || !isRefreshing) return;
+    isRefreshing = false;
+    refreshMsg = 'Refresh timed out. Check your connection and try again.';
+    const button = document.querySelector('.topbar button[onclick="refreshAllData()"]');
+    if (button) { button.disabled = false; button.textContent = '↻ Refresh'; }
+    if (!silent) render();
+  }, 45000);
   refreshMsg = '';
   if (refreshMsgTimer) { clearTimeout(refreshMsgTimer); refreshMsgTimer = null; }
   try {
@@ -8180,13 +8193,18 @@ async function refreshAllData(silent) {
     // an occasional unprompted message.
     refreshMsg = 'Could not refresh: ' + (e && e.message ? e.message : 'unknown error');
   } finally {
-    isRefreshing = false;
-    // Silent background refreshes update data only. Rebuilding the portal on a timer
-    // interrupts student games, teacher attendance entry, Admin work and scroll position.
-    // Explicit/manual refreshes still render and show their confirmation.
-    if (!silent) {
-      render();
-      if (refreshMsg) refreshMsgTimer = setTimeout(() => { refreshMsg = ''; refreshMsgTimer = null; render(); }, 4000);
+    // Ignore late completion from a request whose watchdog already released the UI
+    // and a newer refresh has since started.
+    if (thisRefresh === refreshGeneration) {
+      isRefreshing = false;
+      if (refreshWatchdog) { clearTimeout(refreshWatchdog); refreshWatchdog = null; }
+      // Silent background refreshes update data only. Rebuilding the portal on a timer
+      // interrupts student games, teacher attendance entry, Admin work and scroll position.
+      // Explicit/manual refreshes still render and show their confirmation.
+      if (!silent) {
+        render();
+        if (refreshMsg) refreshMsgTimer = setTimeout(() => { refreshMsg = ''; refreshMsgTimer = null; render(); }, 4000);
+      }
     }
   }
 }
