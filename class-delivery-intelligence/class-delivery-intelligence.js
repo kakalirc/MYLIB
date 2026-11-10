@@ -27,7 +27,7 @@ function dateInRange(value){
  if(!value)return false;
  const d=String(value).slice(0,10),t=today();
  if(period==='all')return true;
- if(period==='month')return d>=t.slice(0,7)+'-01'&&d<=t;
+ if(period==='month')return d.slice(0,7)===t.slice(0,7);
  const n=Number(period),from=new Date(t+'T00:00:00');from.setDate(from.getDate()-n+1);
  return d>=from.toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'})&&d<=t;
 }
