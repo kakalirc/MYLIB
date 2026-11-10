@@ -44,7 +44,7 @@
     const statuses=countBy(bookings,'status','Unknown');
     const subjects=countBy(bookings,'subject','Not specified');
     const recent=[...bookings.map(x=>({date:x.submitted_at,name:x.student_name,kind:'Demo booking',status:x.status,subject:x.subject,source:x.source})),
-      ...regs.map(x=>({date:x.created_at,name:x.student_name,kind:'Registration',status:x.status,subject:(x.subjects||[]).join(', '),source:x.heard_from}))].sort((a,b)=>new Date(b.date||0)-new Date(a.date||0)).slice(0,12);
+      ...regs.map(x=>({date:x.created_at,name:x.student_name,kind:'Registration',status:x.status,subject:Array.isArray(x.subjects)?x.subjects.join(', '):(x.subjects||''),source:x.heard_from}))].sort((a,b)=>new Date(b.date||0)-new Date(a.date||0)).slice(0,12);
     root.innerHTML = '<main class="ai-shell">'
       + '<header class="ai-header"><div><div class="ai-eyebrow">LIB EDUCATION · ADMIN</div><h1>Admissions Intelligence</h1><p>Admissions activity from existing LIB records. No manual enquiry entry.</p></div><div class="ai-controls"><label for="ai-range">Period</label><select id="ai-range"><option value="30" '+(range==='30'?'selected':'')+'>Last 30 days</option><option value="90" '+(range==='90'?'selected':'')+'>Last 90 days</option><option value="all" '+(range==='all'?'selected':'')+'>All records</option></select><button id="ai-refresh">Refresh</button></div></header>'
       + '<section class="ai-grid">'+metric('Demo bookings / prospects',bookings.length,'Each booking counts as one prospect')+metric('Converted demo bookings',converted,'Linked student or Converted status')+metric('Registrations',regs.length,accepted+' accepted')+metric('Paid demo bookings',paid,'Based on existing payment fields')+'</section>'
