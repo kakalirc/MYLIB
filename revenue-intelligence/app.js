@@ -82,7 +82,9 @@
     return{rows,issues};
   }
   function filteredRows(){
-    return data.attendanceRows.filter(r=>monthInRange(r.date)&&(state.teacher==='all'||String(r.teacherId)===state.teacher)&&(state.student==='all'||String(r.studentId)===state.student)&&(state.subject==='all'||String(r.subjectId)===state.subject)&&(state.type==='all'||r.classType===state.type)&&(state.mode==='all'||r.mode===state.mode));
+    const selectedSubject=state.subject==='all'?null:data.subjectById.get(String(state.subject));
+    const selectedSubjectName=selectedSubject?String(selectedSubject.name||'').trim().toLocaleLowerCase():null;
+    return data.attendanceRows.filter(r=>monthInRange(r.date)&&(state.teacher==='all'||String(r.teacherId)===state.teacher)&&(state.student==='all'||String(r.studentId)===state.student)&&(state.subject==='all'||(selectedSubjectName?String(r.subject||'').trim().toLocaleLowerCase()===selectedSubjectName:String(r.subjectId)===state.subject))&&(state.type==='all'||r.classType===state.type)&&(state.mode==='all'||r.mode===state.mode));
   }
   function aggregate(rows,key){
     const map=new Map();
@@ -95,10 +97,31 @@
     });
     return Array.from(map.values()).map(x=>Object.assign(x,{margin:x.contributionRevenue?x.contribution/x.contributionRevenue*100:null})).sort((a,b)=>b.contribution-a.contribution);
   }
+  function aggregateSubjects(rows){
+    const map=new Map();
+    rows.forEach(r=>{
+      const name=String(r.subject||'Deleted subject').trim()||'Deleted subject';
+      const key=name.toLocaleLowerCase();
+      let x=map.get(key);
+      if(!x){x={id:key,name,categorySet:new Set(),sessions:0,units:0,present:0,absent:0,revenue:0,cost:0,contribution:0,contributionRevenue:0};map.set(key,x);}
+      x.categorySet.add(r.category||'Uncategorised');
+      x.sessions++;x.units+=r.count;
+      if(r.status==='Present')x.present++;if(r.status==='Absent')x.absent++;
+      if(r.revenue!==null)x.revenue+=r.revenue;
+      if(r.cost!==null)x.cost+=r.cost;
+      if(r.contribution!==null){x.contribution+=r.contribution;x.contributionRevenue+=r.revenue;}
+    });
+    return Array.from(map.values()).map(x=>({
+      ...x,
+      category:x.categorySet.size===1?Array.from(x.categorySet)[0]:'Multiple',
+      margin:x.contributionRevenue?x.contribution/x.contributionRevenue*100:null
+    })).sort((a,b)=>b.contribution-a.contribution);
+  }
   function payrollRows(){return data.payroll.filter(r=>monthInRange(r.month));}
+  function previousPayrollMonth(){const d=new Date(state.to+'-01T00:00:00');d.setMonth(d.getMonth()-1);return d.toISOString().slice(0,7);}
   function payrollByTeacher(){
     const map=new Map();
-    payrollRows().forEach(r=>{const id=String(r.teacher_id);let x=map.get(id)||{paid:0,adjustment:0,paidRows:0,missingPaidAmount:0};if(r.paid){x.paidRows++;if(r.paid_amount==null)x.missingPaidAmount++;else x.paid+=Number(r.paid_amount)||0;}x.adjustment+=Number(r.adjustment)||0;map.set(id,x);});
+    data.payroll.filter(r=>monthOf(r.month)===previousPayrollMonth()).forEach(r=>{const id=String(r.teacher_id);let x=map.get(id)||{paid:0,adjustment:0,paidRows:0,missingPaidAmount:0};if(r.paid){x.paidRows++;if(r.paid_amount==null)x.missingPaidAmount++;else x.paid+=Number(r.paid_amount)||0;}x.adjustment+=Number(r.adjustment)||0;map.set(id,x);});
     return map;
   }
   function cashRows(){return data.subscriptions.filter(r=>monthInRange(r.date)&&(r.kind==='Payment'||r.kind==='Refund'));}
@@ -134,10 +157,10 @@
   }
   function renderTeachers(rows){
     const payroll=payrollByTeacher();
-    return '<section class="ri-panel"><h2>Teacher profitability</h2><p>Projected cost is based on attendance recorded in the selected month so far and applicable teacher rates; it is not a forecast of the remaining month. Payroll paid is shown separately from current-month class profitability.</p>'+table(['Teacher','Sessions','Class units','Fee value','Projected cost – current month','Gross contribution','Payroll actually paid','Payroll adjustment'],aggregate(rows,'teacherId').map(x=>{const p=payroll.get(x.id)||{paid:0,adjustment:0};return[x.name,x.sessions,number.format(x.units),money(x.revenue),money(x.cost),money(x.contribution),money(p.paid),money(p.adjustment)];}),'No teacher attendance records.')+'<div class="ri-note">Projected cost – current month = recorded attendance class units × applicable teacher rate. Gross contribution and margin use selected-month attendance and rates. Payroll figures come from Teacher Payroll records marked Paid and are shown separately; the payroll month may relate to classes delivered in the preceding month.</div></section>';
+    return '<section class="ri-panel"><h2>Teacher profitability</h2><p>Projected cost is based on attendance recorded in the selected month so far and applicable teacher rates; it is not a forecast of the remaining month. Payroll paid is shown separately from current-month class profitability.</p>'+table(['Teacher','Sessions','Class units','Fee value','Projected cost – current month','Gross contribution','Payroll Paid – Previous Month','Payroll adjustment'],aggregate(rows,'teacherId').map(x=>{const p=payroll.get(x.id)||{paid:0,adjustment:0};return[x.name,x.sessions,number.format(x.units),money(x.revenue),money(x.cost),money(x.contribution),money(p.paid),money(p.adjustment)];}),'No teacher attendance records.')+'<div class="ri-note">Projected cost – current month = recorded attendance class units × applicable teacher rate. Gross contribution and margin use selected-month attendance and rates. Payroll figures are records marked Paid for the month immediately before the selected To month; they are shown separately from current-period class profitability.</div></section>';
   }
   function renderSubjects(rows){
-    return '<section class="ri-panel"><h2>Subject profitability</h2><p>Subject-level contribution using each student’s applicable fee and the teacher’s maintained rate for the subject category.</p>'+table(['Subject','Category','Sessions','Class units','Fee value','Teacher cost','Gross contribution','Margin'],aggregate(rows,'subjectId').map(x=>[x.name,x.category,x.sessions,number.format(x.units),money(x.revenue),money(x.cost),money(x.contribution),pct(x.margin)]),'No subject attendance records.')+'</section>';
+    return '<section class="ri-panel"><h2>Subject profitability</h2><p>Subject-level contribution using each student’s applicable fee and the teacher’s maintained rate for the subject category.</p>'+table(['Subject','Category','Sessions','Class units','Fee value','Teacher cost','Gross contribution','Margin'],aggregateSubjects(rows).map(x=>[x.name,x.category,x.sessions,number.format(x.units),money(x.revenue),money(x.cost),money(x.contribution),pct(x.margin)]),'No subject attendance records.')+'</section>';
   }
   function renderPayrollReconciliation(){
     const paidInPeriod=data.payroll.filter(r=>r.paid&&r.paid_date&&monthInRange(r.paid_date));
@@ -174,7 +197,7 @@
   function render(){
     const rows=filteredRows(),totals=metrics(rows),tabs=[['overview','Overview'],['students','Student Profitability'],['teachers','Teacher Profitability'],['subjects','Subject Profitability'],['cash','Collections & Costs'],['payroll-recon','Payroll Reconciliation'],['quality','Data Quality']];
     const body=state.tab==='students'?renderStudents(rows):state.tab==='teachers'?renderTeachers(rows):state.tab==='subjects'?renderSubjects(rows):state.tab==='cash'?renderCash():state.tab==='payroll-recon'?renderPayrollReconciliation():state.tab==='quality'?renderQuality(rows):renderOverview(rows,totals);
-    const teachers=data.teachers.filter(x=>!x.archived).sort((a,b)=>a.name.localeCompare(b.name)),students=data.students.filter(x=>!x.archived).sort((a,b)=>a.name.localeCompare(b.name)),subjects=data.subjects.slice().sort((a,b)=>a.name.localeCompare(b.name));
+    const teachers=data.teachers.filter(x=>!x.archived).sort((a,b)=>a.name.localeCompare(b.name)),students=data.students.filter(x=>!x.archived).sort((a,b)=>a.name.localeCompare(b.name)),subjects=Array.from(new Map(data.subjects.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(x=>[String(x.name||'').trim().toLocaleLowerCase(),x])).values());
     root.innerHTML='<main class="ri-shell"><header class="ri-header"><div><div class="ri-eyebrow">LIB EDUCATION · ADMIN ANALYTICS</div><h1>Revenue Intelligence</h1><p>Class-level fee value, teacher delivery cost and gross contribution.</p></div><button type="button" id="ri-refresh">Refresh</button></header>'+
       '<section class="ri-filters"><label>From month<input id="ri-from" type="month" value="'+esc(state.from)+'"></label><label>To month<input id="ri-to" type="month" value="'+esc(state.to)+'"></label>'+
       '<label>Teacher<select id="ri-teacher">'+options(teachers,state.teacher,'teachers')+'</select></label><label>Student<select id="ri-student">'+options(students,state.student,'students')+'</select></label><label>Subject<select id="ri-subject">'+options(subjects,state.subject,'subjects')+'</select></label>'+
