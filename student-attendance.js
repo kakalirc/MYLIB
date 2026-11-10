@@ -52,6 +52,30 @@
     });
     return result.filter(function (r) { return /^\d{4}-\d{2}-\d{2}$/.test(r.date); });
   }
+  // Insert the attendance panel directly after the Next Class card in the
+  // Student dashboard. The card contains nested divs, so find its matching close.
+  function insertAfterNextClass(html, markup) {
+    var start = html.indexOf('<div class="s-today-card"');
+    if (start !== -1) {
+      var tags = /<\\/?div\\b[^>]*>/gi;
+      tags.lastIndex = start;
+      var depth = 0, match;
+      while ((match = tags.exec(html))) {
+        if (/^<\\s*div\\b/i.test(match[0])) depth++;
+        else depth--;
+        if (depth === 0) return html.slice(0, tags.lastIndex) + markup + html.slice(tags.lastIndex);
+      }
+    }
+    // If the student has no upcoming class card, keep attendance in the same
+    // dashboard position: immediately before the Study Plan section.
+    var studyPlan = html.indexOf('<h2>📋 My Study Plan</h2>');
+    if (studyPlan !== -1) {
+      var cardStart = html.lastIndexOf('<div class="card">', studyPlan);
+      if (cardStart !== -1) return html.slice(0, cardStart) + markup + html.slice(cardStart);
+    }
+    return html + markup;
+  }
+
   function panel(student) {
     var id = String(student.id);
     var state = stateByStudent[id] || (stateByStudent[id] = { period: 'month', month: today().slice(0, 7) });
@@ -112,13 +136,11 @@
       // Match the academics panel by its stable ID and role, without depending on
       // whitespace or whether optional attributes are present on the opening tag.
       var academicsOpen = /<section\b(?=[^>]*\bid=["']student-portal-academics["'])(?=[^>]*\brole=["']tabpanel["'])[^>]*>/i;
-      var funPanelStart = '</section><section id="student-portal-fun"';
-      if (academicsOpen.test(html) && html.indexOf('class="lib-student-attendance"') === -1
-          && html.indexOf(funPanelStart) !== -1) {
+      if (academicsOpen.test(html) && html.indexOf('class="lib-student-attendance"') === -1) {
         var student = typeof data !== 'undefined' && Array.isArray(data.students)
           ? data.students.find(function (s) { return String(s.id) === String(currentLinkedId); })
           : null;
-        if (student) html = html.replace(funPanelStart, panel(student) + funPanelStart);
+        if (student) html = insertAfterNextClass(html, panel(student));
       }
     }
     return html;
