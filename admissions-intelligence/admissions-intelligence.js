@@ -68,7 +68,7 @@
       ['registrations','registrations','id,created_at,student_name,subjects,heard_from,status,student_id,decided_at']
     ];
     const results=await Promise.all(specs.map(async ([key,table,columns])=>{
-      const {data,error}=await client.from(table).select(columns).order(key==='demos'?'created_at':key==='calls'?'called_at':key==='leads'?'created_at':key==='registrations'?'created_at':'submitted_at',{ascending:false}).limit(5000);
+      const {data,error}=await client.from(table).select(columns).order(key==='demos'?'created_at':key==='calls'?'called_at':key==='registrations'?'created_at':'submitted_at',{ascending:false}).limit(5000);
       if(error) throw new Error(table+': '+error.message);
       return [key,data||[]];
     }));
