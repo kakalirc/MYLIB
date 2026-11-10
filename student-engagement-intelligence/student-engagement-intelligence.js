@@ -2,7 +2,7 @@
 (function(){
 'use strict';
 const URL='https://kqkojscbaycolaioyarh.supabase.co',KEY='sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq',root=document.getElementById('sei-app');
-let db,students=[],grades=[],subjects=[],profiles=[],logins=[],schedules=[],sessions=[],enrolments=[],plans=[],homework=[],attempts=[];
+let db,students=[],grades=[],subjects=[],profiles=[],logins=[],schedules=[],sessions=[],enrolments=[],plans=[],homework=[],attempts=[],frequencyRows=[],frequencyLoadError='';
 const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date());
 let month=localMonth(),view='attention',studentView='flagged',category='all',grade='all',subject='all',search='',sort='flags',drawerId=null;
 function localMonth(){return today().slice(0,7)}
@@ -67,7 +67,46 @@ function currentData(){
  const dq=[];
  past.forEach(x=>{const linked=x.linked_session_id?sessions.find(z=>z.id===x.linked_session_id):null;if(linked&&['Present','Absent'].includes(linked.status))dq.push({type:'Pending schedule linked to Present session',id:x.id,detail:name(students,x.student_id)+' · '+dateText(x.date)});});
  schedules.filter(x=>!x.date).forEach(x=>dq.push({type:'Scheduled class missing date',id:x.id,detail:'Schedule '+x.id}));
- const dupe=new Map();schedules.filter(x=>x.status==='Pending').forEach(x=>{const k=[x.student_id,x.subject_id,x.date,x.class_type].join('|');dupe.set(k,(dupe.get(k)||0)+1);});dupe.forEach((n,k)=>{if(n>1)dq.push({type:'Potential duplicate pending schedules',id:k,detail:n+' records share student, subject, date and class type'});});
+ if(frequencyLoadError){
+  dq.push({type:'Class frequency unavailable',id:'student_subject_frequency',detail:'Could not read configured class frequency. Schedule counts are not classified: '+frequencyLoadError});
+ }else{
+  const frequencyByPair=new Map(frequencyRows.map(r=>[[r.student_id,r.subject_id].join('|'),r]));
+  const dayFields=['sunday_count','monday_count','tuesday_count','wednesday_count','thursday_count','friday_count','saturday_count'];
+  const scheduleGroups=new Map();
+  schedules.filter(x=>String(x.status||'').toLowerCase()!=='cancelled'&&x.date&&x.student_id&&x.subject_id&&x.class_type).forEach(x=>{
+   const k=[x.student_id,x.subject_id,x.date,x.class_type].join('|');
+   if(!scheduleGroups.has(k))scheduleGroups.set(k,[]);
+   scheduleGroups.get(k).push(x);
+  });
+  scheduleGroups.forEach((rows,k)=>{
+   const first=rows[0],weekday=new Date(String(first.date).slice(0,10)+'T00:00:00').getDay(),field=dayFields[weekday];
+   const fr=frequencyByPair.get([first.student_id,first.subject_id].join('|'));
+   const count=rows.length;
+   if(!fr){
+    dq.push({type:'Class frequency needs review',id:first.id,detail:name(students,first.student_id)+' · '+name(subjects,first.subject_id)+' · '+dateText(first.date)+': '+count+' scheduled; no frequency configuration found'});
+    return;
+   }
+   const expected=Math.max(0,Number(fr[field])||0);
+   if(count<expected)dq.push({type:'Under-scheduled classes',id:first.id,detail:name(students,first.student_id)+' · '+name(subjects,first.subject_id)+' · '+dateText(first.date)+': '+count+' scheduled; '+expected+' configured for this weekday'});
+   else if(count>expected)dq.push({type:'Potential excess schedules',id:first.id,detail:name(students,first.student_id)+' · '+name(subjects,first.subject_id)+' · '+dateText(first.date)+': '+count+' scheduled; '+expected+' configured for this weekday'});
+   const savedByType=fr.weekly_times&&typeof fr.weekly_times==='object'?fr.weekly_times:{};
+   const savedSlots=Array.isArray(savedByType[first.class_type])?savedByType[first.class_type]:[];
+   const configuredTimes=savedSlots.filter(slot=>Number(slot.weekday)===weekday&&/^([01]\d|2[0-3]):[0-5]\d$/.test(String(slot.time||'').slice(0,5))&&String(slot.time).slice(0,5)!=='00:00').map(slot=>String(slot.time).slice(0,5)).sort();
+   const actualTimes=rows.map(row=>String(row.time||'').slice(0,5)).filter(time=>/^([01]\d|2[0-3]):[0-5]\d$/.test(time)&&time!=='00:00').sort();
+   if(configuredTimes.length===rows.length&&actualTimes.length===rows.length&&configuredTimes.some((time,i)=>time!==actualTimes[i])){
+    dq.push({type:'Configured class time mismatch',id:first.id,detail:name(students,first.student_id)+' · '+dateText(first.date)+': saved '+configuredTimes.join(', ')+'; scheduled '+actualTimes.join(', ')});
+   }
+  });
+ }
+ const individualSlots=new Map();
+ schedules.filter(x=>String(x.status||'').toLowerCase()!=='cancelled'&&String(x.class_type||'').toLowerCase()==='individual'&&x.teacher_id&&x.date&&x.time&&String(x.time).slice(0,5)!=='00:00').forEach(x=>{
+  const time=String(x.time).slice(0,5),k=[x.teacher_id,x.date,time].join('|');
+  if(!individualSlots.has(k))individualSlots.set(k,[]);
+  individualSlots.get(k).push(x);
+ });
+ individualSlots.forEach(rows=>{
+  if(rows.length>1)dq.push({type:'Potential overlapping Individual classes',id:rows[0].id,detail:rows.length+' Individual classes share the same teacher, date and start time ('+dateText(rows[0].date)+' · '+String(rows[0].time).slice(0,5)+')'});
+ });
  return {active,mapped,lastLogin,flags:allFlags,overdue,three,six,selected,loginMonthStudents,inactiveInMonth,dq};
 }
 function filteredFlags(d){
@@ -97,7 +136,7 @@ function render(){
  view==='overdue'?'<section class="sei-panel"><h2>Currently overdue classes</h2><p class="sei-muted">Pending scheduled classes dated before today. Completed, cancelled and formally rescheduled records are not included. A linked Present session suppresses the flag.</p><div class="sei-kpis">'+kpi('Overdue classes',d.overdue.length,'Current snapshot')+kpi('Affected students',overdueStudents.size,'Distinct students')+'</div><div class="sei-table-wrap"><table class="sei-table"><thead><tr><th>Scheduled date</th><th>Student</th><th>Subject</th><th>Status</th></tr></thead><tbody>'+(currentOverdue||'<tr><td colspan="4" class="sei-empty">No currently overdue classes.</td></tr>')+'</tbody></table></div></section>':
  view==='login'?'<section class="sei-grid"><article class="sei-panel"><h2>Login activity · '+monthName(cur)+'</h2><p class="sei-muted">Only login_log event = login and role = Student are counted.</p>'+kpi('Active students logged in',d.loginMonthStudents,'Distinct Student accounts with a login event')+kpi('Successful login events',monthEvents,'Events in selected month')+kpi('No login in selected month',d.inactiveInMonth,'Active Student accounts')+(loginUnavailable?'<div class="sei-warn">'+loginUnavailable+' active Student accounts have no login history in the available log. These are not classified as currently inactive.</div>':'')+'</article><article class="sei-panel"><h2>Six-month login trend</h2><p class="sei-muted">Monthly successful Student login events.</p><div class="sei-trend">'+byMonth+'</div></article></section>':
  view==='learning'?'<section class="sei-grid"><article class="sei-panel"><h2>Study Plans</h2>'+kpi('Recorded study plans',plans.length,'Existing study_plan records')+kpi('Enrolled student-subjects',enrolments.length,'Current enrolment rows')+kpi('Missing after grace period',studyPlanMissing,'Student-subjects enrolled at least 7 days')+'<div class="sei-warn">Plan coverage is assessed by exact student + subject match. Counts are current snapshots; no reliable six-month history is available.</div></article><article class="sei-panel"><h2>Homework</h2>'+kpi('Assigned homework',hwAssigned,'Existing homework records')+kpi('Submitted',homeworkSubmitted,'Records with submitted_at')+kpi('Overdue unsubmitted',homework.filter(h=>h.due_date&&!h.submitted_at&&h.due_date<today()).length,'Due date passed; no submission')+kpi('Awaiting teacher review',homeworkReview,'Submitted at least 2 days ago')+'<div class="sei-warn">Current record volume is small. Treat these as operational counts, not trend metrics.</div></article><article class="sei-panel"><h2>Knowledge Arena</h2><div class="sei-warn">Attempt data is unavailable to this Admin dashboard under current database read policies. Stage 1 does not change RLS, and no participation count is inferred.</div><p class="sei-muted">KA remains informational only; non-participation does not create an attention flag.</p></article></section>':
- '<section class="sei-panel"><h2>Data Quality Checks</h2><p class="sei-muted">Read-only exceptions detected from current records. Nothing is corrected automatically.</p><div class="sei-kpi"><span>Exceptions</span><strong>'+d.dq.length+'</strong><small>Current checks only</small></div><div class="sei-table-wrap"><table class="sei-table"><thead><tr><th>Check</th><th>Record</th><th>Details</th></tr></thead><tbody>'+(d.dq.map(x=>'<tr><td>'+esc(x.type)+'</td><td>'+esc(String(x.id).slice(0,14))+'</td><td>'+esc(x.detail)+'</td></tr>').join('')||'<tr><td colspan="3" class="sei-empty">No exceptions detected by the current checks.</td></tr>')+'</tbody></table></div><div class="sei-warn">Potential duplicate schedules are surfaced for investigation only. No record is merged, changed or deleted.</div></section>')+
+ '<section class="sei-panel"><h2>Data Quality Checks</h2><p class="sei-muted">Read-only exceptions detected from current records. Nothing is corrected automatically.</p><div class="sei-kpi"><span>Exceptions</span><strong>'+d.dq.length+'</strong><small>Current checks only</small></div><div class="sei-table-wrap"><table class="sei-table"><thead><tr><th>Check</th><th>Record</th><th>Details</th></tr></thead><tbody>'+(d.dq.map(x=>'<tr><td>'+esc(x.type)+'</td><td>'+esc(String(x.id).slice(0,14))+'</td><td>'+esc(x.detail)+'</td></tr>').join('')||'<tr><td colspan="3" class="sei-empty">No exceptions detected by the current checks.</td></tr>')+'</tbody></table></div><div class="sei-warn">Schedule counts are compared with the configured weekday frequency. Cancelled schedules and 00:00 placeholder times are excluded; saved weekly time slots are checked only when real times are configured. These checks are advisory: no record is merged, changed or deleted.</div></section>')+
  '<footer class="sei-foot">Read-only · Admin-only · Existing Supabase tables only. Student login activity uses successful login events only. Where login history is absent, the dashboard reports unavailable history rather than assuming inactivity. Learning activity trends are not shown where the available history is insufficient.</footer></main>';
  root.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{view=b.dataset.view;render();}));
  ['sei-month','sei-grade','sei-subject','sei-search'].forEach(id=>{const el=document.getElementById(id);el.addEventListener(id==='sei-search'?'input':'change',e=>{if(id==='sei-month')month=e.target.value;if(id==='sei-grade')grade=e.target.value;if(id==='sei-subject')subject=e.target.value;if(id==='sei-search')search=e.target.value;render();});});
@@ -142,6 +181,8 @@ async function load(){
   return data;
  }));
  [students,grades,subjects,profiles,logins,schedules,sessions,enrolments,plans,homework]=results;attempts=[];
+ try{frequencyRows=await read('student_subject_frequency','id,student_id,subject_id,monday_count,tuesday_count,wednesday_count,thursday_count,friday_count,saturday_count,sunday_count,weekly_times','updated_at');frequencyLoadError='';}
+ catch(e){frequencyRows=[];frequencyLoadError=e&&e.message?e.message:'Class frequency could not be loaded.';}
  render();
 }
 async function init(){if(!window.supabase){msg('Supabase client did not load.',true);return;}db=window.supabase.createClient(URL,KEY);try{await load();}catch(e){msg(e.message,true);}}
