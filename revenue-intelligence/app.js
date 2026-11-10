@@ -95,6 +95,26 @@
     });
     return Array.from(map.values()).map(x=>Object.assign(x,{margin:x.contributionRevenue?x.contribution/x.contributionRevenue*100:null})).sort((a,b)=>b.contribution-a.contribution);
   }
+  function aggregateSubjects(rows){
+    const map=new Map();
+    rows.forEach(r=>{
+      const name=String(r.subject||'Deleted subject').trim()||'Deleted subject';
+      const key=name.toLocaleLowerCase();
+      let x=map.get(key);
+      if(!x){x={id:key,name,categorySet:new Set(),sessions:0,units:0,present:0,absent:0,revenue:0,cost:0,contribution:0,contributionRevenue:0};map.set(key,x);}
+      x.categorySet.add(r.category||'Uncategorised');
+      x.sessions++;x.units+=r.count;
+      if(r.status==='Present')x.present++;if(r.status==='Absent')x.absent++;
+      if(r.revenue!==null)x.revenue+=r.revenue;
+      if(r.cost!==null)x.cost+=r.cost;
+      if(r.contribution!==null){x.contribution+=r.contribution;x.contributionRevenue+=r.revenue;}
+    });
+    return Array.from(map.values()).map(x=>({
+      ...x,
+      category:x.categorySet.size===1?Array.from(x.categorySet)[0]:'Multiple',
+      margin:x.contributionRevenue?x.contribution/x.contributionRevenue*100:null
+    })).sort((a,b)=>b.contribution-a.contribution);
+  }
   function payrollRows(){return data.payroll.filter(r=>monthInRange(r.month));}
   function previousPayrollMonth(){const d=new Date(state.to+'-01T00:00:00');d.setMonth(d.getMonth()-1);return d.toISOString().slice(0,7);}
   function payrollByTeacher(){
@@ -138,7 +158,7 @@
     return '<section class="ri-panel"><h2>Teacher profitability</h2><p>Projected cost is based on attendance recorded in the selected month so far and applicable teacher rates; it is not a forecast of the remaining month. Payroll paid is shown separately from current-month class profitability.</p>'+table(['Teacher','Sessions','Class units','Fee value','Projected cost – current month','Gross contribution','Payroll Paid – Previous Month','Payroll adjustment'],aggregate(rows,'teacherId').map(x=>{const p=payroll.get(x.id)||{paid:0,adjustment:0};return[x.name,x.sessions,number.format(x.units),money(x.revenue),money(x.cost),money(x.contribution),money(p.paid),money(p.adjustment)];}),'No teacher attendance records.')+'<div class="ri-note">Projected cost – current month = recorded attendance class units × applicable teacher rate. Gross contribution and margin use selected-month attendance and rates. Payroll figures are records marked Paid for the month immediately before the selected To month; they are shown separately from current-period class profitability.</div></section>';
   }
   function renderSubjects(rows){
-    return '<section class="ri-panel"><h2>Subject profitability</h2><p>Subject-level contribution using each student’s applicable fee and the teacher’s maintained rate for the subject category.</p>'+table(['Subject','Category','Sessions','Class units','Fee value','Teacher cost','Gross contribution','Margin'],aggregate(rows,'subjectId').map(x=>[x.name,x.category,x.sessions,number.format(x.units),money(x.revenue),money(x.cost),money(x.contribution),pct(x.margin)]),'No subject attendance records.')+'</section>';
+    return '<section class="ri-panel"><h2>Subject profitability</h2><p>Subject-level contribution using each student’s applicable fee and the teacher’s maintained rate for the subject category.</p>'+table(['Subject','Category','Sessions','Class units','Fee value','Teacher cost','Gross contribution','Margin'],aggregateSubjects(rows).map(x=>[x.name,x.category,x.sessions,number.format(x.units),money(x.revenue),money(x.cost),money(x.contribution),pct(x.margin)]),'No subject attendance records.')+'</section>';
   }
   function renderPayrollReconciliation(){
     const paidInPeriod=data.payroll.filter(r=>r.paid&&r.paid_date&&monthInRange(r.paid_date));
