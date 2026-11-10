@@ -8396,7 +8396,7 @@ async function verifySessionOnResume() {
         handleBackendSessionExpired();
       } else {
         refreshMsg = 'Connection issue. Reconnecting…';
-        if (!isRefreshing) render();
+        console.warn('Session check could not complete; retaining the current screen because this may be a temporary network issue.');
       }
     }
   } catch (error) {
