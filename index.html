@@ -27551,7 +27551,7 @@ function render() {
     ]},
     // Superuser admins only: backups, imports, clearing data, logging switches and the Academic Year roll-over.
     ...(isCurrentUserSuperuserAdmin() ? [{ label: 'Superadmin', tabs: [['superadmin', 'Superadmin tools']] }] : []),
-    { label: 'Analytics', tabs: [['admissionsintelligence', 'Admissions Intelligence']] }
+    { label: 'Analytics', tabs: [['admissionsintelligence', 'Admissions Intelligence']] },
   ];
   const analyticsGroup = tabGroups.find(g => g.label === 'Analytics');
   if (analyticsGroup && !analyticsGroup.tabs.some(([key]) => key === 'teacherperformance')) analyticsGroup.tabs.push(['teacherperformance', 'Teacher Performance Intelligence']);
