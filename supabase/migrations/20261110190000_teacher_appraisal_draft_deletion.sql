@@ -56,9 +56,10 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id=auth.uid() AND p.role='Admin' AND COALESCE(p.archived,false)=false) THEN
     RAISE EXCEPTION 'Only active Admins can delete appraisal periods.';
   END IF;
-  PERFORM 1 FROM public.teacher_appraisal_periods WHERE id=p_period_id FOR UPDATE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'Appraisal period not found.'; END IF;
-  IF EXISTS (SELECT 1 FROM public.teacher_appraisals WHERE period_id=p_period_id AND status <> 'draft' FOR UPDATE) THEN
+  PERFORM 1 FROM public.teacher_appraisal_periods WHERE id=p_period_id AND status='open' FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Open appraisal period not found. Only open periods can be deleted.'; END IF;
+  PERFORM 1 FROM public.teacher_appraisals WHERE period_id=p_period_id FOR UPDATE;
+  IF EXISTS (SELECT 1 FROM public.teacher_appraisals WHERE period_id=p_period_id AND status <> 'draft') THEN
     RAISE EXCEPTION 'This period contains a non-Draft appraisal. No records were deleted.';
   END IF;
   DELETE FROM public.teacher_appraisals WHERE period_id=p_period_id AND status='draft';
@@ -72,3 +73,30 @@ REVOKE ALL ON FUNCTION public.delete_teacher_appraisal_draft(uuid) FROM PUBLIC, 
 REVOKE ALL ON FUNCTION public.delete_teacher_appraisal_period_drafts(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.delete_teacher_appraisal_draft(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.delete_teacher_appraisal_period_drafts(uuid) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.teacher_appraisal_period_delete_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  IF OLD.status <> 'open' THEN
+    RAISE EXCEPTION 'Only open appraisal periods can be deleted.';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.teacher_appraisals WHERE period_id = OLD.id) THEN
+    RAISE EXCEPTION 'Delete eligible Draft appraisals before deleting the period.';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.profiles p
+    WHERE p.id = auth.uid() AND p.role = 'Admin' AND COALESCE(p.archived, false) = false
+  ) THEN
+    RAISE EXCEPTION 'Only active Admins can delete appraisal periods.';
+  END IF;
+  RETURN OLD;
+END;
+$$;
+DROP TRIGGER IF EXISTS teacher_appraisal_period_delete_guard_trg ON public.teacher_appraisal_periods;
+CREATE TRIGGER teacher_appraisal_period_delete_guard_trg
+BEFORE DELETE ON public.teacher_appraisal_periods
+FOR EACH ROW EXECUTE FUNCTION public.teacher_appraisal_period_delete_guard();
