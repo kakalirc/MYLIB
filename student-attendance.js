@@ -2,11 +2,17 @@
 (function () {
   'use strict';
   if (window.__libStudentAttendanceInstalled) return;
-  window.__libStudentAttendanceInstalled = true;
 
   var stateByStudent = Object.create(null);
   var originalRender = window.renderStudentPortal;
-  if (typeof originalRender !== 'function') return;
+  // Do not mark the module installed until its required portal renderer exists.
+  // This allows a later load attempt to succeed if app startup order changes.
+  if (typeof originalRender !== 'function') {
+    window.__libStudentAttendanceLoadFailed = true;
+    return;
+  }
+  window.__libStudentAttendanceInstalled = true;
+  window.__libStudentAttendanceLoadFailed = false;
 
   function today() {
     return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
@@ -102,11 +108,17 @@
 
   window.renderStudentPortal = function () {
     var html = originalRender.apply(this, arguments);
-    if (typeof currentRole !== 'undefined' && currentRole === 'Student' && html.indexOf('id="student-portal-academics" role="tabpanel" >') !== -1) {
-      var student = typeof data !== 'undefined' && data.students ? data.students.find(function (s) { return String(s.id) === String(currentLinkedId); }) : null;
-      if (student) {
-        var marker = '</section><section id="student-portal-fun"';
-        html = html.replace(marker, panel(student) + marker);
+    if (typeof currentRole !== 'undefined' && currentRole === 'Student') {
+      // Match the academics panel by its stable ID and role, without depending on
+      // whitespace or whether optional attributes are present on the opening tag.
+      var academicsOpen = /<section\b(?=[^>]*\bid=["']student-portal-academics["'])(?=[^>]*\brole=["']tabpanel["'])[^>]*>/i;
+      var funPanelStart = '</section><section id="student-portal-fun"';
+      if (academicsOpen.test(html) && html.indexOf('class="lib-student-attendance"') === -1
+          && html.indexOf(funPanelStart) !== -1) {
+        var student = typeof data !== 'undefined' && Array.isArray(data.students)
+          ? data.students.find(function (s) { return String(s.id) === String(currentLinkedId); })
+          : null;
+        if (student) html = html.replace(funPanelStart, panel(student) + funPanelStart);
       }
     }
     return html;
