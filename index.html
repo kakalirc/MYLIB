@@ -14644,7 +14644,7 @@ function exportTeacherRegister() {
 // ---------- render: setup ----------
 
 function setSetupSubTab(tab) {
-  setupSubTab = tab === 'frequency' ? 'frequency' : 'teachers';
+  setupSubTab = ['frequency','teacherappraisal'].includes(tab) ? tab : 'teachers';
   frequencyMsg = '';
   if (setupSubTab === 'frequency') refreshFrequencySetupData().then(() => render());
   else render();
@@ -15146,6 +15146,7 @@ function renderClassFrequencyTeacher(teacher) {
 function renderSetup() {
 
   if (setupSubTab === 'frequency') return renderClassFrequencyAdmin();
+  if (setupSubTab === 'teacherappraisal') return `<div class="card"><div class="row-form" style="margin:0 0 12px;gap:8px"><button class="btn-small" onclick="setSetupSubTab('teachers')">Teachers &amp; Subjects</button><button class="btn-small" onclick="setSetupSubTab('frequency')">Class Frequency</button><button class="btn-primary" onclick="setSetupSubTab('teacherappraisal')">Teacher Appraisal</button></div><h2>Teacher Appraisal Configuration</h2><div class="hint">Manage appraisal categories, criteria, scoring formulas, attendance deadlines, grace periods, deductions, rating bands and configuration versions.</div><iframe src="teacher-appraisal/index.html?view=setup&amp;v=20261110-appraisal1" title="Teacher Appraisal Configuration" style="display:block;width:100%;height:calc(100vh - 230px);min-height:900px;border:0;background:var(--paper);margin-top:12px" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
   // ================= TEACHERS =================
   const activeTeacherOpts = byName(data.teachers.filter(t=>!t.archived)).map(t=>`<option value="${t.id}" ${selectedTeacherId===t.id?'selected':''}>${esc(teacherLabel(t))}</option>`).join('');
   const archivedTeacherOpts = byName(data.teachers.filter(t=>t.archived)).map(t=>`<option value="${t.id}" ${selectedTeacherId===t.id?'selected':''}>${esc(teacherLabel(t))}</option>`).join('');
@@ -15315,6 +15316,7 @@ function renderSetup() {
       <div class="row-form" style="margin:0;gap:8px">
         <button class="${setupSubTab==='teachers'?'btn-primary':'btn-small'}" onclick="setSetupSubTab('teachers')">Teachers &amp; Subjects</button>
         <button class="${setupSubTab==='frequency'?'btn-primary':'btn-small'}" onclick="setSetupSubTab('frequency')">Class Frequency</button>
+        <button class="${setupSubTab==='teacherappraisal'?'btn-primary':'btn-small'}" onclick="setSetupSubTab('teacherappraisal')">Teacher Appraisal</button>
       </div>
     </div>`;
   return setupTabsHtml + teacherBlock1 + teacherManageBlock;
@@ -27546,6 +27548,7 @@ function render() {
       ['studyplans', 'Study Plans'],
       ['homework', 'Homework'],
       ['qbmonitoring', 'Question Bank Monitoring'],
+      ['teacherappraisal', 'Teacher Appraisal'],
     ]},
     { label: 'Learning', tabs: [
       ['knowledgearena', 'Knowledge Arena'],
@@ -27599,6 +27602,7 @@ function render() {
 
   let body = '';
   if (currentTab === 'dashboard') body = renderDashboard();
+  else if (currentTab === 'teacherappraisal') body = `<div class="card" style="padding:0;overflow:hidden"><iframe src="teacher-appraisal/index.html?v=20261110-appraisal1" title="Teacher Appraisal" style="display:block;width:100%;height:calc(100vh - 150px);min-height:900px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
   else if (currentTab === 'teacherperformance') body = `<div class="card" style="padding:0;overflow:hidden"><iframe src="teacher-performance-intelligence/index.html" title="Teacher Performance Intelligence" style="display:block;width:100%;height:calc(100vh - 150px);min-height:820px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
   else if (currentTab === 'revenueintelligence') body = `<div class="card" style="padding:0;overflow:hidden"><iframe src="revenue-intelligence/index.html" title="Revenue Intelligence" style="display:block;width:100%;height:calc(100vh - 150px);min-height:900px;border:0;background:var(--paper)" loading="lazy"></iframe></div>`;
   else if (currentTab === 'studentengagement') body = `<div class="card" style="padding:0;overflow:hidden"><iframe src="student-engagement-intelligence/index.html" title="Student Engagement Intelligence" style="display:block;width:100%;height:calc(100vh - 150px);min-height:900px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
@@ -27721,7 +27725,7 @@ async function initApp() {
 
   // Restore tab from URL hash (e.g. app.libeducation.com/#payroll)
   const hashTab = tabFromHash(location.hash.replace('#', ''));
-  const validTabs = ['dashboard','students','teachers','subjects','schedule','fees','expenses','payroll','reports','wixbookings','audit','ai','users','admins','parents','setup','support','settings','homework','superadmin','admissionsintelligence'];
+  const validTabs = ['dashboard','students','teachers','subjects','schedule','fees','expenses','payroll','reports','wixbookings','audit','ai','users','admins','parents','setup','support','settings','homework','superadmin','admissionsintelligence','teacherappraisal'];
   if (hashTab && validTabs.includes(hashTab)) currentTab = hashTab;
   // Deep link: #rates-fees → student portal with Rates & Fees panel open
   if (hashTab === 'rates-fees') {
