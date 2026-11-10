@@ -15,6 +15,7 @@ async function read(table,cols,order='id'){
  let all=[],from=0;while(true){const r=await db.from(table).select(cols).order(order,{ascending:false}).range(from,from+999);if(r.error)throw new Error(table+': '+r.error.message);all=all.concat(r.data||[]);if(!r.data||r.data.length<1000)break;from+=1000;if(from>10000)throw new Error(table+' exceeded the safe read limit');}return all;
 }
 function msg(s,bad){root.innerHTML='<main class="sei-shell"><div class="sei-message">'+(bad?'<b>Unable to open Student Engagement Intelligence</b><br>':'')+esc(s)+'</div></main>';}
+function dedupSchedules(rows){const groups=new Map();rows.forEach(x=>{const k=[x.student_id,x.subject_id,x.date,x.class_type].join('|');if(!groups.has(k))groups.set(k,[]);groups.get(k).push(x);});return [...groups.values()].map(g=>g.slice().sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')))[0]);}
 function flagsFor(s){
  const out=[],en=enrolments.filter(e=>e.student_id===s.id);
  en.forEach(e=>{
@@ -22,7 +23,7 @@ function flagsFor(s){
   const exists=plans.some(p=>p.student_id===s.id&&p.subject_id===e.subject_id);
   if(!exists)out.push({type:'Study Plan Missing',subject_id:e.subject_id,date:start,reason:'No study plan for this enrolled subject after the 7-day grace period',resolution:'Clears when a matching student + subject study plan is created'});
  });
- const sc=schedules.filter(x=>x.student_id===s.id&&x.status==='Pending'&&x.date<today());
+ const sc=dedupSchedules(schedules.filter(x=>x.student_id===s.id&&x.status==='Pending'&&x.date<today()));
  sc.forEach(x=>{
   const linked=x.linked_session_id?sessions.find(z=>z.id===x.linked_session_id):null;
   if(linked&&linked.status==='Present')return;
@@ -43,9 +44,9 @@ function currentData(){
  const lastLogin=new Map();mapped.forEach(p=>{const l=logins.filter(x=>x.user_id===p.id&&x.role==='Student'&&x.event==='login').sort((a,b)=>b.created_at.localeCompare(a.created_at))[0];if(l)lastLogin.set(p.linked_student_id,l);});
  const allFlags=[];active.forEach(s=>{const fs=flagsFor(s);if(fs.length)allFlags.push({student:s,flags:fs});});
  const past=schedules.filter(x=>x.status==='Pending'&&x.date<today());
- const overdue=past.filter(x=>{const linked=x.linked_session_id?sessions.find(z=>z.id===x.linked_session_id):null;return !(linked&&linked.status==='Present');});
- const three=[];for(let i=2;i>=0;i--){const d=new Date(today()+'T00:00:00');d.setDate(1);d.setMonth(d.getMonth()-i);const k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');const ss=sessions.filter(x=>String(x.date).slice(0,7)===k);const present=ss.filter(x=>x.status==='Present').length,absent=ss.filter(x=>x.status==='Absent').length;three.push({key:k,present,absent,missing:ss.filter(x=>!['Present','Absent'].includes(x.status)).length,rate:present+absent?Math.round(present/(present+absent)*100):null});}
- const six=[];for(let i=5;i>=0;i--){const d=new Date(today()+'T00:00:00');d.setDate(1);d.setMonth(d.getMonth()-i);const k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');const ids=new Set(logins.filter(l=>l.role==='Student'&&l.event==='login'&&String(l.created_at).slice(0,7)===k).map(l=>l.user_id));six.push({key:k,events:logins.filter(l=>l.role==='Student'&&l.event==='login'&&String(l.created_at).slice(0,7)===k).length,students:ids.size});}
+ const overdue=dedupSchedules(past).filter(x=>{const linked=x.linked_session_id?sessions.find(z=>z.id===x.linked_session_id):null;return !(linked&&linked.status==='Present');});
+ const three=[];for(let i=2;i>=0;i--){const d=new Date(month+'-01T00:00:00');d.setMonth(d.getMonth()-i);const k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');const ss=sessions.filter(x=>String(x.date).slice(0,7)===k);const present=ss.filter(x=>x.status==='Present').length,absent=ss.filter(x=>x.status==='Absent').length;three.push({key:k,present,absent,missing:ss.filter(x=>!['Present','Absent'].includes(x.status)).length,rate:present+absent?Math.round(present/(present+absent)*100):null});}
+ const six=[];for(let i=5;i>=0;i--){const d=new Date(month+'-01T00:00:00');d.setMonth(d.getMonth()-i);const k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');const ids=new Set(logins.filter(l=>l.role==='Student'&&l.event==='login'&&String(l.created_at).slice(0,7)===k).map(l=>l.user_id));six.push({key:k,events:logins.filter(l=>l.role==='Student'&&l.event==='login'&&String(l.created_at).slice(0,7)===k).length,students:ids.size});}
  const selected=logins.filter(l=>l.role==='Student'&&l.event==='login'&&String(l.created_at).slice(0,7)===month);
  const monthIds=new Set(selected.map(l=>l.user_id));
  const inactiveInMonth=mapped.filter(p=>!monthIds.has(p.id)).length;
@@ -113,7 +114,7 @@ async function load(){
   ['subjects','id,name','name'],
   ['profiles','id,role,linked_student_id,archived','id'],
   ['login_log','id,user_id,username,role,event,created_at','created_at'],
-  ['scheduled_classes','id,date,student_id,teacher_id,subject_id,class_type,status,linked_session_id','date'],
+  ['scheduled_classes','id,date,student_id,teacher_id,subject_id,class_type,status,linked_session_id,created_at','date'],
   ['sessions','id,date,student_id,teacher_id,subject_id,class_type,status','date'],
   ['student_subjects','id,student_id,subject_id,enrolled_at,created_at','created_at'],
   ['study_plans','id,student_id,subject_id,created_at,updated_at','updated_at'],
