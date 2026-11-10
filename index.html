@@ -22347,6 +22347,8 @@ function renderTeacherPortal() {
   const teacherTabGroups = [
     { label: 'Teaching', tabs: [
       ['myfrequency', 'My Students Class Frequency'],
+    ['demoanalysis', 'My Demo Analysis'],
+      ['demoanalysis', 'My Demo Analysis'],
       ['schedule', 'Class Schedule'],
       ['frequency', 'Class Frequency Setup'],
       ['students', 'My Students'],
@@ -22434,6 +22436,9 @@ function teacherPortalBodyHtml(teacher) {
   }
   if (teacherPortalTab === 'myfrequency') {
     return renderTeacherMyStudentsClassFrequency(teacher);
+  }
+  if (teacherPortalTab === 'demoanalysis') {
+    return `<div class="card" style="padding:0;overflow:hidden"><iframe src="teacher-demo-analysis/index.html" title="My Demo Analysis" style="display:block;width:100%;height:calc(100vh - 150px);min-height:780px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
   }
   if (teacherPortalTab === 'schedule') {
     return renderTeacherSchedule(teacher, false);
