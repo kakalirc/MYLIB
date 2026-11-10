@@ -33,7 +33,6 @@
     const bookings=(all.bookings||[]).filter(x=>inRange(x,'submitted_at'));
     const registrations=(all.registrations||[]).filter(x=>!x.archived && inRange(x,'created_at'));
     const calls=all.calls||[], demos=all.demos||[];
-    const bookedDemoIds=new Set((all.bookings||[]).map(x=>x.demo_log_id).filter(Boolean));
     const records=[];
     bookings.forEach(x=>{
       const history=calls.filter(c=>c.booking_id===x.id).sort((a,b)=>new Date(b.called_at)-new Date(a.called_at));
@@ -46,13 +45,10 @@
       const history=calls.filter(call=>!!x.student_id&&call.student_id===x.student_id).sort((a,b)=>new Date(b.called_at)-new Date(a.called_at));
       records.push({key:'registration:'+x.id,id:x.id,kind:'Registration',source:x.heard_from||'Unknown',date:x.created_at,name:x.student_name,phone:x.parent_mobile||x.student_mobile,email:x.email,interest:Array.isArray(x.subjects)?x.subjects.join(', '):'',mode:x.mode_preference,status:x.status||'—',studentId:x.student_id||null,registration:x,calls:history,followed:history.length>0,booked:false,completed:norm(x.status)==='accepted',admitted:!!x.student_id||norm(x.status)==='accepted'});
     });
-    demos.filter(d=>!bookedDemoIds.has(d.id)&&inRange(d,'created_at')).forEach(x=>{
-      records.push({key:'demo:'+x.id,id:x.id,kind:'Teacher-entered demo',source:'Teacher-entered demo',date:x.created_at||x.date,name:x.student_name,phone:x.parent_mobile,interest:'',status:x.status||'—',studentId:x.linked_student_id||null,log:x,calls:[],followed:false,booked:true,completed:!!x.done_at||['done','converted'].includes(norm(x.status)),admitted:!!x.linked_student_id||norm(x.status)==='converted'});
-    });
-    // Students created directly in LIB, or whose original acquisition record is not present in the source tables.
+    // Students with no linked booking or registration are treated as direct admissions. Demo logs are supporting activity only.
     const linkedIds=new Set(records.map(r=>r.studentId).filter(Boolean));
-    (all.students||[]).filter(s=>!s.archived&&s.onboarding_source&&inRange(s,'created_at')&&!linkedIds.has(s.id)).forEach(s=>{
-      records.push({key:'student:'+s.id,id:s.id,kind:'Direct student admission',source:s.onboarding_source||'Direct admission',date:s.created_at,name:s.name,phone:s.mobile_number,email:s.email,interest:'',status:'Admitted',studentId:s.id,student:s,calls:[],followed:false,booked:false,completed:false,admitted:true});
+    (all.students||[]).filter(s=>!s.archived&&inRange(s,'created_at')&&!linkedIds.has(s.id)).forEach(s=>{
+      records.push({key:'student:'+s.id,id:s.id,kind:'Direct admission',source:s.onboarding_source||'Direct admission',date:s.created_at,name:s.name,phone:s.mobile_number,email:s.email,interest:'',status:'Admitted',studentId:s.id,student:s,calls:[],followed:false,booked:false,completed:false,admitted:true});
     });
     return records.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
   }
@@ -85,7 +81,7 @@
   function openStage(stage) {
     activeStage=stage;
     const records=buildRecords(), selected=stageRecords(records,stage);
-    const labels={all:'All acquisition records',followup:'Follow-up recorded',demo:'Demo booked / recorded',completed:'Demo completed or registration accepted',admissions:'Admissions',open:'Open prospects',lost:'Lost / cancelled / rejected'};
+    const labels={all:'All acquisition records',followup:'Follow-up recorded',demo:'Demo booked',completed:'Demo completed or registration accepted',admissions:'Admissions',open:'Open prospects',lost:'Lost / cancelled / rejected'};
     const rows=selected.map(recordRow).join('');
     const html='<div class="ai-modal-backdrop" data-close-modal="1"><section class="ai-modal" role="dialog" aria-modal="true" aria-label="'+esc(labels[stage]||'Prospect records')+'"><header class="ai-modal-head"><div><div class="ai-eyebrow">PROSPECT RECORDS</div><h2>'+esc(labels[stage]||'Records')+'</h2><p>'+selected.length+' record(s) · '+(stage==='admissions'?'Unique linked students':'Source records; bookings are not deduplicated')+'</p></div><button class="ai-close" type="button" data-close-modal="1" aria-label="Close">×</button></header><div class="ai-table-wrap"><table><thead><tr><th>Date</th><th>Prospect / student</th><th>Route</th><th>Interest</th><th>Source</th><th>Status & history</th></tr></thead><tbody>'+(rows||'<tr><td colspan="6" class="ai-empty">No matching records.</td></tr>')+'</tbody></table></div></section></div>';
     root.insertAdjacentHTML('beforeend',html);
@@ -101,9 +97,9 @@
     const recent=records.slice(0,12);
     root.innerHTML='<main class="ai-shell">'
       +'<header class="ai-header"><div><div class="ai-eyebrow">LIB EDUCATION · ADMIN</div><h1>Admissions Intelligence</h1><p>One view of acquisition, follow-ups, demos and admissions across recorded LIB sources.</p></div><div class="ai-controls"><label for="ai-range">Period</label><select id="ai-range"><option value="30" '+(range==='30'?'selected':'')+'>Last 30 days</option><option value="90" '+(range==='90'?'selected':'')+'>Last 90 days</option><option value="all" '+(range==='all'?'selected':'')+'>All records</option></select><button id="ai-refresh">Refresh</button></div></header>'
-      +'<section class="ai-grid">'+metric('All acquisition records',total,'Bookings, registrations, standalone demos and direct admissions','all')+metric('Follow-up recorded',followed,'Booking call history exists','followup')+metric('Demo booked / recorded',demo,'Bookings and standalone teacher demos','demo')+metric('Unique admissions',admissions.length,'Distinct linked student IDs','admissions')+'</section>'
+      +'<section class="ai-grid">'+metric('All acquisition records',total,'Demo bookings, registrations and direct admissions','all')+metric('Follow-up recorded',followed,'Booking call history exists','followup')+metric('Demo booked / recorded',demo,'Demo bookings with linked demo activity','demo')+metric('Unique admissions',admissions.length,'Distinct linked student IDs','admissions')+'</section>'
       +'<section class="ai-panel ai-funnel"><div class="ai-section-heading"><div><h2>Unified admissions funnel</h2><p class="ai-sub">Click any stage to inspect its underlying records. Stages reflect recorded milestones, not an assumed linear path.</p></div></div>'
-      +'<div class="ai-funnel-grid">'+[['All prospects / records',total,'all'],['Follow-up recorded',followed,'followup'],['Demo booked / recorded',demo,'demo'],['Demo completed / registration accepted',completed,'completed'],['Admissions',admissions.length,'admissions']].map((s,i)=>'<button type="button" class="ai-funnel-stage" data-stage="'+s[2]+'"><span class="ai-stage-name">'+esc(s[0])+'</span><strong>'+s[1]+'</strong><span class="ai-stage-action">View records ↗</span></button>').join('')+'</div><div class="ai-outcomes"><button type="button" data-stage="open">Open prospects <b>'+open+'</b></button><button type="button" data-stage="lost">Lost / cancelled / rejected <b>'+lost+'</b></button></div></section>'
+      +'<div class="ai-funnel-grid">'+[['All prospects / records',total,'all'],['Follow-up recorded',followed,'followup'],['Demo booked',demo,'demo'],['Demo completed / registration accepted',completed,'completed'],['Admissions',admissions.length,'admissions']].map((s,i)=>'<button type="button" class="ai-funnel-stage" data-stage="'+s[2]+'"><span class="ai-stage-name">'+esc(s[0])+'</span><strong>'+s[1]+'</strong><span class="ai-stage-action">View records ↗</span></button>').join('')+'</div><div class="ai-outcomes"><button type="button" data-stage="open">Open prospects <b>'+open+'</b></button><button type="button" data-stage="lost">Lost / cancelled / rejected <b>'+lost+'</b></button></div></section>'
       +'<section class="ai-panels"><article class="ai-panel"><h2>Acquisition source performance</h2><p class="ai-sub">Source values from existing records; missing attribution remains Unknown.</p>'+barRows(sourceRows,total)+'</article>'
       +'<article class="ai-panel"><h2>Record types</h2><p class="ai-sub">Separate routes into the LIB admissions journey.</p>'+barRows(typeRows,total)+'</article>'
       +'<article class="ai-panel"><h2>Course interest</h2>'+barRows(subjectRows,records.filter(r=>r.interest).length)+'</article>'
