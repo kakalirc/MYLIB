@@ -11,8 +11,21 @@ const dateText=v=>v?new Date(String(v).slice(0,10)+'T00:00:00').toLocaleDateStri
 const dayDiff=v=>Math.floor((new Date(today()+'T00:00:00')-new Date(String(v).slice(0,10)+'T00:00:00'))/86400000);
 const name=(list,id)=>{const x=list.find(z=>String(z.id)===String(id));return x?x.name:'Unknown';};
 const monthName=k=>new Date(k+'-01T00:00:00').toLocaleDateString('en-IN',{month:'short',year:'2-digit'});
-async function read(table,cols,order='id'){
- let all=[],from=0;while(true){const r=await db.from(table).select(cols).order(order,{ascending:false}).range(from,from+999);if(r.error)throw new Error(table+': '+r.error.message);all=all.concat(r.data||[]);if(!r.data||r.data.length<1000)break;from+=1000;if(from>10000)throw new Error(table+' exceeded the safe read limit');}return all;
+async function read(table,cols,order='id',filters=[]){
+ let all=[],from=0;while(true){
+  let q=db.from(table).select(cols);
+  filters.forEach(([column,value])=>{q=q.eq(column,value);});
+  const request=q.order(order,{ascending:false}).range(from,from+499);
+  let timer;
+  const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(table+' query timed out after 20 seconds')),20000);});
+  let r;try{r=await Promise.race([request,timeout]);}finally{clearTimeout(timer);}
+  if(r.error)throw new Error(table+': '+r.error.message);
+  all=all.concat(r.data||[]);
+  if(!r.data||r.data.length<500)break;
+  from+=500;
+  if(from>10000)throw new Error(table+' exceeded the safe read limit');
+ }
+ return all;
 }
 function msg(s,bad){root.innerHTML='<main class="sei-shell"><div class="sei-message">'+(bad?'<b>Unable to open Student Engagement Intelligence</b><br>':'')+esc(s)+'</div></main>';}
 function dedupSchedules(rows){const groups=new Map();rows.forEach(x=>{const k=[x.student_id,x.subject_id,x.date,x.class_type].join('|');if(!groups.has(k))groups.set(k,[]);groups.get(k).push(x);});return [...groups.values()].map(g=>g.slice().sort((a,b)=>Number(!!b.linked_session_id)-Number(!!a.linked_session_id)||String(b.created_at||'').localeCompare(String(a.created_at||'')))[0]);}
@@ -112,8 +125,8 @@ async function load(){
   ['students','id,name,archived,student_code,grade_id,created_at','name'],
   ['grades','id,name,archived','name'],
   ['subjects','id,name','name'],
-  ['profiles','id,role,linked_student_id,archived','id'],
-  ['login_log','id,user_id,username,role,event,created_at','created_at'],
+  ['profiles','id,role,linked_student_id,archived','id',[['role','Student']]],
+  ['login_log','id,user_id,username,role,event,created_at','created_at',[['role','Student'],['event','login']]],
   ['scheduled_classes','id,date,student_id,teacher_id,subject_id,class_type,status,linked_session_id,created_at','date'],
   ['sessions','id,date,student_id,teacher_id,subject_id,class_type,status','date'],
   ['student_subjects','id,student_id,subject_id,enrolled_at,created_at','created_at'],
@@ -121,7 +134,13 @@ async function load(){
   ['homework','id,student_id,subject_id,title,due_date,assigned_date,status,submitted_at,reviewed_at,created_at,updated_at','created_at'],
   // KA attempts are omitted because current RLS permits owner-only reads, not Admin reads.
  ];
- const results=await Promise.all(cols.map(x=>read(x[0],x[1],x[2])));
+ let completed=0;
+ const results=await Promise.all(cols.map(async x=>{
+  const data=await read(x[0],x[1],x[2],x[3]||[]);
+  completed++;
+  msg('Loading student engagement records… '+completed+' of '+cols.length+' datasets ready.');
+  return data;
+ }));
  [students,grades,subjects,profiles,logins,schedules,sessions,enrolments,plans,homework]=results;attempts=[];
  render();
 }
