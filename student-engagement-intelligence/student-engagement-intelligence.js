@@ -3,8 +3,8 @@
 'use strict';
 const URL='https://kqkojscbaycolaioyarh.supabase.co',KEY='sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq',root=document.getElementById('sei-app');
 let db,students=[],grades=[],subjects=[],profiles=[],logins=[],schedules=[],sessions=[],enrolments=[],plans=[],homework=[],attempts=[];
-let month=localMonth(),view='attention',studentView='flagged',category='all',grade='all',subject='all',search='',sort='flags',drawerId=null;
 const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date());
+let month=localMonth(),view='attention',studentView='flagged',category='all',grade='all',subject='all',search='',sort='flags',drawerId=null;
 function localMonth(){return today().slice(0,7)}
 const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const dateText=v=>v?new Date(String(v).slice(0,10)+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—';
