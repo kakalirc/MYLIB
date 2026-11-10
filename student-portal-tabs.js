@@ -76,6 +76,16 @@
           if (who) who.insertAdjacentElement('afterend', link);
           else topbar.appendChild(link);
         }
+        if (topbar && !document.getElementById('libAdmissionsIntelligenceLink')) {
+          var admissionsLink = document.createElement('a');
+          admissionsLink.id = 'libAdmissionsIntelligenceLink';
+          admissionsLink.className = 'btn-small';
+          admissionsLink.href = new URL('admissions-intelligence/index.html', document.baseURI).href;
+          admissionsLink.textContent = 'Admissions Intelligence';
+          var kaLink = document.getElementById('libKnowledgeArenaAdminLink');
+          if (kaLink) kaLink.insertAdjacentElement('afterend', admissionsLink);
+          else topbar.appendChild(admissionsLink);
+        }
       }
       if (typeof currentRole !== 'undefined' && currentRole === 'Student') {
         Array.prototype.forEach.call(document.querySelectorAll('#app .card'), function (card) {
