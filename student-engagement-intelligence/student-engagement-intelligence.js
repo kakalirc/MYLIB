@@ -49,7 +49,7 @@ function currentData(){
  const six=[];for(let i=5;i>=0;i--){const d=new Date(month+'-01T00:00:00');d.setMonth(d.getMonth()-i);const k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');const ids=new Set(logins.filter(l=>l.role==='Student'&&l.event==='login'&&String(l.created_at).slice(0,7)===k).map(l=>l.user_id));six.push({key:k,events:logins.filter(l=>l.role==='Student'&&l.event==='login'&&String(l.created_at).slice(0,7)===k).length,students:ids.size});}
  const selected=logins.filter(l=>l.role==='Student'&&l.event==='login'&&String(l.created_at).slice(0,7)===month);
  const monthIds=new Set(selected.map(l=>l.user_id));
- const inactiveInMonth=mapped.filter(p=>!monthIds.has(p.id)).length;
+ const inactiveInMonth=mapped.filter(p=>!monthIds.has(p.id)&&lastLogin.has(p.linked_student_id)).length;
  const loginMonthStudents=monthIds.size;
  const dq=[];
  past.forEach(x=>{const linked=x.linked_session_id?sessions.find(z=>z.id===x.linked_session_id):null;if(linked&&linked.status==='Present')dq.push({type:'Pending schedule linked to Present session',id:x.id,detail:name(students,x.student_id)+' · '+dateText(x.date)});});
@@ -74,7 +74,7 @@ function render(){
  const gradeOpts=grades.map(g=>'<option value="'+esc(g.id)+'" '+(grade===g.id?'selected':'')+'>'+esc(g.name)+'</option>').join('');
  const subjectOpts=subjects.map(s=>'<option value="'+esc(s.id)+'" '+(subject===s.id?'selected':'')+'>'+esc(s.name)+'</option>').join('');
  const loginUnavailable=d.mapped.length-d.lastLogin.size;
- const homeworkSubmitted=homework.filter(h=>h.submitted_at).length,hwAssigned=homework.length;
+ const homeworkSubmitted=homework.filter(h=>h.submitted_at).length,hwAssigned=homework.length,homeworkReview=homework.filter(h=>h.submitted_at&&!h.reviewed_at&&dayDiff(h.submitted_at)>=2).length,studyPlanMissing=enrolments.filter(e=>{const start=e.enrolled_at||e.created_at;return start&&dayDiff(start)>=7&&!plans.some(p=>p.student_id===e.student_id&&p.subject_id===e.subject_id);}).length;
  root.innerHTML='<main class="sei-shell"><header class="sei-head"><div><div class="sei-eyebrow">LIB EDUCATION · ADMIN ANALYTICS</div><h1>Student Engagement Intelligence</h1><p>Read-only operational view of attendance, overdue classes, login activity and learning activity.</p></div><button id="sei-refresh">Refresh data</button></header>'+
  '<section class="sei-filters"><label>Month<input type="month" id="sei-month" value="'+esc(month)+'" max="'+today().slice(0,7)+'"></label><label>Grade<select id="sei-grade"><option value="all">All grades</option>'+gradeOpts+'</select></label><label>Subject<select id="sei-subject"><option value="all">All subjects</option>'+subjectOpts+'</select></label><label>Student search<input id="sei-search" placeholder="Name or Student ID" value="'+esc(search)+'"></label></section>'+
  '<section class="sei-kpis">'+kpi('Active students',d.active.length,'Non-archived student records')+kpi('Students needing attention',d.flags.length,'Current independent flags')+kpi('Currently overdue classes',d.overdue.length,'Pending schedules before today')+kpi('Student logins · '+monthName(cur),monthEvents,'Successful Student login events')+'</section>'+
