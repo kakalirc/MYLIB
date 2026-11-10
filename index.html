@@ -19658,6 +19658,120 @@ function renderStudyPlanReadOnly(student) {
     ${planCards}
   </div>`;
 }
+// Student-facing attendance summary. Uses the same record definitions as the
+// Class Delivery / Teacher Performance analytics: Present and Absent sessions,
+// plus current Pending schedule rows whose dates are before today.
+let studentAttendancePeriod = 'month';
+let studentAttendanceDetailsOpen = false;
+let studentAttendanceHistoryMonth = todayStr.slice(0,7);
+let studentAttendanceHistorySubject = 'all';
+let studentAttendanceStateStudentId = '';
+
+function studentAttendanceEnsureState(studentId) {
+  if (studentAttendanceStateStudentId !== studentId) {
+    studentAttendanceStateStudentId = studentId;
+    studentAttendancePeriod = 'month';
+    studentAttendanceDetailsOpen = false;
+    studentAttendanceHistoryMonth = todayStr.slice(0,7);
+    studentAttendanceHistorySubject = 'all';
+  }
+}
+function studentAttendanceRecords(student) {
+  const sessions = data.sessions.filter(s => s.studentId === student.id && (s.status === 'Present' || s.status === 'Absent'));
+  const overdue = scheduledClasses.filter(s => s.studentId === student.id && s.status === 'Pending' && s.date < todayStr);
+  return { sessions, overdue };
+}
+function studentAttendanceForPeriod(records, period, subjectId) {
+  const inPeriod = date => period === 'all' || String(date || '').slice(0,7) === todayStr.slice(0,7);
+  const sessions = records.sessions.filter(s => inPeriod(s.date) && (!subjectId || s.subjectId === subjectId));
+  const overdue = records.overdue.filter(s => inPeriod(s.date) && (!subjectId || s.subjectId === subjectId));
+  const present = sessions.filter(s => s.status === 'Present').length;
+  const absent = sessions.filter(s => s.status === 'Absent').length;
+  const overdueCount = overdue.length;
+  const denominator = present + absent + overdueCount;
+  return { present, absent, overdue: overdueCount, denominator, rate: denominator ? Math.round(present / denominator * 1000) / 10 : null };
+}
+function studentAttendanceSetPeriod(period) {
+  if (period !== 'month' && period !== 'all') return;
+  studentAttendancePeriod = period;
+  render();
+}
+function studentAttendanceToggleDetails() {
+  studentAttendanceDetailsOpen = !studentAttendanceDetailsOpen;
+  render();
+}
+function studentAttendanceSetHistoryMonth(value) {
+  studentAttendanceHistoryMonth = value || 'all';
+  render();
+}
+function studentAttendanceSetHistorySubject(value) {
+  studentAttendanceHistorySubject = value || 'all';
+  render();
+}
+function studentAttendanceBarHtml(metrics) {
+  if (!metrics.denominator) return '<div class="student-attendance-track is-empty"></div>';
+  const p = metrics.present / metrics.denominator * 100;
+  const a = metrics.absent / metrics.denominator * 100;
+  const o = metrics.overdue / metrics.denominator * 100;
+  return '<div class="student-attendance-track" role="img" aria-label="' + p.toFixed(1) + '% present, ' + a.toFixed(1) + '% absent, ' + o.toFixed(1) + '% overdue">'
+    + '<span class="present" style="width:' + p + '%"></span>'
+    + '<span class="absent" style="width:' + a + '%"></span>'
+    + '<span class="overdue" style="width:' + o + '%"></span></div>';
+}
+function studentAttendanceHtml(student) {
+  studentAttendanceEnsureState(student.id);
+  const records = studentAttendanceRecords(student);
+  const period = studentAttendancePeriod;
+  const overall = studentAttendanceForPeriod(records, period, '');
+  const enrolled = subjectsForStudent(student.id).filter((s, i, all) => s && all.findIndex(x => x.id === s.id) === i)
+    .sort((a,b) => String(a.name).localeCompare(String(b.name)));
+  const monthLabel = new Date(todayStr.slice(0,7) + '-01T00:00:00').toLocaleDateString('en-IN', { month:'long', year:'numeric' });
+  const subjectCards = enrolled.map(subj => {
+    const m = studentAttendanceForPeriod(records, period, subj.id);
+    const rate = m.rate == null ? '—' : m.rate + '%';
+    return '<article class="student-attendance-subject">'
+      + '<div class="student-attendance-subject-head"><b>' + esc(subj.name) + '</b><strong>' + rate + '</strong></div>'
+      + (m.denominator ? studentAttendanceBarHtml(m) : '<div class="student-attendance-no-data">No attendance data yet</div>')
+      + (m.denominator ? '<div class="student-attendance-counts"><span>' + m.present + ' Present</span><span>' + m.absent + ' Absent</span><span>' + m.overdue + ' Overdue</span></div>' : '')
+      + '</article>';
+  }).join('');
+  let historyRows = records.sessions.map(s => ({ date:s.date, subjectId:s.subjectId, teacherId:s.teacherId, classType:s.classType, status:s.status }));
+  historyRows = historyRows.concat(records.overdue.map(s => ({ date:s.date, subjectId:s.subjectId, teacherId:s.teacherId, classType:s.classType, status:'Pending Overdue' })));
+  const historySubjectIds = [...new Set(historyRows.map(r => r.subjectId).filter(Boolean))];
+  const historySubjects = historySubjectIds.map(id => ({ id, name: subjectName(id) })).sort((a,b) => String(a.name).localeCompare(String(b.name)));
+  const months = [...new Set(historyRows.map(r => String(r.date || '').slice(0,7)).filter(x => /^\d{4}-\d{2}$/.test(x)))].sort().reverse();
+  if (!months.includes(todayStr.slice(0,7))) months.unshift(todayStr.slice(0,7));
+  const selectedMonth = studentAttendanceHistoryMonth;
+  const monthOptions = '<option value="all"' + (selectedMonth === 'all' ? ' selected' : '') + '>All dates</option>'
+    + months.map(m => '<option value="' + m + '"' + (selectedMonth === m ? ' selected' : '') + '>' + esc(new Date(m + '-01T00:00:00').toLocaleDateString('en-IN',{month:'long',year:'numeric'})) + '</option>').join('');
+  const subjectOptions = '<option value="all"' + (studentAttendanceHistorySubject === 'all' ? ' selected' : '') + '>All subjects</option>'
+    + historySubjects.map(s => '<option value="' + esc(s.id) + '"' + (studentAttendanceHistorySubject === s.id ? ' selected' : '') + '>' + esc(s.name) + '</option>').join('');
+  const visibleHistory = historyRows.filter(r =>
+    (selectedMonth === 'all' || String(r.date || '').slice(0,7) === selectedMonth) &&
+    (studentAttendanceHistorySubject === 'all' || r.subjectId === studentAttendanceHistorySubject)
+  ).sort((a,b) => String(b.date).localeCompare(String(a.date)) || String(a.subjectId).localeCompare(String(b.subjectId)));
+  const historyHtml = visibleHistory.length
+    ? '<div class="student-attendance-history-wrap"><table class="student-attendance-history"><thead><tr><th>Date</th><th>Subject</th><th>Teacher</th><th>Class type</th><th>Status</th></tr></thead><tbody>'
+      + visibleHistory.map(r => '<tr><td>' + esc(dayDate(r.date)) + '</td><td>' + esc(subjectName(r.subjectId)) + '</td><td>' + esc(teacherName(r.teacherId)) + '</td><td>' + esc(r.classType || '—') + '</td><td><span class="student-attendance-status ' + (r.status === 'Present' ? 'is-present' : r.status === 'Absent' ? 'is-absent' : 'is-overdue') + '">' + esc(r.status) + '</span></td></tr>').join('')
+      + '</tbody></table></div>'
+    : '<div class="student-attendance-no-data">No attendance records for this selection.</div>';
+  return '<section class="card student-attendance-card" aria-labelledby="student-attendance-title">'
+    + '<div class="student-attendance-header"><div><h2 id="student-attendance-title">📊 My Attendance</h2><p>Track your attendance overall and by subject.</p></div>'
+    + '<div class="student-attendance-period" role="group" aria-label="Attendance period">'
+    + '<button type="button" class="' + (period === 'month' ? 'active' : '') + '" aria-pressed="' + (period === 'month') + '" onclick="studentAttendanceSetPeriod(\\'month\\')">This Month</button>'
+    + '<button type="button" class="' + (period === 'all' ? 'active' : '') + '" aria-pressed="' + (period === 'all') + '" onclick="studentAttendanceSetPeriod(\\'all\\')">All Time</button></div></div>'
+    + '<div class="student-attendance-period-label">' + (period === 'month' ? esc(monthLabel) : 'Since your first recorded class') + '</div>'
+    + '<div class="student-attendance-overall"><div><span>Overall attendance</span><strong>' + (overall.rate == null ? '—' : overall.rate + '%') + '</strong></div>'
+    + (overall.denominator ? studentAttendanceBarHtml(overall) : '<div class="student-attendance-no-data">No attendance data yet</div>')
+    + '<div class="student-attendance-counts"><span>' + overall.present + ' Present</span><span>' + overall.absent + ' Absent</span><span>' + overall.overdue + ' Pending Overdue</span></div></div>'
+    + '<h3 class="student-attendance-section-title">Subject-wise attendance</h3>'
+    + (subjectCards || '<div class="student-attendance-no-data">You are not currently enrolled in any subjects.</div>')
+    + '<button type="button" class="student-attendance-details-toggle" aria-expanded="' + studentAttendanceDetailsOpen + '" onclick="studentAttendanceToggleDetails()">' + (studentAttendanceDetailsOpen ? 'Hide attendance history' : 'View detailed attendance history') + ' <span aria-hidden="true">' + (studentAttendanceDetailsOpen ? '↑' : '→') + '</span></button>'
+    + (studentAttendanceDetailsOpen ? '<div class="student-attendance-details"><div class="student-attendance-filters"><label>Subject<select onchange="studentAttendanceSetHistorySubject(this.value)">' + subjectOptions + '</select></label><label>Period<select onchange="studentAttendanceSetHistoryMonth(this.value)">' + monthOptions + '</select></label></div>' + historyHtml + '</div>' : '')
+    + '<p class="student-attendance-footnote">Present counts towards attendance. Absent and Pending Overdue count against it. Future Pending classes are not included.</p>'
+    + '</section>';
+}
+
 function renderStudentPortal() {
   const student = data.students.find(s=>s.id===currentLinkedId);
   if (!student) {
@@ -19683,6 +19797,7 @@ function renderStudentPortal() {
     + studentBadgesHtml(student)
     + studentXpHtml(student)
     + studentDashboardStatsHtml(student)
+    + studentAttendanceHtml(student)
     + studentStreakHtml(student)
     + studentMilestoneBannerHtml(student)
     + studentMonthlyRecapHtml(student)
