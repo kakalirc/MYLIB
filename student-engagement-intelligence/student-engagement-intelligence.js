@@ -15,7 +15,7 @@ async function read(table,cols,order='id'){
  let all=[],from=0;while(true){const r=await db.from(table).select(cols).order(order,{ascending:false}).range(from,from+999);if(r.error)throw new Error(table+': '+r.error.message);all=all.concat(r.data||[]);if(!r.data||r.data.length<1000)break;from+=1000;if(from>10000)throw new Error(table+' exceeded the safe read limit');}return all;
 }
 function msg(s,bad){root.innerHTML='<main class="sei-shell"><div class="sei-message">'+(bad?'<b>Unable to open Student Engagement Intelligence</b><br>':'')+esc(s)+'</div></main>';}
-function dedupSchedules(rows){const groups=new Map();rows.forEach(x=>{const k=[x.student_id,x.subject_id,x.date,x.class_type].join('|');if(!groups.has(k))groups.set(k,[]);groups.get(k).push(x);});return [...groups.values()].map(g=>g.slice().sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')))[0]);}
+function dedupSchedules(rows){const groups=new Map();rows.forEach(x=>{const k=[x.student_id,x.subject_id,x.date,x.class_type].join('|');if(!groups.has(k))groups.set(k,[]);groups.get(k).push(x);});return [...groups.values()].map(g=>g.slice().sort((a,b)=>Number(!!b.linked_session_id)-Number(!!a.linked_session_id)||String(b.created_at||'').localeCompare(String(a.created_at||'')))[0]);}
 function flagsFor(s){
  const out=[],en=enrolments.filter(e=>e.student_id===s.id);
  en.forEach(e=>{
@@ -26,12 +26,12 @@ function flagsFor(s){
  const sc=dedupSchedules(schedules.filter(x=>x.student_id===s.id&&x.status==='Pending'&&x.date<today()));
  sc.forEach(x=>{
   const linked=x.linked_session_id?sessions.find(z=>z.id===x.linked_session_id):null;
-  if(linked&&linked.status==='Present')return;
+  if(linked&&['Present','Absent'].includes(linked.status))return;
   out.push({type:'Overdue Class',subject_id:x.subject_id,date:x.date,record:x,reason:'Scheduled date has passed and the schedule remains Pending',resolution:'Clears when marked Done, cancelled or formally rescheduled'});
  });
  const prof=profiles.find(p=>p.role==='Student'&&p.linked_student_id===s.id&&!p.archived);
  const events=prof?logins.filter(l=>l.user_id===prof.id&&l.role==='Student'&&l.event==='login').sort((a,b)=>b.created_at.localeCompare(a.created_at)):[];
- if(prof&&events.length&&dayDiff(events[0].created_at)>14)out.push({type:'Login Inactive',date:events[0].created_at,reason:'No successful Student login for more than 14 calendar days',resolution:'Clears on the next successful Student login'});
+ if(prof&&events.length&&dayDiff(events[0].created_at)>=14)out.push({type:'Login Inactive',date:events[0].created_at,reason:'No successful Student login for more than 14 calendar days',resolution:'Clears on the next successful Student login'});
  const hw=homework.filter(h=>h.student_id===s.id);
  hw.forEach(h=>{
   if(h.due_date&&!h.submitted_at&&h.due_date<today()&&!['cancelled','void','deleted'].includes(String(h.status||'').toLowerCase()))out.push({type:'Homework Submission Overdue',subject_id:h.subject_id,date:h.due_date,record:h,reason:'Due date passed and no submission is recorded',resolution:'Clears when submitted or otherwise resolved'});
@@ -44,7 +44,7 @@ function currentData(){
  const lastLogin=new Map();mapped.forEach(p=>{const l=logins.filter(x=>x.user_id===p.id&&x.role==='Student'&&x.event==='login').sort((a,b)=>b.created_at.localeCompare(a.created_at))[0];if(l)lastLogin.set(p.linked_student_id,l);});
  const allFlags=[];active.forEach(s=>{const fs=flagsFor(s);if(fs.length)allFlags.push({student:s,flags:fs});});
  const past=schedules.filter(x=>x.status==='Pending'&&x.date<today());
- const overdue=dedupSchedules(past).filter(x=>{const linked=x.linked_session_id?sessions.find(z=>z.id===x.linked_session_id):null;return !(linked&&linked.status==='Present');});
+ const overdue=dedupSchedules(past).filter(x=>{const linked=x.linked_session_id?sessions.find(z=>z.id===x.linked_session_id):null;return !(linked&&['Present','Absent'].includes(linked.status));});
  const three=[];for(let i=2;i>=0;i--){const d=new Date(month+'-01T00:00:00');d.setMonth(d.getMonth()-i);const k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');const ss=sessions.filter(x=>String(x.date).slice(0,7)===k);const present=ss.filter(x=>x.status==='Present').length,absent=ss.filter(x=>x.status==='Absent').length;three.push({key:k,present,absent,missing:ss.filter(x=>!['Present','Absent'].includes(x.status)).length,rate:present+absent?Math.round(present/(present+absent)*100):null});}
  const six=[];for(let i=5;i>=0;i--){const d=new Date(month+'-01T00:00:00');d.setMonth(d.getMonth()-i);const k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');const ids=new Set(logins.filter(l=>l.role==='Student'&&l.event==='login'&&String(l.created_at).slice(0,7)===k).map(l=>l.user_id));six.push({key:k,events:logins.filter(l=>l.role==='Student'&&l.event==='login'&&String(l.created_at).slice(0,7)===k).length,students:ids.size});}
  const selected=logins.filter(l=>l.role==='Student'&&l.event==='login'&&String(l.created_at).slice(0,7)===month);
@@ -52,7 +52,7 @@ function currentData(){
  const inactiveInMonth=mapped.filter(p=>!monthIds.has(p.id)&&lastLogin.has(p.linked_student_id)).length;
  const loginMonthStudents=monthIds.size;
  const dq=[];
- past.forEach(x=>{const linked=x.linked_session_id?sessions.find(z=>z.id===x.linked_session_id):null;if(linked&&linked.status==='Present')dq.push({type:'Pending schedule linked to Present session',id:x.id,detail:name(students,x.student_id)+' · '+dateText(x.date)});});
+ past.forEach(x=>{const linked=x.linked_session_id?sessions.find(z=>z.id===x.linked_session_id):null;if(linked&&['Present','Absent'].includes(linked.status))dq.push({type:'Pending schedule linked to Present session',id:x.id,detail:name(students,x.student_id)+' · '+dateText(x.date)});});
  schedules.filter(x=>!x.date).forEach(x=>dq.push({type:'Scheduled class missing date',id:x.id,detail:'Schedule '+x.id}));
  const dupe=new Map();schedules.filter(x=>x.status==='Pending').forEach(x=>{const k=[x.student_id,x.subject_id,x.date,x.class_type].join('|');dupe.set(k,(dupe.get(k)||0)+1);});dupe.forEach((n,k)=>{if(n>1)dq.push({type:'Potential duplicate pending schedules',id:k,detail:n+' records share student, subject, date and class type'});});
  return {active,mapped,lastLogin,flags:allFlags,overdue,three,six,selected,loginMonthStudents,inactiveInMonth,dq};
