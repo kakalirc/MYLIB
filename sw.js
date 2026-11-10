@@ -1,9 +1,7 @@
-// Minimal service worker. This app shows live financial/attendance data from
-// Supabase, so it deliberately does NOT cache API responses or app data —
-// that could show someone stale balances or payment records while offline,
-// which would be actively misleading for a real institute. Its only job is
-// to satisfy the browser's requirement that an installable PWA have a
-// registered service worker with a fetch handler.
+// Minimal service worker. The app uses live Supabase data and must never
+// cache API responses. Only same-origin navigation/assets are handled here.
+// Cross-origin requests (Supabase, analytics, CDNs, etc.) are left entirely
+// to the browser so a third-party network failure cannot break app requests.
 
 self.addEventListener('install', () => {
   self.skipWaiting();
@@ -14,14 +12,17 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // For navigation requests (index.html), always check with the server
-  // ("no-cache" = revalidate). If the page hasn't changed, the server answers
-  // 304 and the browser reuses its copy, so nothing large is downloaded; after
-  // a new build it gets the new page straight away. Never stale.
+  const requestUrl = new URL(event.request.url);
+
+  // Do not intercept cross-origin requests.
+  if (requestUrl.origin !== self.location.origin) return;
+
+  // Always revalidate navigations so preview/production builds are current.
   if (event.request.mode === 'navigate') {
     event.respondWith(fetch(event.request, { cache: 'no-cache' }));
     return;
   }
-  // For everything else (icons, manifest, etc.) go to network normally.
+
+  // Same-origin assets use the normal network path; no app data is cached.
   event.respondWith(fetch(event.request));
 });
