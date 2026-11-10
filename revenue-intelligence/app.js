@@ -82,7 +82,9 @@
     return{rows,issues};
   }
   function filteredRows(){
-    return data.attendanceRows.filter(r=>monthInRange(r.date)&&(state.teacher==='all'||String(r.teacherId)===state.teacher)&&(state.student==='all'||String(r.studentId)===state.student)&&(state.subject==='all'||String(r.subjectId)===state.subject)&&(state.type==='all'||r.classType===state.type)&&(state.mode==='all'||r.mode===state.mode));
+    const selectedSubject=state.subject==='all'?null:data.subjectById.get(String(state.subject));
+    const selectedSubjectName=selectedSubject?String(selectedSubject.name||'').trim().toLocaleLowerCase():null;
+    return data.attendanceRows.filter(r=>monthInRange(r.date)&&(state.teacher==='all'||String(r.teacherId)===state.teacher)&&(state.student==='all'||String(r.studentId)===state.student)&&(state.subject==='all'||(selectedSubjectName?String(r.subject||'').trim().toLocaleLowerCase()===selectedSubjectName:String(r.subjectId)===state.subject))&&(state.type==='all'||r.classType===state.type)&&(state.mode==='all'||r.mode===state.mode));
   }
   function aggregate(rows,key){
     const map=new Map();
@@ -195,7 +197,7 @@
   function render(){
     const rows=filteredRows(),totals=metrics(rows),tabs=[['overview','Overview'],['students','Student Profitability'],['teachers','Teacher Profitability'],['subjects','Subject Profitability'],['cash','Collections & Costs'],['payroll-recon','Payroll Reconciliation'],['quality','Data Quality']];
     const body=state.tab==='students'?renderStudents(rows):state.tab==='teachers'?renderTeachers(rows):state.tab==='subjects'?renderSubjects(rows):state.tab==='cash'?renderCash():state.tab==='payroll-recon'?renderPayrollReconciliation():state.tab==='quality'?renderQuality(rows):renderOverview(rows,totals);
-    const teachers=data.teachers.filter(x=>!x.archived).sort((a,b)=>a.name.localeCompare(b.name)),students=data.students.filter(x=>!x.archived).sort((a,b)=>a.name.localeCompare(b.name)),subjects=data.subjects.slice().sort((a,b)=>a.name.localeCompare(b.name));
+    const teachers=data.teachers.filter(x=>!x.archived).sort((a,b)=>a.name.localeCompare(b.name)),students=data.students.filter(x=>!x.archived).sort((a,b)=>a.name.localeCompare(b.name)),subjects=Array.from(new Map(data.subjects.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(x=>[String(x.name||'').trim().toLocaleLowerCase(),x])).values());
     root.innerHTML='<main class="ri-shell"><header class="ri-header"><div><div class="ri-eyebrow">LIB EDUCATION · ADMIN ANALYTICS</div><h1>Revenue Intelligence</h1><p>Class-level fee value, teacher delivery cost and gross contribution.</p></div><button type="button" id="ri-refresh">Refresh</button></header>'+
       '<section class="ri-filters"><label>From month<input id="ri-from" type="month" value="'+esc(state.from)+'"></label><label>To month<input id="ri-to" type="month" value="'+esc(state.to)+'"></label>'+
       '<label>Teacher<select id="ri-teacher">'+options(teachers,state.teacher,'teachers')+'</select></label><label>Student<select id="ri-student">'+options(students,state.student,'students')+'</select></label><label>Subject<select id="ri-subject">'+options(subjects,state.subject,'subjects')+'</select></label>'+
