@@ -122,7 +122,7 @@ async function load(){
   // KA attempts are omitted because current RLS permits owner-only reads, not Admin reads.
  ];
  const results=await Promise.all(cols.map(x=>read(x[0],x[1],x[2])));
- [students,grades,subjects,profiles,logins,schedules,enrolments,plans,homework]=results;attempts=[];
+ [students,grades,subjects,profiles,logins,schedules,sessions,enrolments,plans,homework]=results;attempts=[];
  render();
 }
 async function init(){if(!window.supabase){msg('Supabase client did not load.',true);return;}db=window.supabase.createClient(URL,KEY);try{await load();}catch(e){msg(e.message,true);}}
