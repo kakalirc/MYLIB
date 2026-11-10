@@ -9,6 +9,15 @@
   if (typeof window.renderStudentPortal !== 'function') return;
   window.__libStudentPortalTabsInstalled = true;
 
+  // Load the read-only student attendance panel after the portal shell is installed.
+  if (!window.__libStudentAttendanceLoader) {
+    window.__libStudentAttendanceLoader = true;
+    var attendanceScript = document.createElement('script');
+    attendanceScript.src = new URL('student-attendance.js', document.baseURI).href;
+    attendanceScript.defer = true;
+    document.head.appendChild(attendanceScript);
+  }
+
   var originalRenderStudentPortal = window.renderStudentPortal;
   var originalRenderPortalShell = window.renderPortalShell;
   var tabByStudent = Object.create(null);
