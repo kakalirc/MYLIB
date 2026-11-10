@@ -119,7 +119,8 @@
       + '<div class="lib-att-kpis"><div><span>Overall attendance</span><strong>' + overall + '</strong></div><div><span>Present</span><strong>' + total.present + '</strong></div><div><span>Absent</span><strong>' + total.absent + '</strong></div><div><span>Pending overdue</span><strong>' + total.overdue + '</strong></div></div>'
       + '<h3>Subject-wise attendance</h3><div class="lib-att-scroll"><table><thead><tr><th>Subject</th><th>Present</th><th>Absent</th><th>Overdue</th><th>Attendance</th></tr></thead><tbody>' + (subjectRows || '<tr><td colspan="5">No attendance records for this period.</td></tr>') + '</tbody></table></div>'
       + '<details class="lib-att-details"><summary>View attendance details (' + rows.length + ')</summary><div class="lib-att-scroll"><table><thead><tr><th>Date</th><th>Subject</th><th>Teacher</th><th>Class type</th><th>Status</th></tr></thead><tbody>' + (detailRows || '<tr><td colspan="5">No attendance records for this period.</td></tr>') + '</tbody></table></div></details>'
-      + '<p class="lib-att-note">Attendance = Present ÷ (Present + Absent + Pending Overdue). Future Pending classes are excluded. Overdue reflects currently Pending scheduled classes dated in the past.</p></section>';
+      + '<p class="lib-att-note">Attendance = Present ÷ (Present + Absent + Pending Overdue). Future Pending classes are excluded. Overdue reflects currently Pending scheduled classes dated in the past.</p>'
+      + '<p class="lib-att-note"><b>Subscription:</b> Only Present and Absent classes are counted against your subscription. If a class is Pending overdue, it is adjusted automatically when the teacher takes and records that class.</p></section>';
   }
   function styles() {
     if (document.getElementById('lib-student-attendance-css')) return;
