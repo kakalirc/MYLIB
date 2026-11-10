@@ -52,6 +52,30 @@
     });
     return result.filter(function (r) { return /^\d{4}-\d{2}-\d{2}$/.test(r.date); });
   }
+  // Insert the attendance panel directly after the Next Class card in the
+  // Student dashboard. The card contains nested divs, so find its matching close.
+  function insertAfterNextClass(html, markup) {
+    var start = html.indexOf('<div class="s-today-card"');
+    if (start !== -1) {
+      var tags = /<[/]?div[^>]*>/gi;
+      tags.lastIndex = start;
+      var depth = 0, match;
+      while ((match = tags.exec(html))) {
+        if (match[0].charAt(1) !== '/') depth++;
+        else depth--;
+        if (depth === 0) return html.slice(0, tags.lastIndex) + markup + html.slice(tags.lastIndex);
+      }
+    }
+    // If the student has no upcoming class card, keep attendance in the same
+    // dashboard position: immediately before the Study Plan section.
+    var studyPlan = html.indexOf('<h2>📋 My Study Plan</h2>');
+    if (studyPlan !== -1) {
+      var cardStart = html.lastIndexOf('<div class="card">', studyPlan);
+      if (cardStart !== -1) return html.slice(0, cardStart) + markup + html.slice(cardStart);
+    }
+    return html + markup;
+  }
+
   function panel(student) {
     var id = String(student.id);
     var state = stateByStudent[id] || (stateByStudent[id] = { period: 'month', month: today().slice(0, 7) });
@@ -95,7 +119,8 @@
       + '<div class="lib-att-kpis"><div><span>Overall attendance</span><strong>' + overall + '</strong></div><div><span>Present</span><strong>' + total.present + '</strong></div><div><span>Absent</span><strong>' + total.absent + '</strong></div><div><span>Pending overdue</span><strong>' + total.overdue + '</strong></div></div>'
       + '<h3>Subject-wise attendance</h3><div class="lib-att-scroll"><table><thead><tr><th>Subject</th><th>Present</th><th>Absent</th><th>Overdue</th><th>Attendance</th></tr></thead><tbody>' + (subjectRows || '<tr><td colspan="5">No attendance records for this period.</td></tr>') + '</tbody></table></div>'
       + '<details class="lib-att-details"><summary>View attendance details (' + rows.length + ')</summary><div class="lib-att-scroll"><table><thead><tr><th>Date</th><th>Subject</th><th>Teacher</th><th>Class type</th><th>Status</th></tr></thead><tbody>' + (detailRows || '<tr><td colspan="5">No attendance records for this period.</td></tr>') + '</tbody></table></div></details>'
-      + '<p class="lib-att-note">Attendance = Present ÷ (Present + Absent + Pending Overdue). Future Pending classes are excluded. Overdue reflects currently Pending scheduled classes dated in the past.</p></section>';
+      + '<p class="lib-att-note">Attendance = Present ÷ (Present + Absent + Pending Overdue). Future Pending classes are excluded. Overdue reflects currently Pending scheduled classes dated in the past.</p>'
+      + '<p class="lib-att-note"><b>Subscription:</b> Only Present and Absent classes are counted against your subscription. If a class is Pending overdue, it is adjusted automatically when the teacher takes and records that class.</p></section>';
   }
   function styles() {
     if (document.getElementById('lib-student-attendance-css')) return;
@@ -112,13 +137,11 @@
       // Match the academics panel by its stable ID and role, without depending on
       // whitespace or whether optional attributes are present on the opening tag.
       var academicsOpen = /<section\b(?=[^>]*\bid=["']student-portal-academics["'])(?=[^>]*\brole=["']tabpanel["'])[^>]*>/i;
-      var funPanelStart = '</section><section id="student-portal-fun"';
-      if (academicsOpen.test(html) && html.indexOf('class="lib-student-attendance"') === -1
-          && html.indexOf(funPanelStart) !== -1) {
+      if (academicsOpen.test(html) && html.indexOf('class="lib-student-attendance"') === -1) {
         var student = typeof data !== 'undefined' && Array.isArray(data.students)
           ? data.students.find(function (s) { return String(s.id) === String(currentLinkedId); })
           : null;
-        if (student) html = html.replace(funPanelStart, panel(student) + funPanelStart);
+        if (student) html = insertAfterNextClass(html, panel(student));
       }
     }
     return html;
