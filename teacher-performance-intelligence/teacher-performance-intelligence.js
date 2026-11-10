@@ -88,7 +88,7 @@ function teacherTable(rows){
 function render(){
  const d=selectedData(),rows=aggregate(d),studentsData=studentRows(d);
  const own=role==='Teacher'?rows.find(x=>String(x.id)===String(teacherId)):null;
- const active=unique([...d.sc,...d.ss].map(x=>x.teacher_id)).length;
+ const active=role==='Admin'?unique([...d.sc,...d.ss].map(x=>x.teacher_id)).length:studentsData.length;
  const delivery=pct(d.present.length,d.present.length+d.overdue.length),attendance=pct(d.present.length,d.present.length+d.absent.length);
  const workload=rows.slice().sort((a,b)=>b.scheduled-a.scheduled);
  const trends=monthTrend(d);
@@ -98,7 +98,7 @@ function render(){
  const classSelect='<label>Class type<select id="tpi-type"><option value="all">All types</option><option value="Group" '+(filterType==='Group'?'selected':'')+'>Group</option><option value="Individual" '+(filterType==='Individual'?'selected':'')+'>Individual</option></select></label>';
  const periodSelect='<label>Period<select id="tpi-period"><option value="month" '+(period==='month'?'selected':'')+'>Current month</option><option value="30" '+(period==='30'?'selected':'')+'>Last 30 days</option><option value="90" '+(period==='90'?'selected':'')+'>Last 90 days</option><option value="custom" '+(period==='custom'?'selected':'')+'>Custom range</option><option value="all" '+(period==='all'?'selected':'')+'>All available records</option></select></label>';
  const custom=period==='custom'?'<label>From<input type="date" id="tpi-from" value="'+esc(startDate)+'"></label><label>To<input type="date" id="tpi-to" value="'+esc(endDate)+'"></label><button type="button" id="tpi-apply">Apply</button>':'';
- const kpis='<section class="tpi-kpis">'+[['Classes conducted',d.present.length,'Present sessions'],['Classes scheduled',d.sc.length,'Schedule records in range'],['Current overdue',d.overdue.length,'Pending schedule rows dated before today'],['Delivery rate',delivery==null?'—':delivery+'%','Present ÷ (Present + current overdue)'],['Student attendance',attendance==null?'—':attendance+'%','Present ÷ (Present + Absent)'],['Active teachers',active,'Teachers with activity in range']].map(x=>'<article><span>'+x[0]+'</span><strong>'+x[1]+'</strong><small>'+x[2]+'</small></article>').join('')+'</section>';
+ const kpis='<section class="tpi-kpis">'+[['Classes conducted',d.present.length,'Present sessions'],['Classes scheduled',d.sc.length,'Schedule records in range'],['Current overdue',d.overdue.length,'Pending schedule rows dated before today'],['Delivery rate',delivery==null?'—':delivery+'%','Present ÷ (Present + current overdue)'],['Student attendance',attendance==null?'—':attendance+'%','Present ÷ (Present + Absent)'],[role==='Admin'?'Active teachers':'Active students',active,role==='Admin'?'Teachers with activity in range':'Students with activity in range']].map(x=>'<article><span>'+x[0]+'</span><strong>'+x[1]+'</strong><small>'+x[2]+'</small></article>').join('')+'</section>';
  const detailTeacher=role==='Admin'&&filterTeacher!=='all'?rows.find(x=>String(x.id)===String(filterTeacher)):own;
  const teacherStudents=role==='Teacher'||filterTeacher!=='all'?studentsData:'';
  root.innerHTML='<main class="tpi-shell"><header class="tpi-header"><div><div class="tpi-eyebrow">LIB EDUCATION · '+(role==='Admin'?'ADMIN':'TEACHER')+' ANALYTICS</div><h1>Teacher Performance Intelligence</h1><p>'+(role==='Admin'?'Organisation-wide teacher delivery, attendance and workload analysis.':'Your teaching delivery, workload and student engagement.')+'</p></div><button type="button" id="tpi-refresh">Refresh</button></header><section class="tpi-filters">'+periodSelect+custom+teacherSelect+studentSelect+subjectSelect+classSelect+'</section>'+kpis+
@@ -146,6 +146,8 @@ async function load(){
   sessions=sessions.filter(x=>String(x.teacher_id)===String(teacherId));
   teachers=teachers.filter(x=>String(x.id)===String(teacherId));
   subjects=subjects.filter(x=>String(x.teacher_id)===String(teacherId));
+  const ownStudentIds=new Set([...schedules,...sessions].map(x=>String(x.student_id)).filter(Boolean));
+  students=students.filter(x=>ownStudentIds.has(String(x.id)));
  }
  render();
 }
