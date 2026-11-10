@@ -22372,6 +22372,9 @@ function renderTeacherPortal() {
       ['classdelivery', 'Class Delivery Intelligence'],
     ]},
   ];
+  let tpiAnalyticsGroup = teacherTabGroups.find(g => g.label === 'Analytics');
+  if (!tpiAnalyticsGroup) { tpiAnalyticsGroup = { label: 'Analytics', tabs: [] }; teacherTabGroups.push(tpiAnalyticsGroup); }
+  if (!tpiAnalyticsGroup.tabs.some(([key]) => key === 'teacherperformance')) tpiAnalyticsGroup.tabs.push(['teacherperformance', 'Teacher Performance Intelligence']);
   // Phone burger menu keeps its original flat order.
   const teacherMobileTabsList = [
     ['dashboard', 'Dashboard'],
@@ -22393,6 +22396,7 @@ function renderTeacherPortal() {
     ['demoanalysis', 'Demo Analysis'],
     ['classdelivery', 'Class Delivery Intelligence'],
   ];
+  teacherMobileTabsList.push(['teacherperformance', 'Teacher Performance Intelligence']);
   const pendingTotal = teacherPendingItems(teacher).total;
   const pendingBadge = pendingTotal ? ` <span style="color:var(--gold-dark,#b8860b)">(${pendingTotal})</span>` : '';
   teacherMobileTabsList[1] = ['pendingactions', 'Pending Action Items' + (pendingTotal ? ` (${pendingTotal})` : '')];
@@ -22443,6 +22447,9 @@ function teacherPortalBodyHtml(teacher) {
   }
   if (teacherPortalTab === 'myfrequency') {
     return renderTeacherMyStudentsClassFrequency(teacher);
+  }
+  if (teacherPortalTab === 'teacherperformance') {
+    return `<div class="card" style="padding:0;overflow:hidden"><iframe src="teacher-performance-intelligence/index.html" title="Teacher Performance Intelligence" style="display:block;width:100%;height:calc(100vh - 150px);min-height:820px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
   }
   if (teacherPortalTab === 'demoanalysis') {
     return `<div class="card" style="padding:0;overflow:hidden"><iframe src="teacher-demo-analysis/index.html" title="Demo Analysis" style="display:block;width:100%;height:calc(100vh - 150px);min-height:780px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
@@ -27553,6 +27560,8 @@ function render() {
     ...(isCurrentUserSuperuserAdmin() ? [{ label: 'Superadmin', tabs: [['superadmin', 'Superadmin tools']] }] : []),
     { label: 'Analytics', tabs: [['admissionsintelligence', 'Demo Analysis'], ['classdelivery', 'Class Delivery Intelligence']] },
   ];
+  const analyticsGroup = tabGroups.find(g => g.label === 'Analytics');
+  if (analyticsGroup && !analyticsGroup.tabs.some(([key]) => key === 'teacherperformance')) analyticsGroup.tabs.push(['teacherperformance', 'Teacher Performance Intelligence']);
   const tabs = [['dashboard','Dashboard'], ...tabGroups.flatMap(g => g.tabs)]; // flat list still needed wherever code just wants "all tabs"
   const activeGroupLabel = (tabGroups.find(g => g.tabs.some(([key])=>key===currentTab)) || {}).label;
   const sidebarHtml = `
@@ -27590,6 +27599,7 @@ function render() {
 
   let body = '';
   if (currentTab === 'dashboard') body = renderDashboard();
+  else if (currentTab === 'teacherperformance') body = `<div class="card" style="padding:0;overflow:hidden"><iframe src="teacher-performance-intelligence/index.html" title="Teacher Performance Intelligence" style="display:block;width:100%;height:calc(100vh - 150px);min-height:820px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
   else if (currentTab === 'knowledgearena') body = `<div class="card" style="padding:0;overflow:hidden"><iframe src="knowledge-arena/knowledge-arena.html?view=admin&v=20261109-ka-adminfix1" title="Knowledge Arena Admin" style="display:block;width:100%;height:calc(100vh - 150px);min-height:680px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
   else if (currentTab === 'admissionsintelligence') body = `<div class="card" style="padding:0;overflow:hidden"><iframe src="admissions-intelligence/index.html" title="Demo Analysis" style="display:block;width:100%;height:calc(100vh - 150px);min-height:780px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
   else if (currentTab === 'classdelivery') body = `<div class="card" style="padding:0;overflow:hidden"><iframe src="class-delivery-intelligence/index.html" title="Class Delivery Intelligence" style="display:block;width:100%;height:calc(100vh - 150px);min-height:820px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
