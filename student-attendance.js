@@ -57,11 +57,11 @@
   function insertAfterNextClass(html, markup) {
     var start = html.indexOf('<div class="s-today-card"');
     if (start !== -1) {
-      var tags = /<\\/?div\\b[^>]*>/gi;
+      var tags = /<[/]?div[^>]*>/gi;
       tags.lastIndex = start;
       var depth = 0, match;
       while ((match = tags.exec(html))) {
-        if (/^<\\s*div\\b/i.test(match[0])) depth++;
+        if (match[0].charAt(1) !== '/') depth++;
         else depth--;
         if (depth === 0) return html.slice(0, tags.lastIndex) + markup + html.slice(tags.lastIndex);
       }
