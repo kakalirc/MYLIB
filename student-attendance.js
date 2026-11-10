@@ -111,7 +111,7 @@
     if (typeof currentRole !== 'undefined' && currentRole === 'Student') {
       // Match the academics panel by its stable ID and role, without depending on
       // whitespace or whether optional attributes are present on the opening tag.
-      var academicsOpen = /<section\\b(?=[^>]*\\bid=["']student-portal-academics["'])(?=[^>]*\\brole=["']tabpanel["'])[^>]*>/i;
+      var academicsOpen = /<section\b(?=[^>]*\bid=["']student-portal-academics["'])(?=[^>]*\brole=["']tabpanel["'])[^>]*>/i;
       var funPanelStart = '</section><section id="student-portal-fun"';
       if (academicsOpen.test(html) && html.indexOf('class="lib-student-attendance"') === -1
           && html.indexOf(funPanelStart) !== -1) {
