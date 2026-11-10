@@ -22347,6 +22347,7 @@ function renderTeacherPortal() {
   const teacherTabGroups = [
     { label: 'Teaching', tabs: [
       ['myfrequency', 'My Students Class Frequency'],
+      ['demoanalysis', 'My Demo Analysis'],
       ['schedule', 'Class Schedule'],
       ['frequency', 'Class Frequency Setup'],
       ['students', 'My Students'],
@@ -22360,17 +22361,20 @@ function renderTeacherPortal() {
       ['report', 'My Attendance Report'],
       ['availability', 'Availability'],
     ]},
+    { label: 'Learning', tabs: [
+      ['knowledgearena', 'Knowledge Arena'],
+    ]},
     { label: 'Account', tabs: [
       ['profile', 'My Profile'],
       ['setup', 'Setup'],
     ]},
   ];
-  const activeGroupLabel = (teacherTabGroups.find(g => g.tabs.some(([key])=>key===teacherPortalTab)) || {}).label;
   // Phone burger menu keeps its original flat order.
   const teacherMobileTabsList = [
     ['dashboard', 'Dashboard'],
     ['pendingactions', 'Pending Action Items'],
     ['myfrequency', 'My Students Class Frequency'],
+    ['demoanalysis', 'My Demo Analysis'],
     ['schedule', 'Class Schedule'],
     ['frequency', 'Class Frequency Setup'],
     ['students', 'My Students'],
@@ -22379,6 +22383,7 @@ function renderTeacherPortal() {
     ...(teacherQbAccess ? [['questionbank', 'Question Bank']] : []),
     ...(teacherResearchAccess && aiMasterEnabled ? [['research', 'Research']] : []),
     ['availability', 'Availability'],
+    ['knowledgearena', 'Knowledge Arena'],
     ['report', 'My Attendance Report'],
     ['attendance', 'Give Attendance'],
     ['profile', 'My Profile'],
@@ -22398,7 +22403,7 @@ function renderTeacherPortal() {
       <div class="sidebar-item ${teacherPortalTab==='pendingactions'?'active':''}" data-rail="${desktopSidebarRailIcon('pendingactions')}" title="Pending Action Items" aria-label="Pending Action Items" onclick="setTeacherPortalTab('pendingactions')" style="font-weight:700;margin-bottom:10px">Pending Action Items${pendingBadge}</div>
       ${starOn ? `<div class="sidebar-item ${teacherPortalTab==='starteacher'?'active':''}" data-rail="${desktopSidebarRailIcon('starteacher')}" title="Star Teacher" aria-label="Star Teacher" onclick="setTeacherPortalTab('starteacher')" style="font-weight:700;margin-bottom:10px">🏆 Star Teacher${starEarn ? ` <span class="star-pill" title="Points you can earn right now">+${starEarn}</span>` : ''}</div>` : ''}
       ${teacherTabGroups.map(g => {
-        const isCollapsed = !!sidebarCollapsedGroups[g.label] && g.label !== activeGroupLabel;
+        const isCollapsed = !!sidebarCollapsedGroups[g.label];
         return `
         <div class="sidebar-group">
           <div class="sidebar-group-header" data-rail="${desktopSidebarRailIcon(g.label)}" title="${esc(g.label)}" onclick="toggleSidebarGroup('${g.label}')">
@@ -22434,6 +22439,12 @@ function teacherPortalBodyHtml(teacher) {
   }
   if (teacherPortalTab === 'myfrequency') {
     return renderTeacherMyStudentsClassFrequency(teacher);
+  }
+  if (teacherPortalTab === 'demoanalysis') {
+    return `<div class="card" style="padding:0;overflow:hidden"><iframe src="teacher-demo-analysis/index.html" title="My Demo Analysis" style="display:block;width:100%;height:calc(100vh - 150px);min-height:780px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
+  }
+  if (teacherPortalTab === 'knowledgearena') {
+    return `<div class="card" style="padding:0;overflow:hidden"><iframe src="knowledge-arena/knowledge-arena.html?view=play" title="Knowledge Arena" style="display:block;width:100%;height:calc(100vh - 150px);min-height:680px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
   }
   if (teacherPortalTab === 'schedule') {
     return renderTeacherSchedule(teacher, false);
