@@ -743,6 +743,9 @@ function copyBtnHtml(number) {
   return number ? `<button type="button" class="btn-copy" onclick="copyText('${escAttr(number)}', this)" title="Copy number">⧉</button>` : '';
 }
 let isLoggedIn = false;
+let intentionalLogoutInProgress = false;
+let sessionExpiryHandled = false;
+let sessionCheckInFlight = false;
 // Biometric lock: when a valid session exists and bio is registered, we hold the
 // profile here and show the login screen instead of auto-logging in.
 let biometricLockActive = false;
@@ -8224,8 +8227,9 @@ function reloadIfDayChanged() {
 setInterval(() => { if (document.visibilityState === 'visible') reloadIfDayChanged(); }, 5 * 60 * 1000);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && reloadIfDayChanged()) return;
-  if (document.visibilityState === 'visible' && isLoggedIn && !hasUnsavedEditInProgress()) {
-    refreshAllData(true);
+  if (document.visibilityState === 'visible' && isLoggedIn) {
+    verifySessionOnResume();
+    if (!hasUnsavedEditInProgress()) refreshAllData(true);
   }
 });
 
@@ -8274,13 +8278,21 @@ setInterval(() => {
   if (isLoggedIn && document.visibilityState === 'visible' && !hasUnsavedEditInProgress()) refreshAllData(true);
 }, 75000);
 
-async function logout() {
-  // Notify every other open tab, regardless of role or logout method.
-  signalOtherTabsLogout();
+async function logout(options = {}) {
+  const sessionExpired = options.sessionExpired === true;
+  intentionalLogoutInProgress = true;
+  // Notify every other open tab for a user-initiated logout only.
+  if (!sessionExpired) signalOtherTabsLogout();
   try { sessionStorage.removeItem('lib_tab_logged_out'); } catch(e) {}
-  // Only soft-logout if bio belongs to THIS user — prevents user B from
-  // seeing user A's credential gate after logging in with a password.
-  if (bioIsRegistered() && currentUsername === bioGetUsername()) {
+  if (sessionExpired) {
+    // The backend has already rejected/cleared this session. Do not call
+    // signOut or logLoginEvent again; neither can succeed with an invalid token.
+    biometricLockActive = false;
+    biometricLockedProfile = null;
+    biometricLockedUserId = '';
+    loginError = 'Your session has expired. Please sign in again to continue.';
+    loginStep = '';
+  } else if (bioIsRegistered() && currentUsername === bioGetUsername()) {
     // Soft logout — keep the Supabase session alive so the biometric button
     // can gate re-entry on this device. We set biometricLockActive right now
     // so renderLogin() shows the fingerprint button immediately (no page reload).
@@ -8330,8 +8342,53 @@ async function logout() {
   chatDraft = ''; chatMsg = ''; chatNewMode = ''; chatNewTargetId = ''; chatNewSearch = ''; chatGroupNameDraft = ''; chatGroupPreset = ''; chatGroupCustomIds = [];
   chatSearch = ''; chatSearchResults = []; chatSearching = false; clearTimeout(chatSearchTimer);
   chatAttachmentFile = null; chatUploadingAttachment = false; chatSignedUrlCache = {};
+  isRefreshing = false;
+  refreshMsg = '';
   render();
+  intentionalLogoutInProgress = false;
 }
+
+function handleBackendSessionExpired() {
+  if (!isLoggedIn || intentionalLogoutInProgress || sessionExpiryHandled) return;
+  sessionExpiryHandled = true;
+  // Clear the app's authenticated state immediately. The login screen replaces
+  // role-specific menus so stale controls cannot remain usable.
+  logout({ sessionExpired: true }).catch(error => {
+    console.error('Could not complete expired-session cleanup:', error);
+    isLoggedIn = false;
+    loginError = 'Your session has expired. Please sign in again to continue.';
+    loginStep = '';
+    isRefreshing = false;
+    render();
+    intentionalLogoutInProgress = false;
+  });
+}
+
+async function verifySessionOnResume() {
+  if (!isLoggedIn || !sb || sessionCheckInFlight || document.visibilityState === 'hidden') return;
+  sessionCheckInFlight = true;
+  try {
+    // getUser validates the token with Supabase Auth; getSession alone can
+    // return a locally stored session that the backend has already revoked.
+    const { error } = await sb.auth.getUser();
+    if (error) {
+      const message = String(error.message || error);
+      const status = Number(error.status || error.statusCode || 0);
+      if (status === 401 || /jwt expired|invalid jwt|refresh token|session.*(expired|not found|revoked)|not authenticated/i.test(message)) {
+        handleBackendSessionExpired();
+      } else {
+        refreshMsg = 'Connection issue. Reconnecting…';
+        if (!isRefreshing) render();
+      }
+    }
+  } catch (error) {
+    // A network outage is not proof that the user's session has expired.
+    console.warn('Session verification temporarily unavailable:', error);
+  } finally {
+    sessionCheckInFlight = false;
+  }
+}
+window.addEventListener('online', verifySessionOnResume);
 
 function setNewUserRole(v) { newUserRole = v; newUserLinkId = ''; render(); }
 function setNewUserLink(v) { newUserLinkId = v; render(); }
@@ -27682,7 +27739,21 @@ async function initApp() {
     banner.innerHTML = '<b>A required library did not load.</b> Make sure this file was downloaded and opened directly in your browser, and that you have an internet connection. Try reloading the page.';
     return;
   }
-  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: true }
+  });
+  // Keep the visible app state aligned with Supabase's authoritative auth state.
+  // Supabase refreshes tokens automatically; SIGNED_OUT means that refresh or
+  // the stored session is no longer valid and all role-specific UI must be removed.
+  sb.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+      sessionExpiryHandled = false;
+      return;
+    }
+    if (event === 'SIGNED_OUT' && isLoggedIn && !intentionalLogoutInProgress) {
+      handleBackendSessionExpired();
+    }
+  });
 
   // Restore an existing session (e.g. after a page refresh) unless this tab
   // was explicitly logged out from another tab. A tab-local lock is necessary
