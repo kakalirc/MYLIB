@@ -118,7 +118,7 @@
     })).sort((a,b)=>b.contribution-a.contribution);
   }
   function payrollRows(){return data.payroll.filter(r=>monthInRange(r.month));}
-  function previousPayrollMonth(){const d=new Date(state.to+'-01T00:00:00');d.setMonth(d.getMonth()-1);return d.toISOString().slice(0,7);}
+  function previousPayrollMonth(){const parts=String(state.to||'').split('-').map(Number);if(parts.length!==2||!Number.isInteger(parts[0])||!Number.isInteger(parts[1])||parts[1]<1||parts[1]>12)return '';const year=parts[1]===1?parts[0]-1:parts[0],month=parts[1]===1?12:parts[1]-1;return String(year).padStart(4,'0')+'-'+String(month).padStart(2,'0');}
   function payrollByTeacher(){
     const map=new Map();
     data.payroll.filter(r=>monthOf(r.month)===previousPayrollMonth()).forEach(r=>{const id=String(r.teacher_id);let x=map.get(id)||{paid:0,adjustment:0,paidRows:0,missingPaidAmount:0};if(r.paid){x.paidRows++;if(r.paid_amount==null)x.missingPaidAmount++;else x.paid+=Number(r.paid_amount)||0;}x.adjustment+=Number(r.adjustment)||0;map.set(id,x);});
