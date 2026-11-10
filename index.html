@@ -27533,6 +27533,7 @@ function render() {
     ]},
     // Superuser admins only: backups, imports, clearing data, logging switches and the Academic Year roll-over.
     ...(isCurrentUserSuperuserAdmin() ? [{ label: 'Superadmin', tabs: [['superadmin', 'Superadmin tools']] }] : []),
+    { label: 'Analytics', tabs: [['admissionsintelligence', 'Admissions Intelligence']] },
   ];
   const tabs = [['dashboard','Dashboard'], ...tabGroups.flatMap(g => g.tabs)]; // flat list still needed wherever code just wants "all tabs"
   const activeGroupLabel = (tabGroups.find(g => g.tabs.some(([key])=>key===currentTab)) || {}).label;
@@ -27572,6 +27573,7 @@ function render() {
   let body = '';
   if (currentTab === 'dashboard') body = renderDashboard();
   else if (currentTab === 'knowledgearena') body = `<div class="card" style="padding:0;overflow:hidden"><iframe src="knowledge-arena/knowledge-arena.html?view=admin&v=20261109-ka-adminfix1" title="Knowledge Arena Admin" style="display:block;width:100%;height:calc(100vh - 150px);min-height:680px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
+  else if (currentTab === 'admissionsintelligence') body = `<div class="card" style="padding:0;overflow:hidden"><iframe src="admissions-intelligence/index.html" title="Admissions Intelligence" style="display:block;width:100%;height:calc(100vh - 150px);min-height:780px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
   else if (currentTab === 'setup') body = renderSetup();
   else if (currentTab === 'students') body = renderStudents();
   else if (currentTab === 'attendancerewards') body = renderAttendanceRewardsMonitor();
@@ -27688,7 +27690,7 @@ async function initApp() {
 
   // Restore tab from URL hash (e.g. app.libeducation.com/#payroll)
   const hashTab = tabFromHash(location.hash.replace('#', ''));
-  const validTabs = ['dashboard','students','teachers','subjects','schedule','fees','expenses','payroll','reports','wixbookings','audit','ai','users','admins','parents','setup','support','settings','homework','superadmin'];
+  const validTabs = ['dashboard','students','teachers','subjects','schedule','fees','expenses','payroll','reports','wixbookings','audit','ai','users','admins','parents','setup','support','settings','homework','superadmin','admissionsintelligence'];
   if (hashTab && validTabs.includes(hashTab)) currentTab = hashTab;
   // Deep link: #rates-fees → student portal with Rates & Fees panel open
   if (hashTab === 'rates-fees') {

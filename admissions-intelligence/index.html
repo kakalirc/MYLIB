@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admissions Intelligence | My LIB</title>
+<link rel="stylesheet" href="admissions-intelligence.css">
+</head>
+<body style="margin:0;background:#f7f7f4">
+<div id="admissions-app"><main class="ai-shell"><div class="ai-message">Opening Admissions Intelligence…</div></main></div>
+<script>
+(function () {
+  var root = document.getElementById('admissions-app');
+  function showError(message) {
+    root.innerHTML = '<main class="ai-shell"><div class="ai-message bad">' + String(message).replace(/[&<>"]/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}) + '</div></main>';
+  }
+  window.addEventListener('error', function (event) {
+    if (event && event.message) showError('Admissions Intelligence script error: ' + event.message);
+  });
+  function loadApp() {
+    if (!window.supabase || typeof window.supabase.createClient !== 'function') {
+      showError('Supabase library loaded, but its browser client is unavailable. Please refresh and try again.');
+      return;
+    }
+    var app = document.createElement('script');
+    app.src = 'admissions-intelligence.js?v=2';
+    app.onerror = function () { showError('Could not load admissions-intelligence.js. The preview deployment may still be updating; refresh in a minute.'); };
+    document.body.appendChild(app);
+  }
+  function loadFallback() {
+    var fallback = document.createElement('script');
+    fallback.src = 'https://unpkg.com/@supabase/supabase-js@2';
+    fallback.onload = loadApp;
+    fallback.onerror = function () { showError('Could not load the Supabase browser library from either CDN. Check the network connection or browser content blocker.'); };
+    document.head.appendChild(fallback);
+  }
+  var primary = document.createElement('script');
+  primary.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+  primary.onload = loadApp;
+  primary.onerror = loadFallback;
+  document.head.appendChild(primary);
+})();
+</script>
+</body>
+</html>
