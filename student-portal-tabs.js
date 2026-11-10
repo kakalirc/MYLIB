@@ -9,12 +9,20 @@
   if (typeof window.renderStudentPortal !== 'function') return;
   window.__libStudentPortalTabsInstalled = true;
 
-  // Load the read-only student attendance panel after the portal shell is installed.
-  if (!window.__libStudentAttendanceLoader) {
+  // Load attendance relative to this script, not the document base URL. This keeps
+  // the module path correct when the app is served from a nested route or uses a <base> tag.
+  if (!window.__libStudentAttendanceLoader && !window.__libStudentAttendanceInstalled) {
     window.__libStudentAttendanceLoader = true;
+    var portalTabsScriptUrl = document.currentScript && document.currentScript.src
+      ? document.currentScript.src
+      : document.baseURI;
     var attendanceScript = document.createElement('script');
-    attendanceScript.src = new URL('student-attendance.js', document.baseURI).href;
-    attendanceScript.defer = true;
+    attendanceScript.src = new URL('student-attendance.js', portalTabsScriptUrl).href;
+    attendanceScript.async = true;
+    attendanceScript.onerror = function () {
+      window.__libStudentAttendanceLoadFailed = true;
+      window.__libStudentAttendanceLoader = false;
+    };
     document.head.appendChild(attendanceScript);
   }
 
