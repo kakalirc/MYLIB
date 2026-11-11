@@ -894,17 +894,26 @@ Deno.serve(async (req) => {
           new Set(options.map((x:string)=>x.trim().toLocaleLowerCase())).size!==4||
           !Number.isInteger(correct)||correct<0||correct>3)
           return errorResponse(400,"Complete four distinct options, select the correct answer, and provide a valid question and explanation.");
+        const {data:claimed,error:claimError}=await db.from("ka_rejected_questions")
+          .update({review_status:"converted_to_draft",reviewed_by:user.id,reviewed_at:new Date().toISOString()})
+          .eq("id",id).eq("review_status","pending").select("id").maybeSingle();
+        if(claimError||!claimed)return errorResponse(409,"This candidate has already been reviewed by another Admin.");
         const q=candidate.candidate||{};
         const {data:inserted,error:insertError}=await db.from("ka_questions").insert({
           subject:candidate.subject,topic:String(body.topic||candidate.topic||candidate.subject).trim().slice(0,120),
           grade_label:candidate.grade_label,language_code:candidate.language_code,difficulty:candidate.difficulty,
           game_type:candidate.game_type,prompt,options,explanation,status:"pending",generated_by:"ai",generation_job_id:candidate.job_id
         }).select("id,status").single();
-        if(insertError||!inserted)return errorResponse(503,"Could not create the approved Draft.");
+        if(insertError||!inserted){
+          await db.from("ka_rejected_questions").update({review_status:"pending",reviewed_by:null,reviewed_at:null}).eq("id",id);
+          return errorResponse(503,"Could not create the approved Draft; candidate remains available for review.");
+        }
         const {error:keyError}=await db.from("ka_question_keys").insert({question_id:inserted.id,correct_option:correct});
-        if(keyError){await db.from("ka_questions").delete().eq("id",inserted.id);return errorResponse(503,"Could not save the Draft answer key; no incomplete Draft was retained.");}
-        const {error:markError}=await db.from("ka_rejected_questions").update({review_status:"converted_to_draft",reviewed_by:user.id,reviewed_at:new Date().toISOString()}).eq("id",id).eq("review_status","pending");
-        if(markError){await db.from("ka_question_keys").delete().eq("question_id",inserted.id);await db.from("ka_questions").delete().eq("id",inserted.id);return errorResponse(503,"Draft was rolled back because the review record could not be updated.");}
+        if(keyError){
+          await db.from("ka_questions").delete().eq("id",inserted.id);
+          await db.from("ka_rejected_questions").update({review_status:"pending",reviewed_by:null,reviewed_at:null}).eq("id",id);
+          return errorResponse(503,"Could not save the Draft answer key; candidate remains available for review.");
+        }
         return json(200,{draft:inserted});
       }
       return errorResponse(400,"Unknown rejected-question operation.");
