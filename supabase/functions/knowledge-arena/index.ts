@@ -856,7 +856,8 @@ Deno.serve(async (req) => {
         if (!grade || String(key.grade_label).toLocaleLowerCase() === "tina student") return errorResponse(400, "Choose a valid academic grade.");
       }
       if (key.subject) {
-        const { data: subject } = await db.from("subjects").select("name").eq("name", key.subject).maybeSingle();
+        const { data: subject, error: subjectError } = await db.from("subjects").select("name").eq("name", key.subject).limit(1).maybeSingle();
+        if (subjectError) return errorResponse(503, "Could not validate the selected subject.");
         if (!subject || ["all","math + science"].includes(String(key.subject).toLocaleLowerCase())) return errorResponse(400, "Choose an individual LIB subject.");
       }
       const { error } = await db.from(table).upsert({ ...key, enabled, source: kind === "grade_subject" ? "admin" : undefined,
