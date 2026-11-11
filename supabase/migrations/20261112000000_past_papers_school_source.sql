@@ -13,6 +13,7 @@ create unique index if not exists qb_schools_name_normalized_uidx
   on public.qb_schools (lower(regexp_replace(btrim(name), '[[:space:]]+', ' ', 'g')));
 
 alter table public.qb_schools enable row level security;
+revoke all on table public.qb_schools from anon, authenticated;
 grant select, insert, update on public.qb_schools to authenticated;
 
 drop policy if exists qb_schools_read on public.qb_schools;
