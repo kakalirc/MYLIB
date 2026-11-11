@@ -2130,7 +2130,8 @@ let qbAssignOpen = false;
 let qbAssignIds = new Set();    // students ticked in the assign panel
 let qbAssignUntil = '';         // due date (yyyy-mm-dd) for new assignments
 let qbAssignAllGrades = false;  // also list the teacher's students who don't match the paper's board / grade / subject
-let qbSourcePapers = [];        // qb_source_papers rows (original exam PDFs) this user may read
+let qbSourcePapers = [];        // qb_source_papers rows (published papers + own submissions)
+let qbSourceReviews = [];       // Admin-visible status history across all submissions
 let qbSourceLoading = false;
 let qbSourceFilter = { boardId: '', gradeId: '', subject: '', year: '' };
 let qbSourceApplied = null;
@@ -25085,6 +25086,7 @@ function renderAdminQuestionBank() {
     ${currentRole === 'Admin' && qbSourceUploadOpen ? qbSourceUploaderHtml() : ''}
     ${qbMsg ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${esc(qbMsg)}</div>` : ''}
     ${qbSourcePapersHtml()}
+    ${qbSourceReviewHistoryHtml()}
   </div>`;
 
   if (qbSubTab === 'papers') return `<div class="card">
@@ -26365,6 +26367,10 @@ async function loadQbSourcePapers() {
   qbSourceLoading = false;
   if (error) { qbMsg = 'Could not load past papers: ' + error.message; qbSourcePapers = []; }
   else qbSourcePapers = rows || [];
+  if (currentRole === 'Admin') {
+    const { data: history, error: historyError } = await sb.from('qb_source_paper_reviews').select('id,source_paper_id,from_status,to_status,reviewed_by,reviewed_at').order('reviewed_at', { ascending: false }).limit(200);
+    qbSourceReviews = historyError ? [] : (history || []);
+  } else qbSourceReviews = [];
   render();
 }
 // stored_pdf_url may be a full Supabase storage URL (public or signed) or "bucket/path"; private files need a fresh signed link.
@@ -26451,6 +26457,13 @@ async function qbSetSourcePaperStatus(id, status) {
   if (error) { qbMsg = 'Could not update paper status: ' + error.message; render(); return; }
   qbMsg = status === 'published' ? 'Past paper published.' : 'Past paper marked as rejected.';
   await loadQbSourcePapers();
+}
+function qbSourceReviewHistoryHtml() {
+  if (currentRole !== 'Admin') return '';
+  if (!qbSourceReviews.length) return '<section class="card" style="margin-top:16px"><h3 style="margin-top:0">Review history</h3><div class="empty">No past-paper review actions recorded yet.</div></section>';
+  return '<section class="card" style="margin-top:16px"><h3 style="margin-top:0">Review history</h3><div class="table-scroll"><table><thead><tr><th>Paper</th><th>Change</th><th>Reviewer ID</th><th>When</th></tr></thead><tbody>' +
+    qbSourceReviews.map(r => { const p = qbSourcePapers.find(x => x.id === r.source_paper_id); return '<tr><td>' + esc(p ? [p.subject_name, p.year, p.exam_type].filter(Boolean).join(' · ') : 'Past paper') + '</td><td>' + esc(r.from_status || 'New') + ' → ' + esc(r.to_status) + '</td><td>' + esc(r.reviewed_by || 'Admin') + '</td><td>' + esc(r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : '') + '</td></tr>'; }).join('') +
+    '</tbody></table></div></section>';
 }
 function qbSourcePapersHtml() {
   if (qbSourceLoading) return `<div class="empty">Loading past papers…</div>`;
