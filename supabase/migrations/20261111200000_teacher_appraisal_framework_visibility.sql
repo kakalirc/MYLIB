@@ -11,7 +11,8 @@ values (true, false)
 on conflict (id) do nothing;
 
 create table if not exists public.teacher_appraisal_framework_teacher_access (
-  teacher_id uuid primary key references public.teachers(id) on delete cascade,
+  profile_id uuid primary key references public.profiles(id) on delete cascade,
+  teacher_id uuid not null references public.teachers(id) on delete cascade,
   enabled boolean not null default false,
   updated_by uuid references auth.users(id),
   updated_at timestamptz not null default now()
@@ -21,6 +22,7 @@ create table if not exists public.teacher_appraisal_framework_visibility_audit (
   id bigint generated always as identity primary key,
   actor_id uuid references auth.users(id),
   teacher_id uuid references public.teachers(id) on delete set null,
+  profile_id uuid references public.profiles(id) on delete set null,
   scope text not null check (scope in ('global','teacher')),
   old_enabled boolean,
   new_enabled boolean not null,
@@ -80,8 +82,8 @@ begin
     end if;
   else
     if tg_op = 'INSERT' or old.enabled is distinct from new.enabled then
-      insert into public.teacher_appraisal_framework_visibility_audit(actor_id,teacher_id,scope,old_enabled,new_enabled)
-      values (auth.uid(),new.teacher_id,'teacher',case when tg_op='INSERT' then null else old.enabled end,new.enabled);
+      insert into public.teacher_appraisal_framework_visibility_audit(actor_id,teacher_id,profile_id,scope,old_enabled,new_enabled)
+      values (auth.uid(),new.teacher_id,new.profile_id,'teacher',case when tg_op='INSERT' then null else old.enabled end,new.enabled);
     end if;
   end if;
   return new;
@@ -136,7 +138,8 @@ begin
   select coalesce(g.enabled,false) and coalesce(t.enabled,false)
     into v_enabled
   from public.teacher_appraisal_framework_visibility g
-  left join public.teacher_appraisal_framework_teacher_access t on t.teacher_id = v_teacher_id
+  left join public.teacher_appraisal_framework_teacher_access t
+    on t.profile_id = auth.uid() and t.teacher_id = v_teacher_id
   where g.id = true;
 
   if not coalesce(v_enabled,false) then
