@@ -12662,7 +12662,7 @@ function openReceipt(paymentId) {
     ['Class Type', p.type||'—'],
     ['Classes', p.classes + ' classes'],
     p.paymentReference ? ['Reference', p.paymentReference] : null,
-    p.paymentRemarks ? ['Remarks', p.paymentRemarks] : null
+    ['Remarks', 'Payment received with Thanks.']
   ].filter(Boolean);
   var rowsHtml = rows.map(function(r){
     return '<div class=\"row\"><span class=\"label\">'+r[0]+'</span><span class=\"val\">'+r[1]+'</span></div>';
