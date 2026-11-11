@@ -286,4 +286,11 @@
       return originalParentPortal.apply(this, arguments);
     };
   }
+
+  // The main app may finish restoring a saved session before this deferred module loads.
+  try {
+    if (typeof isLoggedIn !== 'undefined' && isLoggedIn && typeof loaded !== 'undefined' && loaded
+        && typeof currentRole !== 'undefined' && (currentRole === 'Student' || currentRole === 'Parent')
+        && typeof render === 'function') render();
+  } catch (error) {}
 })();
