@@ -586,6 +586,7 @@ const EMAIL_DOMAIN = 'lib-education.local';
 let sb = null; // Supabase client, created once the library is confirmed loaded
 const LOGO_SRC = new URL('logo.jpg', location.href).href; // absolute, so pop-up print windows can load it too
 const RECEIPT_LOGO = LOGO_SRC;
+const RECEIPT_SIGNATURE = new URL('lib-authorised-signature.svg', location.href).href;
 // Images are separate files next to index.html (not pasted into this file) so the browser can cache them.
 // PDF/Word exports need the raw bytes, so fetch them when an export runs.
 const _imageBytesCache = {};
@@ -12649,7 +12650,9 @@ function openReceipt(paymentId) {
   var st = (data.students||[]).find(function(s){ return s.id === p.studentId; });
   var subj = subject(p.subjectId);
   var receiptNum = 'LIB-' + p.date.replace(/-/g,'') + '-' + (p.id||'').slice(-6).toUpperCase();
+  var parentName = st && st.parentName ? esc(st.parentName) : '—';
   var rows = [
+    ['Received from', parentName],
     ['Date', p.date],
     ['Student', st ? st.name : '—'],
     ['Student ID', st ? st.code||'—' : '—'],
@@ -12682,9 +12685,12 @@ function openReceipt(paymentId) {
     + '.amt-lbl{font-size:12px;color:#999;}'
     + '.amt-val{font-size:24px;font-weight:700;color:#c0392b;}'
     + '.ftr{display:flex;justify-content:space-between;align-items:flex-end;margin-top:24px;border-top:1px dashed #ddd;padding-top:16px;}'
-    + '.stamp{text-align:center;}'
-    + '.stamp-box{width:110px;height:55px;border:2px dashed #ccc;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#ccc;margin-bottom:3px;}'
-    + '.note{font-size:10px;color:#bbb;text-align:center;margin-top:20px;}'
+    + '.stamp{text-align:center;min-width:145px;}'
+    + '.signature-img{display:block;width:118px;height:58px;object-fit:contain;margin:0 auto 2px;}'
+    + '.stamp-label{font-size:10px;font-weight:600;color:#555;}'
+    + '.note{font-size:10px;color:#888;text-align:center;margin-top:18px;}'
+    + '.company-footer{border-top:1px solid #eee;margin-top:14px;padding-top:10px;text-align:center;color:#777;font-size:10px;line-height:1.55;}'
+    + '.company-footer strong{color:#444;font-size:10px;}'
     + '.print-btn{display:block;width:100%;padding:11px;background:#c0392b;color:#fff;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;margin-bottom:14px;}'
     + '</style></head><body>'
     + '<div class=\"no-print\" style=\"max-width:580px;margin:0 auto 12px;\"><button class=\"print-btn\" onclick=\"window.print()\">🖨️ Print / Save as PDF</button></div>'
@@ -12693,11 +12699,12 @@ function openReceipt(paymentId) {
     + rowsHtml
     + '<div class=\"amt\"><span class=\"amt-lbl\">Amount Paid</span><span class=\"amt-val\">\u20b9'+(p.amountPaid||0).toFixed(2)+'</span></div>'
     + '<div class=\"ftr\"><div><div style=\"font-size:11px;color:#999;margin-bottom:3px;\">System-generated receipt</div>'
-    + '<div style=\"font-size:11px;color:#999;\">'+new Date().toLocaleString('en-IN')+'</div></div>'
-    + '<div class=\"stamp\"><div class=\"stamp-box\">Authorised<br>Signature</div><div style=\"font-size:10px;color:#999;\">LIB Education</div></div></div>'
+    + '<div style=\"font-size:11px;color:#999;\">'+(p.date ? p.date.split(\'-\').reverse().join(\'/\') : \'—\')+'</div></div>'
+    + '<div class=\"stamp\"><img class=\"signature-img\" src=\"SIGNATURE_URL\" alt=\"Authorised signatory signature\"><div class=\"stamp-label\">Authorised Signatory</div></div></div>'
     + '<div class=\"note\">Thank you for your payment. For queries contact LIB Education.</div>'
+    + '<div class=\"company-footer\"><strong>LIBXL-Education Private Limited</strong><br>K001 Mantri Woodlands, Arakere Gate, Bannerghatta Road<br>Bangalore 560076, Karnataka, India</div>'
     + '</div></div></body></html>';
-  html = html.replace('LOGO_URL', RECEIPT_LOGO);
+  html = html.replace('LOGO_URL', RECEIPT_LOGO).replace('SIGNATURE_URL', RECEIPT_SIGNATURE);
   var w = window.open('','_blank');
   if (w) { w.document.write(html); w.document.close(); }
 }
