@@ -74,16 +74,22 @@ language plpgsql
 security definer
 set search_path = public, pg_temp
 as $$
+declare
+  v_old_enabled boolean;
 begin
-  if tg_table_name = 'teacher_appraisal_framework_visibility' then
-    if tg_op = 'INSERT' or old.enabled is distinct from new.enabled then
-      insert into public.teacher_appraisal_framework_visibility_audit(actor_id,scope,old_enabled,new_enabled)
-      values (auth.uid(),'global',case when tg_op='INSERT' then null else old.enabled end,new.enabled);
-    end if;
+  if tg_op = 'INSERT' then
+    v_old_enabled := null;
   else
-    if tg_op = 'INSERT' or old.enabled is distinct from new.enabled then
+    v_old_enabled := old.enabled;
+  end if;
+
+  if v_old_enabled is distinct from new.enabled then
+    if tg_table_name = 'teacher_appraisal_framework_visibility' then
+      insert into public.teacher_appraisal_framework_visibility_audit(actor_id,scope,old_enabled,new_enabled)
+      values (auth.uid(),'global',v_old_enabled,new.enabled);
+    else
       insert into public.teacher_appraisal_framework_visibility_audit(actor_id,teacher_id,profile_id,scope,old_enabled,new_enabled)
-      values (auth.uid(),new.teacher_id,new.profile_id,'teacher',case when tg_op='INSERT' then null else old.enabled end,new.enabled);
+      values (auth.uid(),new.teacher_id,new.profile_id,'teacher',v_old_enabled,new.enabled);
     end if;
   end if;
   return new;
