@@ -1,3 +1,5 @@
+alter table public.ka_generation_jobs add column if not exists drafted_count integer not null default 0;
+
 create table if not exists public.ka_rejected_questions (
   id uuid primary key default gen_random_uuid(),
   job_id uuid references public.ka_generation_jobs(id) on delete set null,
