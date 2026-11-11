@@ -20,10 +20,12 @@ create table if not exists public.qb_source_paper_reviews (
   from_status text,
   to_status text not null,
   reviewed_by uuid references public.profiles(id) on delete set null,
+  reviewer_name text not null default 'Unknown reviewer',
   reviewed_at timestamptz not null default now()
 );
 
 alter table public.qb_source_paper_reviews enable row level security;
+grant select on public.qb_source_paper_reviews to authenticated;
 
 drop policy if exists qb_source_paper_reviews_read on public.qb_source_paper_reviews;
 create policy qb_source_paper_reviews_read
@@ -44,8 +46,9 @@ using (
 create or replace function public.qb_source_papers_guard_and_stamp()
 returns trigger
 language plpgsql
+security definer
 set search_path = public
-as $$
+as $
 declare
   v_role text := qb_my_role();
   v_name text;
@@ -113,17 +116,25 @@ returns trigger
 language plpgsql
 security definer
 set search_path = public
-as $$
+as $
+declare
+  v_reviewer_name text;
 begin
   if new.status is distinct from old.status then
+    select coalesce(t.name, p.admin_name, p.username, 'Unknown reviewer')
+      into v_reviewer_name
+    from public.profiles p
+    left join public.teachers t on t.id = p.linked_teacher_id
+    where p.id = auth.uid();
     insert into public.qb_source_paper_reviews
-      (source_paper_id, from_status, to_status, reviewed_by, reviewed_at)
+      (source_paper_id, from_status, to_status, reviewed_by, reviewer_name, reviewed_at)
     values
-      (new.id, old.status, new.status, auth.uid(), coalesce(new.reviewed_at, now()));
+      (new.id, old.status, new.status, auth.uid(), coalesce(v_reviewer_name, 'Unknown reviewer'), coalesce(new.reviewed_at, now()));
   end if;
   return new;
 end;
-$$;
+$;
+revoke all on function public.qb_source_papers_guard_and_stamp() from public;
 revoke all on function public.qb_source_papers_audit_status() from public;
 
 drop trigger if exists qb_source_papers_audit_status_trg on public.qb_source_papers;
