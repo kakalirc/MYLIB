@@ -913,14 +913,16 @@
       a.requested += Number(job.requested_count || 0);
       a.generated += Number(job.generated_count || 0);
       a.published += Number(job.published_count || 0);
+      a.drafted += Number(job.drafted_count || 0);
       a.rejected += Number(job.rejected_count || 0);
       a[job.status] = (a[job.status] || 0) + 1;
       return a;
-    }, { jobs: 0, requested: 0, generated: 0, published: 0, rejected: 0 });
+    }, { jobs: 0, requested: 0, generated: 0, drafted: 0, published: 0, rejected: 0 });
     const active = Number(totals.queued || 0) + Number(totals.running || 0);
     $("admin-generation-summary").innerHTML = [
       ["Questions requested", totals.requested],
       ["Generated", totals.generated],
+      ["Created as Draft", totals.drafted],
       ["Published", totals.published],
       ["Awaiting processing", totals.queued ? jobs.filter(x => x.status === "queued").reduce((n,x)=>n+Math.max(0,Number(x.requested_count||0)-Number(x.published_count||0)),0) : 0],
       ["Jobs in progress / queue", active],
@@ -962,13 +964,13 @@
     $("admin-jobs").innerHTML = '<div class="admin-job-list">' + adminJobs.map((job) =>
       '<div class="admin-job"><div><b>' + escapeHtml(job.subject || "—") + ' · ' + escapeHtml(job.grade_label || "—") +
       '</b><small>' + escapeHtml(GAME_NAMES[job.game_type] || job.game_type) + ' · ' + escapeHtml(job.difficulty) +
-      ' · ' + Number(job.published_count || 0) + '/' + Number(job.requested_count || 0) + ' published · ' + escapeHtml(job.status) +
+      ' · ' + Number(job.drafted_count || 0) + ' drafted · ' + Number(job.published_count || 0) + ' published · ' + escapeHtml(job.status) +
       ' · ' + Number(job.generated_count || 0) + ' generated · ' + Number(job.rejected_count || 0) + ' rejected</small>' +
       (job.error_summary ? '<small class="job-error">' + escapeHtml(job.error_summary) + '</small>' : '') +
       '</div><div class="job-actions">' +
       (job.status === "queued" ? '<button class="text-btn" data-job-action="pause" data-job-id="' + job.id + '">Pause</button>' : "") +
       (job.status === "paused" ? '<button class="text-btn" data-job-action="resume" data-job-id="' + job.id + '">Resume</button>' : "") +
-      (["partial","failed","paused"].includes(job.status) && Number(job.published_count || 0) < Number(job.requested_count || 0) ? '<button class="text-btn" data-job-action="requeue" data-job-id="' + job.id + '">Requeue missing</button>' : "") +
+      (["partial","failed","paused"].includes(job.status) && (Number(job.published_count || 0) + Number(job.drafted_count || 0)) < Number(job.requested_count || 0) ? '<button class="text-btn" data-job-action="requeue" data-job-id="' + job.id + '">Requeue missing</button>' : "") +
       (["completed","partial","failed","paused"].includes(job.status) ? '<button class="text-btn" data-job-action="regenerate" data-job-id="' + job.id + '">Regenerate</button>' : "") +
       (job.status !== "running" ? '<button class="text-btn danger-text" data-job-action="delete" data-job-id="' + job.id + '">Delete job</button>' : "") +
       '</div></div>'
@@ -1192,7 +1194,7 @@
       const options = Array.isArray(q.options) ? q.options : [];
       return '<details class="admin-question" data-question-id="' + escapeHtml(q.id) + '">' +
         '<summary>' + (q.status === "pending" ? '<input type="checkbox" data-draft-select="'+escapeHtml(q.id)+'" aria-label="Select Draft for publishing"> ' : '') + '<b>' + escapeHtml(q.subject) + ' · ' + escapeHtml(q.grade_label) + '</b><span>' +
-        escapeHtml(GAME_NAMES[q.game_type] || q.game_type) + ' · ' + escapeHtml(q.status) + '</span><small>' +
+        escapeHtml(GAME_NAMES[q.game_type] || q.game_type) + ' · ' + escapeHtml(q.status === 'pending' ? 'Draft' : q.status) + '</span><small>' +
         escapeHtml(q.prompt) + '</small></summary><div class="admin-question-edit">' +
         '<label>Question<textarea data-field="prompt" rows="3">' + escapeHtml(q.prompt) + '</textarea></label>' +
         '<label>Topic<input data-field="topic" value="' + escapeHtml(q.topic) + '"></label>' +
