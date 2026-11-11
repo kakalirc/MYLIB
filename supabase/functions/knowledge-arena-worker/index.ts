@@ -259,7 +259,8 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
     const { data: existing } = await db.from("ka_questions").select("prompt")
       .eq("subject", job.subject).eq("grade_label", job.grade_label).limit(5000);
     const seen = new Set((existing || []).map((x: any) => normalisePrompt(x.prompt)));
-    for (const q of candidates.slice(0, job.requested_count)) {
+    for (const candidate of candidates.slice(0, job.requested_count)) {
+      const q: any = candidate;
       const shapeIssue = validateShape(q, job);
       const normalized = typeof q?.prompt === "string" ? normalisePrompt(q.prompt) : "";
       if (shapeIssue || !normalized || seen.has(normalized)) {
