@@ -13909,7 +13909,7 @@ async function actuallySaveSessionEdit(id, count, date) {
 // so Teachers & Subjects (key 'setup') shows as #teachers-subjects. Old #users links still work.
 const TAB_HASH = { users: 'setup', setup: 'teachers-subjects', onboarding: 'student-onboarding' };
 function tabFromHash(h) { const k = Object.keys(TAB_HASH).find(k => TAB_HASH[k] === h); return k || h; }
-function setTab(t) { currentTab = t; if (t === 'setup' && setupSubTab === 'frequency') loadClassFrequencyRows().then(() => render()); trackUse('tab:' + t, true); location.hash = TAB_HASH[t] || t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'registrations') { regMsg = ''; loadRegistrations().then(() => render()); } if (t === 'fees') { rzpFeeMsg = ''; loadRazorpayFeePayments().then(() => render()); } if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; tbAdminEditId=''; tbAdminMsg=''; Promise.all([loadStudyPlans(), loadTextbookLibrary()]).then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
+function setTab(t) { currentTab = t; if (t === 'setup' && setupSubTab === 'frequency') loadClassFrequencyRows().then(() => render()); trackUse('tab:' + t, true); location.hash = TAB_HASH[t] || t; window.scrollTo(0, 0); mobileTabMenuOpen = false; addConfirmMsg = { teacher: '', student: '' }; saveConfirmMsg = { teacher: '', subject: '' }; parentAddMsg = ''; addingChildToParentId = null; wixBookingsMsg = ''; wixBookingActionId = null; wixBookingEditId = null; wixBookingEditDraft = {}; if (t !== 'reports') { wixBookingFromId = null; } render(); if (t === 'audit') { loadAuditLog(); loadLoginLog(); } if (t === 'users') loadAllAnnouncementsAdmin(); if (t === 'wixbookings') loadWixBookings().then(() => render()); if (t === 'democontrol') loadDemoControlCentre(); if (t === 'registrations') { regMsg = ''; loadRegistrations().then(() => render()); } if (t === 'fees') { rzpFeeMsg = ''; loadRazorpayFeePayments().then(() => render()); } if (t === 'studyplans') { adminStudyPlanFilterTeacherId=''; adminStudyPlanFilterSubjectId=''; adminStudyPlanFilterStudent=''; tbAdminEditId=''; tbAdminMsg=''; Promise.all([loadStudyPlans(), loadTextbookLibrary()]).then(()=>render()); } if (t === 'homework') { adminHwFilterTeacherId=''; adminHwFilterStudentId=''; adminHwFilterStatus=''; adminHwFilterStudent=''; loadHomework().then(()=>render()); }
   if (t === 'questionbank') { qbSubTab='review'; qbFilterType=''; qbFilterDifficulty=''; qbFilterChapter=''; qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic=''; qbFilterBoard=''; qbFilterSubject=''; qbFilterGrade=''; qbEditId=null; loadQBQuestions(); loadQbPapers(); }
   if (t === 'qbmonitoring') loadQuestionBankMonitoring();
   if (t === 'staradmin') { starAdminOpen = true; loadStarExtras(true); }
@@ -27696,6 +27696,7 @@ function render() {
       ['registrations', 'New registrations' + (regNewCount() ? ` (${regNewCount()})` : '')],
       ['chat', 'Communication' + (chatTotalUnread() ? ` (${chatTotalUnread()})` : '')],
       ['wixbookings', 'Demo Bookings' + (data.wixBookings.filter(b=>b.status==='New').length ? ` (${data.wixBookings.filter(b=>b.status==='New').length})` : '')],
+      ['democontrol', 'Demo Control Centre'],
       ['support', 'Support' + (data.supportTickets.filter(t=>t.status==='open').length ? ` (${data.supportTickets.filter(t=>t.status==='open').length})` : '')],
       ['rebuildclasses', 'Rebuild Pending Classes'],
       ['questionbank', 'Question Bank'],
@@ -27808,6 +27809,7 @@ function render() {
   else if (currentTab === 'audit') body = renderAuditLog();
   else if (currentTab === 'ai') body = renderAiAdmin();
   else if (currentTab === 'wixbookings') body = renderWixBookings();
+  else if (currentTab === 'democontrol') body = renderDemoControlCentre();
   else if (currentTab === 'support') body = renderAdminSupport();
   else if (currentTab === 'registrations') body = renderRegistrations();
 
@@ -27953,6 +27955,7 @@ setInterval(async () => {
 
 initApp();
 </script>
+<script src="demo-control-centre.js"></script>
 <script src="student-portal-tabs.js"></script>
 </body>
 </html>
