@@ -57,7 +57,6 @@ function validateShape(q: any, job: any) {
   if (!Number.isInteger(q.correct_option) || q.correct_option < 0 || q.correct_option >= q.options.length) return "invalid correct option index";
   if (new Set(q.options.map((x: string) => x.trim().toLowerCase())).size !== q.options.length) return "duplicate options";
   if (typeof q.explanation !== "string" || q.explanation.trim().length < 8 || q.explanation.length > 900) return "invalid explanation";
-  if (q.options.length !== 4) return "exactly four options are required";
   if (typeof q.topic !== "string" || !q.topic.trim()) return "missing topic";
   if (q.subject && q.subject !== job.subject) return "subject mismatch";
   if (q.grade_label && q.grade_label !== job.grade_label) return "grade mismatch";
@@ -113,6 +112,16 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
   let generated = 0, validated = 0, published = 0, rejected = 0, inputTokens = 0, outputTokens = 0;
   const shapeRejections: string[] = [];
   const validationRejections: string[] = [];
+  const saveRejected = async (q: any, stage: string, reason: string) => {
+    const safeCandidate = q && typeof q === "object" ? q : { raw_value: q ?? null };
+    const { error } = await db.from("ka_rejected_questions").insert({
+      job_id: job.id, subject: job.subject, grade_label: job.grade_label,
+      game_type: job.game_type, difficulty: job.difficulty, language_code: job.language_code,
+      topic: job.topic || job.subject, candidate: safeCandidate,
+      rejection_stage: stage, rejection_reason: reason.slice(0, 1200),
+    });
+    if (error) throw new Error("Could not persist a rejected Knowledge Arena candidate: " + error.message);
+  };
   let usageId: string | null = null;
   let reservedCostInr = 0, reservedCostUsd = 0;
   let leaseLost = false, heartbeatBusy = false;
@@ -254,27 +263,40 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       const shapeIssue = validateShape(q, job);
       const normalized = typeof q?.prompt === "string" ? normalisePrompt(q.prompt) : "";
       if (shapeIssue || !normalized || seen.has(normalized)) {
+        const reason = shapeIssue || (!normalized ? "empty prompt" : "duplicate prompt");
         rejected++;
-        shapeRejections.push(shapeIssue || (!normalized ? "empty prompt" : "duplicate prompt"));
+        shapeRejections.push(reason);
+        await saveRejected(q, reason === "duplicate prompt" ? "duplicate" : "structural", reason);
         continue;
       }
-      const validatorPrompt = "Independently check this MCQ for factual correctness, unambiguous wording, grade suitability, exactly one correct option, and whether the explanation supports the answer. Do not rewrite it. If you cannot confidently verify it from stable, well-established knowledge, reject it. Return JSON only: {\"approved\":boolean,\"issues\":[string]}.\nQuestion JSON:\n"
+      if (q.options.length !== 4) {
+        rejected++;
+        const reason = "Candidate has " + q.options.length + " options. Admin must complete the fourth option and confirm the answer key.";
+        shapeRejections.push(reason);
+        await saveRejected(q, "manual_option_completion", reason);
+        continue;
+      }
+      const validatorPrompt = "Review this educational MCQ using the rubric below. Return JSON only: {\"approved\":boolean,\"issues\":[string],\"severity\":\"critical|review|none\"}.\n"
+        + "Reject only demonstrable problems: factual error, more than one defensible answer, no correct answer, materially ambiguous wording, unsafe/inappropriate content, or clear mismatch with the stated grade/subject. Do NOT reject merely because you are uncertain or cannot independently recall a niche fact. For uncertainty, use approved=false and explain exactly what needs human verification; severity must be review. Issues must identify the specific option or phrase and explain why it is problematic. If no material issue is found, approve with an empty issues array.\nQuestion JSON:\n"
         + JSON.stringify(q);
       assertLease();
       const verdict = await requestStructuredJson(
         ai.api_key,
-        "You are a strict independent educational content auditor. Reject doubtful, ambiguous, inaccurate, or unsuitable questions. Do not approve merely because the supplied answer claims to be correct.",
+        "You are an educational quality reviewer. Be evidence-minded, fair and precise. Do not invent defects. Distinguish a proven error from uncertainty requiring a human check. Evaluate the actual question and options, not stylistic preferences.",
         validatorPrompt, 900, "Validator",
         (value) => !!value && typeof value === "object" &&
           typeof value.approved === "boolean" &&
           Array.isArray(value.issues) &&
-          value.issues.every((issue: unknown) => typeof issue === "string"),
+          value.issues.every((issue: unknown) => typeof issue === "string") &&
+          ["critical","review","none"].includes(value.severity),
         (input, output) => { inputTokens += input; outputTokens += output; },
       );
       assertLease();
       if (verdict.approved !== true || verdict.issues.length > 0) {
         rejected++;
-        validationRejections.push(verdict.issues.join("; ").slice(0, 240) || "independent validator did not approve");
+        const reason = verdict.issues.join("; ").slice(0, 1000) || "Validator flagged this candidate for manual verification.";
+        validationRejections.push(reason.slice(0, 240));
+        await saveRejected(q, verdict.severity === "critical" ? "validator_critical" : "validator_review", reason);
         continue;
       }
       const payload = {
@@ -288,7 +310,11 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       const { error: storeError } = await db.rpc("ka_store_generated_question", {
         p_job_id: job.id, p_question: payload, p_correct_option: q.correct_option,
       });
-      if (storeError) { rejected++; continue; }
+      if (storeError) {
+        rejected++;
+        await saveRejected(q, "storage", "Could not save as Draft: " + storeError.message);
+        continue;
+      }
       seen.add(normalized);
       validated++;
       published++;
@@ -315,7 +341,7 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       rejected_count: rejected, model: MODEL, input_tokens: inputTokens, output_tokens: outputTokens,
       estimated_cost_usd: totalCostUsd, estimated_cost_inr: priorCostInr + actualCostInr, usd_inr_rate: usdInrRate,
       completed_at: new Date().toISOString(),
-      ...(published ? {} : { error_code: "no_questions_published", error_summary: "No candidate passed structural, duplicate and independent AI validation." }),
+      ...(published ? {} : { error_code: "no_questions_published", error_summary: "No candidate was promoted to Draft. Rejected candidates and reasons are available in Admin Manual Validation." }),
     });
     if (usageId) {
       const { error: settleError } = await db.from("ka_ai_usage").update({
