@@ -17,17 +17,19 @@ def guide():
     ) + note('Where to find it', 'Pending Action Items is at the top of the menu, under Dashboard, with Star Teacher below it when it is on. Class Frequency is in the Teaching group. '
              'Tap <b>?</b> next to a heading in the app for quick help on that screen.', 'tip'), new=True)
 
-    g.add('portal', 'Overview', 'Your portal', 'Up to fourteen tabs (* only when the admin switches it on for you). Everything is limited to your own classes and students.', table(
+    g.add('portal', 'Overview', 'Your portal', 'Your available tabs depend on the access the admin has enabled for your account. Your student and class information is limited to your own teaching assignments.', table(
         ['Tab', 'What you do there'], [
             ['Dashboard', 'Today’s classes, earnings, alerts and AI tools'],
             ['Pending Action Items', 'Everything waiting for you, one tap to each'],
             ['Class Schedule', 'Create, run and export your timetable'],
-            ['Class Frequency', 'Classes per weekday for each student and subject'],
+            ['My Students Class Frequency / Class Frequency Setup', 'Review or update each student’s weekly classes per subject'],
             ['My Students', 'Contacts, subjects and class balances of your students'],
             ['Study Plans', 'Topic roadmap for each student and subject'],
             ['Homework', 'Assign, track and review homework'],
             ['Question Bank*', 'Review questions, build practice papers, mark attempts'],
             ['Research*', 'Lesson prep, student insights, question research, resources'],
+            ['Knowledge Arena', 'Play available grade-appropriate learning games'],
+            ['Analytics', 'Demo Analysis, Class Delivery Intelligence and Teacher Performance Intelligence'],
             ['Availability', 'Weekly windows, leave and the free-slots report'],
             ['My Attendance Report', 'Your history and your students’ balances'],
             ['Give Attendance', 'Record the classes you have held'],
@@ -315,6 +317,12 @@ def guide():
         'Teachers can play the same available games as students. Admin-only question generation, suitability and question-bank controls are not available to teachers.',
         'Game XP is separate from attendance XP and does not change attendance rewards.',
     ]) + note('Need help?', 'Use the in-game Help / instructions panel before starting a game.', 'tip'))
+
+    g.add('analytics', 'Analytics', 'Your analytics pages', 'Read-only reports for your own assigned demos, class delivery and teaching activity.', g3(
+        box('My Demo Analysis', ['Period: Last 30 days, Last 90 days or All records.', 'Assigned demos combines your linked Demo Bookings and teacher demo logs, counting a linked booking / log once.', 'Review assigned, completed, converted and conversion-rate cards; the conversion rate is converted demos divided by completed demos.', 'See pending / scheduled, completed, converted and lost / cancelled status, subject conversion, monthly conversions and your assigned-demo register.']),
+        box('Class Delivery Intelligence', ['Filter by period (This month, Last 30 days, Last 90 days or All available records) and class type (Group, Individual or Special).', 'Review Scheduled, Conducted, Absent, Pending and Overdue counts, teacher delivery rate and student attendance rate.', 'See the last-14-days attendance trend, performance by teacher, student attendance and current overdue classes. The report is read-only.']),
+        box('Teacher Performance Intelligence', ['Filter by period (Current month, Last 30 days, Last 90 days, Custom range or All available records), student, subject and class type; the report is scoped to your own teacher account.', 'Review your workload, students handled, group / individual classes, workload by subject and six-month delivery / attendance trends.', 'Inspect your student engagement and current overdue classes. Admin-only teacher comparisons and teacher selection are not available in the Teacher view.']),
+    ) + note('Keep records accurate', 'These reports read the schedules, attendance, demo bookings and demo logs already recorded by My LIB. Correct source records through the normal app workflow; an empty report is not proof that no activity occurred.', 'tip'))
 
     g.add('quickref', 'Quick reference', 'Quick reference', 'I want to… where do I go?', table(['I want to…', 'Go to'], [
         ['See what needs my action', 'Pending Action Items'],

@@ -13,13 +13,20 @@ def guide():
             ['Dashboard', 'Stats, classes expiring, demo funnel, AI students at risk'],
             ['Daily work', 'Class Log, New registrations, Communication, Demo Bookings, Support, Rebuild Pending Classes'],
             ['Money', 'Fees, Payroll, Expenses, Reports &amp; Export'],
-            ['People', 'Students &amp; Subscriptions, Teachers &amp; Subjects, Parents'],
-            ['Teaching', 'Study Plans, Homework, Question Bank'],
+            ['People', 'Students &amp; Subscriptions, Attendance XP &amp; Levels, Student Onboarding &amp; Communication, Teachers &amp; Subjects, Parents'],
+            ['Teacher Monitoring', 'Star Teacher, Research Monitoring, App Usage, AI Usage, Study Plans, Homework, Question Bank Monitoring, Teacher Appraisal'],
+            ['Learning', 'Knowledge Arena'],
+            ['Analytics', 'Demo Analysis, Class Delivery Intelligence, Student Engagement Intelligence, Revenue Intelligence, Teacher Performance Intelligence'],
             ['System', 'Settings, Manage Admins, AI, Audit Log'],
             ['Superadmin', 'Superuser admins only: Academic Year, backups, danger zone'],
         ]) + note('Quick help everywhere', 'Tap <b>?</b> next to a heading for help on that card. The <b>? Help</b> button at the top '
                   'has the Quick Guide and the Help bot.', 'tip') + note('Links you can share', 'Each page has its own address, for example '
                   '<b>…/#fees</b> or <b>…/#setup</b>, so a bookmark opens that page.'))
+
+    g.add('dashboard', 'Dashboard', 'Admin Dashboard', 'Start here for a quick view of the centre’s current position and items needing attention.', g2(
+        box('At-a-glance stats', 'Use the dashboard statistics as a summary; open the relevant source page to verify or act on an individual record.'),
+        box('Classes expiring and demo funnel', 'Review the classes-expiring indicators and the demo funnel, then follow up from the Students or Demo Bookings pages.'),
+    ) + note('AI students at risk', 'The AI student-risk summary is a prompt for review, not a substitute for the student’s actual attendance, learning and subscription records. Open the relevant student record before deciding what action to take.', 'tip'))
 
     g.add('monthly', 'Overview', 'Your month at a glance', 'The jobs that come round every month.', table(['When', 'Job', 'Where'], [
         ['Every day', 'Log classes, answer chats and support, follow up demos and new registrations', 'Class Log, New registrations, Communication, Support, Demo Bookings'],
@@ -82,7 +89,12 @@ def guide():
         ('Preview Rebuild', 'Shows per student and subject: classes left, future Pending classes to remove, overdue classes kept, weekly frequency.'),
         ('Rebuild', 'Removes only future Pending classes and makes new ones. Subscription limits and teacher clashes are still checked.'),
     ]) + note('What stays', ['Done classes, overdue Pending classes and other statuses are never touched.',
-                             'Students with no Class Frequency are skipped and listed.']) + h3('Placeholder times') + bullets([
+                             'Students with no Class Frequency are skipped and listed.']) + h3('New subscriptions and renewals') + bullets([
+        'The top section on this page adds paid classes that are not yet on the schedule for new students and renewals, after the last scheduled class.',
+        'It uses Class Frequency and saved timings. It only adds missing paid classes; it does not delete or rebuild existing classes.',
+        'The process runs automatically every night at 1 AM. Use Preview, check the proposed additions and Needs setup list, then Confirm to run it manually.',
+        'A student page can also show paid classes not yet scheduled, with an Add action. Students without Class Frequency or a teacher need setup first.',
+    ]) + h3('Placeholder times') + bullets([
         'New classes get <b>00:00</b> (Group) or <b>01:00 / 02:00</b> (Individual).',
         'Teachers see them under <b>Class timings to correct</b> in Pending Action Items and put in the real time.',
     ]))
@@ -150,6 +162,9 @@ def guide():
         ['Subscription history', 'Active, upcoming and expired payments, with receipts'],
         ['Special fee rates', 'An agreed per-class rate for this student, with dates'],
         ['Notes, attendance', 'Private teacher notes and the full attendance record'],
+        ['Call log', 'Record calls with the student or parent, add a call note and set a Call again date; demo-stage calls are also shown'],
+        ['Attendance XP & Levels', 'Review the student attendance rewards and levels in the dedicated People page'],
+        ['Student Onboarding & Communication', 'Open the dedicated People page for student / family onboarding and communication tasks'],
     ]) + note('Special fee rates', ['Set subject, Group / Individual, rate (and an Offline rate if different), from and until.',
                                     'Used everywhere this student’s fee is worked out. Discount tiers still apply.',
                                     'Saved requests and payments don’t change.']))
@@ -180,6 +195,31 @@ def guide():
         box('Question Bank', ['Review Queue, Full Question Bank, Archived', 'Practice Papers and Past Papers']),
     ) + note('Teacher access', 'Teachers see the Question Bank and Research tabs only when you switch them on in Settings.', 'tip'))
 
+    g.add('monitoring', 'Teacher Monitoring', 'Teacher Monitoring tools', 'Review teacher activity and output. These are monitoring views; use the normal source screens to correct records.', g2(
+        box('Star Teacher', ['Switch the monthly points programme on or off and set its start date.', 'Review the leaderboard and each teacher’s points, level, badges and activity breakdown.']),
+        box('Research Monitoring', ['Review teacher-wise saved lesson briefs and resources added or shared.', 'Filter by month and teacher. Brief text and private notes are not displayed in this monitoring view.']),
+    ) + g2(
+        box('App Usage', ['Review screens opened and tracked actions by teacher, by feature or by user.', 'The report also includes teachers with no recorded activity in the last 30 days; no event does not necessarily prove no work was done.']),
+        box('AI Usage', ['Review AI calls, tokens and estimated costs by user and feature.', 'AI master switch, role/person access and API settings remain under System → AI.']),
+    ) + g2(
+        box('Study Plans and Textbook library', ['Read-only view of teachers’ study plans and student progress.', 'The Textbook library lists uploaded books and supports rename, retag and delete.']),
+        box('Homework', ['Review homework set by teachers and filter by teacher, student or status. Use the teacher/student workflow to resolve or correct individual records.']),
+    ) + g2(
+        box('Question Bank Monitoring', ['Read-only teacher-wise activity: access status, visits, questions added and approved, practice papers created, student assignments, submissions and reviews.', 'Counts use recorded app events and database timestamps; incomplete event tracking can make activity counts incomplete.']),
+        box('Question Bank work screen', ['The operational Question Bank remains under Daily work, separate from monitoring.', 'Use Review Queue, Full Question Bank, Archived, Practice Papers and Past Papers for question review and paper operations.']),
+    ) + note('Monitoring is not an edit screen', 'Use the original app workflow to change a study plan, homework item, Question Bank record or teacher setting. Monitoring views should not be treated as a substitute for the source record.', 'tip'))
+
+    g.add('analytics', 'Analytics', 'Analytics and Teacher Appraisal', 'Admin reporting pages for admissions, class delivery, student engagement, revenue and teacher performance.', g2(
+        box('Demo Analysis', ['Unified admissions funnel across prospect and student records.', 'Review open prospects and lost / cancelled / rejected outcomes.', 'Compare acquisition sources, record types and course interest.', 'Open stage records and recent admissions activity, including recorded follow-up history.', 'Period selector: Last 30 days, Last 90 days or All records.']),
+        box('Class Delivery Intelligence', ['Filter by period (This month, Last 30 days, Last 90 days or All available records) and class type (Group, Individual or Special).', 'Review Scheduled, Conducted, Absent, Pending and Overdue counts.', 'See teacher delivery rate and student attendance rate, the last-14-days attendance trend, performance by teacher, student attendance and current overdue classes.', 'The report reads scheduled_classes and sessions; it does not itself correct attendance or schedules.']),
+    ) + g2(
+        box('Student Engagement Intelligence', ['Filter by month, grade and subject; search students and switch between students needing attention or all active students.', 'Review attention flags, three-month attendance trend, currently overdue classes and Student login activity (current month and six-month trend).', 'Inspect Study Plans and Homework activity and read-only student detail. Knowledge Arena attempt data is unavailable to this Admin report under current database read policies; no participation count is inferred and non-participation does not create an attention flag.', 'Data Quality Checks show exceptions detected by the current checks; a clean result is not proof that every source is complete.', 'Knowledge Arena individual attempts are not read by this report.']),
+        box('Revenue Intelligence', ['Filter by delivery month range, teacher, student, subject, class type and Online / Offline mode.', 'Review class-level fee value, teacher delivery cost and gross contribution, with contribution by class type and mode and a six-month monthly trend.', 'Compare student, teacher and subject profitability.', 'Reconcile payroll payments to delivery months; distinguish payments made in the selected period from earlier delivery months still unpaid.', 'Review student collections, teacher payroll, recorded expenses and Financial data quality; export class-level CSV.', 'Class type and delivery mode come from attendance records; incomplete rate or payment mapping can affect the calculations.']),
+    ) + g2(
+        box('Teacher Performance Intelligence', ['Filter by period (Current month, Last 30 days, Last 90 days, Custom range or All available records), teacher, student, subject and class type.', 'Compare teachers by scheduled, conducted, absent, pending and overdue classes, student count, delivery rate and student attendance; select a teacher for detail.', 'Review workload distribution, students handled, group / individual classes, subject workload, six-month delivery and attendance trends, monthly delivery rate and workload trend.', 'Inspect student engagement by teacher and current overdue classes.', 'This is a read-only analytics report; it does not replace the separate appraisal process.']),
+        box('Teacher Appraisal', 'Separate, confidential Admin-only appraisal workspace for periods, scoring configuration, evidence review and appraisal records. Teachers do not have access to this workspace. See the dedicated Teacher Appraisal section below.'),
+    ) + note('Data coverage matters', 'Analytics can only report what the app has actually recorded. A missing or unconfigured source should be treated as unavailable data, not assumed performance. Check the report’s data-quality notes before drawing conclusions.', 'tip'))
+
     g.add('settings', 'System', 'Settings, admins, AI and audit', 'How the app is set up.', table(['Page', 'What is there'], [
         ['Settings', 'Grades, categories, boards, subject names; Question Bank access and Research access per teacher; Star Teacher switch, start date and leaderboard; add users; change your password'],
         ['Manage Admins', 'Add or remove admin accounts'],
@@ -196,12 +236,12 @@ def guide():
 
     g.add('knowledgearena', 'Teaching', 'Knowledge Arena content and controls', 'Manage game content without changing the existing Question Bank, Online Assessment or attendance rewards.', g2(
         box('Grade and subject suitability', 'Configure which subjects are suitable for each grade, which games are enabled for each grade, and which subjects each game can draw from. These rules are enforced by the API.'),
-        box('AI question generation', 'Queue a job by grade, subject, game, difficulty, language, count and optional topic. Generated questions must pass structural and quality validation before they can enter the Draft workflow.'),
+        box('AI question generation', 'Queue a job by grade, subject, game, difficulty, language, count and optional topic. Questions that pass structural and independent quality validation are published automatically. Rejected or ambiguous candidates are retained for Admin review.'),
     ) + g2(
-        box('Question review', 'Review approved candidates and complete any missing or defective options. Edit the prompt, four options, correct answer, explanation and difficulty. Approving a candidate moves it to Draft; it does not publish it.'),
+        box('Question review', 'Validated AI-generated questions publish automatically after structural and independent quality checks. Use the review controls to inspect published content and correct issues when needed.'),
         box('Rejected questions', 'Open the Rejected review queue to inspect candidates retained with their rejection stage and reason. Correct a recoverable question and approve it to Draft, or dismiss it. Rejected questions are not available to players.'),
         box('Manual questions', 'Use Add Question to create a question yourself. Subject and Grade are dropdowns populated from the existing catalogue; duplicate labels are removed. Complete all four distinct options, select the correct answer and add an explanation. Save creates a Draft only.'),
-        box('Draft publishing', 'Review Drafts and publish only the selected, complete questions. Publishing is a separate Admin action; neither AI generation nor manual entry publishes automatically.'),
+        box('Draft publishing', 'Questions recovered from the Rejected queue and manually entered questions remain Drafts until an Admin explicitly publishes them. Validated AI-generated questions publish automatically.'),
         box('Daily challenge', 'Daily challenges use grade-eligible Quick Quiz questions from subjects enabled for that grade. A challenge is available only when ten suitable published questions can be assembled.'),
         box('AI budget and reservations', 'Daily and monthly INR limits are shared. Interrupted or uncertain provider calls remain reserved for review; verify actual cost before settling them.'),
     ) + bullets([
@@ -212,7 +252,24 @@ def guide():
         'Knowledge Arena Game XP is separate from attendance XP, levels, badges, streaks and the existing attendance leaderboard.',
         'The Admin screen is aggregate-only for player performance; it does not expose individual answers or question-level student history.',
         'A no-published-questions message means eligible published content is unavailable for that game and grade. Check publication status, grade labels, subject and game type before changing student settings.',
-    ]) + note('Draft first; publish deliberately', 'AI-reviewed questions and manually entered questions remain Drafts until an Admin explicitly publishes them. Keep Knowledge Arena separate from the existing Question Bank / Online Assessment.', 'warn'))
+    ]) + note('Different publication paths', 'Validated AI-generated questions publish automatically. Manually entered questions and questions approved from the Rejected queue remain Drafts until an Admin explicitly publishes them. Keep Knowledge Arena separate from the existing Question Bank / Online Assessment.', 'tip'))
+
+    g.add('appraisal', 'Analytics', 'Teacher Appraisal: complete Admin workflow', 'A confidential, Admin-only process for reviewing teacher performance. Teachers, Students and Parents cannot open this module or view appraisal records.', g2(
+        box('1. Appraisal overview', ['Choose an existing appraisal period to see teacher scores, ratings and status.', 'The overview shows teacher count, average score, finalised count and appraisals awaiting review.', 'Use Consolidated PDF to print the selected period’s teacher summary.']),
+        box('2. Create a period', ['Choose Monthly, Quarterly, Half-yearly, Yearly or Custom.', 'Enter the start and end dates and a clear period label.', 'Generate appraisals creates one Draft appraisal per active teacher; it does not overwrite existing appraisals.', 'The period uses the scoring configuration effective on its start date. If no eligible published configuration exists, generation is blocked.']),
+    ) + g2(
+        box('3. Review an individual appraisal', ['Open a teacher’s row to see the provisional score out of 100, rating, period and configuration version.', 'Review category, subcategory and criterion scores, weights, explanations and calculated values.', 'Expand underlying records to inspect the evidence used by a criterion.', 'Use What does this criterion mean? to inspect its purpose, scoring method, maximum points, evidence source and configured parameters.']),
+        box('4. Complete Admin assessments', ['Some criteria require an Admin score from 0% to 100% and a supporting observation.', 'Enter both the score and evidence / observation, then Save assessment.', 'Add category observations and an overall observation and recommendation.', 'A score with outstanding Admin assessments is provisional. Do not treat missing or unconfigured evidence as poor performance unless the criterion says it was expected and applicable.']),
+    ) + g2(
+        box('5. Recalculate and finalise', ['Recalculate evidence refreshes the evidence and scores for a Draft or reopened appraisal.', 'Check data coverage, applicability, evidence rows and every Admin-assessed criterion before finalising.', 'Finalise appraisal is blocked while required assessments or observations are incomplete.', 'Finalised appraisals are locked from ordinary editing and preserve their configuration and evidence snapshot.']),
+        box('6. Reopen a finalised appraisal', ['Use Reopen only when a correction is justified.', 'Enter a reason; the reason is required and recorded.', 'Review the reopened record, make the correction, recalculate if needed and finalise again.']),
+    ) + g2(
+        box('7. Scoring configuration', ['Open Configuration preview, then Scoring Setup to work on the scoring rules.', 'The hierarchy is Category → Subcategory → Criterion. Category weights must total 100; subcategory weights must equal the parent category; criterion weights must equal the parent subcategory.', 'Configure targets, scoring methods, deadlines, grace periods, bands, deductions, evidence sources and applicability where supported.', 'Use Test with a teacher to select a teacher and date range. The NOT SAVED preview shows the provisional total and category-level points only; it does not show the criterion-by-criterion calculation or underlying evidence. Open an individual generated appraisal to inspect subcategories, criteria, calculated values, explanations and evidence records.']),
+        box('8. Version and period controls', ['Save draft stores a new Draft configuration version. Publish new version makes it active from its effective date and archives the previous published version.', 'Existing periods and finalised appraisal snapshots retain their original configuration; publishing a new version does not rewrite historical scores.', 'Period dates can be edited only before appraisal snapshots are generated.', 'Only unused Draft or Archived configuration versions can be deleted. Published or period-linked versions are protected. Draft appraisals and a period containing only Draft appraisals have separate delete controls; deletion is permanent.']),
+    ) + g2(
+        box('9. Audit trail and PDFs', ['Open Audit history inside an appraisal to see who changed what and when, including recorded change details.', 'Individual PDF prints the selected appraisal. Consolidated PDF prints the selected period’s teacher summary.', 'Keep appraisal observations factual, evidence-based and professional. Treat appraisal information as confidential Admin material.']),
+        box('10. Interpreting scores responsibly', ['A provisional score is not a final rating.', 'Not-applicable criteria are excluded from the applicable-weight calculation; remaining criteria may be proportionally normalised.', 'Automatic metrics depend on source records and tracking coverage. A report with no evidence may mean no activity, unavailable tracking or incomplete source data; inspect the criterion note and evidence before drawing a conclusion.', 'Admin-review criteria require a human assessment; do not substitute an assumed score.']),
+    ) + note('Access boundary', 'This module is restricted to active Admin accounts. Do not share appraisal PDFs or screenshots with teachers or other roles through public links or shared devices.', 'warn'))
 
     g.add('quickref', 'Quick reference', 'Quick reference', 'I want to… where do I go?', table(['I want to…', 'Go to'], [
         ['Log a class', 'Class Log'],

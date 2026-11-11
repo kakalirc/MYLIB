@@ -46,6 +46,14 @@ def guide():
         box('Themes', ['Pick one of 6 accent colours from the dots on the welcome banner', 'Saved for you on this device']),
     ))
 
+    g.add('attendance', 'Classes', 'My Attendance: overall and by subject', 'See the attendance recorded for your classes.', bullets([
+        'The My Attendance panel shows overall attendance and a subject-wise breakdown of Present, Absent and Pending overdue classes.',
+        'Use By month and the month selector to review a period, or choose All time for the full available history.',
+        'Open View attendance details to see the date, subject, teacher, class type and status for each record.',
+        'Attendance percentage is Present divided by Present + Absent + Pending Overdue. Future Pending classes are excluded.',
+        'Only Present and Absent classes are counted against your subscription. A Pending overdue class is adjusted when the teacher takes and records it.',
+    ]) + note('Where to find it', 'My Attendance appears on your My Learning dashboard near the top, below the Next Class card.', 'tip'))
+
     g.add('classes', 'Classes', 'Classes, schedule and balance', 'Know where you stand.', g2(
         box('Attendance', ['Every class by month: date, subject, teacher, type, mode, status and remarks']),
         box('Classes remaining', ['Subscribed, used, expired and remaining for each subject and type',
@@ -112,7 +120,7 @@ def guide():
     ]) + note('Good to know', ['Pending requests don’t count until they’re paid.', 'You can undo an attempt before it’s confirmed.',
                                'Payment history shows each reference and remark, with a printable receipt.']), new=True)
 
-    g.add('ai', 'Help', 'Ask AI, profile and chat', 'Claude helps you understand your own progress.', g3(
+    g.add('ai', 'Help', 'Ask AI, profile and chat', 'Use Ask AI to understand your own progress.', g3(
         box('How am I doing?', ['A friendly summary of your month']),
         box('Plan ahead', ['Next month forecast', 'Subscription advice']),
         box('Ask AI', ['Anything about your own classes and balance', 'Uses only your own data']),
@@ -145,6 +153,12 @@ def guide():
         'Memory Challenge gives you a short time to study a sequence before the answer choices appear.',
         'Questions are selected from published content for your saved grade, with General questions used only where the published question rules allow it. If no eligible questions are available, try another game or return later.',
     ]) + note('Need help?', 'Use the Help / instructions area on the Knowledge Arena screen before starting a game. If a game reports that no published questions are available, this is a content-availability message; it does not mean your login or subscription is invalid.', 'tip'))
+
+    g.add('portalnav', 'Home', 'My Learning, Fun Zone and Settings', 'Your student home screen is organised into three sections.', g3(
+        box('My Learning', 'Your academic dashboard, attendance, study plans, homework, practice papers, shared resources and fee information.'),
+        box('Fun Zone', 'Knowledge Arena games, daily challenges and separate Game XP and achievements.'),
+        box('Settings', 'Your account and personal settings, including password-related options.'),
+    ) + note('Switch sections', 'Use the section tabs near the top of the Student Login page. Your selected section is remembered on this device.', 'tip'))
 
     g.add('quickref', 'Quick reference', 'Quick reference', 'I want to… where do I go?', table(['I want to…', 'Go to'], [
         ['See classes left', 'Stats at the top of the home screen'],

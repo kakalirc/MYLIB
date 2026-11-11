@@ -23,6 +23,12 @@ def guide():
     ]) + note('Why change it?', 'Anyone who knows your mobile number could sign in with the first password.', 'warn')
         + note('A child missing?', 'Ask LIB on WhatsApp or Chat to link them to your login.', 'tip'), new=True)
 
+    g.add('parenthome', 'Overview', 'Using Parent Login', 'Follow your child’s learning, attendance and fees from one page.', g3(
+        box('Choose a child', 'If more than one child is linked to your family login, use the Viewing selector at the top to switch children.'),
+        box('Learning and activity', 'Review the selected child’s study plans, homework, practice papers, teacher-shared resources and Knowledge Arena information.'),
+        box('Attendance and fees', 'Review attendance, class schedule, subscription balances, fee requests, payment history and receipts for the selected child.'),
+    ) + note('Parent access', 'Parent Login is a family view of the linked children. Knowledge Arena games and challenges are completed by the child in their own Student Login; parents cannot submit answers on their behalf.', 'tip'))
+
     g.add('overview', 'Overview', 'What you see', 'One login, one or more children.', g3(
         box('Your child’s home', ['Classes remaining and attended this month', 'Pending fee requests', 'Classes expiring soon', 'Unread chats']),
         box('Several children?', ['Switch between them from the selector at the top', 'Each child’s information stays separate']),
