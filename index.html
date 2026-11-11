@@ -12654,6 +12654,8 @@ function openReceipt(paymentId) {
   var rows = [
     ['Received from', parentName],
     ['Date', p.date],
+    ['Mode of Payment', 'Online'],
+    ['Status', 'Paid'],
     ['Student', st ? st.name : '—'],
     ['Student ID', st ? st.code||'—' : '—'],
     ['Subject', subj ? subj.name : '—'],
