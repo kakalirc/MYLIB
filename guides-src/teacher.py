@@ -22,7 +22,7 @@ def guide():
             ['Dashboard', 'Today’s classes, earnings, alerts and AI tools'],
             ['Pending Action Items', 'Everything waiting for you, one tap to each'],
             ['Class Schedule', 'Create, run and export your timetable'],
-            ['Class Frequency', 'Classes per weekday for each student and subject'],
+            ['My Students Class Frequency / Class Frequency Setup', 'Review or update each student’s weekly classes per subject'],
             ['My Students', 'Contacts, subjects and class balances of your students'],
             ['Study Plans', 'Topic roadmap for each student and subject'],
             ['Homework', 'Assign, track and review homework'],

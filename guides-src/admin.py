@@ -13,7 +13,7 @@ def guide():
             ['Dashboard', 'Stats, classes expiring, demo funnel, AI students at risk'],
             ['Daily work', 'Class Log, New registrations, Communication, Demo Bookings, Support, Rebuild Pending Classes'],
             ['Money', 'Fees, Payroll, Expenses, Reports &amp; Export'],
-            ['People', 'Students &amp; Subscriptions, Teachers &amp; Subjects, Parents'],
+            ['People', 'Students &amp; Subscriptions, Attendance XP &amp; Levels, Student Onboarding &amp; Communication, Teachers &amp; Subjects, Parents'],
             ['Teacher Monitoring', 'Star Teacher, Research Monitoring, App Usage, AI Usage, Study Plans, Homework, Question Bank Monitoring, Teacher Appraisal'],
             ['Learning', 'Knowledge Arena'],
             ['Analytics', 'Demo Analysis, Class Delivery Intelligence, Student Engagement Intelligence, Revenue Intelligence, Teacher Performance Intelligence'],
