@@ -18,6 +18,7 @@
   var studentSubjectNames = [];
   var studentScopeLoaded = false;
   var activeFilterStudentId = '';
+  var studentGradeId = '';
 
   function syncStudentDefaults() {
     if (typeof currentRole === 'undefined' || currentRole !== 'Student'
@@ -25,9 +26,8 @@
     var id = String(currentLinkedId);
     if (activeFilterStudentId === id) return;
     activeFilterStudentId = id;
-    var student = typeof data !== 'undefined' && Array.isArray(data.students)
-      ? data.students.find(function (s) { return String(s.id) === id; }) : null;
-    paperFilters = { boardId: '', schoolId: '', gradeId: student && student.grade_id ? String(student.grade_id) : '', subject: '', year: '' };
+    studentGradeId = '';
+    paperFilters = { boardId: '', schoolId: '', gradeId: '', subject: '', year: '' };
     studentSubjectNames = [];
     studentScopeLoaded = false;
     papersLoaded = false;
@@ -81,6 +81,11 @@
       schoolDirectory = results[1].error ? [] : (results[1].data || []);
       if (typeof currentRole !== 'undefined' && currentRole === 'Student'
           && typeof currentLinkedId !== 'undefined' && currentLinkedId) {
+        var studentResult = await sb.from('students').select('grade_id').eq('id', currentLinkedId).maybeSingle();
+        if (!studentResult.error && studentResult.data && studentResult.data.grade_id) {
+          studentGradeId = String(studentResult.data.grade_id);
+          paperFilters.gradeId = studentGradeId;
+        }
         var enrollmentResult = await sb.from('student_subjects').select('subject_id').eq('student_id', currentLinkedId);
         if (!enrollmentResult.error) {
           var subjectIds = (enrollmentResult.data || []).map(function (row) { return row.subject_id; }).filter(Boolean);
@@ -119,6 +124,10 @@
     var boardOptions = distinctOptions('board_id', function (p) { return labelFor(boardsList, p.board_id) || 'Board'; }).filter(function (o) { return !!o.value; });
     var schoolOptions = distinctOptions('school_id', function (p) { return labelFor(schoolDirectory, p.school_id) || 'School'; }).filter(function (o) { return !!o.value; });
     var gradeOptions = distinctOptions('grade_id', function (p) { return labelFor(gradesList, p.grade_id) || 'Class'; }).filter(function (o) { return !!o.value; });
+    if (isStudentView && studentGradeId && !gradeOptions.some(function (o) { return o.value === studentGradeId; })) {
+      var ownGradeName = labelFor(gradesList, studentGradeId);
+      if (ownGradeName) gradeOptions.push({ value: studentGradeId, label: ownGradeName });
+    }
     var subjectOptions = distinctOptions('subject_name', function (p) { return p.subject_name; });
     var isStudentView = typeof currentRole !== 'undefined' && currentRole === 'Student';
     if (isStudentView && studentScopeLoaded && studentSubjectNames.length) {
@@ -130,7 +139,7 @@
       + filterControl('boardId', 'All Boards', boardOptions)
       + filterControl('schoolId', 'All Schools', schoolOptions)
       + filterControl('gradeId', 'All Classes', gradeOptions)
-      + filterControl('subject', isStudentView ? 'My Subjects' : 'All Subjects', subjectOptions)
+      + filterControl('subject', 'All Subjects', subjectOptions)
       + filterControl('year', 'All Years', yearOptions)
       + '<button class="btn-small" type="button" onclick="libClearPastPaperFilters()">Clear filters</button>'
       + '</div>';
@@ -194,10 +203,7 @@
   };
   window.libClearPastPaperFilters = function () {
     syncStudentDefaults();
-    var student = typeof currentRole !== 'undefined' && currentRole === 'Student'
-      && typeof data !== 'undefined' && Array.isArray(data.students)
-      ? data.students.find(function (s) { return String(s.id) === String(currentLinkedId); }) : null;
-    paperFilters = { boardId: '', schoolId: '', gradeId: student && student.grade_id ? String(student.grade_id) : '', subject: '', year: '' };
+    paperFilters = { boardId: '', schoolId: '', gradeId: studentGradeId || '', subject: '', year: '' };
     if (typeof render === 'function') render();
   };
   window.libRefreshPastPapers = function () {
