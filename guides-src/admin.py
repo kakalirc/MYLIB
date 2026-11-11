@@ -84,7 +84,12 @@ def guide():
         ('Preview Rebuild', 'Shows per student and subject: classes left, future Pending classes to remove, overdue classes kept, weekly frequency.'),
         ('Rebuild', 'Removes only future Pending classes and makes new ones. Subscription limits and teacher clashes are still checked.'),
     ]) + note('What stays', ['Done classes, overdue Pending classes and other statuses are never touched.',
-                             'Students with no Class Frequency are skipped and listed.']) + h3('Placeholder times') + bullets([
+                             'Students with no Class Frequency are skipped and listed.']) + h3('New subscriptions and renewals') + bullets([
+        'The top section on this page adds paid classes that are not yet on the schedule for new students and renewals, after the last scheduled class.',
+        'It uses Class Frequency and saved timings. It only adds missing paid classes; it does not delete or rebuild existing classes.',
+        'The process runs automatically every night at 1 AM. Use Preview, check the proposed additions and Needs setup list, then Confirm to run it manually.',
+        'A student page can also show paid classes not yet scheduled, with an Add action. Students without Class Frequency or a teacher need setup first.',
+    ]) + h3('Placeholder times') + bullets([
         'New classes get <b>00:00</b> (Group) or <b>01:00 / 02:00</b> (Individual).',
         'Teachers see them under <b>Class timings to correct</b> in Pending Action Items and put in the real time.',
     ]))
@@ -152,6 +157,9 @@ def guide():
         ['Subscription history', 'Active, upcoming and expired payments, with receipts'],
         ['Special fee rates', 'An agreed per-class rate for this student, with dates'],
         ['Notes, attendance', 'Private teacher notes and the full attendance record'],
+        ['Call log', 'Record calls with the student or parent, add a call note and set a Call again date; demo-stage calls are also shown'],
+        ['Attendance XP & Levels', 'Review the student attendance rewards and levels in the dedicated People page'],
+        ['Student Onboarding & Communication', 'Open the dedicated People page for student / family onboarding and communication tasks'],
     ]) + note('Special fee rates', ['Set subject, Group / Individual, rate (and an Offline rate if different), from and until.',
                                     'Used everywhere this student’s fee is worked out. Discount tiers still apply.',
                                     'Saved requests and payments don’t change.']))
