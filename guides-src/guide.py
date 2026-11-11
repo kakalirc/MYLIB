@@ -1,4 +1,4 @@
-"""Page template and building blocks shared by the three My LIB user guides."""
+"""Page template and building blocks shared by the four My LIB user guides."""
 import html
 
 E = html.escape
