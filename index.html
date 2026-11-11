@@ -4941,6 +4941,7 @@ async function deleteDemoLog(id) {
 }
 // Shared conversion path for Admin entry points. Conditional linking protects against stale screens.
 async function convertDemoForStudent(demoId, studentId, options = {}) {
+  if (currentRole !== 'Admin') return { ok: false, message: 'Only Admin can convert a demo.' };
   const dl = (data.demoLogs || []).find(d => d.id === demoId);
   if (!dl) return { ok: false, message: 'Demo record not found. Refresh and try again.' };
   if (dl.status === 'Cancelled') return { ok: false, message: 'A cancelled demo cannot be converted.' };
@@ -10106,11 +10107,12 @@ async function addStudent(mode) {
   if (error) { addConfirmMsg.student = 'Could not add student: ' + error.message; render(); return; }
   const student = { id: row.id, name: row.name, archived: !!row.archived, code: row.student_code || '', parentName: '', mobileNumber: row.mobile_number || '', email: '', address: '', photo: '', gradeId: '', boardId: '', academicYear: '', modePreference: '', classTypePreference: '', billSeparately: false };
   data.students.push(student);
+  let phoneWarning = '';
   if (studentMobile) {
     const { data: phoneRow, error: phoneErr } = await sb.from('student_phone_numbers').insert({
       student_id: row.id, phone_type: 'student', phone_number: studentMobile
     }).select().single();
-    if (phoneErr) addConfirmMsg.student = 'Student created, but student mobile could not be saved: ' + phoneErr.message;
+    if (phoneErr) phoneWarning = ' Student mobile could not be saved: ' + phoneErr.message;
     else data.studentPhoneNumbers.push({ id: phoneRow.id, studentId: row.id, type: 'student', number: phoneRow.phone_number });
   }
   studentAddDraft = { name: '', parentMobile: '', studentMobile: '', selectedDemoId: '', matches: null };
@@ -10119,10 +10121,10 @@ async function addStudent(mode) {
     setTab('students'); selectStudent(row.id);
     addConfirmMsg.student = result.ok
       ? 'Student created and demo converted. ₹100 bonus will appear in payroll.' + result.message
-      : 'Student created, but demo conversion failed: ' + result.message + ' The student was retained; review the demo before retrying.';
+      : 'Student created, but demo conversion failed: ' + result.message + ' The student was retained; review the demo before retrying.') + phoneWarning;
   } else {
     selectStudent(row.id);
-    if (!addConfirmMsg.student) addConfirmMsg.student = 'Student "' + name + '" added. Fill in their details below.';
+    addConfirmMsg.student = 'Student "' + name + '" added. Fill in their details below.' + phoneWarning;
   }
   render();
 }
@@ -27559,7 +27561,7 @@ function regCardHtml(r) {
         <input type="text" value="${escAttr(d.academicYear || '')}" oninput="regDraftSet('academicYear',this.value)" placeholder="Academic year e.g. 2026-27" title="Academic year" style="width:150px"></div>
       ${regExistingStudentCandidates(r).length ? `<div style="margin:8px 0;padding:8px;background:#fff8e6;border:1px solid var(--line);border-radius:6px">
         <b style="font-size:12px">Possible existing student match</b><div class="hint" style="font-size:11px">Confirm the identity before reusing a record. Parent mobile alone is not treated as a child match.</div>
-        <select onchange="regDraftSet('existingStudentId',this.value)" style="margin-top:5px;max-width:100%"><option value="">Create a new student record</option>${regExistingStudentCandidates(r).map(s=>`<option value="${escAttr(s.id)}" ${d.existingStudentId===s.id?'selected':''}>Reuse ${esc(s.name)}${s.code?' ('+esc(s.code)+')':''}</option>`).join('')}</select>
+        <select onchange="regDraftSet('existingStudentId',this.value);regDraftSet('demoId','');render()" style="margin-top:5px;max-width:100%"><option value="">Create a new student record</option>${regExistingStudentCandidates(r).map(s=>`<option value="${escAttr(s.id)}" ${d.existingStudentId===s.id?'selected':''}>Reuse ${esc(s.name)}${s.code?' ('+esc(s.code)+')':''}</option>`).join('')}</select>
       </div>` : ''}
       ${kids.length ? `<div class="row-form" style="flex-direction:column;align-items:flex-start;gap:2px">
         <label><input type="radio" name="regFam" ${d.family === 'existing' ? 'checked' : ''} onchange="regDraftSet('family','existing')"> Link to existing family: ${esc(kids.map(s => s.name).join(', '))}${login ? ` (uses parent login ${esc(login.username)})` : ''}</label>
