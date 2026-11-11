@@ -301,6 +301,17 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
         continue;
       }
       assertLease();
+      const invalidIndices = [...new Set(verdict.invalid_option_indices || [])];
+      if (invalidIndices.length === 1 && invalidIndices[0] >= 0 && invalidIndices[0] < q.options.length &&
+          invalidIndices[0] !== q.correct_option) {
+        const removedIndex = invalidIndices[0];
+        const reviewCopy = { ...q, original_options: q.options, options: q.options.filter((_: string, index: number) => index !== removedIndex),
+          correct_option: q.correct_option > removedIndex ? q.correct_option - 1 : q.correct_option };
+        rejected++;
+        const reason = "One defective distractor (Option " + (removedIndex + 1) + ") was removed from the review copy. Admin must add a replacement fourth option and confirm the answer key. " + verdict.issues.join("; ");
+        await saveRejected(reviewCopy, "manual_option_completion", reason);
+        continue;
+      }
       if (verdict.approved !== true || verdict.issues.length > 0) {
         rejected++;
         const reason = verdict.issues.join("; ").slice(0, 1000) || "Validator flagged this candidate for manual verification.";
