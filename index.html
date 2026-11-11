@@ -27321,7 +27321,7 @@ function regOpenAccept(id) {
   regAcceptId = regAcceptId === id ? '' : id; regRejectId = '';
   regAcceptDraft = { name: r.student_name || '', gradeId: r.grade_id === 'NA' ? '' : (r.grade_id || ''), boardId: r.board_id || (kids[0] && kids[0].boardId) || '',
     mode: r.mode_preference || '', ctype: r.class_type_preference || '', family: kids.length ? 'existing' : 'new', parentLogin: true, studentLogin: true,
-    existingStudentId: '', academicYear: regGuessAcademicYear(kids) };
+    existingStudentId: '', academicYear: regGuessAcademicYear(kids), demoConversionMode: 'without', demoId: '' };
   render();
 }
 function regDraftSet(k, v) { regAcceptDraft[k] = v; }
@@ -27407,10 +27407,13 @@ function regOriginalFormHtml(r) {
       <div class="hint" style="margin-bottom:4px">Original form as the family sent it (read-only). The student record above may have been changed since.</div>
       <table class="no-stack" style="font-size:13px;width:auto"><tbody>${rows.map(([k, v]) => `<tr><td class="hint" style="white-space:nowrap;padding:2px 10px 2px 0;border:0">${k}</td><td style="padding:2px 0;border:0">${esc(v)}</td></tr>`).join('')}</tbody></table></div>`;
 }
-async function regAccept(id) {
+async function regAccept(id, conversionMode = 'without') {
   const r = data.registrations.find(x => x.id === id);
   if (!r || regBusy) return;
   const d = regAcceptDraft, name = (d.name || '').trim();
+  const demoCandidates = regDemoCandidates(r, r.student_id || d.existingStudentId || 'new-registration-student');
+  const selectedDemo = conversionMode === 'convert' ? demoCandidates.find(x => x.id === d.demoId) : null;
+  if (conversionMode === 'convert' && !selectedDemo) { regMsg = 'Select a valid matching demo, or choose Accept Without Conversion.'; render(); return; }
   if (!name || !isValidPersonName(name)) { regMsg = "Type the student's name (no numbers)."; render(); return; }
   const kids = d.family === 'existing' ? regFamily(r) : [];
   const selectedExisting = d.existingStudentId ? data.students.find(s => s.id === d.existingStudentId && !s.archived) : null;
@@ -27508,11 +27511,17 @@ async function regAccept(id) {
   if (ue) {
     regBusy = false; regMsg = `Student ${row.name} is available${isNewStudent ? ' (newly created)' : ' (existing record reused)'}, but the registration could not be marked Accepted: ${ue.message}. Do not create another student; refresh and retry after checking the registration.`; render(); return;
   }
+  let conversionResult = null;
+  if (conversionMode === 'convert' && selectedDemo) {
+    conversionResult = await convertDemoForStudent(selectedDemo.id, studentId, { navigate: false });
+    if (!conversionResult.ok) notes.push('Registration accepted and student linked, but demo conversion needs attention: ' + conversionResult.message);
+  }
   regDone[id] = { studentId, phones, notes, message: regWelcomeMessage(r, row.name, parentLine, studentLine) };
   regBusy = false; regAcceptId = '';
-  regMsg = `${row.name}${(row.student_code || row.code) ? ' (' + (row.student_code || row.code) + ')' : ''} ${isNewStudent ? 'created' : 'linked to the existing student record'}. Registration accepted. Demo records, if any, remain separate until you explicitly link them.`;
+  regMsg = row.name + (row.student_code || row.code ? ' (' + (row.student_code || row.code) + ')' : '') + (isNewStudent ? ' created' : ' linked to the existing student record') + '. Registration accepted.' + (conversionMode === 'convert' ? (conversionResult && conversionResult.ok ? ' Demo converted; ₹100 bonus will appear in payroll.' + conversionResult.message : ' Demo conversion did not complete; see the note on this registration and retry after review.') : ' No demo conversion was performed.');
   trackUse('registration-accept');
-  await loadRegistrations(); render();
+  await loadRegistrations();
+  if (conversionResult && conversionResult.ok) regOpenStudent(studentId); else render();
 }
 
 function regWelcomeMessage(r, name, parentLine, studentLine) {
@@ -27557,7 +27566,9 @@ function regCardHtml(r) {
         <label><input type="radio" name="regFam" ${d.family === 'new' ? 'checked' : ''} onchange="regDraftSet('family','new')"> A new family</label></div>` : ''}
       <div class="row-form"><label><input type="checkbox" ${d.parentLogin ? 'checked' : ''} onchange="regDraftSet('parentLogin',this.checked)"> Parent login (ID and password = parent mobile${kids.length ? ', or the family\'s login' : ''})</label>
         <label><input type="checkbox" ${d.studentLogin ? 'checked' : ''} onchange="regDraftSet('studentLogin',this.checked)"> Student login (ID and password = student code)</label></div>
-      <div class="row-form"><button class="btn-primary" ${regBusy ? 'disabled' : ''} onclick="regAccept('${r.id}')">${regBusy ? 'Adding…' : 'Add student'}</button><button class="btn-small" onclick="regAcceptId='';render()">Cancel</button></div>
+      \${regDemoCandidates(r, r.student_id || d.existingStudentId || 'new-registration-student').length ? \`<div style="margin:8px 0;padding:9px;background:#fff8e6;border:1px solid var(--line);border-radius:7px"><b style="font-size:12px">Matching demo records</b><div class="hint" style="font-size:11px">Choose one exact demo to convert with this acceptance, or accept without conversion. Only one demo can be converted here.</div>
+        <select onchange="regDraftSet('demoId',this.value)" style="max-width:100%;margin:6px 0"><option value="">Select a demo…</option>\${regDemoCandidates(r, r.student_id || d.existingStudentId || 'new-registration-student').map(dl=>\`<option value="\${escAttr(dl.id)}" \${d.demoId===dl.id?'selected':''}>\${esc(dayDate(dl.date))} · \${esc(dl.studentName)} · \${esc(dl.status)}</option>\`).join('')}</select></div>\` : '<div class="hint" style="margin:8px 0">No matching demo found from the registration name and contact numbers. You can accept without conversion.</div>'}
+      <div class="row-form"><button class="btn-primary" \${regBusy ? 'disabled' : ''} onclick="regAccept('\${r.id}','convert')" \${!d.demoId || !regDemoCandidates(r, r.student_id || d.existingStudentId || 'new-registration-student').some(x=>x.id===d.demoId) ? 'disabled' : ''}>\${regBusy ? 'Adding…' : 'Accept &amp; Link &amp; Convert'}</button><button class="btn-small" \${regBusy ? 'disabled' : ''} onclick="regAccept('\${r.id}','without')">\${regBusy ? 'Adding…' : 'Accept Without Conversion'}</button><button class="btn-small" onclick="regAcceptId='';render()">Cancel</button></div>
       <div class="hint">Subjects are not added here: enrol the student with a teacher on their page afterwards.</div></div>`;
   } else if (r.status === 'New' && regRejectId === r.id) {
     action = `<div class="row-form" style="margin-top:10px"><input type="text" id="regRejectReason" placeholder="Reason (optional), e.g. Junk, Not reachable" style="min-width:220px"><button class="btn-small btn-primary" onclick="regRejectOne('${r.id}')">Reject</button><button class="btn-small" onclick="regRejectId='';render()">Cancel</button></div>`;
