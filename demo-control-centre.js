@@ -292,7 +292,7 @@ function renderDemoControlCentre() {
   const sourceOptions=['All',...new Set(all.map(x=>x.leadSource).filter(Boolean))].sort((a,b)=>a==='All'?-1:a.localeCompare(b));
   const statusOptions=['All',...new Set(all.map(x=>x.status).filter(Boolean))].sort((a,b)=>a==='All'?-1:a.localeCompare(b));
   const teachers=activeTeachers();
-  const list=records.map(x=>'<tr><td><b>'+esc(x.name)+'</b><div class="hint">'+esc(x.phone)+'</div></td><td>'+esc(x.leadSource||x.source)+'</td><td>'+esc(x.subject||'—')+'</td><td>'+esc(x.status)+'</td><td>'+esc(x.teacher||'—')+'</td><td>'+esc(x.date||'—')+'</td><td><button class="btn-small" onclick="demoCCOpen('+JSON.stringify(x.key)+')">Manage</button></td></tr>').join('');
+  const list=records.map(x=>'<tr><td><b>'+esc(x.name)+'</b><div class="hint">'+esc(x.phone)+'</div></td><td>'+esc(x.leadSource||x.source)+'</td><td>'+esc(x.subject||'—')+'</td><td>'+esc(x.status)+'</td><td>'+esc(x.teacher||'—')+'</td><td>'+esc(x.date||'—')+'</td><td><button class="btn-small" onclick="demoCCOpen('+escAttr(JSON.stringify(x.key))+')">Manage</button></td></tr>').join('');
   let detail='';
   if(selected){
     const type=selected.type==='Wix Demo Booking'?'wix':selected.type==='Knowledge Arena Guest'?'ka':'demo';
