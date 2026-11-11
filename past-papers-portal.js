@@ -123,13 +123,13 @@
     var gradesList = typeof grades !== 'undefined' ? grades : [];
     var boardOptions = distinctOptions('board_id', function (p) { return labelFor(boardsList, p.board_id) || 'Board'; }).filter(function (o) { return !!o.value; });
     var schoolOptions = distinctOptions('school_id', function (p) { return labelFor(schoolDirectory, p.school_id) || 'School'; }).filter(function (o) { return !!o.value; });
+    var isStudentView = typeof currentRole !== 'undefined' && currentRole === 'Student';
     var gradeOptions = distinctOptions('grade_id', function (p) { return labelFor(gradesList, p.grade_id) || 'Class'; }).filter(function (o) { return !!o.value; });
     if (isStudentView && studentGradeId && !gradeOptions.some(function (o) { return o.value === studentGradeId; })) {
       var ownGradeName = labelFor(gradesList, studentGradeId);
       if (ownGradeName) gradeOptions.push({ value: studentGradeId, label: ownGradeName });
     }
     var subjectOptions = distinctOptions('subject_name', function (p) { return p.subject_name; });
-    var isStudentView = typeof currentRole !== 'undefined' && currentRole === 'Student';
     if (isStudentView && studentScopeLoaded && studentSubjectNames.length) {
       subjectOptions = subjectOptions.filter(function (o) { return studentSubjectNames.indexOf(o.value) !== -1; });
     }
