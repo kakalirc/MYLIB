@@ -152,6 +152,8 @@
   window.libSetPastPaperFilter = function (key, value) {
     if (!Object.prototype.hasOwnProperty.call(paperFilters, key)) return;
     paperFilters[key] = value;
+    if (key === 'boardId' && value) paperFilters.schoolId = '';
+    if (key === 'schoolId' && value) paperFilters.boardId = '';
     if (typeof render === 'function') render();
   };
   window.libClearPastPaperFilters = function () {
