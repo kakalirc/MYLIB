@@ -318,11 +318,11 @@ def guide():
         'Game XP is separate from attendance XP and does not change attendance rewards.',
     ]) + note('Need help?', 'Use the in-game Help / instructions panel before starting a game.', 'tip'))
 
-    g.add('analytics', 'Analytics', 'Your analytics pages', 'Use the available analytics pages to understand your own teaching activity and class delivery.', g3(
-        box('Demo Analysis', 'Review the demos assigned to you and their recorded outcomes.'),
-        box('Class Delivery Intelligence', 'Review your scheduled and recorded class delivery using the records available in My LIB.'),
-        box('Teacher Performance Intelligence', 'Review the teacher-performance indicators and supporting information made available to you.'),
-    ) + note('Keep records accurate', 'Analytics depend on class schedules, attendance and other app records being complete. Correct source records through the normal app workflow; do not treat an empty report as proof that no activity occurred.', 'tip'))
+    g.add('analytics', 'Analytics', 'Your analytics pages', 'Read-only reports for your own assigned demos, class delivery and teaching activity.', g3(
+        box('My Demo Analysis', ['Period: Last 30 days, Last 90 days or All records.', 'Assigned demos combines your linked Demo Bookings and teacher demo logs, counting a linked booking / log once.', 'Review assigned, completed, converted and conversion-rate cards; the conversion rate is converted demos divided by completed demos.', 'See pending / scheduled, completed, converted and lost / cancelled status, subject conversion, monthly conversions and your assigned-demo register.']),
+        box('Class Delivery Intelligence', ['Filter by period (This month, Last 30 days, Last 90 days or All available records) and class type (Group, Individual or Special).', 'Review Scheduled, Conducted, Absent, Pending and Overdue counts, teacher delivery rate and student attendance rate.', 'See the last-14-days attendance trend, performance by teacher, student attendance and current overdue classes. The report is read-only.']),
+        box('Teacher Performance Intelligence', ['Filter by period (Current month, Last 30 days, Last 90 days, Custom range or All available records), student, subject and class type; the report is scoped to your own teacher account.', 'Review your workload, students handled, group / individual classes, workload by subject and six-month delivery / attendance trends.', 'Inspect your student engagement and current overdue classes. Admin-only teacher comparisons and teacher selection are not available in the Teacher view.']),
+    ) + note('Keep records accurate', 'These reports read the schedules, attendance, demo bookings and demo logs already recorded by My LIB. Correct source records through the normal app workflow; an empty report is not proof that no activity occurred.', 'tip'))
 
     g.add('quickref', 'Quick reference', 'Quick reference', 'I want to… where do I go?', table(['I want to…', 'Go to'], [
         ['See what needs my action', 'Pending Action Items'],
