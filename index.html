@@ -26401,7 +26401,7 @@ function qbSourceUploaderHtml() {
   const css = 'width:100%;min-width:0;box-sizing:border-box;min-height:42px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);font:inherit;font-weight:400';
   return '<section class="card" style="margin:0 0 18px;padding:clamp(16px,2.4vw,24px);border:1px solid var(--line);border-radius:14px">' +
     '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px"><div><h3 style="margin:0 0 5px;font-family:Zilla Slab,serif">Upload from your computer</h3><p class="hint" style="margin:0;max-width:680px">Add original question-paper PDFs. Each upload remains in Pending Review and hidden from teachers until an Admin publishes it.</p></div><span style="font-size:12px;font-weight:700;color:var(--forest);background:rgba(56,104,70,.10);padding:6px 10px;border-radius:20px;white-space:nowrap">Admin only · 50 MB per PDF</span></div>' +
-    '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 18px">' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px 18px">' +
       field('Board', '<select id="qbSourceUploadBoard" style="' + css + '"><option value="">Select board</option>' + opts(boards) + '</select>') +
       field('Class', '<select id="qbSourceUploadGrade" style="' + css + '"><option value="">Select class</option>' + opts(grades) + '</select>') +
       field('Subject', '<select id="qbSourceUploadSubject" style="' + css + '"><option value="">Select subject</option>' + subjects.map(s=>'<option>'+esc(s)+'</option>').join('') + '</select>') +
