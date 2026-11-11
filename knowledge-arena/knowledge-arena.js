@@ -924,7 +924,7 @@
       ["Generated", totals.generated],
       ["Created as Draft", totals.drafted],
       ["Published", totals.published],
-      ["Awaiting processing", totals.queued ? jobs.filter(x => x.status === "queued").reduce((n,x)=>n+Math.max(0,Number(x.requested_count||0)-Number(x.published_count||0)),0) : 0],
+      ["Awaiting processing", totals.queued ? jobs.filter(x => x.status === "queued").reduce((n,x)=>n+Math.max(0,Number(x.requested_count||0)-(Number(x.published_count||0)+Number(x.drafted_count||0))),0) : 0],
       ["Jobs in progress / queue", active],
       ["Partial / failed", Number(totals.partial || 0) + Number(totals.failed || 0)],
       ["Rejected by validation", totals.rejected]
@@ -940,18 +940,18 @@
       '<span><b>Generation:</b> ' + (settings.generation_enabled ? 'Enabled' : 'Paused') + '</span>';
     const gameMap = new Map();
     for (const job of jobs) {
-      const row = gameMap.get(job.game_type) || { jobs: 0, requested: 0, generated: 0, published: 0, rejected: 0, queued: 0, running: 0, partial: 0, failed: 0, completed: 0, paused: 0 };
+      const row = gameMap.get(job.game_type) || { jobs: 0, requested: 0, generated: 0, drafted: 0, published: 0, rejected: 0, queued: 0, running: 0, partial: 0, failed: 0, completed: 0, paused: 0 };
       row.jobs++;
       row.requested += Number(job.requested_count || 0);
       row.generated += Number(job.generated_count || 0);
-      row.published += Number(job.published_count || 0);
+      row.published += Number(job.published_count || 0);\n      row.drafted += Number(job.drafted_count || 0);
       row.rejected += Number(job.rejected_count || 0);
       row[job.status] = (row[job.status] || 0) + 1;
       gameMap.set(job.game_type, row);
     }
     const gameRows = [...gameMap.entries()].sort((a,b) => (GAME_NAMES[a[0]] || a[0]).localeCompare(GAME_NAMES[b[0]] || b[0]));
     $("admin-generation-games").innerHTML = gameRows.length
-      ? '<table class="generation-table"><thead><tr><th>Game</th><th>Jobs</th><th>Requested</th><th>Published</th><th>Queued</th><th>Partial / Failed</th></tr></thead><tbody>' +
+      ? '<table class="generation-table"><thead><tr><th>Game</th><th>Jobs</th><th>Requested</th><th>Drafts</th><th>Published</th><th>Queued</th><th>Partial / Failed</th></tr></thead><tbody>' +
         gameRows.map(([id,row]) => '<tr><td>' + escapeHtml(GAME_NAMES[id] || id) + '</td><td>' + row.jobs + '</td><td>' + row.requested + '</td><td>' + row.published + '</td><td>' + row.queued + '</td><td>' + (row.partial + row.failed) + '</td></tr>').join("") +
         '</tbody></table>'
       : '<p class="muted">No generation jobs have been queued.</p>';
