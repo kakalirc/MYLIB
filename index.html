@@ -2231,14 +2231,8 @@ let teacherQbAccess = null;
 async function loadTeacherQbAccess() {
   if (!sb || !currentLinkedId) { teacherQbAccess = false; return; }
   try {
-    // Until SQL 32 is run this function doesn't exist; then fall back to the scope check alone.
     const sw = await sb.rpc('qb_my_qb_access');
-    if (!sw.error && sw.data !== true) { teacherQbAccess = false; if (teacherPortalTab === 'questionbank') teacherPortalTab = 'dashboard'; return; }
-    const [qs, ps] = await Promise.all([
-      sb.from('qb_questions').select('id', { count: 'exact', head: true }),
-      sb.from('qb_practice_papers').select('id', { count: 'exact', head: true }).eq('created_by_teacher_id', currentLinkedId),
-    ]);
-    teacherQbAccess = (qs.count || 0) > 0 || (ps.count || 0) > 0;
+    teacherQbAccess = !sw.error && sw.data === true;
   } catch (e) { teacherQbAccess = false; }
   if (!teacherQbAccess && teacherPortalTab === 'questionbank') teacherPortalTab = 'dashboard';
 }
@@ -25162,8 +25156,10 @@ function renderTeacherQuestionBank(teacher) {
   if (qbSubTab === 'past') return `<div class="card">
     <div class="row-form" style="justify-content:space-between;align-items:center;margin-bottom:16px">
       <h2 style="font-family:'Zilla Slab',serif;margin:0">Question Bank ${helpBtn('qb-' + qbSubTab)}</h2>
+      <button class="btn-small btn-primary" onclick="qbSourceUploadOpen=!qbSourceUploadOpen;render()">${qbSourceUploadOpen?'Close uploader':'+ Upload Past Papers'}</button>
     </div>
     ${subTabsHtml}
+    ${currentRole === 'Teacher' && qbSourceUploadOpen ? qbSourceUploaderHtml() : ''}
     ${qbMsg ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${esc(qbMsg)}</div>` : ''}
     ${qbSourcePapersHtml()}
   </div>`;
@@ -26365,10 +26361,10 @@ function qbTeacherTeaches(subject, gradeId) {
 async function loadQbSourcePapers() {
   if (!sb) return;
   qbSourceLoading = true; render();
-  const { data: rows, error } = await sb.from('qb_source_papers').select('id, board_id, grade_id, subject_name, year, exam_type, medium, question_count, stored_pdf_url, source_url, status').order('year', { ascending: false });
+  const { data: rows, error } = await sb.from('qb_source_papers').select('id, board_id, grade_id, subject_name, year, exam_type, medium, question_count, stored_pdf_url, source_url, status, uploaded_by, uploader_name, reviewed_by, reviewed_at').order('year', { ascending: false });
   qbSourceLoading = false;
   if (error) { qbMsg = 'Could not load past papers: ' + error.message; qbSourcePapers = []; }
-  else qbSourcePapers = (rows || []).filter(sp => currentRole !== 'Teacher' || qbTeacherTeaches(sp.subject_name, sp.grade_id));
+  else qbSourcePapers = rows || [];
   render();
 }
 // stored_pdf_url may be a full Supabase storage URL (public or signed) or "bucket/path"; private files need a fresh signed link.
@@ -26400,7 +26396,7 @@ function qbSourceUploaderHtml() {
   const field = (label, control) => '<label style="display:flex;flex-direction:column;gap:6px;min-width:0;font-size:13px;font-weight:600;color:var(--ink)">' + label + control + '</label>';
   const css = 'width:100%;min-width:0;box-sizing:border-box;min-height:42px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);font:inherit;font-weight:400';
   return '<section class="card" style="margin:0 0 18px;padding:clamp(16px,2.4vw,24px);border:1px solid var(--line);border-radius:14px">' +
-    '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px"><div><h3 style="margin:0 0 5px;font-family:Zilla Slab,serif">Upload from your computer</h3><p class="hint" style="margin:0;max-width:680px">Add original question-paper PDFs. Each upload remains in Pending Review and hidden from teachers until an Admin publishes it.</p></div><span style="font-size:12px;font-weight:700;color:var(--forest);background:rgba(56,104,70,.10);padding:6px 10px;border-radius:20px;white-space:nowrap">Admin only · 50 MB per PDF</span></div>' +
+    '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px"><div><h3 style="margin:0 0 5px;font-family:Zilla Slab,serif">Upload from your computer</h3><p class="hint" style="margin:0;max-width:680px">Add original question-paper PDFs for any subject or class. Your submission remains Pending Review until you publish it or Admin reviews it.</p></div><span style="font-size:12px;font-weight:700;color:var(--forest);background:rgba(56,104,70,.10);padding:6px 10px;border-radius:20px;white-space:nowrap">Teacher & Admin · 50 MB per PDF</span></div>' +
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px 18px">' +
       field('Board', '<select id="qbSourceUploadBoard" style="' + css + '"><option value="">Select board</option>' + opts(boards) + '</select>') +
       field('Class', '<select id="qbSourceUploadGrade" style="' + css + '"><option value="">Select class</option>' + opts(grades) + '</select>') +
@@ -26418,7 +26414,8 @@ function qbSetSourceUploadFiles(input) {
   if (el) el.textContent = qbSourceUploadFiles.map(f=>f.name).join(' · ') || 'No files selected.';
 }
 async function qbUploadSourcePapers() {
-  if (currentRole !== 'Admin') { qbSourceUploadMsg='Only Admin can upload past papers.'; render(); return; }
+  if (!['Admin','Teacher'].includes(currentRole)) { qbSourceUploadMsg='You do not have permission to upload past papers.'; render(); return; }
+  if (currentRole === 'Teacher' && !teacherQbAccess) { qbSourceUploadMsg='Question Bank access is not enabled for your account.'; render(); return; }
   if (!sb || qbSourceUploading) return;
   const val=id=>document.getElementById(id)?.value || '';
   const board_id=val('qbSourceUploadBoard'), grade_id=val('qbSourceUploadGrade'), subject_name=val('qbSourceUploadSubject');
@@ -26431,7 +26428,7 @@ async function qbUploadSourcePapers() {
   const results=[];
   for(const file of files){
     const name=file.name.normalize('NFKD').replace(/[^\w.()-]+/g,'-').slice(-120)||'paper.pdf';
-    const path='source-papers/'+crypto.randomUUID()+'-'+name; let uploaded=false;
+    const path='source-papers/'+(currentRole === 'Teacher' ? currentLinkedId : 'admin')+'/'+crypto.randomUUID()+'-'+name; let uploaded=false;
     try{
       const {error:upErr}=await sb.storage.from('qb-papers').upload(path,file,{contentType:'application/pdf',upsert:false});
       if(upErr)throw upErr; uploaded=true;
@@ -26446,9 +26443,18 @@ async function qbUploadSourcePapers() {
   qbSourceUploadFiles=[];qbSourceUploadOpen=false;await loadQbSourcePapers();render();
 }
 
+async function qbSetSourcePaperStatus(id, status) {
+  if (!['published','rejected'].includes(status)) return;
+  const paper = qbSourcePapers.find(x => x.id === id);
+  if (!paper || !sb) return;
+  const { error } = await sb.from('qb_source_papers').update({status}).eq('id', id);
+  if (error) { qbMsg = 'Could not update paper status: ' + error.message; render(); return; }
+  qbMsg = status === 'published' ? 'Past paper published.' : 'Past paper marked as rejected.';
+  await loadQbSourcePapers();
+}
 function qbSourcePapersHtml() {
   if (qbSourceLoading) return `<div class="empty">Loading past papers…</div>`;
-  if (!qbSourcePapers.length) return `<div class="empty">No past papers stored yet.</div>`;
+  if (!qbSourcePapers.length) return `<div class="empty">No published past papers or your own submissions are available yet.</div>`;
   // The dropdowns edit a draft; nothing is listed until Apply copies it into qbSourceApplied.
   // Each filter is independent: every dropdown lists all values, and "All" (empty) doesn't narrow.
   const f = qbSourceFilter, a = qbSourceApplied;
@@ -26464,7 +26470,7 @@ function qbSourcePapersHtml() {
     <button class="btn-small" onclick="qbSourceApplied={...qbSourceFilter};render()">Apply filter</button>
     ${a ? `<button class="btn-small" onclick="qbSourceFilter={boardId:'',gradeId:'',subject:'',year:''};qbSourceApplied=null;render()">Clear</button>` : ''}
   </div>`;
-  if (!a) return `<p class="hint" style="margin-bottom:12px">Original board question papers the question bank was built from.</p>
+  if (!a) return `<p class="hint" style="margin-bottom:12px">Published papers across all subjects, plus your own submissions awaiting review or rejected.</p>
     ${filtersHtml}<div class="empty">Choose filters and press Apply filter to see the papers.</div>`;
   const match = sp => (!a.boardId || sp.board_id === a.boardId) && (!a.gradeId || sp.grade_id === a.gradeId)
     && (!a.subject || sp.subject_name === a.subject) && (!a.year || String(sp.year) === a.year);
@@ -26476,12 +26482,14 @@ function qbSourcePapersHtml() {
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(sp);
   });
-  return `<p class="hint" style="margin-bottom:12px">Original board question papers the question bank was built from.</p>
+  return `<p class="hint" style="margin-bottom:12px">Published papers across all subjects, plus your own submissions awaiting review or rejected.</p>
     ${filtersHtml}<div style="font-size:12px;color:var(--muted);margin-bottom:8px">${list.length} paper${list.length === 1 ? '' : 's'}</div>
     ${[...groups.entries()].map(([k, list]) => `<div style="margin-bottom:16px"><div style="font-weight:700;border-bottom:2px solid var(--line);padding-bottom:4px;margin-bottom:6px">${esc(k)}</div>
-      ${list.map(sp => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:14px">
-        <span><b>${esc(String(sp.year || ''))}</b> ${esc(sp.exam_type || '')}${sp.medium ? ` <span style="color:var(--muted);font-size:12px">· ${esc(sp.medium)}</span>` : ''}${sp.question_count ? ` <span style="color:var(--muted);font-size:12px">· ${esc(String(sp.question_count))} questions</span>` : ''}</span>
-        ${sp.stored_pdf_url || sp.source_url ? `<button class="btn-small" onclick="qbOpenSourcePdf('${sp.id}')">⬇ Open PDF</button>` : '<span class="hint">No PDF</span>'}
+      ${list.map(sp => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px">
+        <span><b>${esc(String(sp.year || ''))}</b> ${esc(sp.exam_type || '')}${sp.medium ? ` <span style="color:var(--muted);font-size:12px">· ${esc(sp.medium)}</span>` : ''}${sp.question_count ? ` <span style="color:var(--muted);font-size:12px">· ${esc(String(sp.question_count))} questions</span>` : ''}<br><span class="hint">${esc(sp.subject_name || '')} · ${esc(sp.uploader_name || 'Legacy upload')} · ${esc(sp.status || 'published')}</span></span>
+        <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${sp.stored_pdf_url || sp.source_url ? `<button class="btn-small" onclick="qbOpenSourcePdf('${sp.id}')">⬇ Open PDF</button>` : '<span class="hint">No PDF</span>'}
+        ${sp.status === 'pending_review' && (currentRole === 'Admin' || (currentRole === 'Teacher' && sp.uploaded_by)) ? `<button class="btn-small btn-primary" onclick="qbSetSourcePaperStatus('${sp.id}','published')">Publish</button><button class="btn-small" onclick="qbSetSourcePaperStatus('${sp.id}','rejected')">Reject</button>` : ''}
+        </span>
       </div>`).join('')}</div>`).join('')}`;
 }
 
