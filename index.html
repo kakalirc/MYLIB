@@ -4939,14 +4939,37 @@ async function deleteDemoLog(id) {
   }
   demoLogMsg = 'Deleted.' + (wb ? ' Linked Wix booking reset to New.' : ''); render();
 }
+// Shared conversion path for Admin entry points. Conditional linking protects against stale screens.
+async function convertDemoForStudent(demoId, studentId, options = {}) {
+  const dl = (data.demoLogs || []).find(d => d.id === demoId);
+  if (!dl) return { ok: false, message: 'Demo record not found. Refresh and try again.' };
+  if (dl.status === 'Cancelled') return { ok: false, message: 'A cancelled demo cannot be converted.' };
+  if (dl.linkedStudentId && dl.linkedStudentId !== studentId) return { ok: false, message: 'This demo is already linked to another student. No changes were made.' };
+  if (!(dl.status === 'Converted' && dl.linkedStudentId === studentId)) {
+    let query = sb.from('demo_logs').update({ linked_student_id: studentId, ...demoConvertFields(dl) }).eq('id', demoId);
+    query = dl.linkedStudentId === studentId ? query.eq('linked_student_id', studentId) : query.is('linked_student_id', null);
+    const { data: saved, error } = await query.select('id').maybeSingle();
+    if (error) return { ok: false, message: 'Could not convert demo: ' + error.message };
+    if (!saved) return { ok: false, message: 'The demo was changed by another user. Refresh and review it before retrying.' };
+    dl.linkedStudentId = studentId;
+    applyDemoConvert(dl);
+  }
+  // Demo row is the payroll source of truth. Wix is separate and remains retryable.
+  const wb = wixBookingForDemo(dl);
+  let wixMessage = '';
+  if (wb) {
+    const synced = await wixLinkDemo(dl, { status: 'Converted', converted_student_id: studentId });
+    if (!synced) wixMessage = ' The demo is Converted, but its website booking still needs syncing from Demo Bookings.';
+  }
+  if (options.navigate !== false) { setTab('students'); selectStudent(studentId); }
+  return { ok: true, message: wixMessage };
+}
 async function convertDemoLog(id) {
   const dl = data.demoLogs.find(d => d.id === id);
   if (!dl || !dl.linkedStudentId) { demoLogMsg = 'Please link a student before converting.'; render(); return; }
-  const { error } = await sb.from('demo_logs').update(demoConvertFields(dl)).eq('id', id);
-  if (error) { demoLogMsg = 'Error: ' + error.message; render(); return; }
-  applyDemoConvert(dl);
-  const wb = await wixLinkDemo(dl, dl.linkedStudentId ? { status: 'Converted', converted_student_id: dl.linkedStudentId } : null);
-  demoLogMsg = 'Marked Converted — ₹100 bonus will appear in payroll.' + (wb ? ' Wix booking updated.' : ''); render();
+  const result = await convertDemoForStudent(id, dl.linkedStudentId);
+  if (!result.ok) { demoLogMsg = result.message; render(); return; }
+  demoLogMsg = 'Marked Converted — ₹100 bonus will appear in payroll.' + result.message; render();
 }
 async function cancelDemoLog(id) {
   const dl = data.demoLogs.find(d => d.id === id);
@@ -4957,22 +4980,21 @@ async function cancelDemoLog(id) {
   demoLogMsg = 'Demo log removed.' + (wb ? ' Wix booking marked Cancelled.' : ''); render();
 }
 async function createAndLinkDemo(id, nameFromDemo) {
-  const name = nameFromDemo.trim();
+  const name = (nameFromDemo || '').trim();
   if (!name) { demoLinkMsg = 'No student name on this demo log.'; render(); return; }
+  const dl = data.demoLogs.find(d => d.id === id);
+  if (!dl || dl.status === 'Cancelled' || dl.linkedStudentId) { demoLinkMsg = 'This demo is no longer eligible for a new student link. Refresh and review it.'; render(); return; }
+  if (!confirm('Create a new student record for ' + name + ' and convert this demo?')) return;
   demoLinkMsg = 'Creating student…'; render();
   const { data: row, error } = await sb.from('students').insert({ name, archived: false, onboarding_source: 'demo_register_create_link' }).select().single();
   if (error) { demoLinkMsg = 'Could not create student: ' + error.message; render(); return; }
-  data.students.push({ id: row.id, name: row.name, archived: false, code: row.student_code || '' });
-  demoLinkStudentId = row.id;
-  // Now link the demo log
-  const dl = data.demoLogs.find(d => d.id === id);
-  const { error: linkErr } = await sb.from('demo_logs').update({ linked_student_id: row.id, ...demoConvertFields(dl) }).eq('id', id);
-  if (linkErr) { demoLinkMsg = 'Student created but link failed: ' + linkErr.message; render(); return; }
-  if (dl) { dl.linkedStudentId = row.id; applyDemoConvert(dl); }
-  await wixLinkDemo(dl, dl.linkedStudentId ? { status: 'Converted', converted_student_id: dl.linkedStudentId } : null);
+  data.students.push({ id: row.id, name: row.name, archived: false, code: row.student_code || '', parentName: '', mobileNumber: '', email: '', address: '', photo: '', gradeId: '', boardId: '', academicYear: '', modePreference: '', classTypePreference: '', billSeparately: false });
+  const result = await convertDemoForStudent(id, row.id, { navigate: false });
+  if (!result.ok) { demoLinkMsg = 'Student created, but demo conversion did not complete: ' + result.message + ' The student record was retained; refresh and resolve this demo before retrying.'; render(); return; }
   demoLinkingId = ''; wixCardLinkingDemoId = ''; demoLinkStudentId = ''; demoLinkMsg = '';
   wixLastCreatedStudentId = row.id;
-  demoLogMsg = `✓ Student "${name}"${(row.student_code || row.code) ? ' (' + (row.student_code || row.code) + ')' : ''} created and linked. Marked Converted — bonus will appear in payroll.`; render();
+  demoLogMsg = '✓ Student "' + name + '" created and linked. Marked Converted — ₹100 bonus will appear in payroll.' + result.message;
+  setTab('students'); selectStudent(row.id); render();
 }
 // Search box only refills the dropdown; a full render() per keystroke lost focus and dropped letters.
 function demoLinkOptionsHtml() {
@@ -4989,14 +5011,13 @@ function demoLinkSearchInput(el) {
 }
 async function linkDemoToStudent(id) {
   if (!demoLinkStudentId) { demoLinkMsg = 'Please pick a student.'; render(); return; }
+  const studentId = demoLinkStudentId;
   demoLinkMsg = 'Saving…'; render();
-  const dl = data.demoLogs.find(d => d.id === id);
-  const { error } = await sb.from('demo_logs').update({ linked_student_id: demoLinkStudentId, ...demoConvertFields(dl) }).eq('id', id);
-  if (error) { demoLinkMsg = 'Error: ' + error.message; render(); return; }
-  if (dl) { dl.linkedStudentId = demoLinkStudentId; applyDemoConvert(dl); }
-  const wb = await wixLinkDemo(dl, dl.linkedStudentId ? { status: 'Converted', converted_student_id: dl.linkedStudentId } : null);
+  const result = await convertDemoForStudent(id, studentId, { navigate: false });
+  if (!result.ok) { demoLinkMsg = result.message; render(); return; }
   demoLinkingId = ''; wixCardLinkingDemoId = ''; demoLinkStudentId = ''; demoLinkMsg = '';
-  demoLogMsg = 'Linked student and marked Converted — ₹100 bonus will appear in payroll.' + (wb ? ' Wix booking updated.' : ''); render();
+  demoLogMsg = 'Linked student and marked Converted — ₹100 bonus will appear in payroll.' + result.message;
+  setTab('students'); selectStudent(studentId); render();
 }
 // Converting also records the demo as done (admins may skip straight from Pending) and clears any Lost reason.
 function demoDoneDate(dl) {
