@@ -1123,7 +1123,62 @@
     fill("review-game", games, "All games");
   }
 
+  let rejectedQuestionRows = [];
+  function ensureRejectedReviewPanel() {
+    if ($("rejected-question-panel")) return;
+    const list=$("admin-question-list");
+    if(!list)return;
+    const panel=document.createElement("section");
+    panel.id="rejected-question-panel";
+    panel.className="admin-question-review-panel";
+    panel.innerHTML='<h3>Rejected Questions · Manual Validation</h3><p class="muted">Candidates rejected by automated checks are retained here with their exact reason. Complete four options before approving into Draft.</p><button class="btn-secondary" id="refresh-rejected-questions" type="button">Refresh rejected questions</button><div id="rejected-question-feedback" class="muted"></div><div id="rejected-question-list"></div>';
+    list.parentNode.insertBefore(panel,list);
+    $("refresh-rejected-questions").addEventListener("click",()=>refreshRejectedQuestions());
+    $("rejected-question-list").addEventListener("click",handleRejectedQuestionAction);
+  }
+  async function refreshRejectedQuestions() {
+    ensureRejectedReviewPanel();
+    const feedback=$("rejected-question-feedback"), list=$("rejected-question-list");
+    feedback.textContent="Loading retained candidates…";
+    try {
+      const result=await api("get_admin_rejected_questions");
+      rejectedQuestionRows=result.questions||[];
+      renderRejectedQuestions();
+      feedback.textContent=rejectedQuestionRows.length+" candidate(s) awaiting manual validation.";
+    } catch(e) { feedback.textContent="Could not load rejected candidates: "+e.message; }
+  }
+  function renderRejectedQuestions() {
+    const list=$("rejected-question-list"); if(!list)return;
+    if(!rejectedQuestionRows.length){list.innerHTML='<p class="muted">No rejected candidates are awaiting review.</p>';return;}
+    list.innerHTML=rejectedQuestionRows.map((r)=>{
+      const q=r.candidate||{}, opts=Array.isArray(q.options)?q.options:[];
+      const optionInputs=[0,1,2,3].map(i=>'<label>Option '+(i+1)+(i>=opts.length?' · Admin to complete':'')+'<input data-rejected-option="'+i+'" maxlength="250" value="'+escapeHtml(opts[i]||"")+'"></label>').join("");
+      return '<details class="admin-question" data-rejected-id="'+escapeHtml(r.id)+'"><summary><b>'+escapeHtml(r.subject)+' · Grade '+escapeHtml(r.grade_label)+'</b><span>'+escapeHtml(r.rejection_stage)+'</span><small>'+escapeHtml(q.prompt||"Candidate has no readable prompt")+'</small></summary><div class="admin-question-edit"><p><b>Why rejected:</b> '+escapeHtml(r.rejection_reason)+'</p><p class="muted">'+escapeHtml(GAME_NAMES[r.game_type]||r.game_type)+' · '+escapeHtml(r.difficulty)+' · '+escapeHtml(new Date(r.created_at).toLocaleString("en-IN"))+'</p><label>Question<textarea data-rejected-field="prompt" rows="3">'+escapeHtml(q.prompt||"")+'</textarea></label><label>Topic<input data-rejected-field="topic" value="'+escapeHtml(q.topic||r.topic||"")+'"></label><div class="admin-question-options">'+optionInputs+'</div><label>Correct answer<select data-rejected-field="correct_option">'+[0,1,2,3].map(i=>'<option value="'+i+'" '+(Number(q.correct_option)===i?'selected':'')+'>Option '+(i+1)+'</option>').join("")+'</select></label><label>Explanation<textarea data-rejected-field="explanation" rows="2">'+escapeHtml(q.explanation||"")+'</textarea></label><div class="admin-question-actions"><button class="btn-secondary" data-rejected-action="approve">Approve into Draft</button><button class="btn-secondary" data-rejected-action="dismiss">Dismiss permanently</button></div></div></details>';
+    }).join("");
+  }
+  async function handleRejectedQuestionAction(event) {
+    const button=event.target.closest("[data-rejected-action]"); if(!button)return;
+    const row=button.closest("[data-rejected-id]"); if(!row)return;
+    const id=row.dataset.rejectedId, operation=button.dataset.rejectedAction;
+    if(operation==="dismiss"&&!window.confirm("Dismiss this candidate? Its record will be retained for audit."))return;
+    button.disabled=true;
+    try {
+      const payload={rejected_question_id:id,operation:operation==="approve"?"approve_draft":"dismiss"};
+      if(operation==="approve"){
+        payload.prompt=row.querySelector('[data-rejected-field="prompt"]').value;
+        payload.topic=row.querySelector('[data-rejected-field="topic"]').value;
+        payload.options=[0,1,2,3].map(i=>row.querySelector('[data-rejected-option="'+i+'"]').value);
+        payload.correct_option=Number(row.querySelector('[data-rejected-field="correct_option"]').value);
+        payload.explanation=row.querySelector('[data-rejected-field="explanation"]').value;
+      }
+      await api("admin_rejected_question",payload);
+      $("rejected-question-feedback").textContent=operation==="approve"?"Approved into Draft. It is not live until published.":"Candidate dismissed; audit record retained.";
+      await refreshRejectedQuestions(); await refreshQuestions();
+    }catch(e){$("rejected-question-feedback").textContent=e.message;button.disabled=false;}
+  }
+
   function renderQuestionBank() {
+    ensureRejectedReviewPanel();
     const grade = $("review-grade")?.value || "";
     const subject = $("review-subject")?.value || "";
     const game = $("review-game")?.value || "";
@@ -1131,11 +1186,12 @@
     const rows = adminQuestions.filter((q) =>
       (!grade || q.grade_label === grade) && (!subject || q.subject === subject) &&
       (!game || q.game_type === game) && (!status || q.status === status));
-    if (!rows.length) { $("admin-question-list").innerHTML = '<p class="muted">No questions match these filters.</p>'; return; }
-    $("admin-question-list").innerHTML = rows.map((q) => {
+    const bulkBar='<div class="admin-question-actions"><button class="btn-secondary" id="publish-selected-drafts" type="button">Publish selected Drafts</button><span class="muted">Select Drafts below; only complete four-option Drafts can be published.</span></div>';
+    if (!rows.length) { $("admin-question-list").innerHTML = bulkBar+'<p class="muted">No questions match these filters.</p>'; bindBulkPublish(); return; }
+    $("admin-question-list").innerHTML = bulkBar+rows.map((q) => {
       const options = Array.isArray(q.options) ? q.options : [];
       return '<details class="admin-question" data-question-id="' + escapeHtml(q.id) + '">' +
-        '<summary><b>' + escapeHtml(q.subject) + ' · ' + escapeHtml(q.grade_label) + '</b><span>' +
+        '<summary>' + (q.status === "pending" ? '<input type="checkbox" data-draft-select="'+escapeHtml(q.id)+'" aria-label="Select Draft for publishing"> ' : '') + '<b>' + escapeHtml(q.subject) + ' · ' + escapeHtml(q.grade_label) + '</b><span>' +
         escapeHtml(GAME_NAMES[q.game_type] || q.game_type) + ' · ' + escapeHtml(q.status) + '</span><small>' +
         escapeHtml(q.prompt) + '</small></summary><div class="admin-question-edit">' +
         '<label>Question<textarea data-field="prompt" rows="3">' + escapeHtml(q.prompt) + '</textarea></label>' +
@@ -1152,6 +1208,18 @@
         '<button class="btn-secondary" data-question-action="archive">Remove from play</button>' +
         '<button class="btn-secondary" data-question-action="delete">Delete permanently</button></div></div></details>';
     }).join("");
+    bindBulkPublish();
+  }
+  function bindBulkPublish() {
+    const button=$("publish-selected-drafts"); if(!button)return;
+    button.addEventListener("click",async()=>{
+      const ids=[...document.querySelectorAll("[data-draft-select]:checked")].map(x=>x.dataset.draftSelect);
+      if(!ids.length){$("question-feedback").textContent="Select at least one Draft.";return;}
+      if(!window.confirm("Publish "+ids.length+" selected Draft question(s) to Knowledge Arena?"))return;
+      button.disabled=true;
+      try{const result=await api("admin_question",{operation:"publish_many",question_ids:ids});$("question-feedback").textContent=(result.published_count||0)+" Draft(s) published.";await refreshQuestions();}
+      catch(e){$("question-feedback").textContent="Bulk publish failed: "+e.message;button.disabled=false;}
+    });
   }
 
   let questionBankRequest = null;
@@ -1169,6 +1237,8 @@
         populateQuestionFilters();
         renderQuestionBank();
         feedback.textContent = "Loaded " + adminQuestions.length + " most recent questions.";
+        ensureRejectedReviewPanel();
+        await refreshRejectedQuestions();
       } catch (error) {
         feedback.textContent = "Could not load questions: " + error.message;
         if (list) list.innerHTML = '<p class="muted">Questions could not be loaded. Use Refresh to try again.</p>';
