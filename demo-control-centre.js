@@ -23,6 +23,14 @@ async function demoCCCallKA(body) {
   if(!res.ok) throw new Error(payload.error||'Knowledge Arena request failed ('+res.status+').');
   return payload;
 }
+async function demoCCLoadAllKALeads() {
+  const leads=[]; let offset=0,total=0;
+  do {
+    const page=await demoCCCallKA({action:'get_admin_guest_leads',limit:100,offset});
+    leads.push(...(page.leads||[])); total=Number(page.total)||0; offset+=100;
+  } while(offset<total&&offset<10000);
+  return leads;
+}
 async function loadDemoControlCentre() {
   if(currentRole!=='Admin') return;
   demoCC.loading=true; demoCC.error=''; render();
@@ -31,13 +39,13 @@ async function loadDemoControlCentre() {
     const [fu,ac,ka]=await Promise.all([
       sb.from('demo_control_followups').select('*').order('updated_at',{ascending:false}),
       sb.from('demo_control_activity').select('*').order('changed_at',{ascending:false}).limit(1000),
-      demoCCCallKA({action:'get_admin_guest_leads',limit:100,offset:0})
+      demoCCLoadAllKALeads()
     ]);
     if(fu.error) throw new Error('Follow-up data: '+fu.error.message);
     if(ac.error) throw new Error('Activity history: '+ac.error.message);
     demoCC.followups=fu.data||[];
     demoCC.activity=ac.data||[];
-    demoCC.kaLeads=ka.leads||[];
+    demoCC.kaLeads=ka||[];
   } catch(e) { demoCC.error=e.message||'Could not load Demo Control Centre.'; }
   finally { demoCC.loading=false; render(); }
 }
