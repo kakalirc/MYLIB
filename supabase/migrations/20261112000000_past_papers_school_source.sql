@@ -5,7 +5,7 @@ create table if not exists public.qb_schools (
   id uuid primary key default gen_random_uuid(),
   name text not null check (length(btrim(name)) between 2 and 200),
   archived boolean not null default false,
-  created_by uuid references public.profiles(id) on delete set null,
+  created_by uuid default auth.uid() references public.profiles(id) on delete set null,
   created_at timestamptz not null default now()
 );
 
