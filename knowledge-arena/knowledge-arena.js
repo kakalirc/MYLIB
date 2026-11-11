@@ -953,7 +953,7 @@
     const gameRows = [...gameMap.entries()].sort((a,b) => (GAME_NAMES[a[0]] || a[0]).localeCompare(GAME_NAMES[b[0]] || b[0]));
     $("admin-generation-games").innerHTML = gameRows.length
       ? '<table class="generation-table"><thead><tr><th>Game</th><th>Jobs</th><th>Requested</th><th>Drafts</th><th>Published</th><th>Queued</th><th>Partial / Failed</th></tr></thead><tbody>' +
-        gameRows.map(([id,row]) => '<tr><td>' + escapeHtml(GAME_NAMES[id] || id) + '</td><td>' + row.jobs + '</td><td>' + row.requested + '</td><td>' + row.published + '</td><td>' + row.queued + '</td><td>' + (row.partial + row.failed) + '</td></tr>').join("") +
+        gameRows.map(([id,row]) => '<tr><td>' + escapeHtml(GAME_NAMES[id] || id) + '</td><td>' + row.jobs + '</td><td>' + row.requested + '</td><td>' + row.drafted + '</td><td>' + row.published + '</td><td>' + row.queued + '</td><td>' + (row.partial + row.failed) + '</td></tr>').join("") +
         '</tbody></table>'
       : '<p class="muted">No generation jobs have been queued.</p>';
     $("generation-status-feedback").textContent = "Showing " + jobs.length + " non-archived jobs. Status refreshes every 30 seconds while this page is open.";
