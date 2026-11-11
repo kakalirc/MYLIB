@@ -10073,19 +10073,57 @@ async function deleteSubject(id) {
 }
 
 // ---------- students + subscriptions + enrollment ----------
-async function addStudent() {
-  const input = document.getElementById('newStudent');
-  const name = input.value.trim();
+let studentAddDraft = { name: '', parentMobile: '', studentMobile: '', selectedDemoId: '', matches: null };
+function studentAddDemoMatches(name, parentMobile, studentMobile) {
+  const n = String(name || '').trim().toLocaleLowerCase(), p = phoneKey(parentMobile), st = phoneKey(studentMobile);
+  if (!n || (!p && !st)) return [];
+  return (data.demoLogs || []).filter(d => d.status !== 'Cancelled' && !d.linkedStudentId
+    && (d.studentName || '').trim().toLocaleLowerCase() === n
+    && ((p && phoneKey(d.parentMobile) === p) || (st && phoneKey(d.studentMobile) === st)))
+    .sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+async function addStudent(mode) {
+  const nameEl = document.getElementById('newStudent');
+  const parentEl = document.getElementById('newStudentParentMobile');
+  const studentEl = document.getElementById('newStudentStudentMobile');
+  const name = (nameEl ? nameEl.value : studentAddDraft.name || '').trim();
+  const parentMobile = (parentEl ? parentEl.value : studentAddDraft.parentMobile || '').trim();
+  const studentMobile = (studentEl ? studentEl.value : studentAddDraft.studentMobile || '').trim();
   if (!name) return;
   if (!isValidPersonName(name)) { addConfirmMsg.student = 'Name cannot contain numbers.'; render(); return; }
-  if (!confirm('You are about to create a New Student record.\n\nPlease confirm that this student does not already exist in the system.\n\nContinue with creating this student?')) return;
-  const { data: row, error } = await sb.from('students').insert({ name, archived: false, onboarding_source: 'student_maintenance_add' }).select().single();
+  const matches = studentAddDemoMatches(name, parentMobile, studentMobile);
+  studentAddDraft = { name, parentMobile, studentMobile, selectedDemoId: studentAddDraft.selectedDemoId || '', matches };
+  if (!mode && matches.length) { addConfirmMsg.student = ''; render(); return; }
+  mode = mode || 'without';
+  if (mode === 'convert' && !matches.some(d => d.id === studentAddDraft.selectedDemoId)) { addConfirmMsg.student = 'Select the exact matching demo before converting.'; render(); return; }
+  const demoId = mode === 'convert' ? studentAddDraft.selectedDemoId : '';
+  if (!confirm(mode === 'convert'
+    ? 'Create this student and link & convert the selected demo? This will trigger the existing ₹100 demo conversion bonus.'
+    : 'Create a new student record without converting a demo?')) return;
+  const { data: row, error } = await sb.from('students').insert({
+    name, archived: false, onboarding_source: 'student_maintenance_add', mobile_number: parentMobile || null
+  }).select().single();
   if (error) { addConfirmMsg.student = 'Could not add student: ' + error.message; render(); return; }
-  data.students.push({ id: row.id, name: row.name, archived: !!row.archived, code: row.student_code || '', parentName: '', mobileNumber: '', email: '', address: '', photo: '', gradeId: '', boardId: '', academicYear: '', modePreference: '', classTypePreference: '', billSeparately: false });
-  input.value = '';
-  // Open the new student's maintenance screen straight away so details can be filled in.
-  selectStudent(row.id);
-  addConfirmMsg.student = `Student "${name}" added${(row.student_code || row.code) ? ' (' + (row.student_code || row.code) + ')' : ''}. Fill in their details below.`;
+  const student = { id: row.id, name: row.name, archived: !!row.archived, code: row.student_code || '', parentName: '', mobileNumber: row.mobile_number || '', email: '', address: '', photo: '', gradeId: '', boardId: '', academicYear: '', modePreference: '', classTypePreference: '', billSeparately: false };
+  data.students.push(student);
+  if (studentMobile) {
+    const { data: phoneRow, error: phoneErr } = await sb.from('student_phone_numbers').insert({
+      student_id: row.id, phone_type: 'student', phone_number: studentMobile
+    }).select().single();
+    if (phoneErr) addConfirmMsg.student = 'Student created, but student mobile could not be saved: ' + phoneErr.message;
+    else data.studentPhoneNumbers.push({ id: phoneRow.id, studentId: row.id, type: 'student', number: phoneRow.phone_number });
+  }
+  studentAddDraft = { name: '', parentMobile: '', studentMobile: '', selectedDemoId: '', matches: null };
+  if (mode === 'convert') {
+    const result = await convertDemoForStudent(demoId, row.id, { navigate: false });
+    setTab('students'); selectStudent(row.id);
+    addConfirmMsg.student = result.ok
+      ? 'Student created and demo converted. ₹100 bonus will appear in payroll.' + result.message
+      : 'Student created, but demo conversion failed: ' + result.message + ' The student was retained; review the demo before retrying.';
+  } else {
+    selectStudent(row.id);
+    if (!addConfirmMsg.student) addConfirmMsg.student = 'Student "' + name + '" added. Fill in their details below.';
+  }
   render();
 }
 // "Copy to new student": a new student record with the family details copied from an existing one.
@@ -15452,10 +15490,15 @@ function renderStudents() {
       <h2>Add Student</h2>
       <div class="hint">Create a new student record. Please check that the student does not already exist before adding them.</div>
       <div class="row-form">
-        <input type="text" id="newStudent" placeholder="Student's name" onkeydown="if(event.key==='Enter') addStudent()">
+        <input type="text" id="newStudent" value="\${escAttr(studentAddDraft.name)}" placeholder="Student's name" oninput="studentAddDraft.name=this.value" onkeydown="if(event.key==='Enter') addStudent()">
+        <input type="tel" id="newStudentParentMobile" value="\${escAttr(studentAddDraft.parentMobile)}" placeholder="Parent mobile (optional)" oninput="studentAddDraft.parentMobile=this.value" style="width:170px">
+        <input type="tel" id="newStudentStudentMobile" value="\${escAttr(studentAddDraft.studentMobile)}" placeholder="Student mobile (optional)" oninput="studentAddDraft.studentMobile=this.value" style="width:170px">
         <button class="btn-primary" onclick="addStudent()">Add student</button>
       </div>
-      ${addConfirmMsg.student ? `<div class="hint" style="color:var(--forest)">✓ ${esc(addConfirmMsg.student)}</div>` : ''}
+      \${studentAddDraft.matches && studentAddDraft.matches.length ? \`<div style="margin-top:8px;padding:10px;background:#fff8e6;border:1px solid var(--line);border-radius:7px"><b>Possible previous demo match (\${studentAddDraft.matches.length})</b><div class="hint">Confirm the exact demo before converting. No match is linked automatically.</div>
+        <select onchange="studentAddDraft.selectedDemoId=this.value" style="max-width:100%;margin:6px 0"><option value="">Select the correct demo…</option>\${studentAddDraft.matches.map(d=>\`<option value="\${escAttr(d.id)}" \${studentAddDraft.selectedDemoId===d.id?'selected':''}>\${esc(dayDate(d.date))} · \${esc(d.studentName)} · \${esc(d.status)} · \${esc(d.parentMobile || d.studentMobile || 'No mobile')}</option>\`).join('')}</select>
+        <div class="row-form"><button class="btn-small btn-primary" onclick="addStudent('convert')">Create &amp; Link &amp; Convert</button><button class="btn-small" onclick="addStudent('without')">Create Without Conversion</button><button class="btn-small" onclick="studentAddDraft.matches=null;studentAddDraft.selectedDemoId='';render()">Cancel</button></div></div>\` : ''}
+      \${addConfirmMsg.student ? \`<div class="hint" style="color:var(--forest)">✓ \${esc(addConfirmMsg.student)}</div>\` : ''}
     </div>
   `;
   const block2 = `
