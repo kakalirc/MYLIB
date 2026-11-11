@@ -25083,6 +25083,10 @@ function renderAdminQuestionBank() {
       ${currentRole === 'Admin' ? `<button class="btn-small btn-primary" onclick="qbSourceUploadOpen=!qbSourceUploadOpen;render()">${qbSourceUploadOpen?'Close uploader':'+ Upload Past Papers'}</button>` : ''}
     </div>
     ${subTabsHtml}
+    ${currentRole === 'Admin' ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin:16px 0 18px">
+      <div style="padding:18px;border:1px solid var(--line);border-radius:13px;background:linear-gradient(135deg,rgba(56,104,70,.10),rgba(56,104,70,.025))"><div style="font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--forest);margin-bottom:7px">Primary collection method</div><h3 style="margin:0 0 6px;font-family:Zilla Slab,serif">Discover papers online</h3><p class="hint" style="margin:0">Search official board, school and trusted education sources, then review papers before importing them.</p><div style="margin-top:12px;font-size:12px;font-weight:700;color:var(--muted)">Online discovery engine · Planned next phase</div></div>
+      <div style="padding:18px;border:1px solid var(--line);border-radius:13px;background:var(--surface)"><div style="font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:7px">Secondary collection method</div><h3 style="margin:0 0 6px;font-family:Zilla Slab,serif">Upload from computer</h3><p class="hint" style="margin:0">Add PDFs shared by teachers or already saved on your computer. Admin reviews each upload before publishing.</p><button class="btn-small btn-primary" style="margin-top:12px" onclick="qbSourceUploadOpen=!qbSourceUploadOpen;render()">${qbSourceUploadOpen?'Close upload form':'Choose PDF files'}</button></div>
+    </div>` : ''}
     ${qbSourceUploadMsg ? `<div class="hint" style="color:var(--brick);margin:8px 0">${esc(qbSourceUploadMsg)}</div>` : ''}
     ${currentRole === 'Admin' && qbSourceUploadOpen ? qbSourceUploaderHtml() : ''}
     ${qbMsg ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${esc(qbMsg)}</div>` : ''}
@@ -26393,18 +26397,20 @@ async function qbOpenSourcePdf(id) {
 function qbSourceUploaderHtml() {
   const opts = rows => rows.map(x => '<option value="' + escAttr(x.id) + '">' + esc(x.name) + '</option>').join('');
   const subjects = [...new Set((data.subjects || []).map(x => String(x.name || '').trim()).filter(Boolean))].sort();
-  return '<div class="card" style="margin:0 0 16px;padding:16px">' +
-    '<h3>Upload original question papers</h3><p class="hint">PDFs upload directly to Supabase Storage. Each file is saved as Pending Review and hidden from teachers until published.</p>' +
-    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">' +
-    '<label>Board<select id="qbSourceUploadBoard"><option value="">Select board</option>' + opts(boards) + '</select></label>' +
-    '<label>Class<select id="qbSourceUploadGrade"><option value="">Select class</option>' + opts(grades) + '</select></label>' +
-    '<label>Subject<select id="qbSourceUploadSubject"><option value="">Select subject</option>' + subjects.map(s=>'<option>'+esc(s)+'</option>').join('') + '</select></label>' +
-    '<label>Examination year<input id="qbSourceUploadYear" type="number" min="1950" max="' + (new Date().getFullYear()+1) + '" value="' + new Date().getFullYear() + '"></label>' +
-    '<label>Exam type<select id="qbSourceUploadExam"><option value="main">Main</option><option value="compartment">Compartment</option><option value="supplementary">Supplementary</option><option value="other">Other</option></select></label>' +
-    '<label>Medium<select id="qbSourceUploadMedium"><option value="">Select medium</option><option>English</option><option>Hindi</option><option>Kannada</option><option>Sanskrit</option><option>Other</option></select></label></div>' +
-    '<label style="display:block;margin-top:12px">PDF files (maximum 50 MB each)<input id="qbSourceUploadInput" type="file" accept="application/pdf,.pdf" multiple onchange="qbSetSourceUploadFiles(this)" style="display:block;width:100%;margin-top:5px"></label>' +
-    '<div class="hint" id="qbSourceUploadFileNames" style="margin-top:6px">Select one or more PDFs. Metadata above applies to every selected file.</div>' +
-    '<div class="row-form" style="justify-content:flex-end;margin-top:12px"><button class="btn-small" onclick="qbSourceUploadOpen=false;qbSourceUploadFiles=[];render()">Cancel</button><button class="btn-small btn-primary" onclick="qbUploadSourcePapers()" ' + (qbSourceUploading?'disabled':'') + '>Upload as Pending Review</button></div></div>';
+  const field = (label, control) => '<label style="display:flex;flex-direction:column;gap:6px;min-width:0;font-size:13px;font-weight:600;color:var(--ink)">' + label + control + '</label>';
+  const css = 'width:100%;min-width:0;box-sizing:border-box;min-height:42px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);font:inherit;font-weight:400';
+  return '<section class="card" style="margin:0 0 18px;padding:clamp(16px,2.4vw,24px);border:1px solid var(--line);border-radius:14px">' +
+    '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px"><div><h3 style="margin:0 0 5px;font-family:Zilla Slab,serif">Upload from your computer</h3><p class="hint" style="margin:0;max-width:680px">Add original question-paper PDFs. Each upload remains in Pending Review and hidden from teachers until an Admin publishes it.</p></div><span style="font-size:12px;font-weight:700;color:var(--forest);background:rgba(56,104,70,.10);padding:6px 10px;border-radius:20px;white-space:nowrap">Admin only · 50 MB per PDF</span></div>' +
+    '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 18px">' +
+      field('Board', '<select id="qbSourceUploadBoard" style="' + css + '"><option value="">Select board</option>' + opts(boards) + '</select>') +
+      field('Class', '<select id="qbSourceUploadGrade" style="' + css + '"><option value="">Select class</option>' + opts(grades) + '</select>') +
+      field('Subject', '<select id="qbSourceUploadSubject" style="' + css + '"><option value="">Select subject</option>' + subjects.map(s=>'<option>'+esc(s)+'</option>').join('') + '</select>') +
+      field('Examination year', '<input id="qbSourceUploadYear" type="number" min="1950" max="' + (new Date().getFullYear()+1) + '" value="' + new Date().getFullYear() + '" style="' + css + '">') +
+      field('Exam type', '<select id="qbSourceUploadExam" style="' + css + '"><option value="main">Main</option><option value="compartment">Compartment</option><option value="supplementary">Supplementary</option><option value="other">Other</option></select>') +
+      field('Medium of question paper', '<select id="qbSourceUploadMedium" style="' + css + '"><option value="">Select medium</option><option>English</option><option>Hindi</option><option>Kannada</option><option>Sanskrit</option><option>Other</option></select>') +
+    '</div>' +
+    '<div style="margin-top:20px;padding:16px;border:1px dashed var(--line);border-radius:12px;background:var(--surface-alt,rgba(0,0,0,.02))"><label for="qbSourceUploadInput" style="display:block;font-weight:700;margin-bottom:8px">Select PDF files</label><input id="qbSourceUploadInput" type="file" accept="application/pdf,.pdf" multiple onchange="qbSetSourceUploadFiles(this)" style="display:block;width:100%;max-width:100%;font-size:14px"><div class="hint" id="qbSourceUploadFileNames" style="margin-top:9px">Choose multiple PDFs. The metadata above applies to every selected file.</div></div>' +
+    '<div class="row-form" style="justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap;margin-top:18px"><button class="btn-small" onclick="qbSourceUploadOpen=false;qbSourceUploadFiles=[];render()">Cancel</button><button class="btn-small btn-primary" onclick="qbUploadSourcePapers()" ' + (qbSourceUploading?'disabled':'') + '>' + (qbSourceUploading?'Uploading…':'Upload as Pending Review') + '</button></div></section>';
 }
 function qbSetSourceUploadFiles(input) {
   qbSourceUploadFiles = Array.from(input.files || []);
