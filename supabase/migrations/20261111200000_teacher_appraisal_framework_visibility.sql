@@ -188,6 +188,7 @@ begin
                   'target',m->'target',
                   'deadline_hours',m->'deadline_hours',
                   'grace_hours',m->'grace_hours',
+                  'missing_score_percent',case when m->>'method'='timeliness_bands' then m->'missing_score_percent' else null end,
                   'bands',case when m->>'method'='timeliness_bands' then m->'bands' else null end,
                   'score_bands',m->'score_bands'
                 )) order by ordm
