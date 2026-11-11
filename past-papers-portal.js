@@ -79,9 +79,9 @@
       + optionList(options, paperFilters[key], allLabel) + '</select></label>';
   }
   function renderPublishedPapers() {
+    if (papersError) return '<div class="card"><div class="hint" style="color:var(--brick)">' + escHtml(papersError) + '</div><button class="btn-small" onclick="libRefreshPastPapers()">Try again</button></div>';
     if (!papersLoaded && !papersLoading) loadPublishedPapers(false);
     if (papersLoading) return '<div class="card"><div class="empty">Loading published question papers…</div></div>';
-    if (papersError) return '<div class="card"><div class="hint" style="color:var(--brick)">' + escHtml(papersError) + '</div><button class="btn-small" onclick="libRefreshPastPapers()">Try again</button></div>';
 
     var boardsList = typeof boards !== 'undefined' ? boards : [];
     var gradesList = typeof grades !== 'undefined' ? grades : [];
