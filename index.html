@@ -10119,7 +10119,7 @@ async function addStudent(mode) {
   if (mode === 'convert') {
     const result = await convertDemoForStudent(demoId, row.id, { navigate: false });
     setTab('students'); selectStudent(row.id);
-    addConfirmMsg.student = result.ok
+    addConfirmMsg.student = (result.ok
       ? 'Student created and demo converted. ₹100 bonus will appear in payroll.' + result.message
       : 'Student created, but demo conversion failed: ' + result.message + ' The student was retained; review the demo before retrying.') + phoneWarning;
   } else {
@@ -15497,10 +15497,10 @@ function renderStudents() {
         <input type="tel" id="newStudentStudentMobile" value="${escAttr(studentAddDraft.studentMobile)}" placeholder="Student mobile (optional)" oninput="studentAddDraft.studentMobile=this.value" style="width:170px">
         <button class="btn-primary" onclick="addStudent()">Add student</button>
       </div>
-      ${studentAddDraft.matches && studentAddDraft.matches.length ? \`<div style="margin-top:8px;padding:10px;background:#fff8e6;border:1px solid var(--line);border-radius:7px"><b>Possible previous demo match (${studentAddDraft.matches.length})</b><div class="hint">Confirm the exact demo before converting. No match is linked automatically.</div>
-        <select onchange="studentAddDraft.selectedDemoId=this.value" style="max-width:100%;margin:6px 0"><option value="">Select the correct demo…</option>${studentAddDraft.matches.map(d=>\`<option value="${escAttr(d.id)}" ${studentAddDraft.selectedDemoId===d.id?'selected':''}>${esc(dayDate(d.date))} · ${esc(d.studentName)} · ${esc(d.status)} · ${esc(d.parentMobile || d.studentMobile || 'No mobile')}</option>\`).join('')}</select>
-        <div class="row-form"><button class="btn-small btn-primary" onclick="addStudent('convert')">Create &amp; Link &amp; Convert</button><button class="btn-small" onclick="addStudent('without')">Create Without Conversion</button><button class="btn-small" onclick="studentAddDraft.matches=null;studentAddDraft.selectedDemoId='';render()">Cancel</button></div></div>\` : ''}
-      ${addConfirmMsg.student ? \`<div class="hint" style="color:var(--forest)">✓ ${esc(addConfirmMsg.student)}</div>\` : ''}
+      ${studentAddDraft.matches && studentAddDraft.matches.length ? `<div style="margin-top:8px;padding:10px;background:#fff8e6;border:1px solid var(--line);border-radius:7px"><b>Possible previous demo match (${studentAddDraft.matches.length})</b><div class="hint">Confirm the exact demo before converting. No match is linked automatically.</div>
+        <select onchange="studentAddDraft.selectedDemoId=this.value" style="max-width:100%;margin:6px 0"><option value="">Select the correct demo…</option>${studentAddDraft.matches.map(d=>`<option value="${escAttr(d.id)}" ${studentAddDraft.selectedDemoId===d.id?'selected':''}>${esc(dayDate(d.date))} · ${esc(d.studentName)} · ${esc(d.status)} · ${esc(d.parentMobile || d.studentMobile || 'No mobile')}</option>`).join('')}</select>
+        <div class="row-form"><button class="btn-small btn-primary" onclick="addStudent('convert')">Create &amp; Link &amp; Convert</button><button class="btn-small" onclick="addStudent('without')">Create Without Conversion</button><button class="btn-small" onclick="studentAddDraft.matches=null;studentAddDraft.selectedDemoId='';render()">Cancel</button></div></div>` : ''}
+      ${addConfirmMsg.student ? `<div class="hint" style="color:var(--forest)">✓ ${esc(addConfirmMsg.student)}</div>` : ''}
     </div>
   `;
   const block2 = `
@@ -27568,8 +27568,8 @@ function regCardHtml(r) {
         <label><input type="radio" name="regFam" ${d.family === 'new' ? 'checked' : ''} onchange="regDraftSet('family','new')"> A new family</label></div>` : ''}
       <div class="row-form"><label><input type="checkbox" ${d.parentLogin ? 'checked' : ''} onchange="regDraftSet('parentLogin',this.checked)"> Parent login (ID and password = parent mobile${kids.length ? ', or the family\'s login' : ''})</label>
         <label><input type="checkbox" ${d.studentLogin ? 'checked' : ''} onchange="regDraftSet('studentLogin',this.checked)"> Student login (ID and password = student code)</label></div>
-      \${regDemoCandidates(r, r.student_id || d.existingStudentId || 'new-registration-student').length ? \`<div style="margin:8px 0;padding:9px;background:#fff8e6;border:1px solid var(--line);border-radius:7px"><b style="font-size:12px">Matching demo records</b><div class="hint" style="font-size:11px">Choose one exact demo to convert with this acceptance, or accept without conversion. Only one demo can be converted here.</div>
-        <select onchange="regDraftSet('demoId',this.value)" style="max-width:100%;margin:6px 0"><option value="">Select a demo…</option>${regDemoCandidates(r, r.student_id || d.existingStudentId || 'new-registration-student').map(dl=>\`<option value="${escAttr(dl.id)}" ${d.demoId===dl.id?'selected':''}>${esc(dayDate(dl.date))} · ${esc(dl.studentName)} · ${esc(dl.status)}</option>\`).join('')}</select></div>\` : '<div class="hint" style="margin:8px 0">No matching demo found from the registration name and contact numbers. You can accept without conversion.</div>'}
+      ${regDemoCandidates(r, r.student_id || d.existingStudentId || 'new-registration-student').length ? `<div style="margin:8px 0;padding:9px;background:#fff8e6;border:1px solid var(--line);border-radius:7px"><b style="font-size:12px">Matching demo records</b><div class="hint" style="font-size:11px">Choose one exact demo to convert with this acceptance, or accept without conversion. Only one demo can be converted here.</div>
+        <select onchange="regDraftSet('demoId',this.value)" style="max-width:100%;margin:6px 0"><option value="">Select a demo…</option>${regDemoCandidates(r, r.student_id || d.existingStudentId || 'new-registration-student').map(dl=>`<option value="${escAttr(dl.id)}" ${d.demoId===dl.id?'selected':''}>${esc(dayDate(dl.date))} · ${esc(dl.studentName)} · ${esc(dl.status)}</option>`).join('')}</select></div>` : '<div class="hint" style="margin:8px 0">No matching demo found from the registration name and contact numbers. You can accept without conversion.</div>'}
       <div class="row-form"><button class="btn-primary" ${regBusy ? 'disabled' : ''} onclick="regAccept('${r.id}','convert')" ${!d.demoId || !regDemoCandidates(r, r.student_id || d.existingStudentId || 'new-registration-student').some(x=>x.id===d.demoId) ? 'disabled' : ''}>${regBusy ? 'Adding…' : 'Accept &amp; Link &amp; Convert'}</button><button class="btn-small" ${regBusy ? 'disabled' : ''} onclick="regAccept('${r.id}','without')">${regBusy ? 'Adding…' : 'Accept Without Conversion'}</button><button class="btn-small" onclick="regAcceptId='';render()">Cancel</button></div>
       <div class="hint">Subjects are not added here: enrol the student with a teacher on their page afterwards.</div></div>`;
   } else if (r.status === 'New' && regRejectId === r.id) {
