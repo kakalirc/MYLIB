@@ -27,7 +27,7 @@
     if (activeFilterStudentId === id) return;
     activeFilterStudentId = id;
     studentGradeId = '';
-    paperFilters = { boardId: '', schoolId: '', gradeId: '', subject: '', year: '' };
+    paperFilters = { boardId: '', schoolId: '', gradeId: '', subject: '__my_subjects__', year: '' };
     studentSubjectNames = [];
     studentScopeLoaded = false;
     papersLoaded = false;
@@ -130,9 +130,7 @@
       if (ownGradeName) gradeOptions.push({ value: studentGradeId, label: ownGradeName });
     }
     var subjectOptions = distinctOptions('subject_name', function (p) { return p.subject_name; });
-    if (isStudentView && studentScopeLoaded && studentSubjectNames.length) {
-      subjectOptions = subjectOptions.filter(function (o) { return studentSubjectNames.indexOf(o.value) !== -1; });
-    }
+    if (isStudentView) subjectOptions.unshift({ value: '__my_subjects__', label: 'My Subjects' });
     var yearOptions = distinctOptions('year', function (p) { return String(p.year); }, true);
 
     var filters = '<div class="lib-past-paper-filters">'
@@ -145,7 +143,7 @@
       + '</div>';
 
     var visible = publishedPapers.filter(function (p) {
-      return (!isStudentView || (studentScopeLoaded && studentSubjectNames.indexOf(String(p.subject_name || '').trim()) !== -1))
+      return (!isStudentView || paperFilters.subject !== '__my_subjects__' || (studentScopeLoaded && studentSubjectNames.indexOf(String(p.subject_name || '').trim()) !== -1))
         && (!paperFilters.boardId || p.board_id === paperFilters.boardId)
         && (!paperFilters.schoolId || p.school_id === paperFilters.schoolId)
         && (!paperFilters.gradeId || p.grade_id === paperFilters.gradeId)
@@ -203,7 +201,7 @@
   };
   window.libClearPastPaperFilters = function () {
     syncStudentDefaults();
-    paperFilters = { boardId: '', schoolId: '', gradeId: studentGradeId || '', subject: '', year: '' };
+    paperFilters = { boardId: '', schoolId: '', gradeId: studentGradeId || '', subject: currentRole === 'Student' ? '__my_subjects__' : '', year: '' };
     if (typeof render === 'function') render();
   };
   window.libRefreshPastPapers = function () {
