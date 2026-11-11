@@ -109,7 +109,7 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
   const job = Array.isArray(claimed) ? claimed[0] : claimed;
   if (!job) return { skipped: "no_queued_jobs_or_worker_lease_active" };
 
-  let generated = 0, validated = 0, drafted = 0, rejected = 0, inputTokens = 0, outputTokens = 0;
+  let generated = 0, validated = 0, published = 0, rejected = 0, inputTokens = 0, outputTokens = 0;
   const shapeRejections: string[] = [];
   const validationRejections: string[] = [];
   const saveRejected = async (q: any, stage: string, reason: string) => {
@@ -334,31 +334,36 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       });
       if (storeError) {
         rejected++;
-        await saveRejected(q, "storage", "Could not save as Draft: " + storeError.message);
+        await saveRejected(q, "storage", "Could not publish validated question: " + storeError.message);
         continue;
       }
       seen.add(normalized);
       validated++;
-      drafted++;
+      published++;
     }
 
     const actualCostUsd = (inputTokens * inputRate + outputTokens * outputRate) / 1000000;
     const actualCostInr = actualCostUsd * usdInrRate;
     const totalCostUsd = priorCostUsd + actualCostUsd;
     const totalCostInr = priorCostInr + actualCostInr;
-    const status = drafted === job.requested_count ? "completed" : drafted > 0 ? "partial" : "failed";
+    const status = published === job.requested_count ? "completed" : published > 0 ? "partial" : "failed";
     if (rejected) console.warn("Knowledge Arena question rejection summary", {
       job_id: job.id, grade_label: job.grade_label, subject: job.subject,
       generated, rejected, shape_rejections: shapeRejections.slice(0, 12),
       validation_rejections: validationRejections.slice(0, 12),
     });
+    if (settings.daily_challenge_enabled && published > 0) {
+      assertLease();
+      const { error: challengeError } = await db.rpc("ka_publish_daily_challenges", { p_challenge_date: indiaDate() });
+      if (challengeError) console.warn("Post-generation daily challenge publication did not complete", challengeError);
+    }
     assertLease();
     await updateJob(db, job.id, {
-      status, generated_count: generated, validated_count: validated, drafted_count: drafted, published_count: 0,
+      status, generated_count: generated, validated_count: validated, drafted_count: 0, published_count: published,
       rejected_count: rejected, model: MODEL, input_tokens: inputTokens, output_tokens: outputTokens,
       estimated_cost_usd: totalCostUsd, estimated_cost_inr: priorCostInr + actualCostInr, usd_inr_rate: usdInrRate,
       completed_at: new Date().toISOString(),
-      ...(drafted ? { error_code: null, error_summary: null } : { error_code: "no_questions_drafted", error_summary: "No candidate was promoted to Draft. Rejected candidates and reasons are available in Admin Manual Validation." }),
+      ...(published ? { error_code: null, error_summary: null } : { error_code: "no_questions_published", error_summary: "No candidate passed structural, duplicate and independent AI validation. Rejected candidates and reasons are available in Admin Manual Validation." }),
     });
     if (usageId) {
       const { error: settleError } = await db.from("ka_ai_usage").update({
@@ -367,7 +372,7 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       }).eq("id", usageId);
       if (settleError) throw new Error("AI usage was not settled; its reservation remains charged against the budget.");
     }
-    return { job_id: job.id, status, generated, validated, drafted, rejected, estimated_cost_inr: priorCostInr + actualCostInr };
+    return { job_id: job.id, status, generated, validated, published, rejected, estimated_cost_inr: priorCostInr + actualCostInr };
   } catch (e) {
     const observedCostUsd = (inputTokens * inputRate + outputTokens * outputRate) / 1000000;
     if (usageId) {
@@ -379,14 +384,14 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       if (reviewError) console.error("Could not mark AI reservation for review", reviewError);
     }
     if (!leaseLost) {
-      const failureStatus = drafted > 0 ? "partial" : "failed";
+      const failureStatus = published > 0 ? "partial" : "failed";
       await updateJob(db, job.id, {
-        status: failureStatus, generated_count: generated, validated_count: validated, drafted_count: drafted, published_count: 0,
+        status: failureStatus, generated_count: generated, validated_count: validated, drafted_count: 0, published_count: published,
         rejected_count: rejected, model: MODEL, input_tokens: inputTokens, output_tokens: outputTokens,
         estimated_cost_usd: priorCostUsd + (usageId ? reservedCostUsd : 0),
         estimated_cost_inr: priorCostInr + (usageId ? reservedCostInr : 0),
         usd_inr_rate: usdInrRate, completed_at: new Date().toISOString(),
-        error_code: drafted > 0 ? "generation_interrupted_after_partial" : "generation_failed",
+        error_code: published > 0 ? "generation_interrupted_after_partial" : "generation_failed",
         error_summary: String((e as Error).message || e).slice(0, 500),
       });
     }
