@@ -15,6 +15,23 @@
   var papersLoading = false;
   var papersError = '';
   var paperFilters = { boardId: '', schoolId: '', gradeId: '', subject: '', year: '' };
+  var studentSubjectNames = [];
+  var studentScopeLoaded = false;
+  var activeFilterStudentId = '';
+
+  function syncStudentDefaults() {
+    if (typeof currentRole === 'undefined' || currentRole !== 'Student'
+        || typeof currentLinkedId === 'undefined' || !currentLinkedId) return;
+    var id = String(currentLinkedId);
+    if (activeFilterStudentId === id) return;
+    activeFilterStudentId = id;
+    var student = typeof data !== 'undefined' && Array.isArray(data.students)
+      ? data.students.find(function (s) { return String(s.id) === id; }) : null;
+    paperFilters = { boardId: '', schoolId: '', gradeId: student && student.grade_id ? String(student.grade_id) : '', subject: '', year: '' };
+    studentSubjectNames = [];
+    studentScopeLoaded = false;
+    papersLoaded = false;
+  }
 
   function escHtml(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g, function (ch) {
@@ -50,6 +67,7 @@
     papersLoading = true;
     papersError = '';
     try {
+      syncStudentDefaults();
       var results = await Promise.all([
         sb.from('qb_source_papers')
           .select('id,source_type,school_id,board_id,grade_id,subject_name,year,exam_type,medium,question_count,stored_pdf_url,source_url')
@@ -61,6 +79,18 @@
       if (results[0].error) throw results[0].error;
       publishedPapers = results[0].data || [];
       schoolDirectory = results[1].error ? [] : (results[1].data || []);
+      if (typeof currentRole !== 'undefined' && currentRole === 'Student'
+          && typeof currentLinkedId !== 'undefined' && currentLinkedId) {
+        var enrollmentResult = await sb.from('student_subjects').select('subject_id').eq('student_id', currentLinkedId);
+        if (!enrollmentResult.error) {
+          var subjectIds = (enrollmentResult.data || []).map(function (row) { return row.subject_id; }).filter(Boolean);
+          if (subjectIds.length) {
+            var subjectResult = await sb.from('subjects').select('id,name').in('id', subjectIds);
+            if (!subjectResult.error) studentSubjectNames = (subjectResult.data || []).map(function (row) { return String(row.name || '').trim(); }).filter(Boolean);
+          }
+          studentScopeLoaded = true;
+        }
+      }
       papersLoaded = true;
     } catch (error) {
       papersError = error && error.message ? error.message : 'Could not load published question papers.';
@@ -79,6 +109,7 @@
       + optionList(options, paperFilters[key], allLabel) + '</select></label>';
   }
   function renderPublishedPapers() {
+    syncStudentDefaults();
     if (papersError) return '<div class="card"><div class="hint" style="color:var(--brick)">' + escHtml(papersError) + '</div><button class="btn-small" onclick="libRefreshPastPapers()">Try again</button></div>';
     if (!papersLoaded && !papersLoading) loadPublishedPapers(false);
     if (papersLoading) return '<div class="card"><div class="empty">Loading published question papers…</div></div>';
@@ -89,19 +120,24 @@
     var schoolOptions = distinctOptions('school_id', function (p) { return labelFor(schoolDirectory, p.school_id) || 'School'; }).filter(function (o) { return !!o.value; });
     var gradeOptions = distinctOptions('grade_id', function (p) { return labelFor(gradesList, p.grade_id) || 'Class'; }).filter(function (o) { return !!o.value; });
     var subjectOptions = distinctOptions('subject_name', function (p) { return p.subject_name; });
+    var isStudentView = typeof currentRole !== 'undefined' && currentRole === 'Student';
+    if (isStudentView && studentScopeLoaded && studentSubjectNames.length) {
+      subjectOptions = subjectOptions.filter(function (o) { return studentSubjectNames.indexOf(o.value) !== -1; });
+    }
     var yearOptions = distinctOptions('year', function (p) { return String(p.year); }, true);
 
     var filters = '<div class="lib-past-paper-filters">'
       + filterControl('boardId', 'All Boards', boardOptions)
       + filterControl('schoolId', 'All Schools', schoolOptions)
       + filterControl('gradeId', 'All Classes', gradeOptions)
-      + filterControl('subject', 'All Subjects', subjectOptions)
+      + filterControl('subject', isStudentView ? 'My Subjects' : 'All Subjects', subjectOptions)
       + filterControl('year', 'All Years', yearOptions)
       + '<button class="btn-small" type="button" onclick="libClearPastPaperFilters()">Clear filters</button>'
       + '</div>';
 
     var visible = publishedPapers.filter(function (p) {
-      return (!paperFilters.boardId || p.board_id === paperFilters.boardId)
+      return (!isStudentView || (studentScopeLoaded && studentSubjectNames.indexOf(String(p.subject_name || '').trim()) !== -1))
+        && (!paperFilters.boardId || p.board_id === paperFilters.boardId)
         && (!paperFilters.schoolId || p.school_id === paperFilters.schoolId)
         && (!paperFilters.gradeId || p.grade_id === paperFilters.gradeId)
         && (!paperFilters.subject || p.subject_name === paperFilters.subject)
@@ -157,7 +193,11 @@
     if (typeof render === 'function') render();
   };
   window.libClearPastPaperFilters = function () {
-    paperFilters = { boardId: '', schoolId: '', gradeId: '', subject: '', year: '' };
+    syncStudentDefaults();
+    var student = typeof currentRole !== 'undefined' && currentRole === 'Student'
+      && typeof data !== 'undefined' && Array.isArray(data.students)
+      ? data.students.find(function (s) { return String(s.id) === String(currentLinkedId); }) : null;
+    paperFilters = { boardId: '', schoolId: '', gradeId: student && student.grade_id ? String(student.grade_id) : '', subject: '', year: '' };
     if (typeof render === 'function') render();
   };
   window.libRefreshPastPapers = function () {
