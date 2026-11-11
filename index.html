@@ -25080,7 +25080,7 @@ function renderAdminQuestionBank() {
     ${subTabsHtml}
     ${currentRole === 'Admin' ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin:16px 0 18px">
       <div style="padding:18px;border:1px solid var(--line);border-radius:13px;background:linear-gradient(135deg,rgba(56,104,70,.10),rgba(56,104,70,.025))"><div style="font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--forest);margin-bottom:7px">Primary collection method</div><h3 style="margin:0 0 6px;font-family:Zilla Slab,serif">Discover papers online</h3><p class="hint" style="margin:0">Search official board, school and trusted education sources, then review papers before importing them.</p><div style="margin-top:12px;font-size:12px;font-weight:700;color:var(--muted)">Online discovery engine · Planned next phase</div></div>
-      <div style="padding:18px;border:1px solid var(--line);border-radius:13px;background:var(--surface)"><div style="font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:7px">Secondary collection method</div><h3 style="margin:0 0 6px;font-family:Zilla Slab,serif">Upload from computer</h3><p class="hint" style="margin:0">Add PDFs shared by teachers or already saved on your computer. Admin reviews each upload before publishing.</p><button class="btn-small btn-primary" style="margin-top:12px" onclick="qbSourceUploadOpen=!qbSourceUploadOpen;render()">${qbSourceUploadOpen?'Close upload form':'Choose PDF files'}</button></div>
+      <div style="padding:18px;border:1px solid var(--line);border-radius:13px;background:var(--surface)"><div style="font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:7px">Secondary collection method</div><h3 style="margin:0 0 6px;font-family:Zilla Slab,serif">Upload from computer</h3><p class="hint" style="margin:0">Add PDFs saved on your computer. Review and publish your own teacher submissions; Admin can review any submission.</p><button class="btn-small btn-primary" style="margin-top:12px" onclick="qbSourceUploadOpen=!qbSourceUploadOpen;render()">${qbSourceUploadOpen?'Close upload form':'Choose PDF files'}</button></div>
     </div>` : ''}
     ${qbSourceUploadMsg ? `<div class="hint" style="color:var(--brick);margin:8px 0">${esc(qbSourceUploadMsg)}</div>` : ''}
     ${currentRole === 'Admin' && qbSourceUploadOpen ? qbSourceUploaderHtml() : ''}
@@ -26470,7 +26470,7 @@ function qbSourcePapersHtml() {
   if (!qbSourcePapers.length) return `<div class="empty">No published past papers or your own submissions are available yet.</div>`;
   // The dropdowns edit a draft; nothing is listed until Apply copies it into qbSourceApplied.
   // Each filter is independent: every dropdown lists all values, and "All" (empty) doesn't narrow.
-  const f = qbSourceFilter, a = qbSourceApplied;
+  const f = qbSourceFilter, a = qbSourceApplied || (currentRole === 'Teacher' ? { boardId: '', gradeId: '', subject: '', year: '' } : null);
   const opts = (key, val, label) => [...new Map(qbSourcePapers.map(sp => [String(val(sp) ?? ''), label(sp)])).entries()]
     .filter(([v]) => v).sort((x, y) => key === 'year' ? y[0].localeCompare(x[0]) : String(x[1]).localeCompare(String(y[1]), undefined, { numeric: true }));
   const sel = (key, all, val, label) => `<select onchange="qbSourceFilter.${key}=this.value"><option value="">${all}</option>
