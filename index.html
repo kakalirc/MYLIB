@@ -2232,14 +2232,8 @@ let teacherQbAccess = null;
 async function loadTeacherQbAccess() {
   if (!sb || !currentLinkedId) { teacherQbAccess = false; return; }
   try {
-    // Until SQL 32 is run this function doesn't exist; then fall back to the scope check alone.
     const sw = await sb.rpc('qb_my_qb_access');
-    if (!sw.error && sw.data !== true) { teacherQbAccess = false; if (teacherPortalTab === 'questionbank') teacherPortalTab = 'dashboard'; return; }
-    const [qs, ps] = await Promise.all([
-      sb.from('qb_questions').select('id', { count: 'exact', head: true }),
-      sb.from('qb_practice_papers').select('id', { count: 'exact', head: true }).eq('created_by_teacher_id', currentLinkedId),
-    ]);
-    teacherQbAccess = (qs.count || 0) > 0 || (ps.count || 0) > 0;
+    teacherQbAccess = !sw.error && sw.data === true;
   } catch (e) { teacherQbAccess = false; }
   if (!teacherQbAccess && teacherPortalTab === 'questionbank') teacherPortalTab = 'dashboard';
 }
