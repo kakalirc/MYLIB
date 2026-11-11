@@ -864,6 +864,52 @@ Deno.serve(async (req) => {
       return json(200, { saved: true, kind, enabled });
     }
 
+    if (action === "get_admin_rejected_questions") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const { data, error } = await db.from("ka_rejected_questions")
+        .select("id,job_id,subject,grade_label,game_type,difficulty,language_code,topic,candidate,rejection_stage,rejection_reason,created_at")
+        .eq("review_status","pending").order("created_at",{ascending:false}).limit(200);
+      if (error) return errorResponse(503, "Could not load rejected questions for manual validation.");
+      return json(200,{questions:data||[]});
+    }
+
+    if (action === "admin_rejected_question") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const id=String(body.rejected_question_id||"");
+      if(!id) return errorResponse(400,"Rejected question ID is required.");
+      const {data: candidate,error:readError}=await db.from("ka_rejected_questions")
+        .select("*").eq("id",id).eq("review_status","pending").maybeSingle();
+      if(readError||!candidate) return errorResponse(404,"Rejected question not found or already reviewed.");
+      const operation=String(body.operation||"");
+      if(operation==="dismiss"){
+        const {error}=await db.from("ka_rejected_questions").update({review_status:"dismissed",reviewed_by:user.id,reviewed_at:new Date().toISOString()}).eq("id",id).eq("review_status","pending");
+        if(error)return errorResponse(503,"Could not dismiss rejected question.");
+        return json(200,{dismissed:true});
+      }
+      if(operation==="approve_draft"){
+        const prompt=String(body.prompt||"").trim(), explanation=String(body.explanation||"").trim();
+        const options=body.options, correct=safeNumber(body.correct_option,-1);
+        if(prompt.length<12||prompt.length>700||explanation.length<8||explanation.length>900||
+          !Array.isArray(options)||options.length!==4||options.some((x:any)=>typeof x!=="string"||!x.trim()||x.length>250)||
+          new Set(options.map((x:string)=>x.trim().toLocaleLowerCase())).size!==4||
+          !Number.isInteger(correct)||correct<0||correct>3)
+          return errorResponse(400,"Complete four distinct options, select the correct answer, and provide a valid question and explanation.");
+        const q=candidate.candidate||{};
+        const {data:inserted,error:insertError}=await db.from("ka_questions").insert({
+          subject:candidate.subject,topic:String(body.topic||candidate.topic||candidate.subject).trim().slice(0,120),
+          grade_label:candidate.grade_label,language_code:candidate.language_code,difficulty:candidate.difficulty,
+          game_type:candidate.game_type,prompt,options,explanation,status:"pending",generated_by:"ai",generation_job_id:candidate.job_id
+        }).select("id,status").single();
+        if(insertError||!inserted)return errorResponse(503,"Could not create the approved Draft.");
+        const {error:keyError}=await db.from("ka_question_keys").insert({question_id:inserted.id,correct_option:correct});
+        if(keyError){await db.from("ka_questions").delete().eq("id",inserted.id);return errorResponse(503,"Could not save the Draft answer key; no incomplete Draft was retained.");}
+        const {error:markError}=await db.from("ka_rejected_questions").update({review_status:"converted_to_draft",reviewed_by:user.id,reviewed_at:new Date().toISOString()}).eq("id",id).eq("review_status","pending");
+        if(markError){await db.from("ka_question_keys").delete().eq("question_id",inserted.id);await db.from("ka_questions").delete().eq("id",inserted.id);return errorResponse(503,"Draft was rolled back because the review record could not be updated.");}
+        return json(200,{draft:inserted});
+      }
+      return errorResponse(400,"Unknown rejected-question operation.");
+    }
+
     if (action === "get_admin_questions") {
       if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
       let query = db.from("ka_questions")
@@ -899,6 +945,20 @@ Deno.serve(async (req) => {
           .eq("id", questionId).select("id,status").single();
         if (error) return errorResponse(503, "Could not remove this question from play.");
         return json(200, { question: data });
+      }
+      if (operation === "publish_many") {
+        const ids=Array.isArray(body.question_ids)?[...new Set(body.question_ids.map((x:any)=>String(x)))]:[];
+        if(!ids.length||ids.length>100)return errorResponse(400,"Select between 1 and 100 Draft questions.");
+        const {data:rows,error:readError}=await db.from("ka_questions").select("id,options,status").in("id",ids);
+        if(readError||!rows||rows.length!==ids.length)return errorResponse(400,"One or more selected questions could not be found.");
+        if(rows.some((q:any)=>q.status!=="pending"||!Array.isArray(q.options)||q.options.length!==4))
+          return errorResponse(400,"Only four-option Draft questions can be published.");
+        const {data:keys,error:keyError}=await db.from("ka_question_keys").select("question_id,correct_option").in("question_id",ids);
+        if(keyError||!keys||keys.length!==ids.length||keys.some((k:any)=>k.correct_option<0||k.correct_option>3))
+          return errorResponse(400,"Every selected Draft must have a valid answer key.");
+        const {data:published,error}=await db.from("ka_questions").update({status:"published",published_at:new Date().toISOString()}).in("id",ids).eq("status","pending").select("id");
+        if(error||!published||published.length!==ids.length)return errorResponse(503,"Bulk publish did not complete for every selected Draft. Refresh and verify the question bank.");
+        return json(200,{published_count:published.length});
       }
       if (operation === "publish") {
         const { data, error } = await db.from("ka_questions").update({
