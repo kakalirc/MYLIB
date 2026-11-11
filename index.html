@@ -26421,9 +26421,9 @@ function qbToggleSourceFields(sourceType) {
 async function qbAddSchoolFromUploader() {
   if (currentRole !== 'Admin') return;
   const input = document.getElementById('qbSourceNewSchoolName');
-  const name = String(input?.value || '').trim().replace(/\\s+/g, ' ');
+  const name = String(input?.value || '').trim().replace(/\s+/g, ' ');
   if (!name) { qbSourceUploadMsg = 'Enter a school name first.'; render(); return; }
-  const duplicate = qbSchools.find(s => s.name.trim().toLowerCase().replace(/\\s+/g, ' ') === name.toLowerCase());
+  const duplicate = qbSchools.find(s => s.name.trim().toLowerCase().replace(/\s+/g, ' ') === name.toLowerCase());
   if (duplicate) {
     qbSourceSchoolSearch = duplicate.name;
     qbSourceUploadMsg = 'This school is already in the list. It has been selected.';
@@ -26472,8 +26472,8 @@ async function qbUploadSourcePapers() {
   const val=id=>document.getElementById(id)?.value || '';
   const source_type=val('qbSourceUploadType') || qbSourceType || 'board';
   const board_id=source_type === 'board' ? val('qbSourceUploadBoard') : null;
-  const schoolName=source_type === 'school' ? String(val('qbSourceUploadSchool')).trim().replace(/\\s+/g,' ') : '';
-  const selectedSchool=schoolName ? qbSchools.find(s=>s.name.trim().toLowerCase().replace(/\\s+/g,' ')===schoolName.toLowerCase()) : null;
+  const schoolName=source_type === 'school' ? String(val('qbSourceUploadSchool')).trim().replace(/\s+/g,' ') : '';
+  const selectedSchool=schoolName ? qbSchools.find(s=>s.name.trim().toLowerCase().replace(/\s+/g,' ')===schoolName.toLowerCase()) : null;
   const school_id=selectedSchool?.id || null;
   const grade_id=val('qbSourceUploadGrade'), subject_name=val('qbSourceUploadSubject');
   const year=Number(val('qbSourceUploadYear')), exam_type=val('qbSourceUploadExam'), medium=val('qbSourceUploadMedium');
@@ -26482,12 +26482,12 @@ async function qbUploadSourcePapers() {
     qbSourceUploadMsg=source_type === 'school' && !school_id ? 'Select a school from the suggested school list. If it is missing, ask Admin to add it to the school master.' : 'Complete all metadata fields and select at least one PDF.';
     render(); return;
   }
-  const invalid=files.find(f=>(!/\\.pdf$/i.test(f.name)&&f.type!=='application/pdf')||f.size<=0||f.size>50*1024*1024);
+  const invalid=files.find(f=>(!/\.pdf$/i.test(f.name)&&f.type!=='application/pdf')||f.size<=0||f.size>50*1024*1024);
   if(invalid){qbSourceUploadMsg=invalid.name+' is not a valid PDF or exceeds 50 MB.';render();return;}
   qbSourceUploading=true; qbSourceUploadMsg='Uploading '+files.length+' PDF file(s)…';render();
   const results=[];
   for(const file of files){
-    const name=file.name.normalize('NFKD').replace(/[^\\w.()-]+/g,'-').slice(-120)||'paper.pdf';
+    const name=file.name.normalize('NFKD').replace(/[^\w.()-]+/g,'-').slice(-120)||'paper.pdf';
     const path='source-papers/'+(currentRole === 'Teacher' ? currentLinkedId : 'admin')+'/'+crypto.randomUUID()+'-'+name; let uploaded=false;
     try{
       const {error:upErr}=await sb.storage.from('qb-papers').upload(path,file,{contentType:'application/pdf',upsert:false});
