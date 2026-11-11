@@ -30,6 +30,7 @@
     paperFilters = { boardId: '', schoolId: '', gradeId: student && student.grade_id ? String(student.grade_id) : '', subject: '', year: '' };
     studentSubjectNames = [];
     studentScopeLoaded = false;
+    papersLoaded = false;
   }
 
   function escHtml(value) {
