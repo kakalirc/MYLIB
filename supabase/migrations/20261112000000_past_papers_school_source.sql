@@ -10,7 +10,7 @@ create table if not exists public.qb_schools (
 );
 
 create unique index if not exists qb_schools_name_normalized_uidx
-  on public.qb_schools (lower(regexp_replace(btrim(name), '\\s+', ' ', 'g')));
+  on public.qb_schools (lower(regexp_replace(btrim(name), '[[:space:]]+', ' ', 'g')));
 
 alter table public.qb_schools enable row level security;
 grant select, insert, update on public.qb_schools to authenticated;
