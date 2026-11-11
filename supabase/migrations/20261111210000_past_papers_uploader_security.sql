@@ -15,8 +15,7 @@ set public = false,
     allowed_mime_types = array['application/pdf']::text[]
 where id = 'qb-papers';
 
--- Remove the broad teacher-switch policy: it previously OR-ed around the
--- subject-scoped read policy and would expose pending papers to QB-enabled teachers.
+-- Replace the teacher read rule so pending papers cannot be returned to teachers.
 drop policy if exists qb_teacher_switch on public.qb_source_papers;
 drop policy if exists qb_source_papers_teacher_read on public.qb_source_papers;
 create policy qb_source_papers_teacher_read
@@ -37,11 +36,13 @@ for all to authenticated
 using (qb_my_role() = 'Admin')
 with check (qb_my_role() = 'Admin');
 
--- Keep the teacher-switch guard for the other Question Bank buckets, but
--- never grant a teacher broad access to qb-papers.
+-- Preserve the existing RESTRICTIVE nature of the teacher-switch guard.
+-- Teachers retain QB access to the existing image/answer buckets, but not broad
+-- access to qb-papers. Non-QB buckets retain their prior behavior.
 drop policy if exists qb_teacher_switch on storage.objects;
 create policy qb_teacher_switch
 on storage.objects
+as restrictive
 for all to authenticated
 using (
   bucket_id not in ('qb-images', 'qb-papers', 'practice-answers')
@@ -67,12 +68,9 @@ using (
   and exists (
     select 1
     from public.qb_source_papers sp
-    where (
-      sp.stored_pdf_url = ('qb-papers/' || objects.name)
-      or sp.stored_pdf_url like ('%/qb-papers/' || objects.name || '%')
-    )
-    and sp.status = 'published'
-    and qb_teacher_teaches(sp.subject_name, sp.grade_id)
+    where sp.stored_pdf_url = ('qb-papers/' || objects.name)
+      and sp.status = 'published'
+      and qb_teacher_teaches(sp.subject_name, sp.grade_id)
   )
 );
 
