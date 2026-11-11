@@ -2634,7 +2634,6 @@ async function loadBoards() {
     boards = rows.map(r => ({ id: r.id, name: r.name, sortOrder: r.sort_order, archived: !!r.archived }));
   }
 }
-let qbSchools = [];
 async function loadQbSchools() {
   if (!sb || !['Admin','Teacher'].includes(currentRole)) return;
   const { data: rows, error } = await sb.from('qb_schools').select('id,name,archived').order('name');
