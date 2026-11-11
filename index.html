@@ -4962,7 +4962,7 @@ async function convertDemoForStudent(demoId, studentId, options = {}) {
     const synced = await wixLinkDemo(dl, { status: 'Converted', converted_student_id: studentId });
     if (!synced) wixMessage = ' The demo is Converted, but its website booking still needs syncing from Demo Bookings.';
   }
-  if (options.navigate !== false) { setTab('students'); selectStudent(studentId); }
+  if (options.navigate !== false) { setTab('students'); selectStudent(studentId); addConfirmMsg.student = 'Demo converted. ₹100 bonus will appear in payroll.' + wixMessage; render(); }
   return { ok: true, message: wixMessage };
 }
 async function convertDemoLog(id) {
@@ -4995,7 +4995,7 @@ async function createAndLinkDemo(id, nameFromDemo) {
   demoLinkingId = ''; wixCardLinkingDemoId = ''; demoLinkStudentId = ''; demoLinkMsg = '';
   wixLastCreatedStudentId = row.id;
   demoLogMsg = '✓ Student "' + name + '" created and linked. Marked Converted — ₹100 bonus will appear in payroll.' + result.message;
-  setTab('students'); selectStudent(row.id); render();
+  setTab('students'); selectStudent(row.id); addConfirmMsg.student = 'Student created and demo converted. ₹100 bonus will appear in payroll.' + result.message; render();
 }
 // Search box only refills the dropdown; a full render() per keystroke lost focus and dropped letters.
 function demoLinkOptionsHtml() {
@@ -5018,7 +5018,7 @@ async function linkDemoToStudent(id) {
   if (!result.ok) { demoLinkMsg = result.message; render(); return; }
   demoLinkingId = ''; wixCardLinkingDemoId = ''; demoLinkStudentId = ''; demoLinkMsg = '';
   demoLogMsg = 'Linked student and marked Converted — ₹100 bonus will appear in payroll.' + result.message;
-  setTab('students'); selectStudent(studentId); render();
+  setTab('students'); selectStudent(studentId); addConfirmMsg.student = 'Demo converted. ₹100 bonus will appear in payroll.' + result.message; render();
 }
 // Converting also records the demo as done (admins may skip straight from Pending) and clears any Lost reason.
 function demoDoneDate(dl) {
@@ -27523,7 +27523,7 @@ async function regAccept(id, conversionMode = 'without') {
   regMsg = row.name + (row.student_code || row.code ? ' (' + (row.student_code || row.code) + ')' : '') + (isNewStudent ? ' created' : ' linked to the existing student record') + '. Registration accepted.' + (conversionMode === 'convert' ? (conversionResult && conversionResult.ok ? ' Demo converted; ₹100 bonus will appear in payroll.' + conversionResult.message : ' Demo conversion did not complete; see the note on this registration and retry after review.') : ' No demo conversion was performed.');
   trackUse('registration-accept');
   await loadRegistrations();
-  if (conversionResult && conversionResult.ok) regOpenStudent(studentId); else render();
+  if (conversionResult && conversionResult.ok) { regOpenStudent(studentId); addConfirmMsg.student = 'Registration accepted and matching demo converted. ₹100 bonus will appear in payroll.' + conversionResult.message; render(); } else render();
 }
 
 function regWelcomeMessage(r, name, parentLine, studentLine) {
