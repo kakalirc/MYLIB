@@ -967,7 +967,7 @@ Deno.serve(async (req) => {
         const topic=String(body.topic||"General").trim().slice(0,120);
         const explanation=String(body.explanation||"").trim();
         const options=body.options;
-        const correct=safeNumber(body.correct_option,-1);
+        const correct=Number(body.correct_option);
         const allowedGames=["word_master","number_quest","science_explorer","quick_quiz","brain_teaser","memory_challenge","world_explorer","history_quest","society_culture_challenge","civics_constitution_challenge","economics_explorer","money_matters","word_builder","math_sprint"];
         if(!subject||!grade||!allowedGames.includes(game)||!["en","hi","kn","sa","fr"].includes(language)||prompt.length<12||prompt.length>700||explanation.length<8||explanation.length>900||!Array.isArray(options)||options.length!==4||options.some((x:any)=>typeof x!=="string"||!x.trim()||x.length>250)||new Set(options.map((x:string)=>x.trim().toLocaleLowerCase())).size!==4||!Number.isInteger(correct)||correct<0||correct>3) return errorResponse(400,"Enter subject, grade, game, question, four distinct options, correct answer and explanation.");
         const difficulty=["easy","medium","hard"].includes(String(body.difficulty))?String(body.difficulty):"medium";
