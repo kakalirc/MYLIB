@@ -26368,7 +26368,7 @@ async function loadQbSourcePapers() {
   if (error) { qbMsg = 'Could not load past papers: ' + error.message; qbSourcePapers = []; }
   else qbSourcePapers = rows || [];
   if (currentRole === 'Admin') {
-    const { data: history, error: historyError } = await sb.from('qb_source_paper_reviews').select('id,source_paper_id,from_status,to_status,reviewed_by,reviewed_at').order('reviewed_at', { ascending: false }).limit(200);
+    const { data: history, error: historyError } = await sb.from('qb_source_paper_reviews').select('id,source_paper_id,from_status,to_status,reviewed_by,reviewer_name,reviewed_at').order('reviewed_at', { ascending: false }).limit(200);
     qbSourceReviews = historyError ? [] : (history || []);
   } else qbSourceReviews = [];
   render();
@@ -26461,8 +26461,8 @@ async function qbSetSourcePaperStatus(id, status) {
 function qbSourceReviewHistoryHtml() {
   if (currentRole !== 'Admin') return '';
   if (!qbSourceReviews.length) return '<section class="card" style="margin-top:16px"><h3 style="margin-top:0">Review history</h3><div class="empty">No past-paper review actions recorded yet.</div></section>';
-  return '<section class="card" style="margin-top:16px"><h3 style="margin-top:0">Review history</h3><div class="table-scroll"><table><thead><tr><th>Paper</th><th>Change</th><th>Reviewer ID</th><th>When</th></tr></thead><tbody>' +
-    qbSourceReviews.map(r => { const p = qbSourcePapers.find(x => x.id === r.source_paper_id); return '<tr><td>' + esc(p ? [p.subject_name, p.year, p.exam_type].filter(Boolean).join(' · ') : 'Past paper') + '</td><td>' + esc(r.from_status || 'New') + ' → ' + esc(r.to_status) + '</td><td>' + esc(r.reviewed_by || 'Admin') + '</td><td>' + esc(r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : '') + '</td></tr>'; }).join('') +
+  return '<section class="card" style="margin-top:16px"><h3 style="margin-top:0">Review history</h3><div class="table-scroll"><table><thead><tr><th>Paper</th><th>Change</th><th>Reviewer</th><th>When</th></tr></thead><tbody>' +
+    qbSourceReviews.map(r => { const p = qbSourcePapers.find(x => x.id === r.source_paper_id); return '<tr><td>' + esc(p ? [p.subject_name, p.year, p.exam_type].filter(Boolean).join(' · ') : 'Past paper') + '</td><td>' + esc(r.from_status || 'New') + ' → ' + esc(r.to_status) + '</td><td>' + esc(r.reviewer_name || 'Unknown reviewer') + '</td><td>' + esc(r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : '') + '</td></tr>'; }).join('') +
     '</tbody></table></div></section>';
 }
 function qbSourcePapersHtml() {
