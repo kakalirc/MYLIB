@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>My Appraisal Framework | LIB Education</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+:root{--bg:#f4f0e6;--paper:#fffdf8;--ink:#232a24;--muted:#746e60;--line:#ded5bd;--forest:#3c5e42;--brick:#a6432e;--gold:#c99a3c;--shadow:0 4px 18px #232a2410}
+*{box-sizing:border-box}body{margin:0;padding:22px;background:var(--bg);color:var(--ink);font:15px/1.55 'Work Sans',Arial,sans-serif}.wrap{max-width:1050px;margin:auto}.top{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:20px}.brand{font:700 25px Georgia;color:var(--forest)}.muted,.hint{color:var(--muted)}.hero,.card{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:20px;margin:0 0 14px;box-shadow:var(--shadow)}h1{font:700 28px Georgia;margin:0 0 6px;color:var(--forest)}h2{font:700 19px Georgia;margin:0}.meta{font-size:13px;color:var(--muted)}.pill{display:inline-block;padding:4px 9px;border-radius:20px;background:#e9efe6;color:var(--forest);font-size:12px;font-weight:700}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-top:16px}.stat{padding:12px;border:1px solid var(--line);border-radius:8px;background:#faf7ef}.stat b{display:block;font-size:23px;color:var(--forest)}.category{margin-top:14px}.cat-head,.sub-head,.metric-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.cat-head{padding-bottom:12px;border-bottom:1px solid var(--line)}.sub{padding:14px 0 4px 12px}.sub-head{font-weight:700;color:#4d5948}.metric{border-top:1px solid #eee8da;padding:13px 0 12px 14px}.metric-head b{font-weight:700}.weight{white-space:nowrap;color:var(--forest);font-weight:700}.metric p{margin:5px 0;color:var(--muted)}.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.chip{font-size:12px;border:1px solid var(--line);border-radius:5px;padding:3px 7px;background:#faf7ef}.note{background:#f6f2e8;border-left:3px solid var(--gold);padding:12px 14px;border-radius:5px;color:#635a48}.error{color:#9c342b}.loading{padding:30px;text-align:center;color:var(--muted)}button{border:1px solid var(--line);background:#fffdf8;padding:8px 12px;border-radius:6px;font-weight:600;cursor:pointer;color:var(--ink)}@media(max-width:600px){body{padding:12px}.hero,.card{padding:15px}h1{font-size:24px}.sub{padding-left:4px}.metric{padding-left:6px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><div class="brand">LIB Education</div><button onclick="history.back()">← Back to Teacher Login</button></div>
+  <div id="app"><div class="loading">Loading your appraisal framework…</div></div>
+</div>
+<script>
+(function(){
+'use strict';
+const SUPABASE_URL='https://kqkojscbaycolaioyarh.supabase.co';
+const SUPABASE_ANON_KEY='sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const n=v=>Number(v)||0;
+const app=document.getElementById('app');
+function methodLabel(m){
+ if(m==='admin_review')return 'Admin assessment using documented evidence';
+ if(m==='timeliness_bands')return 'Attendance-entry timeliness bands';
+ if(m==='count_target')return 'Achievement against a configured target';
+ if(m==='percentage')return 'Measured percentage against the configured target';
+ if(m==='threshold')return 'Configured threshold bands';
+ if(m==='deduction')return 'Configured deductions for qualifying events';
+ return 'Configured scoring method';
+}
+function evidenceLabel(id){
+ const map={
+ frequency_adherence:'Student-subject weekly frequency and attendance records',
+ overall_delivery:'Scheduled classes and attendance records',
+ schedule_management:'Documented class cancellations, rescheduling and leave records',
+ class_record_reconciliation:'Scheduled class and attendance reconciliation records',
+ student_attendance:'Student attendance and participation records',
+ absence_followup:'Documented absence follow-up and homework records',
+ study_plan_quality:'Study plan records',
+ homework_quality:'Homework assignment and review records',
+ learning_support:'Teacher notes, study plans and homework records',
+ schedule_discipline:'Teacher availability and scheduled class records',
+ leave_management:'Leave and schedule-change records',
+ professional_records:'Teacher notes and relevant app activity records',
+ teacher_app_adoption:'Meaningful Teacher App feature-use records',
+ ai_adoption:'AI usage records, where AI access is enabled',
+ research_notes:'Teacher research notes',
+ teaching_resources:'Teaching resources created or shared',
+ attendance_timeliness:'Attendance submission timestamps compared with scheduled class start time',
+ attendance_completeness:'Scheduled classes and attendance records',
+ study_plan_compliance:'Expected student-subject study plan coverage',
+ homework_compliance:'Homework records and documented follow-up',
+ research_resource_compliance:'Research notes and teaching resources'
+ };
+ return map[id]||'Relevant records and documented evidence';
+}
+function scoringExplanation(m){
+ if(m.method==='admin_review')return 'Admin assessment: a score from 0% to 100% is assigned using documented evidence. Points awarded = criterion weight × assessed percentage.';
+ if(m.method==='count_target')return 'Achievement is measured against the configured count target, capped at 100%. Points awarded = criterion weight × achievement percentage.';
+ if(m.method==='timeliness_bands')return 'Each eligible record is scored using the published time bands. The average resulting percentage is applied to this criterion’s weight.';
+ if(m.method==='percentage')return 'The measured result is compared with the configured target (or percentage aggregation), capped at 100%. Points awarded = criterion weight × measured percentage.';
+ if(m.method==='threshold')return 'The measured result is matched to the configured threshold band and the resulting score percentage is applied to this criterion’s weight.';
+ if(m.method==='deduction')return 'Configured deductions are applied to qualifying events, with the resulting score floored at zero.';
+ return 'The criterion is assessed using its published method and supporting evidence.';
+}
+function params(m){
+ const out=[];
+ if(m.target!==undefined&&m.target!==null)out.push('Target: '+m.target);
+ if(m.deadline_hours!==undefined&&m.deadline_hours!==null)out.push('Deadline: '+m.deadline_hours+' hours');
+ if(m.grace_hours!==undefined&&m.grace_hours!==null)out.push('Grace period: '+m.grace_hours+' hours');
+ if(m.missing_score_percent!==undefined&&m.missing_score_percent!==null)out.push('Missing record score: '+m.missing_score_percent+'%');
+ if(Array.isArray(m.bands)&&m.bands.length)out.push('Bands: '+m.bands.map(b=>(b.max_hours??'')+' hours → '+(b.score_percent??'')+'%').join(' · '));
+ if(Array.isArray(m.score_bands)&&m.score_bands.length)out.push('Score bands: '+m.score_bands.map(b=>(b.min_percent??'')+'–'+(b.max_percent??'')+'% → '+(b.score_percent??'')+'%').join(' · '));
+ return out;
+}
+function render(data){
+ const cats=data.categories||[];
+ const total=cats.reduce((s,c)=>s+n(c.weight),0);
+ app.innerHTML='<section class="hero"><div class="pill">Published framework · v'+esc(data.version)+'</div><h1>My Appraisal Framework</h1><div class="meta">Effective from '+esc(new Date(data.effective_from+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'long',year:'numeric'}))+'</div><p class="muted">This page explains the criteria used in the teacher appraisal process. It describes the evaluation framework only; it does not display individual appraisal scores or Admin observations.</p><div class="grid"><div class="stat"><b>'+cats.length+'</b>Evaluation categories</div><div class="stat"><b>'+cats.reduce((s,c)=>s+(c.subcategories||[]).reduce((a,x)=>a+(x.metrics||[]).length,0),0)+'</b>Evaluation criteria</div><div class="stat"><b>'+total+'</b>Total available points</div></div></section>'+
+ '<div class="card"><h2>How the framework works</h2><p class="muted">Each category contributes its stated weight to the overall 100-point framework. Individual criteria are assessed using the method and evidence described below. Some criteria are calculated from system records; others require an Admin review supported by evidence.</p><div class="note">Fairness safeguards: student absence alone is not treated as teacher underperformance. Criteria that are not applicable or cannot be reliably measured because of system-data limitations are handled according to the appraisal rules rather than assumed to be a performance failure.</div></div>'+
+ cats.map(c=>'<section class="card category"><div class="cat-head"><h2>'+esc(c.name)+'</h2><div class="weight">'+n(c.weight)+' points</div></div>'+
+ (c.subcategories||[]).map(sc=>'<div class="sub"><div class="sub-head"><span>'+esc(sc.name)+'</span><span class="weight">'+n(sc.weight)+' points</span></div>'+
+ (sc.metrics||[]).map(m=>'<div class="metric"><div class="metric-head"><b>'+esc(m.name)+'</b><span class="weight">'+n(m.weight)+' points</span></div><p>'+esc(m.description||'This criterion is part of the published appraisal framework.')+'</p><p><b>Scoring:</b> '+esc(scoringExplanation(m))+'</p><p><b>Evidence:</b> '+esc(evidenceLabel(m.id))+'</p><div class="chips"><span class="chip">'+esc(methodLabel(m.method))+'</span>'+params(m).map(x=>'<span class="chip">'+esc(x)+'</span>').join('')+'</div></div>').join('')+'</div>').join('')+'</section>').join('')+
+ '<section class="card"><h2>Performance rating bands</h2><div class="grid">'+(data.rating_bands||[]).map(b=>'<div class="stat"><b>'+esc(b.label)+'</b>'+esc(b.min)+'–'+esc(b.max)+' points</div>').join('')+'</div><p class="hint">The rating bands describe the overall score ranges. Admin assessments are evidence-based and are not displayed on this framework page.</p></section>'+
+ '<section class="card"><div class="note">This is the currently effective published version. If the framework is revised and a new version becomes effective, this page will show the new version automatically.</div></section>';
+}
+async function init(){
+ try{
+  if(!window.supabase)throw new Error('The LIB service could not be loaded. Please refresh and try again.');
+  const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+  const {data:{session},error:sessionError}=await sb.auth.getSession();
+  if(sessionError)throw sessionError;
+  if(!session)throw new Error('Please sign in to your Teacher Login first.');
+  const {data,error}=await sb.rpc('get_teacher_appraisal_framework');
+  if(error)throw error;
+  if(!data)throw new Error('No published appraisal framework is available.');
+  render(data);
+ }catch(e){
+  app.innerHTML='<section class="card"><h2>Framework not available</h2><p class="error">'+esc(e.message||'Your account is not currently enabled to view this framework.')+'</p><p class="hint">If you believe you should have access, please contact the LIB Education Admin team.</p><button onclick="history.back()">Back to Teacher Login</button></section>';
+ }
+}
+init();
+})();
+</script>
+</body>
+</html>

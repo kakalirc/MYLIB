@@ -2020,6 +2020,21 @@ let resettingUserId = null;
 let studentViewMonth = monthStr;
 let teacherViewMonth = monthStr;
 let teacherPortalTab = 'dashboard';
+let teacherFrameworkAccess = null;
+let teacherFrameworkAccessLoading = false;
+async function loadTeacherFrameworkAccess() {
+  if (teacherFrameworkAccess !== null || teacherFrameworkAccessLoading) return;
+  teacherFrameworkAccessLoading = true;
+  try {
+    const { data: framework, error } = await sb.rpc('get_teacher_appraisal_framework');
+    teacherFrameworkAccess = !error && !!framework && typeof framework === 'object';
+  } catch (e) {
+    teacherFrameworkAccess = false;
+  } finally {
+    teacherFrameworkAccessLoading = false;
+    if (isLoggedIn && currentRole === 'Teacher') render();
+  }
+}
 let teacherStudentSearch = '';
 let studyPlanTeacherStudentId = '';
 let studyPlanTeacherSubjectId = '';
@@ -22508,6 +22523,7 @@ function renderTeacherPortal() {
   if (!teacher) {
     return `<div class="card"><div class="empty">Your teacher record could not be found. Contact the admin.</div></div>`;
   }
+  if (teacherFrameworkAccess === null && !teacherFrameworkAccessLoading) loadTeacherFrameworkAccess();
   const teacherTabGroups = [
     { label: 'Teaching', tabs: [
       ['myfrequency', 'My Students Class Frequency'],
@@ -22529,6 +22545,7 @@ function renderTeacherPortal() {
     ]},
     { label: 'Account', tabs: [
       ['profile', 'My Profile'],
+      ...(teacherFrameworkAccess ? [['appraisalframework', 'My Appraisal Framework']] : []),
       ['setup', 'Setup'],
     ]},
     { label: 'Analytics', tabs: [
@@ -22556,6 +22573,7 @@ function renderTeacherPortal() {
     ['report', 'My Attendance Report'],
     ['attendance', 'Give Attendance'],
     ['profile', 'My Profile'],
+    ...(teacherFrameworkAccess ? [['appraisalframework', 'My Appraisal Framework']] : []),
     ['setup', 'Setup'],
     ['demoanalysis', 'Demo Analysis'],
     ['classdelivery', 'Class Delivery Intelligence'],
@@ -22650,6 +22668,9 @@ function teacherPortalBodyHtml(teacher) {
   }
   if (teacherPortalTab === 'attendance') {
     return renderTeacherAttendance(teacher);
+  }
+  if (teacherPortalTab === 'appraisalframework' && teacherFrameworkAccess) {
+    return `<div class="card" style="padding:0;overflow:hidden"><iframe src="teacher-appraisal/framework.html?v=20261111-framework1" title="My Appraisal Framework" style="display:block;width:100%;height:calc(100vh - 150px);min-height:900px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
   }
   if (teacherPortalTab === 'profile') {
     return renderTeacherProfile(teacher);
