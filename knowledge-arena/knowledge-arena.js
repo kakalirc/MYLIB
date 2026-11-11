@@ -1189,8 +1189,8 @@
     const rows = adminQuestions.filter((q) =>
       (!grade || q.grade_label === grade) && (!subject || q.subject === subject) &&
       (!game || q.game_type === game) && (!status || q.status === status));
-    const bulkBar='<div class="admin-question-actions"><button class="btn-secondary" id="publish-selected-drafts" type="button">Publish selected Drafts</button><span class="muted">Select Drafts below; only complete four-option Drafts can be published.</span></div>';
-    if (!rows.length) { $("admin-question-list").innerHTML = bulkBar+'<p class="muted">No questions match these filters.</p>'; bindBulkPublish(); return; }
+    const bulkBar='<div class="admin-question-actions"><button class="btn-secondary" id="add-manual-question" type="button">Add Question</button><button class="btn-secondary" id="publish-selected-drafts" type="button">Publish selected Drafts</button><span class="muted">Select Drafts below; only complete four-option Drafts can be published.</span></div>';
+    if (!rows.length) { $("admin-question-list").innerHTML = bulkBar+'<p class="muted">No questions match these filters.</p>'; bindManualQuestion(); bindBulkPublish(); return; }
     $("admin-question-list").innerHTML = bulkBar+rows.map((q) => {
       const options = Array.isArray(q.options) ? q.options : [];
       return '<details class="admin-question" data-question-id="' + escapeHtml(q.id) + '">' +
@@ -1211,7 +1211,24 @@
         '<button class="btn-secondary" data-question-action="archive">Remove from play</button>' +
         '<button class="btn-secondary" data-question-action="delete">Delete permanently</button></div></div></details>';
     }).join("");
+    bindManualQuestion();
     bindBulkPublish();
+  }
+  function bindManualQuestion() {
+    const button=$("add-manual-question"); if(!button)return;
+    button.addEventListener("click",()=>{
+      if($("manual-question-form"))return;
+      const panel=document.createElement("section"); panel.id="manual-question-form"; panel.className="admin-question-review-panel";
+      panel.innerHTML='<h3>Add Manual Question</h3><p class="muted">Saved as Draft; not visible to students until published.</p><div class="admin-question-edit"><label>Subject<input id="manual-subject"></label><label>Grade<input id="manual-grade" placeholder="e.g. Grade 6"></label><label>Game<select id="manual-game"></select></label><label>Language<select id="manual-language"><option value="en">English</option><option value="hi">Hindi</option><option value="kn">Kannada</option><option value="sa">Sanskrit</option><option value="fr">French</option></select></label><label>Difficulty<select id="manual-difficulty"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option></select></label><label>Topic<input id="manual-topic"></label><label>Question<textarea id="manual-prompt" rows="3"></textarea></label><label>Option 1<input id="manual-option-0"></label><label>Option 2<input id="manual-option-1"></label><label>Option 3<input id="manual-option-2"></label><label>Option 4<input id="manual-option-3"></label><label>Correct answer<select id="manual-correct"><option value="0">Option 1</option><option value="1">Option 2</option><option value="2">Option 3</option><option value="3">Option 4</option></select></label><label>Explanation<textarea id="manual-explanation" rows="2"></textarea></label><button class="btn-secondary" id="save-manual-question" type="button">Save as Draft</button><button class="btn-secondary" id="cancel-manual-question" type="button">Cancel</button><div id="manual-question-feedback" class="muted"></div></div>';
+      Object.entries(GAME_NAMES).forEach(([id,name])=>{const option=document.createElement("option");option.value=id;option.textContent=name; $("manual-game").appendChild(option);});
+      const list=$("admin-question-list"); list.parentNode.insertBefore(panel,list);
+      $("cancel-manual-question").addEventListener("click",()=>panel.remove());
+      $("save-manual-question").addEventListener("click",async()=>{
+        const v=id=>$(id).value.trim(); const payload={operation:"create_manual",subject:v("manual-subject"),grade_label:v("manual-grade"),game_type:v("manual-game"),language_code:v("manual-language"),difficulty:v("manual-difficulty"),topic:v("manual-topic")||"General",prompt:v("manual-prompt"),options:[0,1,2,3].map(i=>v("manual-option-"+i)),correct_option:Number(v("manual-correct")),explanation:v("manual-explanation")};
+        const save=$("save-manual-question"),feedback=$("manual-question-feedback");save.disabled=true;feedback.textContent="Saving Draft…";
+        try{await api("admin_question",payload);feedback.textContent="Saved as Draft.";panel.remove();await refreshQuestions();}catch(e){feedback.textContent=e.message;save.disabled=false;}
+      });
+    });
   }
   function bindBulkPublish() {
     const button=$("publish-selected-drafts"); if(!button)return;
