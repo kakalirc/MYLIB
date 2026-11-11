@@ -26439,26 +26439,40 @@ async function qbAddSchoolFromUploader() {
   render();
 }
 function qbSourceUploaderHtml() {
-  const opts = rows => rows.filter(x => !x.archived).map(x => '<option value="' + escAttr(x.id) + '">' + esc(x.name) + '</option>').join('');
+  const opts = rows => rows.filter(x => !x.archived).map(x => `<option value="${escAttr(x.id)}">${esc(x.name)}</option>`).join('');
   const subjects = [...new Set((data.subjects || []).map(x => String(x.name || '').trim()).filter(Boolean))].sort();
-  const schoolOptions = qbSchools.filter(s => !s.archived).map(s => '<option value="' + escAttr(s.name) + '"></option>').join('');
-  const field = (label, control) => '<label style="display:flex;flex-direction:column;gap:6px;min-width:0;font-size:13px;font-weight:600;color:var(--ink)">' + label + control + '</label>';
+  const schoolOptions = qbSchools.filter(x => !x.archived).map(x => `<option value="${escAttr(x.name)}"></option>`).join('');
+  const field = (label, control) => `<label style="display:flex;flex-direction:column;gap:6px;min-width:0;font-size:13px;font-weight:600;color:var(--ink)">${label}${control}</label>`;
   const css = 'width:100%;min-width:0;box-sizing:border-box;min-height:42px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);font:inherit;font-weight:400';
-  return '<section class="card" style="margin:0 0 18px;padding:clamp(16px,2.4vw,24px);border:1px solid var(--line);border-radius:14px">' +
-    '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px"><div><h3 style="margin:0 0 5px;font-family:Zilla Slab,serif">Upload from your computer</h3><p class="hint" style="margin:0;max-width:680px">Add original question-paper PDFs. Your submission remains Pending Review until it is published.</p></div><span style="font-size:12px;font-weight:700;color:var(--forest);background:rgba(56,104,70,.10);padding:6px 10px;border-radius:20px;white-space:nowrap">Teacher & Admin · 50 MB per PDF</span></div>' +
-    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px 18px">' +
-      field('Paper source', '<select id="qbSourceUploadType" style="' + css + '" onchange="qbSourceType=this.value;qbToggleSourceFields(this.value)"><option value="board" ' + (qbSourceType === 'board' ? 'selected' : '') + '>Board</option><option value="school" ' + (qbSourceType === 'school' ? 'selected' : '') + '>School</option></select>') +
-      '<div id="qbSourceBoardWrap" style="' + (qbSourceType === 'board' ? '' : 'display:none;') + '">' + field('Board', '<select id="qbSourceUploadBoard" style="' + css + '"><option value="">Select board</option>' + opts(boards) + '</select>') + '</div>' +
-      '<div id="qbSourceSchoolWrap" style="' + (qbSourceType === 'school' ? '' : 'display:none;') + '">' + field('School name (search)', '<input id="qbSourceUploadSchool" list="qbSourceSchoolList" value="' + escAttr(qbSourceSchoolSearch) + '" placeholder="Type to search schools" style="' + css + '" oninput="qbSourceSchoolSearch=this.value"><datalist id="qbSourceSchoolList">' + schoolOptions + '</datalist>') +
-      (currentRole === 'Admin' ? '<div style="display:flex;gap:6px;margin-top:8px"><input id="qbSourceNewSchoolName" placeholder="Add a new school to master list" style="' + css + '"><button type="button" class="btn-small" onclick="qbAddSchoolFromUploader()">Add</button></div>' : '') + '</div>' +
-      field('Class', '<select id="qbSourceUploadGrade" style="' + css + '"><option value="">Select class</option>' + opts(grades) + '</select>') +
-      field('Subject', '<select id="qbSourceUploadSubject" style="' + css + '"><option value="">Select subject</option>' + subjects.map(s=>'<option>'+esc(s)+'</option>').join('') + '</select>') +
-      field('Examination year', '<input id="qbSourceUploadYear" type="number" min="1950" max="' + (new Date().getFullYear()+1) + '" value="' + new Date().getFullYear() + '" style="' + css + '">') +
-      field('Exam type', '<select id="qbSourceUploadExam" style="' + css + '"><option value="main">Main</option><option value="compartment">Compartment</option><option value="supplementary">Supplementary</option><option value="other">Other</option></select>') +
-      field('Medium of question paper', '<select id="qbSourceUploadMedium" style="' + css + '"><option value="">Select medium</option><option>English</option><option>Hindi</option><option>Kannada</option><option>Sanskrit</option><option>Other</option></select>') +
-    '</div>' +
-    '<div style="margin-top:20px;padding:16px;border:1px dashed var(--line);border-radius:12px;background:var(--surface-alt,rgba(0,0,0,.02))"><label for="qbSourceUploadInput" style="display:block;font-weight:700;margin-bottom:8px">Select PDF files</label><input id="qbSourceUploadInput" type="file" accept="application/pdf,.pdf" multiple onchange="qbSetSourceUploadFiles(this)" style="display:block;width:100%;max-width:100%;font-size:14px"><div class="hint" id="qbSourceUploadFileNames" style="margin-top:9px">' + (qbSourceUploadFiles.length ? qbSourceUploadFiles.map(f=>esc(f.name)).join(' · ') : 'Choose multiple PDFs. The metadata above applies to every selected file.') + '</div></div>' +
-    '<div class="row-form" style="justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap;margin-top:18px"><button class="btn-small" onclick="qbSourceUploadOpen=false;qbSourceUploadFiles=[];qbSourceSchoolSearch='';render()">Cancel</button><button class="btn-small btn-primary" onclick="qbUploadSourcePapers()" ' + (qbSourceUploading?'disabled':'') + '>' + (qbSourceUploading?'Uploading…':'Upload as Pending Review') + '</button></div></section>';
+  return `
+    <section class="card" style="margin:0 0 18px;padding:clamp(16px,2.4vw,24px);border:1px solid var(--line);border-radius:14px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px">
+        <div><h3 style="margin:0 0 5px;font-family:Zilla Slab,serif">Upload from your computer</h3><p class="hint" style="margin:0;max-width:680px">Add original question-paper PDFs. Your submission remains Pending Review until it is published.</p></div>
+        <span style="font-size:12px;font-weight:700;color:var(--forest);background:rgba(56,104,70,.10);padding:6px 10px;border-radius:20px;white-space:nowrap">Teacher &amp; Admin · 50 MB per PDF</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px 18px">
+        ${field('Paper source', `<select id="qbSourceUploadType" style="${css}" onchange="qbSourceType=this.value;qbToggleSourceFields(this.value)"><option value="board" ${qbSourceType === 'board' ? 'selected' : ''}>Board</option><option value="school" ${qbSourceType === 'school' ? 'selected' : ''}>School</option></select>`)}
+        <div id="qbSourceBoardWrap" style="${qbSourceType === 'board' ? '' : 'display:none;'}">${field('Board', `<select id="qbSourceUploadBoard" style="${css}"><option value="">Select board</option>${opts(boards)}</select>`)}</div>
+        <div id="qbSourceSchoolWrap" style="${qbSourceType === 'school' ? '' : 'display:none;'}">
+          ${field('School name (search)', `<input id="qbSourceUploadSchool" list="qbSourceSchoolList" value="${escAttr(qbSourceSchoolSearch)}" placeholder="Type to search schools" style="${css}" oninput="qbSourceSchoolSearch=this.value"><datalist id="qbSourceSchoolList">${schoolOptions}</datalist>`)}
+          ${currentRole === 'Admin' ? `<div style="display:flex;gap:6px;margin-top:8px"><input id="qbSourceNewSchoolName" placeholder="Add a new school to master list" style="${css}"><button type="button" class="btn-small" onclick="qbAddSchoolFromUploader()">Add</button></div>` : ''}
+        </div>
+        ${field('Class', `<select id="qbSourceUploadGrade" style="${css}"><option value="">Select class</option>${opts(grades)}</select>`)}
+        ${field('Subject', `<select id="qbSourceUploadSubject" style="${css}"><option value="">Select subject</option>${subjects.map(x => `<option>${esc(x)}</option>`).join('')}</select>`)}
+        ${field('Examination year', `<input id="qbSourceUploadYear" type="number" min="1950" max="${new Date().getFullYear()+1}" value="${new Date().getFullYear()}" style="${css}">`)}
+        ${field('Exam type', `<select id="qbSourceUploadExam" style="${css}"><option value="main">Main</option><option value="compartment">Compartment</option><option value="supplementary">Supplementary</option><option value="other">Other</option></select>`)}
+        ${field('Medium of question paper', `<select id="qbSourceUploadMedium" style="${css}"><option value="">Select medium</option><option>English</option><option>Hindi</option><option>Kannada</option><option>Sanskrit</option><option>Other</option></select>`)}
+      </div>
+      <div style="margin-top:20px;padding:16px;border:1px dashed var(--line);border-radius:12px;background:var(--surface-alt,rgba(0,0,0,.02))">
+        <label for="qbSourceUploadInput" style="display:block;font-weight:700;margin-bottom:8px">Select PDF files</label>
+        <input id="qbSourceUploadInput" type="file" accept="application/pdf,.pdf" multiple onchange="qbSetSourceUploadFiles(this)" style="display:block;width:100%;max-width:100%;font-size:14px">
+        <div class="hint" id="qbSourceUploadFileNames" style="margin-top:9px">${qbSourceUploadFiles.length ? qbSourceUploadFiles.map(x => esc(x.name)).join(' · ') : 'Choose multiple PDFs. The metadata above applies to every selected file.'}</div>
+      </div>
+      <div class="row-form" style="justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap;margin-top:18px">
+        <button class="btn-small" onclick="qbSourceUploadOpen=false;qbSourceUploadFiles=[];qbSourceSchoolSearch='';render()">Cancel</button>
+        <button class="btn-small btn-primary" onclick="qbUploadSourcePapers()" ${qbSourceUploading ? 'disabled' : ''}>${qbSourceUploading ? 'Uploading…' : 'Upload as Pending Review'}</button>
+      </div>
+    </section>`;
 }
 function qbSetSourceUploadFiles(input) {
   qbSourceUploadFiles = Array.from(input.files || []);
