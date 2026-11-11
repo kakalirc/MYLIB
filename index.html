@@ -2134,6 +2134,7 @@ let qbSourcePapers = [];        // qb_source_papers rows (original exam PDFs) th
 let qbSourceLoading = false;
 let qbSourceFilter = { boardId: '', gradeId: '', subject: '', year: '' };
 let qbSourceApplied = null;
+let qbSourceUploadOpen=false, qbSourceUploadFiles=[], qbSourceUploading=false, qbSourceUploadMsg='';
 let qbAdminPaperFilter = { teacherId: '', subject: '', gradeId: '', waiting: false };  // admin's view of all teachers' papers
 let qbPaperTab = null;          // 'students' | 'questions' on the open paper; null = pick by whether it's assigned
 let qbStudentFilter = null;     // 'all' | an assignment status; null = 'submitted' when any need marking
@@ -25079,8 +25080,11 @@ function renderAdminQuestionBank() {
   if (qbSubTab === 'past') return `<div class="card">
     <div class="row-form" style="justify-content:space-between;align-items:center;margin-bottom:16px">
       <h2 style="font-family:'Zilla Slab',serif;margin:0">Question Bank ${helpBtn('qb-' + qbSubTab)}</h2>
+      ${currentRole === 'Admin' ? `<button class="btn-small btn-primary" onclick="qbSourceUploadOpen=!qbSourceUploadOpen;render()">${qbSourceUploadOpen?'Close uploader':'+ Upload Past Papers'}</button>` : ''}
     </div>
     ${subTabsHtml}
+    ${qbSourceUploadMsg ? `<div class="hint" style="color:var(--brick);margin:8px 0">${esc(qbSourceUploadMsg)}</div>` : ''}
+    ${currentRole === 'Admin' && qbSourceUploadOpen ? qbSourceUploaderHtml() : ''}
     ${qbMsg ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${esc(qbMsg)}</div>` : ''}
     ${qbSourcePapersHtml()}
   </div>`;
@@ -26357,7 +26361,7 @@ function qbTeacherTeaches(subject, gradeId) {
 async function loadQbSourcePapers() {
   if (!sb) return;
   qbSourceLoading = true; render();
-  const { data: rows, error } = await sb.from('qb_source_papers').select('id, board_id, grade_id, subject_name, year, exam_type, medium, question_count, stored_pdf_url, source_url').order('year', { ascending: false });
+  const { data: rows, error } = await sb.from('qb_source_papers').select('id, board_id, grade_id, subject_name, year, exam_type, medium, question_count, stored_pdf_url, source_url, status').order('year', { ascending: false });
   qbSourceLoading = false;
   if (error) { qbMsg = 'Could not load past papers: ' + error.message; qbSourcePapers = []; }
   else qbSourcePapers = (rows || []).filter(sp => currentRole !== 'Teacher' || qbTeacherTeaches(sp.subject_name, sp.grade_id));
@@ -26386,6 +26390,56 @@ async function qbOpenSourcePdf(id) {
   if (!href) { w.close(); qbMsg = 'No PDF is stored for this paper.'; render(); return; }
   w.location.href = href;
 }
+function qbSourceUploaderHtml() {
+  const opts = rows => rows.map(x => '<option value="' + escAttr(x.id) + '">' + esc(x.name) + '</option>').join('');
+  const subjects = [...new Set((data.subjects || []).map(x => String(x.name || '').trim()).filter(Boolean))].sort();
+  return '<div class="card" style="margin:0 0 16px;padding:16px">' +
+    '<h3>Upload original question papers</h3><p class="hint">PDFs upload directly to Supabase Storage. Each file is saved as Pending Review and hidden from teachers until published.</p>' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">' +
+    '<label>Board<select id="qbSourceUploadBoard"><option value="">Select board</option>' + opts(boards) + '</select></label>' +
+    '<label>Class<select id="qbSourceUploadGrade"><option value="">Select class</option>' + opts(grades) + '</select></label>' +
+    '<label>Subject<select id="qbSourceUploadSubject"><option value="">Select subject</option>' + subjects.map(s=>'<option>'+esc(s)+'</option>').join('') + '</select></label>' +
+    '<label>Examination year<input id="qbSourceUploadYear" type="number" min="1950" max="' + (new Date().getFullYear()+1) + '" value="' + new Date().getFullYear() + '"></label>' +
+    '<label>Exam type<select id="qbSourceUploadExam"><option value="main">Main</option><option value="compartment">Compartment</option><option value="supplementary">Supplementary</option><option value="other">Other</option></select></label>' +
+    '<label>Medium<select id="qbSourceUploadMedium"><option value="">Select medium</option><option>English</option><option>Hindi</option><option>Kannada</option><option>Sanskrit</option><option>Other</option></select></label></div>' +
+    '<label style="display:block;margin-top:12px">PDF files (maximum 50 MB each)<input id="qbSourceUploadInput" type="file" accept="application/pdf,.pdf" multiple onchange="qbSetSourceUploadFiles(this)" style="display:block;width:100%;margin-top:5px"></label>' +
+    '<div class="hint" id="qbSourceUploadFileNames" style="margin-top:6px">Select one or more PDFs. Metadata above applies to every selected file.</div>' +
+    '<div class="row-form" style="justify-content:flex-end;margin-top:12px"><button class="btn-small" onclick="qbSourceUploadOpen=false;qbSourceUploadFiles=[];render()">Cancel</button><button class="btn-small btn-primary" onclick="qbUploadSourcePapers()" ' + (qbSourceUploading?'disabled':'') + '>Upload as Pending Review</button></div></div>';
+}
+function qbSetSourceUploadFiles(input) {
+  qbSourceUploadFiles = Array.from(input.files || []);
+  const el = document.getElementById('qbSourceUploadFileNames');
+  if (el) el.textContent = qbSourceUploadFiles.map(f=>f.name).join(' · ') || 'No files selected.';
+}
+async function qbUploadSourcePapers() {
+  if (currentRole !== 'Admin') { qbSourceUploadMsg='Only Admin can upload past papers.'; render(); return; }
+  if (!sb || qbSourceUploading) return;
+  const val=id=>document.getElementById(id)?.value || '';
+  const board_id=val('qbSourceUploadBoard'), grade_id=val('qbSourceUploadGrade'), subject_name=val('qbSourceUploadSubject');
+  const year=Number(val('qbSourceUploadYear')), exam_type=val('qbSourceUploadExam'), medium=val('qbSourceUploadMedium');
+  const files=qbSourceUploadFiles.slice();
+  if(!board_id||!grade_id||!subject_name||!Number.isInteger(year)||year<1950||year>new Date().getFullYear()+1||!medium||!files.length){qbSourceUploadMsg='Complete all metadata fields and select at least one PDF.';render();return;}
+  const invalid=files.find(f=>(!/\.pdf$/i.test(f.name)&&f.type!=='application/pdf')||f.size<=0||f.size>50*1024*1024);
+  if(invalid){qbSourceUploadMsg=invalid.name+' is not a valid PDF or exceeds 50 MB.';render();return;}
+  qbSourceUploading=true; qbSourceUploadMsg='Uploading '+files.length+' PDF file(s)…';render();
+  const results=[];
+  for(const file of files){
+    const name=file.name.normalize('NFKD').replace(/[^\w.()-]+/g,'-').slice(-120)||'paper.pdf';
+    const path='source-papers/'+crypto.randomUUID()+'-'+name; let uploaded=false;
+    try{
+      const {error:upErr}=await sb.storage.from('qb-papers').upload(path,file,{contentType:'application/pdf',upsert:false});
+      if(upErr)throw upErr; uploaded=true;
+      const {error:dbErr}=await sb.from('qb_source_papers').insert({board_id,grade_id,subject_name,year,exam_type,medium,stored_pdf_url:'qb-papers/'+path,pdf_type:'digital',extraction_status:'not_started',status:'pending_review'});
+      if(dbErr){const {error:cleanErr}=await sb.storage.from('qb-papers').remove([path]);if(cleanErr)console.error('Past paper orphan cleanup failed',cleanErr);throw dbErr;}
+      results.push({name:file.name,ok:true});
+    }catch(e){if(uploaded)console.warn('Past paper DB registration failed',file.name);results.push({name:file.name,ok:false,error:String(e?.message||e)});}
+  }
+  qbSourceUploading=false;const ok=results.filter(x=>x.ok).length,fail=results.filter(x=>!x.ok);
+  qbSourceUploadMsg='Upload complete: '+ok+' saved as Pending Review'+(fail.length?'; '+fail.length+' failed.':'.');
+  if(fail.length)qbSourceUploadMsg+=' '+fail.map(x=>x.name+': '+x.error).join('; ');
+  qbSourceUploadFiles=[];qbSourceUploadOpen=false;await loadQbSourcePapers();render();
+}
+
 function qbSourcePapersHtml() {
   if (qbSourceLoading) return `<div class="empty">Loading past papers…</div>`;
   if (!qbSourcePapers.length) return `<div class="empty">No past papers stored yet.</div>`;
