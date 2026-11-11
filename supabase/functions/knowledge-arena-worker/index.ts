@@ -280,17 +280,26 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
         + "Reject only demonstrable problems: factual error, more than one defensible answer, no correct answer, materially ambiguous wording, unsafe/inappropriate content, or clear mismatch with the stated grade/subject. Do NOT reject merely because you are uncertain or cannot independently recall a niche fact. For uncertainty, use approved=false and explain exactly what needs human verification; severity must be review. Issues must identify the specific option or phrase and explain why it is problematic. If no material issue is found, approve with an empty issues array.\nQuestion JSON:\n"
         + JSON.stringify(q);
       assertLease();
-      const verdict = await requestStructuredJson(
-        ai.api_key,
-        "You are an educational quality reviewer. Be evidence-minded, fair and precise. Do not invent defects. Distinguish a proven error from uncertainty requiring a human check. Evaluate the actual question and options, not stylistic preferences.",
-        validatorPrompt, 900, "Validator",
-        (value) => !!value && typeof value === "object" &&
-          typeof value.approved === "boolean" &&
-          Array.isArray(value.issues) &&
-          value.issues.every((issue: unknown) => typeof issue === "string") &&
-          ["critical","review","none"].includes(value.severity),
-        (input, output) => { inputTokens += input; outputTokens += output; },
-      );
+      let verdict: any;
+      try {
+        verdict = await requestStructuredJson(
+          ai.api_key,
+          "You are an educational quality reviewer. Be evidence-minded, fair and precise. Do not invent defects. Distinguish a proven error from uncertainty requiring a human check. Evaluate the actual question and options, not stylistic preferences.",
+          validatorPrompt, 900, "Validator",
+          (value) => !!value && typeof value === "object" &&
+            typeof value.approved === "boolean" &&
+            Array.isArray(value.issues) &&
+            value.issues.every((issue: unknown) => typeof issue === "string") &&
+            ["critical","review","none"].includes(value.severity),
+          (input, output) => { inputTokens += input; outputTokens += output; },
+        );
+      } catch (error) {
+        rejected++;
+        const reason = "Validator could not complete a reliable review: " + String((error as Error).message || error).slice(0, 900);
+        validationRejections.push(reason.slice(0, 240));
+        await saveRejected(q, "validator_error", reason);
+        continue;
+      }
       assertLease();
       if (verdict.approved !== true || verdict.issues.length > 0) {
         rejected++;
