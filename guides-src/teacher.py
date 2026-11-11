@@ -17,7 +17,7 @@ def guide():
     ) + note('Where to find it', 'Pending Action Items is at the top of the menu, under Dashboard, with Star Teacher below it when it is on. Class Frequency is in the Teaching group. '
              'Tap <b>?</b> next to a heading in the app for quick help on that screen.', 'tip'), new=True)
 
-    g.add('portal', 'Overview', 'Your portal', 'Up to fourteen tabs (* only when the admin switches it on for you). Everything is limited to your own classes and students.', table(
+    g.add('portal', 'Overview', 'Your portal', 'Your available tabs depend on the access the admin has enabled for your account. Your student and class information is limited to your own teaching assignments.', table(
         ['Tab', 'What you do there'], [
             ['Dashboard', 'Today’s classes, earnings, alerts and AI tools'],
             ['Pending Action Items', 'Everything waiting for you, one tap to each'],
@@ -28,6 +28,8 @@ def guide():
             ['Homework', 'Assign, track and review homework'],
             ['Question Bank*', 'Review questions, build practice papers, mark attempts'],
             ['Research*', 'Lesson prep, student insights, question research, resources'],
+            ['Knowledge Arena', 'Play available grade-appropriate learning games'],
+            ['Analytics', 'Demo Analysis, Class Delivery Intelligence and Teacher Performance Intelligence'],
             ['Availability', 'Weekly windows, leave and the free-slots report'],
             ['My Attendance Report', 'Your history and your students’ balances'],
             ['Give Attendance', 'Record the classes you have held'],
@@ -315,6 +317,12 @@ def guide():
         'Teachers can play the same available games as students. Admin-only question generation, suitability and question-bank controls are not available to teachers.',
         'Game XP is separate from attendance XP and does not change attendance rewards.',
     ]) + note('Need help?', 'Use the in-game Help / instructions panel before starting a game.', 'tip'))
+
+    g.add('analytics', 'Analytics', 'Your analytics pages', 'Use the available analytics pages to understand your own teaching activity and class delivery.', g3(
+        box('Demo Analysis', 'Review the demos assigned to you and their recorded outcomes.'),
+        box('Class Delivery Intelligence', 'Review your scheduled and recorded class delivery using the records available in My LIB.'),
+        box('Teacher Performance Intelligence', 'Review the teacher-performance indicators and supporting information made available to you.'),
+    ) + note('Keep records accurate', 'Analytics depend on class schedules, attendance and other app records being complete. Correct source records through the normal app workflow; do not treat an empty report as proof that no activity occurred.', 'tip'))
 
     g.add('quickref', 'Quick reference', 'Quick reference', 'I want to… where do I go?', table(['I want to…', 'Go to'], [
         ['See what needs my action', 'Pending Action Items'],

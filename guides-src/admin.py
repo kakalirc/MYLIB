@@ -14,7 +14,9 @@ def guide():
             ['Daily work', 'Class Log, New registrations, Communication, Demo Bookings, Support, Rebuild Pending Classes'],
             ['Money', 'Fees, Payroll, Expenses, Reports &amp; Export'],
             ['People', 'Students &amp; Subscriptions, Teachers &amp; Subjects, Parents'],
-            ['Teaching', 'Study Plans, Homework, Question Bank'],
+            ['Teacher Monitoring', 'Star Teacher, Research Monitoring, App Usage, AI Usage, Study Plans, Homework, Question Bank Monitoring, Teacher Appraisal'],
+            ['Learning', 'Knowledge Arena'],
+            ['Analytics', 'Demo Analysis, Class Delivery Intelligence, Student Engagement Intelligence, Revenue Intelligence, Teacher Performance Intelligence'],
             ['System', 'Settings, Manage Admins, AI, Audit Log'],
             ['Superadmin', 'Superuser admins only: Academic Year, backups, danger zone'],
         ]) + note('Quick help everywhere', 'Tap <b>?</b> next to a heading for help on that card. The <b>? Help</b> button at the top '
@@ -180,6 +182,17 @@ def guide():
         box('Question Bank', ['Review Queue, Full Question Bank, Archived', 'Practice Papers and Past Papers']),
     ) + note('Teacher access', 'Teachers see the Question Bank and Research tabs only when you switch them on in Settings.', 'tip'))
 
+    g.add('analytics', 'Analytics', 'Analytics and Teacher Appraisal', 'Admin reporting pages for operational, financial, learning and teacher-performance review.', g2(
+        box('Demo Analysis', 'Review demo outcomes and conversion patterns from the Demo Bookings records.'),
+        box('Class Delivery Intelligence', 'Review scheduled versus recorded class delivery using the existing class and attendance records.'),
+    ) + g2(
+        box('Student Engagement Intelligence', 'Review student engagement indicators using the activity and learning records already captured by the app.'),
+        box('Revenue Intelligence', 'Review fee, subscription, payment and revenue indicators. Treat the underlying fee and payment records as the source of truth.'),
+    ) + g2(
+        box('Teacher Performance Intelligence', 'Review teacher delivery and performance indicators using recorded app data.'),
+        box('Teacher Appraisal', 'Admin-only appraisal workspace for periods, scoring configuration, evidence review and appraisal records. Teachers do not have access to this workspace.'),
+    ) + note('Data coverage matters', 'Analytics can only report what the app has actually recorded. A missing or unconfigured source should be treated as unavailable data, not assumed performance.', 'tip'))
+
     g.add('settings', 'System', 'Settings, admins, AI and audit', 'How the app is set up.', table(['Page', 'What is there'], [
         ['Settings', 'Grades, categories, boards, subject names; Question Bank access and Research access per teacher; Star Teacher switch, start date and leaderboard; add users; change your password'],
         ['Manage Admins', 'Add or remove admin accounts'],
@@ -196,12 +209,12 @@ def guide():
 
     g.add('knowledgearena', 'Teaching', 'Knowledge Arena content and controls', 'Manage game content without changing the existing Question Bank, Online Assessment or attendance rewards.', g2(
         box('Grade and subject suitability', 'Configure which subjects are suitable for each grade, which games are enabled for each grade, and which subjects each game can draw from. These rules are enforced by the API.'),
-        box('AI question generation', 'Queue a job by grade, subject, game, difficulty, language, count and optional topic. Generated questions must pass structural and quality validation before they can enter the Draft workflow.'),
+        box('AI question generation', 'Queue a job by grade, subject, game, difficulty, language, count and optional topic. Questions that pass structural and independent quality validation are published automatically. Rejected or ambiguous candidates are retained for Admin review.'),
     ) + g2(
-        box('Question review', 'Review approved candidates and complete any missing or defective options. Edit the prompt, four options, correct answer, explanation and difficulty. Approving a candidate moves it to Draft; it does not publish it.'),
+        box('Question review', 'Validated AI-generated questions publish automatically after structural and independent quality checks. Use the review controls to inspect published content and correct issues when needed.'),
         box('Rejected questions', 'Open the Rejected review queue to inspect candidates retained with their rejection stage and reason. Correct a recoverable question and approve it to Draft, or dismiss it. Rejected questions are not available to players.'),
         box('Manual questions', 'Use Add Question to create a question yourself. Subject and Grade are dropdowns populated from the existing catalogue; duplicate labels are removed. Complete all four distinct options, select the correct answer and add an explanation. Save creates a Draft only.'),
-        box('Draft publishing', 'Review Drafts and publish only the selected, complete questions. Publishing is a separate Admin action; neither AI generation nor manual entry publishes automatically.'),
+        box('Draft publishing', 'Questions recovered from the Rejected queue and manually entered questions remain Drafts until an Admin explicitly publishes them. Validated AI-generated questions publish automatically.'),
         box('Daily challenge', 'Daily challenges use grade-eligible Quick Quiz questions from subjects enabled for that grade. A challenge is available only when ten suitable published questions can be assembled.'),
         box('AI budget and reservations', 'Daily and monthly INR limits are shared. Interrupted or uncertain provider calls remain reserved for review; verify actual cost before settling them.'),
     ) + bullets([
@@ -212,7 +225,7 @@ def guide():
         'Knowledge Arena Game XP is separate from attendance XP, levels, badges, streaks and the existing attendance leaderboard.',
         'The Admin screen is aggregate-only for player performance; it does not expose individual answers or question-level student history.',
         'A no-published-questions message means eligible published content is unavailable for that game and grade. Check publication status, grade labels, subject and game type before changing student settings.',
-    ]) + note('Draft first; publish deliberately', 'AI-reviewed questions and manually entered questions remain Drafts until an Admin explicitly publishes them. Keep Knowledge Arena separate from the existing Question Bank / Online Assessment.', 'warn'))
+    ]) + note('Different publication paths', 'Validated AI-generated questions publish automatically. Manually entered questions and questions approved from the Rejected queue remain Drafts until an Admin explicitly publishes them. Keep Knowledge Arena separate from the existing Question Bank / Online Assessment.', 'tip'))
 
     g.add('quickref', 'Quick reference', 'Quick reference', 'I want to… where do I go?', table(['I want to…', 'Go to'], [
         ['Log a class', 'Class Log'],

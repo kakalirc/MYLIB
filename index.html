@@ -11968,6 +11968,8 @@ const SUPPORT_KB = {
 - Homework (Teacher Monitoring): every homework set by teachers, with filters by teacher, student and status.
 - Question Bank (Daily work): Review Queue (approve new or edited questions), Full Question Bank, Archived, Practice Papers and Past Papers. Pick board, subject and grade to see questions. Old-syllabus questions stay hidden unless you tick "Old syllabus only".
 - Question Bank Monitoring (Teacher Monitoring): read-only teacher-wise Question Bank activity, including access status, visits, questions added/approved, practice papers created, student assignments, submissions and reviews. Counts are based on existing app events and database timestamps.
+- Teacher Appraisal (Teacher Monitoring): Admin-only appraisal workspace for appraisal periods, scoring configuration, evidence review and appraisal records. Teachers cannot access it.
+- Analytics: Demo Analysis, Class Delivery Intelligence, Student Engagement Intelligence, Revenue Intelligence and Teacher Performance Intelligence. These reports depend on data already recorded by the app.
 - Settings (System, once called Setup): grades, categories, boards and subject names; Question Bank access and Research access (which teachers get those tabs); add users and manage their logins; change your password.
 - Manage Admins (System): add or remove admin accounts.
 - AI (System): AI Settings (master switch, API key and cost estimate prices) and AI access (per role and per person).
@@ -11991,13 +11993,14 @@ const SUPPORT_KB = {
 - Give Attendance (Attendance): record a class you gave. Current month records can be edited; earlier months are view only.
 - My Attendance Report (Attendance): your classes for the month, by student.
 - Earnings (Dashboard): tap to unlock with your password; shows classes × your rate, demo bonuses, adjustment, paid status and the 📄 Salary Slip once paid.
+- Analytics: Demo Analysis, Class Delivery Intelligence and Teacher Performance Intelligence show teacher-level information available to your account. Reports depend on recorded class and activity data.
 - Availability (Attendance): your weekly teaching hours, leave dates and a free slots report.
 - My Profile (Account): your details and your online class link.
 - Setup (Account): change your password.
 - Chat: message Admin and others (💬 Chat button at the top).
 - Report an Issue: use the Support button at the top if something looks wrong.`,
   Student: `My LIB app guide for Student (everything is on one page, scroll down):
-- Top of the page: your classes remaining, classes attended this month, XP level, badges and streak. Tap a colour dot next to Theme to change your colours.
+- Top of the page: your classes remaining, classes attended this month, XP level, badges and streak. The Student Login has My Learning, Fun Zone and Settings sections. Tap a colour dot next to Theme to change your colours.
 - XP & Levels: earn 1 XP for every class you attend. Levels go Beginner → Explorer → Rising Star → Pro → Champion → Legend.
 - My Study Plan: the topics your teacher planned for you and how far you've got.
 - Homework: homework from your teachers. Upload a photo of your work (or Mark submitted) before the due date; marks and feedback show once your teacher reviews it.
@@ -12005,7 +12008,8 @@ const SUPPORT_KB = {
 - From your teachers: notes, worksheets and links your teachers shared for your subjects.
 - Ask AI: ask about your own progress, classes remaining or what to focus on.
 - Leaderboard: your rank among students in each subject.
-- Further down: online class links, fee requests, subscription and attendance reports for the month, class schedule, payment history with receipts, and the fee calculator.
+- My Attendance: overall and subject-wise Present, Absent and Pending overdue counts, with a month selector or All time view and expandable class details. Attendance percentage is Present ÷ (Present + Absent + Pending Overdue); future Pending classes are excluded. Only Present and Absent classes count against the subscription.
+- Further down: online class links, fee requests, subscription reports, class schedule, payment history with receipts, and the fee calculator.
 - Paying fees: tick the fee requests and press Pay to pay by UPI (put the Unique ID shown in the UPI note, then Payment Completed), or press Pay online (Razorpay). Payments are confirmed by the office, so they take a little time to show.
 - Change Password: at the bottom of the page.
 - Chat (💬 at the top) to message your teacher or Admin. Support (at the top) to report a problem.`,
