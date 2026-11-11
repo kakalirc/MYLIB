@@ -943,18 +943,7 @@ Deno.serve(async (req) => {
 
     if (action === "admin_question") {
       if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
-      const questionId = String(body.question_id || "");
-      if (!questionId) return errorResponse(400, "Question ID is required.");
-      const { data: existing, error: readError } = await db.from("ka_questions")
-        .select("id,status").eq("id", questionId).maybeSingle();
-      if (readError || !existing) return errorResponse(404, "Question not found.");
       const operation = String(body.operation || "");
-      if (operation === "archive") {
-        const { data, error } = await db.from("ka_questions").update({ status: "rejected" })
-          .eq("id", questionId).select("id,status").single();
-        if (error) return errorResponse(503, "Could not remove this question from play.");
-        return json(200, { question: data });
-      }
       if (operation === "publish_many") {
         const ids=Array.isArray(body.question_ids)?[...new Set(body.question_ids.map((x:any)=>String(x)))]:[];
         if(!ids.length||ids.length>100)return errorResponse(400,"Select between 1 and 100 Draft questions.");
@@ -968,6 +957,17 @@ Deno.serve(async (req) => {
         const {data:published,error}=await db.from("ka_questions").update({status:"published",published_at:new Date().toISOString()}).in("id",ids).eq("status","pending").select("id");
         if(error||!published||published.length!==ids.length)return errorResponse(503,"Bulk publish did not complete for every selected Draft. Refresh and verify the question bank.");
         return json(200,{published_count:published.length});
+      }
+      const questionId = String(body.question_id || "");
+      if (!questionId) return errorResponse(400, "Question ID is required.");
+      const { data: existing, error: readError } = await db.from("ka_questions")
+        .select("id,status").eq("id", questionId).maybeSingle();
+      if (readError || !existing) return errorResponse(404, "Question not found.");
+      if (operation === "archive") {
+        const { data, error } = await db.from("ka_questions").update({ status: "rejected" })
+          .eq("id", questionId).select("id,status").single();
+        if (error) return errorResponse(503, "Could not remove this question from play.");
+        return json(200, { question: data });
       }
       if (operation === "publish") {
         const {data:question,error:questionError}=await db.from("ka_questions").select("id,status,options").eq("id",questionId).maybeSingle();
