@@ -276,7 +276,7 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
         await saveRejected(q, "manual_option_completion", reason);
         continue;
       }
-      const validatorPrompt = "Review this educational MCQ using the rubric below. Return JSON only: {\"approved\":boolean,\"issues\":[string],\"severity\":\"critical|review|none\"}.\n"
+      const validatorPrompt = "Review this educational MCQ using the rubric below. Return JSON only: {\"approved\":boolean,\"issues\":[string],\"severity\":\"critical|review|none\",\"invalid_option_indices\":[integer]}.\n"
         + "Reject only demonstrable problems: factual error, more than one defensible answer, no correct answer, materially ambiguous wording, unsafe/inappropriate content, or clear mismatch with the stated grade/subject. Do NOT reject merely because you are uncertain or cannot independently recall a niche fact. For uncertainty, use approved=false and explain exactly what needs human verification; severity must be review. Issues must identify the specific option or phrase and explain why it is problematic. If exactly one distractor (not the correct answer) is defective, identify its zero-based index in invalid_option_indices; it will be removed from the review copy and Admin will add a replacement fourth option. Do not fail the entire question solely for one defective distractor. If no material issue is found, approve with empty issues and empty invalid_option_indices.\nQuestion JSON:\n"
         + JSON.stringify(q);
       assertLease();
