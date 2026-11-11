@@ -330,11 +330,6 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       generated, rejected, shape_rejections: shapeRejections.slice(0, 12),
       validation_rejections: validationRejections.slice(0, 12),
     });
-    if (settings.daily_challenge_enabled && false) {
-      assertLease();
-      const { error: challengeError } = await db.rpc("ka_publish_daily_challenges", { p_challenge_date: indiaDate() });
-      if (challengeError) console.warn("Post-generation daily challenge publication did not complete", challengeError);
-    }
     assertLease();
     await updateJob(db, job.id, {
       status, generated_count: generated, validated_count: validated, drafted_count: drafted, published_count: 0,
@@ -350,7 +345,7 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       }).eq("id", usageId);
       if (settleError) throw new Error("AI usage was not settled; its reservation remains charged against the budget.");
     }
-    return { job_id: job.id, status, generated, validated, published, rejected, estimated_cost_inr: priorCostInr + actualCostInr };
+    return { job_id: job.id, status, generated, validated, drafted, rejected, estimated_cost_inr: priorCostInr + actualCostInr };
   } catch (e) {
     const observedCostUsd = (inputTokens * inputRate + outputTokens * outputRate) / 1000000;
     if (usageId) {
@@ -362,14 +357,14 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       if (reviewError) console.error("Could not mark AI reservation for review", reviewError);
     }
     if (!leaseLost) {
-      const failureStatus = published > 0 ? "partial" : "failed";
+      const failureStatus = drafted > 0 ? "partial" : "failed";
       await updateJob(db, job.id, {
-        status: failureStatus, generated_count: generated, validated_count: validated, published_count: published,
+        status: failureStatus, generated_count: generated, validated_count: validated, drafted_count: drafted, published_count: 0,
         rejected_count: rejected, model: MODEL, input_tokens: inputTokens, output_tokens: outputTokens,
         estimated_cost_usd: priorCostUsd + (usageId ? reservedCostUsd : 0),
         estimated_cost_inr: priorCostInr + (usageId ? reservedCostInr : 0),
         usd_inr_rate: usdInrRate, completed_at: new Date().toISOString(),
-        error_code: published > 0 ? "generation_interrupted_after_partial" : "generation_failed",
+        error_code: drafted > 0 ? "generation_interrupted_after_partial" : "generation_failed",
         error_summary: String((e as Error).message || e).slice(0, 500),
       });
     }
