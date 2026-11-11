@@ -23,6 +23,11 @@ def guide():
                   'has the Quick Guide and the Help bot.', 'tip') + note('Links you can share', 'Each page has its own address, for example '
                   '<b>…/#fees</b> or <b>…/#setup</b>, so a bookmark opens that page.'))
 
+    g.add('dashboard', 'Dashboard', 'Admin Dashboard', 'Start here for a quick view of the centre’s current position and items needing attention.', g2(
+        box('At-a-glance stats', 'Use the dashboard statistics as a summary; open the relevant source page to verify or act on an individual record.'),
+        box('Classes expiring and demo funnel', 'Review the classes-expiring indicators and the demo funnel, then follow up from the Students or Demo Bookings pages.'),
+    ) + note('AI students at risk', 'The AI student-risk summary is a prompt for review, not a substitute for the student’s actual attendance, learning and subscription records. Open the relevant student record before deciding what action to take.', 'tip'))
+
     g.add('monthly', 'Overview', 'Your month at a glance', 'The jobs that come round every month.', table(['When', 'Job', 'Where'], [
         ['Every day', 'Log classes, answer chats and support, follow up demos and new registrations', 'Class Log, New registrations, Communication, Support, Demo Bookings'],
         ['1st to 7th', 'Raise the month’s fee requests and send fee messages', 'Fees › Raise fee requests'],
