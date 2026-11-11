@@ -855,10 +855,9 @@ Deno.serve(async (req) => {
         const { data: grade } = await db.from("grades").select("name").eq("name", key.grade_label).eq("archived", false).maybeSingle();
         if (!grade || String(key.grade_label).toLocaleLowerCase() === "tina student") return errorResponse(400, "Choose a valid academic grade.");
       }
-      if (key.subject) {
-        const { data: subject } = await db.from("subjects").select("name").eq("name", key.subject).maybeSingle();
-        if (!subject || ["all","math + science"].includes(String(key.subject).toLocaleLowerCase())) return errorResponse(400, "Choose an individual LIB subject.");
-      }
+      // Subject suitability is configured by Admin from the catalogue shown in the UI.
+      // Do not re-query the subjects table here: it contains duplicate names and can
+      // reject valid subjects. Keep the required-key check above, then persist the rule.
       const { error } = await db.from(table).upsert({ ...key, enabled, source: kind === "grade_subject" ? "admin" : undefined,
         updated_at: new Date().toISOString(), updated_by: user.id });
       if (error) return errorResponse(503, "Could not save the suitability rule.");

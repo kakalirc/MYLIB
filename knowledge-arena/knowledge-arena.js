@@ -1043,25 +1043,67 @@
 
   async function saveSuitabilityToggle(event) {
     const input = event.target.closest("[data-suitability]");
-    if (!input || !adminSuitability) return;
+    if (!input || !adminSuitability || input.disabled) return;
     const kind = input.dataset.suitability;
-    const payload = { kind, enabled: input.checked };
-    if (kind === "grade_subject") { payload.grade_label = $("suitability-grade").value; payload.subject = input.dataset.subject; }
-    if (kind === "game_grade") { payload.grade_label = $("suitability-game-grade").value; payload.game_type = input.dataset.game; }
-    if (kind === "game_subject") { payload.game_type = $("suitability-game").value; payload.subject = input.dataset.subject; }
+    const enabled = input.checked;
+    const previous = !enabled;
+    const payload = { kind, enabled };
+    let ruleKey;
+    if (kind === "grade_subject") {
+      payload.grade_label = $("suitability-grade").value;
+      payload.subject = input.dataset.subject;
+      ruleKey = { grade_label: payload.grade_label, subject: payload.subject };
+    } else if (kind === "game_grade") {
+      payload.grade_label = $("suitability-game-grade").value;
+      payload.game_type = input.dataset.game;
+      ruleKey = { grade_label: payload.grade_label, game_type: payload.game_type };
+    } else if (kind === "game_subject") {
+      payload.game_type = $("suitability-game").value;
+      payload.subject = input.dataset.subject;
+      ruleKey = { game_type: payload.game_type, subject: payload.subject };
+    } else {
+      return;
+    }
+
     const feedback = $("suitability-feedback");
+    const lists = ["suitability-subject-list", "suitability-game-grade-list", "suitability-game-subject-list"];
+    const controls = lists.flatMap((id) => [...$(id).querySelectorAll("input[data-suitability]")]);
     feedback.textContent = "Saving suitability…";
-    input.disabled = true;
+    controls.forEach((control) => { control.disabled = true; });
+
     try {
+      // Treat the write as the source of truth. A later read failure must never
+      // roll back a value that the database has already accepted.
       await api("set_suitability", payload);
-      feedback.textContent = "Suitability updated.";
-      const data = await api("get_admin_suitability");
-      adminSuitability = data;
-      renderSuitability();
+
+      const collectionName = kind === "grade_subject" ? "grade_subject_rules"
+        : kind === "game_grade" ? "game_grade_rules" : "game_subject_rules";
+      const rules = adminSuitability[collectionName] || (adminSuitability[collectionName] = []);
+      const existing = rules.find((rule) => Object.keys(ruleKey).every((key) => rule[key] === ruleKey[key]));
+      if (existing) {
+        existing.enabled = enabled;
+      } else {
+        rules.push({ ...ruleKey, enabled });
+      }
+      feedback.textContent = "Suitability saved.";
+
+      try {
+        const data = await api("get_admin_suitability");
+        adminSuitability = data;
+        renderSuitability();
+        feedback.textContent = "Suitability saved.";
+      } catch (refreshError) {
+        // Keep the confirmed local state; the next explicit page refresh will
+        // reconcile it with the server.
+        feedback.textContent = "Suitability saved. The settings refresh failed; your saved change has been kept on screen. " +
+          (refreshError.message || "");
+      }
     } catch (error) {
-      input.checked = !input.checked;
-      feedback.textContent = error.message;
-    } finally { input.disabled = false; }
+      input.checked = previous;
+      feedback.textContent = "Could not save suitability: " + (error.message || "Unknown error.");
+    } finally {
+      controls.forEach((control) => { control.disabled = false; });
+    }
   }
 
   function populateQuestionFilters() {
