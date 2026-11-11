@@ -11,7 +11,7 @@
 </head>
 <body>
 <div class="wrap">
-  <div class="top"><div class="brand">LIB Education</div><button onclick="history.back()">← Back to Teacher Login</button></div>
+  <div class="top"><div class="brand">LIB Education</div></div>
   <div id="app"><div class="loading">Loading your appraisal framework…</div></div>
 </div>
 <script>
@@ -99,7 +99,7 @@ async function init(){
   if(!data)throw new Error('No published appraisal framework is available.');
   render(data);
  }catch(e){
-  app.innerHTML='<section class="card"><h2>Framework not available</h2><p class="error">'+esc(e.message||'Your account is not currently enabled to view this framework.')+'</p><p class="hint">If you believe you should have access, please contact the LIB Education Admin team.</p><button onclick="history.back()">Back to Teacher Login</button></section>';
+  app.innerHTML='<section class="card"><h2>Framework not available</h2><p class="error">'+esc(e.message||'Your account is not currently enabled to view this framework.')+'</p><p class="hint">If you believe you should have access, please contact the LIB Education Admin team.</p></section>';
  }
 }
 init();
