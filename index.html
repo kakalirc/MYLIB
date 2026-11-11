@@ -4939,14 +4939,38 @@ async function deleteDemoLog(id) {
   }
   demoLogMsg = 'Deleted.' + (wb ? ' Linked Wix booking reset to New.' : ''); render();
 }
+// Shared conversion path for Admin entry points. Conditional linking protects against stale screens.
+async function convertDemoForStudent(demoId, studentId, options = {}) {
+  if (currentRole !== 'Admin') return { ok: false, message: 'Only Admin can convert a demo.' };
+  const dl = (data.demoLogs || []).find(d => d.id === demoId);
+  if (!dl) return { ok: false, message: 'Demo record not found. Refresh and try again.' };
+  if (dl.status === 'Cancelled') return { ok: false, message: 'A cancelled demo cannot be converted.' };
+  if (dl.linkedStudentId && dl.linkedStudentId !== studentId) return { ok: false, message: 'This demo is already linked to another student. No changes were made.' };
+  if (!(dl.status === 'Converted' && dl.linkedStudentId === studentId)) {
+    let query = sb.from('demo_logs').update({ linked_student_id: studentId, ...demoConvertFields(dl) }).eq('id', demoId);
+    query = dl.linkedStudentId === studentId ? query.eq('linked_student_id', studentId) : query.is('linked_student_id', null);
+    const { data: saved, error } = await query.select('id').maybeSingle();
+    if (error) return { ok: false, message: 'Could not convert demo: ' + error.message };
+    if (!saved) return { ok: false, message: 'The demo was changed by another user. Refresh and review it before retrying.' };
+    dl.linkedStudentId = studentId;
+    applyDemoConvert(dl);
+  }
+  // Demo row is the payroll source of truth. Wix is separate and remains retryable.
+  const wb = wixBookingForDemo(dl);
+  let wixMessage = '';
+  if (wb) {
+    const synced = await wixLinkDemo(dl, { status: 'Converted', converted_student_id: studentId });
+    if (!synced) wixMessage = ' The demo is Converted, but its website booking still needs syncing from Demo Bookings.';
+  }
+  if (options.navigate !== false) { setTab('students'); selectStudent(studentId); addConfirmMsg.student = 'Demo converted. ₹100 bonus will appear in payroll.' + wixMessage; render(); }
+  return { ok: true, message: wixMessage };
+}
 async function convertDemoLog(id) {
   const dl = data.demoLogs.find(d => d.id === id);
   if (!dl || !dl.linkedStudentId) { demoLogMsg = 'Please link a student before converting.'; render(); return; }
-  const { error } = await sb.from('demo_logs').update(demoConvertFields(dl)).eq('id', id);
-  if (error) { demoLogMsg = 'Error: ' + error.message; render(); return; }
-  applyDemoConvert(dl);
-  const wb = await wixLinkDemo(dl, dl.linkedStudentId ? { status: 'Converted', converted_student_id: dl.linkedStudentId } : null);
-  demoLogMsg = 'Marked Converted — ₹100 bonus will appear in payroll.' + (wb ? ' Wix booking updated.' : ''); render();
+  const result = await convertDemoForStudent(id, dl.linkedStudentId);
+  if (!result.ok) { demoLogMsg = result.message; render(); return; }
+  demoLogMsg = 'Marked Converted — ₹100 bonus will appear in payroll.' + result.message; render();
 }
 async function cancelDemoLog(id) {
   const dl = data.demoLogs.find(d => d.id === id);
@@ -4957,22 +4981,21 @@ async function cancelDemoLog(id) {
   demoLogMsg = 'Demo log removed.' + (wb ? ' Wix booking marked Cancelled.' : ''); render();
 }
 async function createAndLinkDemo(id, nameFromDemo) {
-  const name = nameFromDemo.trim();
+  const name = (nameFromDemo || '').trim();
   if (!name) { demoLinkMsg = 'No student name on this demo log.'; render(); return; }
+  const dl = data.demoLogs.find(d => d.id === id);
+  if (!dl || dl.status === 'Cancelled' || dl.linkedStudentId) { demoLinkMsg = 'This demo is no longer eligible for a new student link. Refresh and review it.'; render(); return; }
+  if (!confirm('Create a new student record for ' + name + ' and convert this demo?')) return;
   demoLinkMsg = 'Creating student…'; render();
   const { data: row, error } = await sb.from('students').insert({ name, archived: false, onboarding_source: 'demo_register_create_link' }).select().single();
   if (error) { demoLinkMsg = 'Could not create student: ' + error.message; render(); return; }
-  data.students.push({ id: row.id, name: row.name, archived: false, code: row.student_code || '' });
-  demoLinkStudentId = row.id;
-  // Now link the demo log
-  const dl = data.demoLogs.find(d => d.id === id);
-  const { error: linkErr } = await sb.from('demo_logs').update({ linked_student_id: row.id, ...demoConvertFields(dl) }).eq('id', id);
-  if (linkErr) { demoLinkMsg = 'Student created but link failed: ' + linkErr.message; render(); return; }
-  if (dl) { dl.linkedStudentId = row.id; applyDemoConvert(dl); }
-  await wixLinkDemo(dl, dl.linkedStudentId ? { status: 'Converted', converted_student_id: dl.linkedStudentId } : null);
+  data.students.push({ id: row.id, name: row.name, archived: false, code: row.student_code || '', parentName: '', mobileNumber: '', email: '', address: '', photo: '', gradeId: '', boardId: '', academicYear: '', modePreference: '', classTypePreference: '', billSeparately: false });
+  const result = await convertDemoForStudent(id, row.id, { navigate: false });
+  if (!result.ok) { demoLinkMsg = 'Student created, but demo conversion did not complete: ' + result.message + ' The student record was retained; refresh and resolve this demo before retrying.'; render(); return; }
   demoLinkingId = ''; wixCardLinkingDemoId = ''; demoLinkStudentId = ''; demoLinkMsg = '';
   wixLastCreatedStudentId = row.id;
-  demoLogMsg = `✓ Student "${name}"${(row.student_code || row.code) ? ' (' + (row.student_code || row.code) + ')' : ''} created and linked. Marked Converted — bonus will appear in payroll.`; render();
+  demoLogMsg = '✓ Student "' + name + '" created and linked. Marked Converted — ₹100 bonus will appear in payroll.' + result.message;
+  setTab('students'); selectStudent(row.id); addConfirmMsg.student = 'Student created and demo converted. ₹100 bonus will appear in payroll.' + result.message; render();
 }
 // Search box only refills the dropdown; a full render() per keystroke lost focus and dropped letters.
 function demoLinkOptionsHtml() {
@@ -4989,14 +5012,13 @@ function demoLinkSearchInput(el) {
 }
 async function linkDemoToStudent(id) {
   if (!demoLinkStudentId) { demoLinkMsg = 'Please pick a student.'; render(); return; }
+  const studentId = demoLinkStudentId;
   demoLinkMsg = 'Saving…'; render();
-  const dl = data.demoLogs.find(d => d.id === id);
-  const { error } = await sb.from('demo_logs').update({ linked_student_id: demoLinkStudentId, ...demoConvertFields(dl) }).eq('id', id);
-  if (error) { demoLinkMsg = 'Error: ' + error.message; render(); return; }
-  if (dl) { dl.linkedStudentId = demoLinkStudentId; applyDemoConvert(dl); }
-  const wb = await wixLinkDemo(dl, dl.linkedStudentId ? { status: 'Converted', converted_student_id: dl.linkedStudentId } : null);
+  const result = await convertDemoForStudent(id, studentId, { navigate: false });
+  if (!result.ok) { demoLinkMsg = result.message; render(); return; }
   demoLinkingId = ''; wixCardLinkingDemoId = ''; demoLinkStudentId = ''; demoLinkMsg = '';
-  demoLogMsg = 'Linked student and marked Converted — ₹100 bonus will appear in payroll.' + (wb ? ' Wix booking updated.' : ''); render();
+  demoLogMsg = 'Linked student and marked Converted — ₹100 bonus will appear in payroll.' + result.message;
+  setTab('students'); selectStudent(studentId); addConfirmMsg.student = 'Demo converted. ₹100 bonus will appear in payroll.' + result.message; render();
 }
 // Converting also records the demo as done (admins may skip straight from Pending) and clears any Lost reason.
 function demoDoneDate(dl) {
@@ -10052,19 +10074,59 @@ async function deleteSubject(id) {
 }
 
 // ---------- students + subscriptions + enrollment ----------
-async function addStudent() {
-  const input = document.getElementById('newStudent');
-  const name = input.value.trim();
+let studentAddDraft = { name: '', parentMobile: '', studentMobile: '', selectedDemoId: '', matches: null };
+function studentAddDemoMatches(name, parentMobile, studentMobile) {
+  const n = String(name || '').trim().toLocaleLowerCase(), p = phoneKey(parentMobile), st = phoneKey(studentMobile);
+  if (!n || (!p && !st)) return [];
+  return (data.demoLogs || []).filter(d => d.status !== 'Cancelled' && !d.linkedStudentId
+    && (d.studentName || '').trim().toLocaleLowerCase() === n
+    && ((p && phoneKey(d.parentMobile) === p) || (st && phoneKey(d.studentMobile) === st)))
+    .sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+async function addStudent(mode) {
+  const nameEl = document.getElementById('newStudent');
+  const parentEl = document.getElementById('newStudentParentMobile');
+  const studentEl = document.getElementById('newStudentStudentMobile');
+  const name = (nameEl ? nameEl.value : studentAddDraft.name || '').trim();
+  const parentMobile = (parentEl ? parentEl.value : studentAddDraft.parentMobile || '').trim();
+  const studentMobile = (studentEl ? studentEl.value : studentAddDraft.studentMobile || '').trim();
   if (!name) return;
   if (!isValidPersonName(name)) { addConfirmMsg.student = 'Name cannot contain numbers.'; render(); return; }
-  if (!confirm('You are about to create a New Student record.\n\nPlease confirm that this student does not already exist in the system.\n\nContinue with creating this student?')) return;
-  const { data: row, error } = await sb.from('students').insert({ name, archived: false, onboarding_source: 'student_maintenance_add' }).select().single();
+  const matches = studentAddDemoMatches(name, parentMobile, studentMobile);
+  studentAddDraft = { name, parentMobile, studentMobile, selectedDemoId: studentAddDraft.selectedDemoId || '', matches };
+  if (!mode && matches.length) { addConfirmMsg.student = ''; render(); return; }
+  mode = mode || 'without';
+  if (mode === 'convert' && !matches.some(d => d.id === studentAddDraft.selectedDemoId)) { addConfirmMsg.student = 'Select the exact matching demo before converting.'; render(); return; }
+  const demoId = mode === 'convert' ? studentAddDraft.selectedDemoId : '';
+  if (!confirm(mode === 'convert'
+    ? 'Create this student and link & convert the selected demo? This will trigger the existing ₹100 demo conversion bonus.'
+    : 'Create a new student record without converting a demo?')) return;
+  const { data: row, error } = await sb.from('students').insert({
+    name, archived: false, onboarding_source: 'student_maintenance_add', mobile_number: parentMobile || null
+  }).select().single();
   if (error) { addConfirmMsg.student = 'Could not add student: ' + error.message; render(); return; }
-  data.students.push({ id: row.id, name: row.name, archived: !!row.archived, code: row.student_code || '', parentName: '', mobileNumber: '', email: '', address: '', photo: '', gradeId: '', boardId: '', academicYear: '', modePreference: '', classTypePreference: '', billSeparately: false });
-  input.value = '';
-  // Open the new student's maintenance screen straight away so details can be filled in.
-  selectStudent(row.id);
-  addConfirmMsg.student = `Student "${name}" added${(row.student_code || row.code) ? ' (' + (row.student_code || row.code) + ')' : ''}. Fill in their details below.`;
+  const student = { id: row.id, name: row.name, archived: !!row.archived, code: row.student_code || '', parentName: '', mobileNumber: row.mobile_number || '', email: '', address: '', photo: '', gradeId: '', boardId: '', academicYear: '', modePreference: '', classTypePreference: '', billSeparately: false };
+  data.students.push(student);
+  let phoneWarning = '';
+  const phoneRowsToSave = [];
+  if (phoneKey(parentMobile)) phoneRowsToSave.push({ student_id: row.id, phone_type: 'parent', phone_number: phoneKey(parentMobile) });
+  if (phoneKey(studentMobile)) phoneRowsToSave.push({ student_id: row.id, phone_type: 'student', phone_number: phoneKey(studentMobile) });
+  if (phoneRowsToSave.length) {
+    const { data: savedPhones, error: phoneErr } = await sb.from('student_phone_numbers').insert(phoneRowsToSave).select();
+    if (phoneErr) phoneWarning = ' Contact mobile number(s) could not be saved: ' + phoneErr.message;
+    else (savedPhones || []).forEach(p => data.studentPhoneNumbers.push({ id: p.id, studentId: p.student_id, type: p.phone_type, number: p.phone_number }));
+  }
+  studentAddDraft = { name: '', parentMobile: '', studentMobile: '', selectedDemoId: '', matches: null };
+  if (mode === 'convert') {
+    const result = await convertDemoForStudent(demoId, row.id, { navigate: false });
+    setTab('students'); selectStudent(row.id);
+    addConfirmMsg.student = (result.ok
+      ? 'Student created and demo converted. ₹100 bonus will appear in payroll.' + result.message
+      : 'Student created, but demo conversion failed: ' + result.message + ' The student was retained; review the demo before retrying.') + phoneWarning;
+  } else {
+    selectStudent(row.id);
+    addConfirmMsg.student = 'Student "' + name + '" added. Fill in their details below.' + phoneWarning;
+  }
   render();
 }
 // "Copy to new student": a new student record with the family details copied from an existing one.
@@ -15431,9 +15493,14 @@ function renderStudents() {
       <h2>Add Student</h2>
       <div class="hint">Create a new student record. Please check that the student does not already exist before adding them.</div>
       <div class="row-form">
-        <input type="text" id="newStudent" placeholder="Student's name" onkeydown="if(event.key==='Enter') addStudent()">
+        <input type="text" id="newStudent" value="${escAttr(studentAddDraft.name)}" placeholder="Student's name" oninput="studentAddDraft.name=this.value" onkeydown="if(event.key==='Enter') addStudent()">
+        <input type="tel" id="newStudentParentMobile" value="${escAttr(studentAddDraft.parentMobile)}" placeholder="Parent mobile (optional)" oninput="studentAddDraft.parentMobile=this.value" style="width:170px">
+        <input type="tel" id="newStudentStudentMobile" value="${escAttr(studentAddDraft.studentMobile)}" placeholder="Student mobile (optional)" oninput="studentAddDraft.studentMobile=this.value" style="width:170px">
         <button class="btn-primary" onclick="addStudent()">Add student</button>
       </div>
+      ${studentAddDraft.matches && studentAddDraft.matches.length ? `<div style="margin-top:8px;padding:10px;background:#fff8e6;border:1px solid var(--line);border-radius:7px"><b>Possible previous demo match (${studentAddDraft.matches.length})</b><div class="hint">Confirm the exact demo before converting. No match is linked automatically.</div>
+        <select onchange="studentAddDraft.selectedDemoId=this.value" style="max-width:100%;margin:6px 0"><option value="">Select the correct demo…</option>${studentAddDraft.matches.map(d=>`<option value="${escAttr(d.id)}" ${studentAddDraft.selectedDemoId===d.id?'selected':''}>${esc(dayDate(d.date))} · ${esc(d.studentName)} · ${esc(d.status)} · ${esc(d.parentMobile || d.studentMobile || 'No mobile')}</option>`).join('')}</select>
+        <div class="row-form"><button class="btn-small btn-primary" onclick="addStudent('convert')">Create &amp; Link &amp; Convert</button><button class="btn-small" onclick="addStudent('without')">Create Without Conversion</button><button class="btn-small" onclick="studentAddDraft.matches=null;studentAddDraft.selectedDemoId='';render()">Cancel</button></div></div>` : ''}
       ${addConfirmMsg.student ? `<div class="hint" style="color:var(--forest)">✓ ${esc(addConfirmMsg.student)}</div>` : ''}
     </div>
   `;
@@ -27257,7 +27324,7 @@ function regOpenAccept(id) {
   regAcceptId = regAcceptId === id ? '' : id; regRejectId = '';
   regAcceptDraft = { name: r.student_name || '', gradeId: r.grade_id === 'NA' ? '' : (r.grade_id || ''), boardId: r.board_id || (kids[0] && kids[0].boardId) || '',
     mode: r.mode_preference || '', ctype: r.class_type_preference || '', family: kids.length ? 'existing' : 'new', parentLogin: true, studentLogin: true,
-    existingStudentId: '', academicYear: regGuessAcademicYear(kids) };
+    existingStudentId: '', academicYear: regGuessAcademicYear(kids), demoConversionMode: 'without', demoId: '' };
   render();
 }
 function regDraftSet(k, v) { regAcceptDraft[k] = v; }
@@ -27343,10 +27410,13 @@ function regOriginalFormHtml(r) {
       <div class="hint" style="margin-bottom:4px">Original form as the family sent it (read-only). The student record above may have been changed since.</div>
       <table class="no-stack" style="font-size:13px;width:auto"><tbody>${rows.map(([k, v]) => `<tr><td class="hint" style="white-space:nowrap;padding:2px 10px 2px 0;border:0">${k}</td><td style="padding:2px 0;border:0">${esc(v)}</td></tr>`).join('')}</tbody></table></div>`;
 }
-async function regAccept(id) {
+async function regAccept(id, conversionMode = 'without') {
   const r = data.registrations.find(x => x.id === id);
   if (!r || regBusy) return;
   const d = regAcceptDraft, name = (d.name || '').trim();
+  const demoCandidates = regDemoCandidates(r, r.student_id || d.existingStudentId || 'new-registration-student');
+  const selectedDemo = conversionMode === 'convert' ? demoCandidates.find(x => x.id === d.demoId) : null;
+  if (conversionMode === 'convert' && !selectedDemo) { regMsg = 'Select a valid matching demo, or choose Accept Without Conversion.'; render(); return; }
   if (!name || !isValidPersonName(name)) { regMsg = "Type the student's name (no numbers)."; render(); return; }
   const kids = d.family === 'existing' ? regFamily(r) : [];
   const selectedExisting = d.existingStudentId ? data.students.find(s => s.id === d.existingStudentId && !s.archived) : null;
@@ -27444,11 +27514,17 @@ async function regAccept(id) {
   if (ue) {
     regBusy = false; regMsg = `Student ${row.name} is available${isNewStudent ? ' (newly created)' : ' (existing record reused)'}, but the registration could not be marked Accepted: ${ue.message}. Do not create another student; refresh and retry after checking the registration.`; render(); return;
   }
+  let conversionResult = null;
+  if (conversionMode === 'convert' && selectedDemo) {
+    conversionResult = await convertDemoForStudent(selectedDemo.id, studentId, { navigate: false });
+    if (!conversionResult.ok) notes.push('Registration accepted and student linked, but demo conversion needs attention: ' + conversionResult.message);
+  }
   regDone[id] = { studentId, phones, notes, message: regWelcomeMessage(r, row.name, parentLine, studentLine) };
   regBusy = false; regAcceptId = '';
-  regMsg = `${row.name}${(row.student_code || row.code) ? ' (' + (row.student_code || row.code) + ')' : ''} ${isNewStudent ? 'created' : 'linked to the existing student record'}. Registration accepted. Demo records, if any, remain separate until you explicitly link them.`;
+  regMsg = row.name + (row.student_code || row.code ? ' (' + (row.student_code || row.code) + ')' : '') + (isNewStudent ? ' created' : ' linked to the existing student record') + '. Registration accepted.' + (conversionMode === 'convert' ? (conversionResult && conversionResult.ok ? ' Demo converted; ₹100 bonus will appear in payroll.' + conversionResult.message : ' Demo conversion did not complete; see the note on this registration and retry after review.') : ' No demo conversion was performed.');
   trackUse('registration-accept');
-  await loadRegistrations(); render();
+  await loadRegistrations();
+  if (conversionResult && conversionResult.ok) { regOpenStudent(studentId); addConfirmMsg.student = 'Registration accepted and matching demo converted. ₹100 bonus will appear in payroll.' + conversionResult.message; render(); } else render();
 }
 
 function regWelcomeMessage(r, name, parentLine, studentLine) {
@@ -27486,14 +27562,16 @@ function regCardHtml(r) {
         <input type="text" value="${escAttr(d.academicYear || '')}" oninput="regDraftSet('academicYear',this.value)" placeholder="Academic year e.g. 2026-27" title="Academic year" style="width:150px"></div>
       ${regExistingStudentCandidates(r).length ? `<div style="margin:8px 0;padding:8px;background:#fff8e6;border:1px solid var(--line);border-radius:6px">
         <b style="font-size:12px">Possible existing student match</b><div class="hint" style="font-size:11px">Confirm the identity before reusing a record. Parent mobile alone is not treated as a child match.</div>
-        <select onchange="regDraftSet('existingStudentId',this.value)" style="margin-top:5px;max-width:100%"><option value="">Create a new student record</option>${regExistingStudentCandidates(r).map(s=>`<option value="${escAttr(s.id)}" ${d.existingStudentId===s.id?'selected':''}>Reuse ${esc(s.name)}${s.code?' ('+esc(s.code)+')':''}</option>`).join('')}</select>
+        <select onchange="regDraftSet('existingStudentId',this.value);regDraftSet('demoId','');render()" style="margin-top:5px;max-width:100%"><option value="">Create a new student record</option>${regExistingStudentCandidates(r).map(s=>`<option value="${escAttr(s.id)}" ${d.existingStudentId===s.id?'selected':''}>Reuse ${esc(s.name)}${s.code?' ('+esc(s.code)+')':''}</option>`).join('')}</select>
       </div>` : ''}
       ${kids.length ? `<div class="row-form" style="flex-direction:column;align-items:flex-start;gap:2px">
         <label><input type="radio" name="regFam" ${d.family === 'existing' ? 'checked' : ''} onchange="regDraftSet('family','existing')"> Link to existing family: ${esc(kids.map(s => s.name).join(', '))}${login ? ` (uses parent login ${esc(login.username)})` : ''}</label>
         <label><input type="radio" name="regFam" ${d.family === 'new' ? 'checked' : ''} onchange="regDraftSet('family','new')"> A new family</label></div>` : ''}
       <div class="row-form"><label><input type="checkbox" ${d.parentLogin ? 'checked' : ''} onchange="regDraftSet('parentLogin',this.checked)"> Parent login (ID and password = parent mobile${kids.length ? ', or the family\'s login' : ''})</label>
         <label><input type="checkbox" ${d.studentLogin ? 'checked' : ''} onchange="regDraftSet('studentLogin',this.checked)"> Student login (ID and password = student code)</label></div>
-      <div class="row-form"><button class="btn-primary" ${regBusy ? 'disabled' : ''} onclick="regAccept('${r.id}')">${regBusy ? 'Adding…' : 'Add student'}</button><button class="btn-small" onclick="regAcceptId='';render()">Cancel</button></div>
+      ${regDemoCandidates(r, r.student_id || d.existingStudentId || 'new-registration-student').length ? `<div style="margin:8px 0;padding:9px;background:#fff8e6;border:1px solid var(--line);border-radius:7px"><b style="font-size:12px">Matching demo records</b><div class="hint" style="font-size:11px">Choose one exact demo to convert with this acceptance, or accept without conversion. Only one demo can be converted here.</div>
+        <select onchange="regDraftSet('demoId',this.value)" style="max-width:100%;margin:6px 0"><option value="">Select a demo…</option>${regDemoCandidates(r, r.student_id || d.existingStudentId || 'new-registration-student').map(dl=>`<option value="${escAttr(dl.id)}" ${d.demoId===dl.id?'selected':''}>${esc(dayDate(dl.date))} · ${esc(dl.studentName)} · ${esc(dl.status)}</option>`).join('')}</select></div>` : '<div class="hint" style="margin:8px 0">No matching demo found from the registration name and contact numbers. You can accept without conversion.</div>'}
+      <div class="row-form"><button class="btn-primary" ${regBusy ? 'disabled' : ''} onclick="regAccept('${r.id}','convert')" ${!d.demoId || !regDemoCandidates(r, r.student_id || d.existingStudentId || 'new-registration-student').some(x=>x.id===d.demoId) ? 'disabled' : ''}>${regBusy ? 'Adding…' : 'Accept &amp; Link &amp; Convert'}</button><button class="btn-small" ${regBusy ? 'disabled' : ''} onclick="regAccept('${r.id}','without')">${regBusy ? 'Adding…' : 'Accept Without Conversion'}</button><button class="btn-small" onclick="regAcceptId='';render()">Cancel</button></div>
       <div class="hint">Subjects are not added here: enrol the student with a teacher on their page afterwards.</div></div>`;
   } else if (r.status === 'New' && regRejectId === r.id) {
     action = `<div class="row-form" style="margin-top:10px"><input type="text" id="regRejectReason" placeholder="Reason (optional), e.g. Junk, Not reachable" style="min-width:220px"><button class="btn-small btn-primary" onclick="regRejectOne('${r.id}')">Reject</button><button class="btn-small" onclick="regRejectId='';render()">Cancel</button></div>`;
