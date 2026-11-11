@@ -13,6 +13,7 @@ create table if not exists public.demo_control_followups (
   unique (source_type, source_id)
 );
 alter table public.demo_control_followups enable row level security;
+grant select, insert, update, delete on public.demo_control_followups to authenticated;
 drop policy if exists "Admins manage demo control followups" on public.demo_control_followups;
 create policy "Admins manage demo control followups" on public.demo_control_followups
   for all to authenticated
@@ -32,6 +33,7 @@ create table if not exists public.demo_control_activity (
   changed_at timestamptz not null default now()
 );
 alter table public.demo_control_activity enable row level security;
+grant select on public.demo_control_activity to authenticated;
 drop policy if exists "Admins read demo control activity" on public.demo_control_activity;
 create policy "Admins read demo control activity" on public.demo_control_activity
   for select to authenticated
