@@ -944,7 +944,8 @@
       row.jobs++;
       row.requested += Number(job.requested_count || 0);
       row.generated += Number(job.generated_count || 0);
-      row.published += Number(job.published_count || 0);\n      row.drafted += Number(job.drafted_count || 0);
+      row.published += Number(job.published_count || 0);
+      row.drafted += Number(job.drafted_count || 0);
       row.rejected += Number(job.rejected_count || 0);
       row[job.status] = (row[job.status] || 0) + 1;
       gameMap.set(job.game_type, row);
