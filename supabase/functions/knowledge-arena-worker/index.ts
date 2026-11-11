@@ -303,7 +303,7 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
         continue;
       }
       assertLease();
-      const invalidIndices = [...new Set(verdict.invalid_option_indices || [])];
+      const invalidIndices: number[] = [...new Set<number>((verdict.invalid_option_indices || []) as number[])];
       if (invalidIndices.length === 1 && invalidIndices[0] >= 0 && invalidIndices[0] < q.options.length &&
           invalidIndices[0] !== q.correct_option) {
         const removedIndex = invalidIndices[0];
