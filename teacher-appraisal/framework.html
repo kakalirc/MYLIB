@@ -31,11 +31,46 @@ function methodLabel(m){
  if(m==='deduction')return 'Configured deductions for qualifying events';
  return 'Configured scoring method';
 }
+function evidenceLabel(id){
+ const map={
+ frequency_adherence:'Student-subject weekly frequency and attendance records',
+ overall_delivery:'Scheduled classes and attendance records',
+ schedule_management:'Documented class cancellations, rescheduling and leave records',
+ class_record_reconciliation:'Scheduled class and attendance reconciliation records',
+ student_attendance:'Student attendance and participation records',
+ absence_followup:'Documented absence follow-up and homework records',
+ study_plan_quality:'Study plan records',
+ homework_quality:'Homework assignment and review records',
+ learning_support:'Teacher notes, study plans and homework records',
+ schedule_discipline:'Teacher availability and scheduled class records',
+ leave_management:'Leave and schedule-change records',
+ professional_records:'Teacher notes and relevant app activity records',
+ teacher_app_adoption:'Meaningful Teacher App feature-use records',
+ ai_adoption:'AI usage records, where AI access is enabled',
+ research_notes:'Teacher research notes',
+ teaching_resources:'Teaching resources created or shared',
+ attendance_timeliness:'Attendance submission timestamps compared with scheduled class start time',
+ attendance_completeness:'Scheduled classes and attendance records',
+ study_plan_compliance:'Expected student-subject study plan coverage',
+ homework_compliance:'Homework records and documented follow-up',
+ research_resource_compliance:'Research notes and teaching resources'
+ };
+ return map[id]||'Relevant records and documented evidence';
+}
+function scoringExplanation(m){
+ if(m.method==='admin_review')return 'Admin assessment: a score from 0% to 100% is assigned using documented evidence. Points awarded = criterion weight × assessed percentage.';
+ if(m.method==='count_target')return 'Achievement is measured against the configured count target, capped at 100%. Points awarded = criterion weight × achievement percentage.';
+ if(m.method==='timeliness_bands')return 'Each eligible record is scored using the published time bands. The average resulting percentage is applied to this criterion’s weight.';
+ if(m.method==='percentage')return 'The measured result is compared with the configured target (or percentage aggregation), capped at 100%. Points awarded = criterion weight × measured percentage.';
+ if(m.method==='threshold')return 'The measured result is matched to the configured threshold band and the resulting score percentage is applied to this criterion’s weight.';
+ if(m.method==='deduction')return 'Configured deductions are applied to qualifying events, with the resulting score floored at zero.';
+ return 'The criterion is assessed using its published method and supporting evidence.';
+}
 function params(m){
  const out=[];
  if(m.target!==undefined&&m.target!==null)out.push('Target: '+m.target);
  if(m.deadline_hours!==undefined&&m.deadline_hours!==null)out.push('Deadline: '+m.deadline_hours+' hours');
- if(m.grace_hours!==undefined&&m.grace_hours!==null)out.push('Grace period: '+m.grace_hours+' hours');
+ if(m.grace_hours!==undefined&&m.grace_hours!==null)out.push('Grace period: '+m.grace_hours+' hours');\n if(m.missing_score_percent!==undefined&&m.missing_score_percent!==null)out.push('Missing record score: '+m.missing_score_percent+'%');
  if(Array.isArray(m.bands)&&m.bands.length)out.push('Bands: '+m.bands.map(b=>(b.max_hours??'')+' hours → '+(b.score_percent??'')+'%').join(' · '));
  if(Array.isArray(m.score_bands)&&m.score_bands.length)out.push('Score bands: '+m.score_bands.map(b=>(b.min_percent??'')+'–'+(b.max_percent??'')+'% → '+(b.score_percent??'')+'%').join(' · '));
  return out;
