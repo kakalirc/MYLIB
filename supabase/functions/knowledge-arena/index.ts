@@ -958,6 +958,25 @@ Deno.serve(async (req) => {
         if(error||!published||published.length!==ids.length)return errorResponse(503,"Bulk publish did not complete for every selected Draft. Refresh and verify the question bank.");
         return json(200,{published_count:published.length});
       }
+      if (operation === "create_manual") {
+        const subject=String(body.subject||"").trim().slice(0,100);
+        const grade=String(body.grade_label||"").trim().slice(0,60);
+        const game=String(body.game_type||"").trim();
+        const language=String(body.language_code||"en").trim();
+        const prompt=String(body.prompt||"").trim();
+        const topic=String(body.topic||"General").trim().slice(0,120);
+        const explanation=String(body.explanation||"").trim();
+        const options=body.options;
+        const correct=safeNumber(body.correct_option,-1);
+        const allowedGames=["word_master","number_quest","science_explorer","quick_quiz","brain_teaser","memory_challenge","world_explorer","history_quest","society_culture_challenge","civics_constitution_challenge","economics_explorer","money_matters","word_builder","math_sprint"];
+        if(!subject||!grade||!allowedGames.includes(game)||!["en","hi","kn","sa","fr"].includes(language)||prompt.length<12||prompt.length>700||explanation.length<8||explanation.length>900||!Array.isArray(options)||options.length!==4||options.some((x:any)=>typeof x!=="string"||!x.trim()||x.length>250)||new Set(options.map((x:string)=>x.trim().toLocaleLowerCase())).size!==4||!Number.isInteger(correct)||correct<0||correct>3) return errorResponse(400,"Enter subject, grade, game, question, four distinct options, correct answer and explanation.");
+        const difficulty=["easy","medium","hard"].includes(String(body.difficulty))?String(body.difficulty):"medium";
+        const {data:created,error:createError}=await db.from("ka_questions").insert({subject,grade_label:grade,game_type:game,language_code:language,topic,difficulty,prompt,options,explanation,status:"pending",generated_by:"admin",generation_job_id:null,published_at:null}).select("id,status").single();
+        if(createError||!created)return errorResponse(503,"Could not save the manual question as a Draft.");
+        const {error:keyError}=await db.from("ka_question_keys").insert({question_id:created.id,correct_option:correct});
+        if(keyError){await db.from("ka_questions").delete().eq("id",created.id);return errorResponse(503,"Could not save the answer key; the manual question was rolled back.");}
+        return json(200,{question:created,created:true});
+      }
       const questionId = String(body.question_id || "");
       if (!questionId) return errorResponse(400, "Question ID is required.");
       const { data: existing, error: readError } = await db.from("ka_questions")
