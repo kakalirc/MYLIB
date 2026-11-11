@@ -12650,7 +12650,7 @@ function openReceipt(paymentId) {
   var st = (data.students||[]).find(function(s){ return s.id === p.studentId; });
   var subj = subject(p.subjectId);
   var receiptNum = 'LIB-' + p.date.replace(/-/g,'') + '-' + (p.id||'').slice(-6).toUpperCase();
-  var parentName = st && st.parentName ? st.parentName : '—';
+  var parentName = st && st.parentName ? esc(st.parentName) : '—';
   var rows = [
     ['Received from', parentName],
     ['Date', p.date],
