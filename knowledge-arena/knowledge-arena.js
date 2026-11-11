@@ -913,16 +913,18 @@
       a.requested += Number(job.requested_count || 0);
       a.generated += Number(job.generated_count || 0);
       a.published += Number(job.published_count || 0);
+      a.drafted += Number(job.drafted_count || 0);
       a.rejected += Number(job.rejected_count || 0);
       a[job.status] = (a[job.status] || 0) + 1;
       return a;
-    }, { jobs: 0, requested: 0, generated: 0, published: 0, rejected: 0 });
+    }, { jobs: 0, requested: 0, generated: 0, drafted: 0, published: 0, rejected: 0 });
     const active = Number(totals.queued || 0) + Number(totals.running || 0);
     $("admin-generation-summary").innerHTML = [
       ["Questions requested", totals.requested],
       ["Generated", totals.generated],
+      ["Created as Draft", totals.drafted],
       ["Published", totals.published],
-      ["Awaiting processing", totals.queued ? jobs.filter(x => x.status === "queued").reduce((n,x)=>n+Math.max(0,Number(x.requested_count||0)-Number(x.published_count||0)),0) : 0],
+      ["Awaiting processing", totals.queued ? jobs.filter(x => x.status === "queued").reduce((n,x)=>n+Math.max(0,Number(x.requested_count||0)-(Number(x.published_count||0)+Number(x.drafted_count||0))),0) : 0],
       ["Jobs in progress / queue", active],
       ["Partial / failed", Number(totals.partial || 0) + Number(totals.failed || 0)],
       ["Rejected by validation", totals.rejected]
@@ -938,19 +940,20 @@
       '<span><b>Generation:</b> ' + (settings.generation_enabled ? 'Enabled' : 'Paused') + '</span>';
     const gameMap = new Map();
     for (const job of jobs) {
-      const row = gameMap.get(job.game_type) || { jobs: 0, requested: 0, generated: 0, published: 0, rejected: 0, queued: 0, running: 0, partial: 0, failed: 0, completed: 0, paused: 0 };
+      const row = gameMap.get(job.game_type) || { jobs: 0, requested: 0, generated: 0, drafted: 0, published: 0, rejected: 0, queued: 0, running: 0, partial: 0, failed: 0, completed: 0, paused: 0 };
       row.jobs++;
       row.requested += Number(job.requested_count || 0);
       row.generated += Number(job.generated_count || 0);
       row.published += Number(job.published_count || 0);
+      row.drafted += Number(job.drafted_count || 0);
       row.rejected += Number(job.rejected_count || 0);
       row[job.status] = (row[job.status] || 0) + 1;
       gameMap.set(job.game_type, row);
     }
     const gameRows = [...gameMap.entries()].sort((a,b) => (GAME_NAMES[a[0]] || a[0]).localeCompare(GAME_NAMES[b[0]] || b[0]));
     $("admin-generation-games").innerHTML = gameRows.length
-      ? '<table class="generation-table"><thead><tr><th>Game</th><th>Jobs</th><th>Requested</th><th>Published</th><th>Queued</th><th>Partial / Failed</th></tr></thead><tbody>' +
-        gameRows.map(([id,row]) => '<tr><td>' + escapeHtml(GAME_NAMES[id] || id) + '</td><td>' + row.jobs + '</td><td>' + row.requested + '</td><td>' + row.published + '</td><td>' + row.queued + '</td><td>' + (row.partial + row.failed) + '</td></tr>').join("") +
+      ? '<table class="generation-table"><thead><tr><th>Game</th><th>Jobs</th><th>Requested</th><th>Drafts</th><th>Published</th><th>Queued</th><th>Partial / Failed</th></tr></thead><tbody>' +
+        gameRows.map(([id,row]) => '<tr><td>' + escapeHtml(GAME_NAMES[id] || id) + '</td><td>' + row.jobs + '</td><td>' + row.requested + '</td><td>' + row.drafted + '</td><td>' + row.published + '</td><td>' + row.queued + '</td><td>' + (row.partial + row.failed) + '</td></tr>').join("") +
         '</tbody></table>'
       : '<p class="muted">No generation jobs have been queued.</p>';
     $("generation-status-feedback").textContent = "Showing " + jobs.length + " non-archived jobs. Status refreshes every 30 seconds while this page is open.";
@@ -962,13 +965,13 @@
     $("admin-jobs").innerHTML = '<div class="admin-job-list">' + adminJobs.map((job) =>
       '<div class="admin-job"><div><b>' + escapeHtml(job.subject || "—") + ' · ' + escapeHtml(job.grade_label || "—") +
       '</b><small>' + escapeHtml(GAME_NAMES[job.game_type] || job.game_type) + ' · ' + escapeHtml(job.difficulty) +
-      ' · ' + Number(job.published_count || 0) + '/' + Number(job.requested_count || 0) + ' published · ' + escapeHtml(job.status) +
+      ' · ' + Number(job.drafted_count || 0) + ' drafted · ' + Number(job.published_count || 0) + ' published · ' + escapeHtml(job.status) +
       ' · ' + Number(job.generated_count || 0) + ' generated · ' + Number(job.rejected_count || 0) + ' rejected</small>' +
       (job.error_summary ? '<small class="job-error">' + escapeHtml(job.error_summary) + '</small>' : '') +
       '</div><div class="job-actions">' +
       (job.status === "queued" ? '<button class="text-btn" data-job-action="pause" data-job-id="' + job.id + '">Pause</button>' : "") +
       (job.status === "paused" ? '<button class="text-btn" data-job-action="resume" data-job-id="' + job.id + '">Resume</button>' : "") +
-      (["partial","failed","paused"].includes(job.status) && Number(job.published_count || 0) < Number(job.requested_count || 0) ? '<button class="text-btn" data-job-action="requeue" data-job-id="' + job.id + '">Requeue missing</button>' : "") +
+      (["partial","failed","paused"].includes(job.status) && (Number(job.published_count || 0) + Number(job.drafted_count || 0)) < Number(job.requested_count || 0) ? '<button class="text-btn" data-job-action="requeue" data-job-id="' + job.id + '">Requeue missing</button>' : "") +
       (["completed","partial","failed","paused"].includes(job.status) ? '<button class="text-btn" data-job-action="regenerate" data-job-id="' + job.id + '">Regenerate</button>' : "") +
       (job.status !== "running" ? '<button class="text-btn danger-text" data-job-action="delete" data-job-id="' + job.id + '">Delete job</button>' : "") +
       '</div></div>'
@@ -1123,7 +1126,62 @@
     fill("review-game", games, "All games");
   }
 
+  let rejectedQuestionRows = [];
+  function ensureRejectedReviewPanel() {
+    if ($("rejected-question-panel")) return;
+    const list=$("admin-question-list");
+    if(!list)return;
+    const panel=document.createElement("section");
+    panel.id="rejected-question-panel";
+    panel.className="admin-question-review-panel";
+    panel.innerHTML='<h3>Rejected Questions · Manual Validation</h3><p class="muted">Candidates rejected by automated checks are retained here with their exact reason. Complete four options before approving into Draft.</p><button class="btn-secondary" id="refresh-rejected-questions" type="button">Refresh rejected questions</button><div id="rejected-question-feedback" class="muted"></div><div id="rejected-question-list"></div>';
+    list.parentNode.insertBefore(panel,list);
+    $("refresh-rejected-questions").addEventListener("click",()=>refreshRejectedQuestions());
+    $("rejected-question-list").addEventListener("click",handleRejectedQuestionAction);
+  }
+  async function refreshRejectedQuestions() {
+    ensureRejectedReviewPanel();
+    const feedback=$("rejected-question-feedback"), list=$("rejected-question-list");
+    feedback.textContent="Loading retained candidates…";
+    try {
+      const result=await api("get_admin_rejected_questions");
+      rejectedQuestionRows=result.questions||[];
+      renderRejectedQuestions();
+      feedback.textContent=rejectedQuestionRows.length+" candidate(s) awaiting manual validation.";
+    } catch(e) { feedback.textContent="Could not load rejected candidates: "+e.message; }
+  }
+  function renderRejectedQuestions() {
+    const list=$("rejected-question-list"); if(!list)return;
+    if(!rejectedQuestionRows.length){list.innerHTML='<p class="muted">No rejected candidates are awaiting review.</p>';return;}
+    list.innerHTML=rejectedQuestionRows.map((r)=>{
+      const q=r.candidate||{}, opts=Array.isArray(q.options)?q.options:[];
+      const optionInputs=[0,1,2,3].map(i=>'<label>Option '+(i+1)+(i>=opts.length?' · Admin to complete':'')+'<input data-rejected-option="'+i+'" maxlength="250" value="'+escapeHtml(opts[i]||"")+'"></label>').join("");
+      return '<details class="admin-question" data-rejected-id="'+escapeHtml(r.id)+'"><summary><b>'+escapeHtml(r.subject)+' · Grade '+escapeHtml(r.grade_label)+'</b><span>'+escapeHtml(r.rejection_stage)+'</span><small>'+escapeHtml(q.prompt||"Candidate has no readable prompt")+'</small></summary><div class="admin-question-edit"><p><b>Why rejected:</b> '+escapeHtml(r.rejection_reason)+'</p>'+(Array.isArray(q.original_options)?'<p class="muted">Original options: '+q.original_options.map((x,i)=>'Option '+(i+1)+': '+escapeHtml(x)).join(' · ')+'</p>':'')+'<p class="muted">'+escapeHtml(GAME_NAMES[r.game_type]||r.game_type)+' · '+escapeHtml(r.difficulty)+' · '+escapeHtml(new Date(r.created_at).toLocaleString("en-IN"))+'</p><label>Question<textarea data-rejected-field="prompt" rows="3">'+escapeHtml(q.prompt||"")+'</textarea></label><label>Topic<input data-rejected-field="topic" value="'+escapeHtml(q.topic||r.topic||"")+'"></label><div class="admin-question-options">'+optionInputs+'</div><label>Correct answer<select data-rejected-field="correct_option">'+[0,1,2,3].map(i=>'<option value="'+i+'" '+(Number(q.correct_option)===i?'selected':'')+'>Option '+(i+1)+'</option>').join("")+'</select></label><label>Explanation<textarea data-rejected-field="explanation" rows="2">'+escapeHtml(q.explanation||"")+'</textarea></label><div class="admin-question-actions"><button class="btn-secondary" data-rejected-action="approve">Approve into Draft</button><button class="btn-secondary" data-rejected-action="dismiss">Dismiss permanently</button></div></div></details>';
+    }).join("");
+  }
+  async function handleRejectedQuestionAction(event) {
+    const button=event.target.closest("[data-rejected-action]"); if(!button)return;
+    const row=button.closest("[data-rejected-id]"); if(!row)return;
+    const id=row.dataset.rejectedId, operation=button.dataset.rejectedAction;
+    if(operation==="dismiss"&&!window.confirm("Dismiss this candidate? Its record will be retained for audit."))return;
+    button.disabled=true;
+    try {
+      const payload={rejected_question_id:id,operation:operation==="approve"?"approve_draft":"dismiss"};
+      if(operation==="approve"){
+        payload.prompt=row.querySelector('[data-rejected-field="prompt"]').value;
+        payload.topic=row.querySelector('[data-rejected-field="topic"]').value;
+        payload.options=[0,1,2,3].map(i=>row.querySelector('[data-rejected-option="'+i+'"]').value);
+        payload.correct_option=Number(row.querySelector('[data-rejected-field="correct_option"]').value);
+        payload.explanation=row.querySelector('[data-rejected-field="explanation"]').value;
+      }
+      await api("admin_rejected_question",payload);
+      $("rejected-question-feedback").textContent=operation==="approve"?"Approved into Draft. It is not live until published.":"Candidate dismissed; audit record retained.";
+      await refreshRejectedQuestions(); await refreshQuestions();
+    }catch(e){$("rejected-question-feedback").textContent=e.message;button.disabled=false;}
+  }
+
   function renderQuestionBank() {
+    ensureRejectedReviewPanel();
     const grade = $("review-grade")?.value || "";
     const subject = $("review-subject")?.value || "";
     const game = $("review-game")?.value || "";
@@ -1131,12 +1189,13 @@
     const rows = adminQuestions.filter((q) =>
       (!grade || q.grade_label === grade) && (!subject || q.subject === subject) &&
       (!game || q.game_type === game) && (!status || q.status === status));
-    if (!rows.length) { $("admin-question-list").innerHTML = '<p class="muted">No questions match these filters.</p>'; return; }
-    $("admin-question-list").innerHTML = rows.map((q) => {
+    const bulkBar='<div class="admin-question-actions"><button class="btn-secondary" id="add-manual-question" type="button">Add Question</button><button class="btn-secondary" id="publish-selected-drafts" type="button">Publish selected Drafts</button><span class="muted">Select Drafts below; only complete four-option Drafts can be published.</span></div>';
+    if (!rows.length) { $("admin-question-list").innerHTML = bulkBar+'<p class="muted">No questions match these filters.</p>'; bindManualQuestion(); bindBulkPublish(); return; }
+    $("admin-question-list").innerHTML = bulkBar+rows.map((q) => {
       const options = Array.isArray(q.options) ? q.options : [];
       return '<details class="admin-question" data-question-id="' + escapeHtml(q.id) + '">' +
-        '<summary><b>' + escapeHtml(q.subject) + ' · ' + escapeHtml(q.grade_label) + '</b><span>' +
-        escapeHtml(GAME_NAMES[q.game_type] || q.game_type) + ' · ' + escapeHtml(q.status) + '</span><small>' +
+        '<summary>' + (q.status === "pending" ? '<input type="checkbox" data-draft-select="'+escapeHtml(q.id)+'" aria-label="Select Draft for publishing"> ' : '') + '<b>' + escapeHtml(q.subject) + ' · ' + escapeHtml(q.grade_label) + '</b><span>' +
+        escapeHtml(GAME_NAMES[q.game_type] || q.game_type) + ' · ' + escapeHtml(q.status === 'pending' ? 'Draft' : q.status) + '</span><small>' +
         escapeHtml(q.prompt) + '</small></summary><div class="admin-question-edit">' +
         '<label>Question<textarea data-field="prompt" rows="3">' + escapeHtml(q.prompt) + '</textarea></label>' +
         '<label>Topic<input data-field="topic" value="' + escapeHtml(q.topic) + '"></label>' +
@@ -1152,6 +1211,38 @@
         '<button class="btn-secondary" data-question-action="archive">Remove from play</button>' +
         '<button class="btn-secondary" data-question-action="delete">Delete permanently</button></div></div></details>';
     }).join("");
+    bindBulkPublish();
+  }
+  function openManualQuestionForm() {
+    if($("manual-question-form"))return;
+    const panel=document.createElement("section"); panel.id="manual-question-form"; panel.className="admin-question-review-panel";
+    const uniqueOptions = (values) => [...new Map((values || []).map(value => String(value || "").trim()).filter(Boolean).map(value => [value.toLocaleLowerCase(), value])).values()].sort((a,b) => a.localeCompare(b));
+    const subjects = uniqueOptions(adminOptions?.subjects || adminSummary?.subjects || []);
+    const grades = uniqueOptions(adminOptions?.grades || adminSummary?.grades || []);
+    const subjectOptions = '<option value="">Select subject</option>' + subjects.map(value => '<option value="' + escapeHtml(value) + '">' + escapeHtml(value) + '</option>').join("");
+    const gradeOptions = '<option value="">Select grade</option>' + grades.map(value => '<option value="' + escapeHtml(value) + '">' + escapeHtml(value) + '</option>').join("");
+    panel.innerHTML='<h3>Add Manual Question</h3><p class="muted">Saved as Draft; not visible to students until published.</p><div class="admin-question-edit"><label>Subject<select id="manual-subject" required>' + subjectOptions + '</select></label><label>Grade<select id="manual-grade" required>' + gradeOptions + '</select></label><label>Game<select id="manual-game"></select></label><label>Language<select id="manual-language"><option value="en">English</option><option value="hi">Hindi</option><option value="kn">Kannada</option><option value="sa">Sanskrit</option><option value="fr">French</option></select></label><label>Difficulty<select id="manual-difficulty"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option></select></label><label>Topic<input id="manual-topic"></label><label>Question<textarea id="manual-prompt" rows="3"></textarea></label><label>Option 1<input id="manual-option-0"></label><label>Option 2<input id="manual-option-1"></label><label>Option 3<input id="manual-option-2"></label><label>Option 4<input id="manual-option-3"></label><label>Correct answer<select id="manual-correct"><option value="0">Option 1</option><option value="1">Option 2</option><option value="2">Option 3</option><option value="3">Option 4</option></select></label><label>Explanation<textarea id="manual-explanation" rows="2"></textarea></label><button class="btn-secondary" id="save-manual-question" type="button">Save as Draft</button><button class="btn-secondary" id="cancel-manual-question" type="button">Cancel</button><div id="manual-question-feedback" class="muted"></div></div>';
+    const gameSelect=panel.querySelector("#manual-game"); Object.entries(GAME_NAMES).forEach(([id,name])=>{const option=document.createElement("option");option.value=id;option.textContent=name; gameSelect.appendChild(option);});
+    const list=$("admin-question-list"); list.parentNode.insertBefore(panel,list);
+    $("cancel-manual-question").addEventListener("click",()=>panel.remove());
+    $("save-manual-question").addEventListener("click",async()=>{
+      const v=id=>$(id).value.trim(); const payload={operation:"create_manual",subject:v("manual-subject"),grade_label:v("manual-grade"),game_type:v("manual-game"),language_code:v("manual-language"),difficulty:v("manual-difficulty"),topic:v("manual-topic")||"General",prompt:v("manual-prompt"),options:[0,1,2,3].map(i=>v("manual-option-"+i)),correct_option:Number(v("manual-correct")),explanation:v("manual-explanation")};
+      const save=$("save-manual-question"),feedback=$("manual-question-feedback");save.disabled=true;feedback.textContent="Saving Draft…";
+      try{await api("admin_question",payload);feedback.textContent="Saved as Draft.";panel.remove();await refreshQuestions();}catch(e){feedback.textContent=e.message;save.disabled=false;}
+    });
+
+  }
+
+  function bindBulkPublish() {
+    const button=$("publish-selected-drafts"); if(!button)return;
+    button.addEventListener("click",async()=>{
+      const ids=[...document.querySelectorAll("[data-draft-select]:checked")].map(x=>x.dataset.draftSelect);
+      if(!ids.length){$("question-feedback").textContent="Select at least one Draft.";return;}
+      if(!window.confirm("Publish "+ids.length+" selected Draft question(s) to Knowledge Arena?"))return;
+      button.disabled=true;
+      try{const result=await api("admin_question",{operation:"publish_many",question_ids:ids});$("question-feedback").textContent=(result.published_count||0)+" Draft(s) published.";await refreshQuestions();}
+      catch(e){$("question-feedback").textContent="Bulk publish failed: "+e.message;button.disabled=false;}
+    });
   }
 
   let questionBankRequest = null;
@@ -1169,6 +1260,8 @@
         populateQuestionFilters();
         renderQuestionBank();
         feedback.textContent = "Loaded " + adminQuestions.length + " most recent questions.";
+        ensureRejectedReviewPanel();
+        await refreshRejectedQuestions();
       } catch (error) {
         feedback.textContent = "Could not load questions: " + error.message;
         if (list) list.innerHTML = '<p class="muted">Questions could not be loaded. Use Refresh to try again.</p>';
@@ -1180,6 +1273,7 @@
   }
 
   async function handleQuestionAction(event) {
+    if (event.target.closest("#add-manual-question")) { openManualQuestionForm(); return; }
     const button = event.target.closest("[data-question-action]");
     if (!button) return;
     const row = button.closest("[data-question-id]");

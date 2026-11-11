@@ -57,7 +57,6 @@ function validateShape(q: any, job: any) {
   if (!Number.isInteger(q.correct_option) || q.correct_option < 0 || q.correct_option >= q.options.length) return "invalid correct option index";
   if (new Set(q.options.map((x: string) => x.trim().toLowerCase())).size !== q.options.length) return "duplicate options";
   if (typeof q.explanation !== "string" || q.explanation.trim().length < 8 || q.explanation.length > 900) return "invalid explanation";
-  if (q.options.length !== 4) return "exactly four options are required";
   if (typeof q.topic !== "string" || !q.topic.trim()) return "missing topic";
   if (q.subject && q.subject !== job.subject) return "subject mismatch";
   if (q.grade_label && q.grade_label !== job.grade_label) return "grade mismatch";
@@ -110,9 +109,19 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
   const job = Array.isArray(claimed) ? claimed[0] : claimed;
   if (!job) return { skipped: "no_queued_jobs_or_worker_lease_active" };
 
-  let generated = 0, validated = 0, published = 0, rejected = 0, inputTokens = 0, outputTokens = 0;
+  let generated = 0, validated = 0, drafted = 0, rejected = 0, inputTokens = 0, outputTokens = 0;
   const shapeRejections: string[] = [];
   const validationRejections: string[] = [];
+  const saveRejected = async (q: any, stage: string, reason: string) => {
+    const safeCandidate = q && typeof q === "object" ? q : { raw_value: q ?? null };
+    const { error } = await db.from("ka_rejected_questions").insert({
+      job_id: job.id, subject: job.subject, grade_label: job.grade_label,
+      game_type: job.game_type, difficulty: job.difficulty, language_code: job.language_code,
+      topic: job.topic || job.subject, candidate: safeCandidate,
+      rejection_stage: stage, rejection_reason: reason.slice(0, 1200),
+    });
+    if (error) throw new Error("Could not persist a rejected Knowledge Arena candidate: " + error.message);
+  };
   let usageId: string | null = null;
   let reservedCostInr = 0, reservedCostUsd = 0;
   let leaseLost = false, heartbeatBusy = false;
@@ -250,31 +259,66 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
     const { data: existing } = await db.from("ka_questions").select("prompt")
       .eq("subject", job.subject).eq("grade_label", job.grade_label).limit(5000);
     const seen = new Set((existing || []).map((x: any) => normalisePrompt(x.prompt)));
-    for (const q of candidates.slice(0, job.requested_count)) {
+    for (const candidate of candidates.slice(0, job.requested_count)) {
+      const q: any = candidate;
       const shapeIssue = validateShape(q, job);
       const normalized = typeof q?.prompt === "string" ? normalisePrompt(q.prompt) : "";
       if (shapeIssue || !normalized || seen.has(normalized)) {
+        const reason = shapeIssue || (!normalized ? "empty prompt" : "duplicate prompt");
         rejected++;
-        shapeRejections.push(shapeIssue || (!normalized ? "empty prompt" : "duplicate prompt"));
+        shapeRejections.push(reason);
+        await saveRejected(q, reason === "duplicate prompt" ? "duplicate" : "structural", reason);
         continue;
       }
-      const validatorPrompt = "Independently check this MCQ for factual correctness, unambiguous wording, grade suitability, exactly one correct option, and whether the explanation supports the answer. Do not rewrite it. If you cannot confidently verify it from stable, well-established knowledge, reject it. Return JSON only: {\"approved\":boolean,\"issues\":[string]}.\nQuestion JSON:\n"
+      if (q.options.length !== 4) {
+        rejected++;
+        const reason = "Candidate has " + q.options.length + " options. Admin must complete the fourth option and confirm the answer key.";
+        shapeRejections.push(reason);
+        await saveRejected(q, "manual_option_completion", reason);
+        continue;
+      }
+      const validatorPrompt = "Review this educational MCQ using the rubric below. Return JSON only: {\"approved\":boolean,\"issues\":[string],\"severity\":\"critical|review|none\",\"invalid_option_indices\":[integer]}.\n"
+        + "Reject only demonstrable problems: factual error, more than one defensible answer, no correct answer, materially ambiguous wording, unsafe/inappropriate content, or clear mismatch with the stated grade/subject. Do NOT reject merely because you are uncertain or cannot independently recall a niche fact. For uncertainty, use approved=false and explain exactly what needs human verification; severity must be review. Issues must identify the specific option or phrase and explain why it is problematic. If exactly one distractor (not the correct answer) is defective, identify its zero-based index in invalid_option_indices; it will be removed from the review copy and Admin will add a replacement fourth option. Do not fail the entire question solely for one defective distractor. If no material issue is found, approve with empty issues and empty invalid_option_indices.\nQuestion JSON:\n"
         + JSON.stringify(q);
       assertLease();
-      const verdict = await requestStructuredJson(
-        ai.api_key,
-        "You are a strict independent educational content auditor. Reject doubtful, ambiguous, inaccurate, or unsuitable questions. Do not approve merely because the supplied answer claims to be correct.",
-        validatorPrompt, 900, "Validator",
-        (value) => !!value && typeof value === "object" &&
-          typeof value.approved === "boolean" &&
-          Array.isArray(value.issues) &&
-          value.issues.every((issue: unknown) => typeof issue === "string"),
-        (input, output) => { inputTokens += input; outputTokens += output; },
-      );
+      let verdict: any;
+      try {
+        verdict = await requestStructuredJson(
+          ai.api_key,
+          "You are an educational quality reviewer. Be evidence-minded, fair and precise. Do not invent defects. Distinguish a proven error from uncertainty requiring a human check. Evaluate the actual question and options, not stylistic preferences.",
+          validatorPrompt, 900, "Validator",
+          (value) => !!value && typeof value === "object" &&
+            typeof value.approved === "boolean" &&
+            Array.isArray(value.issues) &&
+            value.issues.every((issue: unknown) => typeof issue === "string") &&
+            Array.isArray(value.invalid_option_indices) && value.invalid_option_indices.every((x: unknown) => Number.isInteger(x)) &&
+            ["critical","review","none"].includes(value.severity),
+          (input, output) => { inputTokens += input; outputTokens += output; },
+        );
+      } catch (error) {
+        rejected++;
+        const reason = "Validator could not complete a reliable review: " + String((error as Error).message || error).slice(0, 900);
+        validationRejections.push(reason.slice(0, 240));
+        await saveRejected(q, "validator_error", reason);
+        continue;
+      }
       assertLease();
+      const invalidIndices: number[] = [...new Set<number>((verdict.invalid_option_indices || []) as number[])];
+      if (invalidIndices.length === 1 && invalidIndices[0] >= 0 && invalidIndices[0] < q.options.length &&
+          invalidIndices[0] !== q.correct_option) {
+        const removedIndex = invalidIndices[0];
+        const reviewCopy = { ...q, original_options: q.options, options: q.options.filter((_: string, index: number) => index !== removedIndex),
+          correct_option: q.correct_option > removedIndex ? q.correct_option - 1 : q.correct_option };
+        rejected++;
+        const reason = "One defective distractor (Option " + (removedIndex + 1) + ") was removed from the review copy. Admin must add a replacement fourth option and confirm the answer key. " + verdict.issues.join("; ");
+        await saveRejected(reviewCopy, "manual_option_completion", reason);
+        continue;
+      }
       if (verdict.approved !== true || verdict.issues.length > 0) {
         rejected++;
-        validationRejections.push(verdict.issues.join("; ").slice(0, 240) || "independent validator did not approve");
+        const reason = verdict.issues.join("; ").slice(0, 1000) || "Validator flagged this candidate for manual verification.";
+        validationRejections.push(reason.slice(0, 240));
+        await saveRejected(q, verdict.severity === "critical" ? "validator_critical" : "validator_review", reason);
         continue;
       }
       const payload = {
@@ -288,34 +332,33 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       const { error: storeError } = await db.rpc("ka_store_generated_question", {
         p_job_id: job.id, p_question: payload, p_correct_option: q.correct_option,
       });
-      if (storeError) { rejected++; continue; }
+      if (storeError) {
+        rejected++;
+        await saveRejected(q, "storage", "Could not save as Draft: " + storeError.message);
+        continue;
+      }
       seen.add(normalized);
       validated++;
-      published++;
+      drafted++;
     }
 
     const actualCostUsd = (inputTokens * inputRate + outputTokens * outputRate) / 1000000;
     const actualCostInr = actualCostUsd * usdInrRate;
     const totalCostUsd = priorCostUsd + actualCostUsd;
     const totalCostInr = priorCostInr + actualCostInr;
-    const status = published === job.requested_count ? "completed" : published > 0 ? "partial" : "failed";
+    const status = drafted === job.requested_count ? "completed" : drafted > 0 ? "partial" : "failed";
     if (rejected) console.warn("Knowledge Arena question rejection summary", {
       job_id: job.id, grade_label: job.grade_label, subject: job.subject,
       generated, rejected, shape_rejections: shapeRejections.slice(0, 12),
       validation_rejections: validationRejections.slice(0, 12),
     });
-    if (settings.daily_challenge_enabled && published > 0) {
-      assertLease();
-      const { error: challengeError } = await db.rpc("ka_publish_daily_challenges", { p_challenge_date: indiaDate() });
-      if (challengeError) console.warn("Post-generation daily challenge publication did not complete", challengeError);
-    }
     assertLease();
     await updateJob(db, job.id, {
-      status, generated_count: generated, validated_count: validated, published_count: published,
+      status, generated_count: generated, validated_count: validated, drafted_count: drafted, published_count: 0,
       rejected_count: rejected, model: MODEL, input_tokens: inputTokens, output_tokens: outputTokens,
       estimated_cost_usd: totalCostUsd, estimated_cost_inr: priorCostInr + actualCostInr, usd_inr_rate: usdInrRate,
       completed_at: new Date().toISOString(),
-      ...(published ? {} : { error_code: "no_questions_published", error_summary: "No candidate passed structural, duplicate and independent AI validation." }),
+      ...(drafted ? { error_code: null, error_summary: null } : { error_code: "no_questions_drafted", error_summary: "No candidate was promoted to Draft. Rejected candidates and reasons are available in Admin Manual Validation." }),
     });
     if (usageId) {
       const { error: settleError } = await db.from("ka_ai_usage").update({
@@ -324,7 +367,7 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       }).eq("id", usageId);
       if (settleError) throw new Error("AI usage was not settled; its reservation remains charged against the budget.");
     }
-    return { job_id: job.id, status, generated, validated, published, rejected, estimated_cost_inr: priorCostInr + actualCostInr };
+    return { job_id: job.id, status, generated, validated, drafted, rejected, estimated_cost_inr: priorCostInr + actualCostInr };
   } catch (e) {
     const observedCostUsd = (inputTokens * inputRate + outputTokens * outputRate) / 1000000;
     if (usageId) {
@@ -336,14 +379,14 @@ async function runOneJob(db: ReturnType<typeof adminClient>) {
       if (reviewError) console.error("Could not mark AI reservation for review", reviewError);
     }
     if (!leaseLost) {
-      const failureStatus = published > 0 ? "partial" : "failed";
+      const failureStatus = drafted > 0 ? "partial" : "failed";
       await updateJob(db, job.id, {
-        status: failureStatus, generated_count: generated, validated_count: validated, published_count: published,
+        status: failureStatus, generated_count: generated, validated_count: validated, drafted_count: drafted, published_count: 0,
         rejected_count: rejected, model: MODEL, input_tokens: inputTokens, output_tokens: outputTokens,
         estimated_cost_usd: priorCostUsd + (usageId ? reservedCostUsd : 0),
         estimated_cost_inr: priorCostInr + (usageId ? reservedCostInr : 0),
         usd_inr_rate: usdInrRate, completed_at: new Date().toISOString(),
-        error_code: published > 0 ? "generation_interrupted_after_partial" : "generation_failed",
+        error_code: drafted > 0 ? "generation_interrupted_after_partial" : "generation_failed",
         error_summary: String((e as Error).message || e).slice(0, 500),
       });
     }
