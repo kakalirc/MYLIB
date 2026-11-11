@@ -1019,7 +1019,7 @@ Deno.serve(async (req) => {
     if (action === "get_admin_jobs") {
       if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
       const { data, error } = await db.from("ka_generation_jobs")
-        .select("id,status,subject,topic,grade_label,language_code,game_type,difficulty,requested_count,generated_count,validated_count,published_count,rejected_count,created_at,started_at,completed_at,error_code,error_summary,estimated_cost_inr")
+        .select("id,status,subject,topic,grade_label,language_code,game_type,difficulty,requested_count,generated_count,validated_count,drafted_count,published_count,rejected_count,created_at,started_at,completed_at,error_code,error_summary,estimated_cost_inr")
         .is("archived_at", null).order("created_at", { ascending: false }).limit(500);
       if (error) return errorResponse(503, "Could not load generation jobs.");
       return json(200, { jobs: data || [] });
