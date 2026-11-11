@@ -961,9 +961,14 @@ Deno.serve(async (req) => {
         return json(200,{published_count:published.length});
       }
       if (operation === "publish") {
+        const {data:question,error:questionError}=await db.from("ka_questions").select("id,status,options").eq("id",questionId).maybeSingle();
+        if(questionError||!question)return errorResponse(404,"Question not found.");
+        const {data:key,error:keyError}=await db.from("ka_question_keys").select("correct_option").eq("question_id",questionId).maybeSingle();
+        if(keyError||!key||!Array.isArray(question.options)||question.options.length!==4||key.correct_option<0||key.correct_option>3)
+          return errorResponse(400,"Only a complete four-option Draft with a valid answer key can be published.");
         const { data, error } = await db.from("ka_questions").update({
           status: "published", published_at: new Date().toISOString(),
-        }).eq("id", questionId).select("id,status,published_at").single();
+        }).eq("id", questionId).eq("status","pending").select("id,status,published_at").single();
         if (error) return errorResponse(503, "Could not publish this question.");
         return json(200, { question: data });
       }
