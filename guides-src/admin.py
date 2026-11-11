@@ -190,6 +190,20 @@ def guide():
         box('Question Bank', ['Review Queue, Full Question Bank, Archived', 'Practice Papers and Past Papers']),
     ) + note('Teacher access', 'Teachers see the Question Bank and Research tabs only when you switch them on in Settings.', 'tip'))
 
+    g.add('monitoring', 'Teacher Monitoring', 'Teacher Monitoring tools', 'Review teacher activity and output. These are monitoring views; use the normal source screens to correct records.', g2(
+        box('Star Teacher', ['Switch the monthly points programme on or off and set its start date.', 'Review the leaderboard and each teacher’s points, level, badges and activity breakdown.']),
+        box('Research Monitoring', ['Review teacher-wise saved lesson briefs and resources added or shared.', 'Filter by month and teacher. Brief text and private notes are not displayed in this monitoring view.']),
+    ) + g2(
+        box('App Usage', ['Review screens opened and tracked actions by teacher, by feature or by user.', 'The report also includes teachers with no recorded activity in the last 30 days; no event does not necessarily prove no work was done.']),
+        box('AI Usage', ['Review AI calls, tokens and estimated costs by user and feature.', 'AI master switch, role/person access and API settings remain under System → AI.']),
+    ) + g2(
+        box('Study Plans and Textbook library', ['Read-only view of teachers’ study plans and student progress.', 'The Textbook library lists uploaded books and supports rename, retag and delete.']),
+        box('Homework', ['Review homework set by teachers and filter by teacher, student or status. Use the teacher/student workflow to resolve or correct individual records.']),
+    ) + g2(
+        box('Question Bank Monitoring', ['Read-only teacher-wise activity: access status, visits, questions added and approved, practice papers created, student assignments, submissions and reviews.', 'Counts use recorded app events and database timestamps; incomplete event tracking can make activity counts incomplete.']),
+        box('Question Bank work screen', ['The operational Question Bank remains under Daily work, separate from monitoring.', 'Use Review Queue, Full Question Bank, Archived, Practice Papers and Past Papers for question review and paper operations.']),
+    ) + note('Monitoring is not an edit screen', 'Use the original app workflow to change a study plan, homework item, Question Bank record or teacher setting. Monitoring views should not be treated as a substitute for the source record.', 'tip'))
+
     g.add('analytics', 'Analytics', 'Analytics and Teacher Appraisal', 'Admin reporting pages for admissions, class delivery, student engagement, revenue and teacher performance.', g2(
         box('Demo Analysis', ['Unified admissions funnel across prospect and student records.', 'Review open prospects and lost / cancelled / rejected outcomes.', 'Compare acquisition sources, record types and course interest.', 'Open stage records and recent admissions activity, including recorded follow-up history.', 'Period selector: Last 30 days, Last 90 days or All records.']),
         box('Class Delivery Intelligence', ['Filter by period (This month, Last 30 days, Last 90 days or All available records) and class type (Group, Individual or Special).', 'Review Scheduled, Conducted, Absent, Pending and Overdue counts.', 'See teacher delivery rate and student attendance rate, the last-14-days attendance trend, performance by teacher, student attendance and current overdue classes.', 'The report reads scheduled_classes and sessions; it does not itself correct attendance or schedules.']),
