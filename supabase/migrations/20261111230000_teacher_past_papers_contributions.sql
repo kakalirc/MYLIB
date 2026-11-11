@@ -48,7 +48,7 @@ returns trigger
 language plpgsql
 security definer
 set search_path = public
-as $
+as $function$
 declare
   v_role text := qb_my_role();
   v_name text;
@@ -104,7 +104,7 @@ begin
   end if;
   return new;
 end;
-$$;
+$function$;
 
 drop trigger if exists qb_source_papers_guard_and_stamp_trg on public.qb_source_papers;
 create trigger qb_source_papers_guard_and_stamp_trg
@@ -116,7 +116,7 @@ returns trigger
 language plpgsql
 security definer
 set search_path = public
-as $
+as $function$
 declare
   v_reviewer_name text;
 begin
@@ -133,7 +133,7 @@ begin
   end if;
   return new;
 end;
-$;
+$function$;
 revoke all on function public.qb_source_papers_guard_and_stamp() from public;
 revoke all on function public.qb_source_papers_audit_status() from public;
 
