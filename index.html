@@ -26539,7 +26539,7 @@ function qbSourcePapersHtml() {
   const f = qbSourceFilter, a = qbSourceApplied || (currentRole === 'Teacher' ? { boardId: '', schoolId: '', gradeId: '', subject: '', year: '' } : null);
   const opts = (key, val, label) => [...new Map(qbSourcePapers.map(sp => [String(val(sp) ?? ''), label(sp)])).entries()]
     .filter(([v]) => v).sort((x, y) => key === 'year' ? y[0].localeCompare(x[0]) : String(x[1]).localeCompare(String(y[1]), undefined, { numeric: true }));
-  const sel = (key, all, val, label) => `<select onchange="qbSourceFilter.${key}=this.value"><option value="">${all}</option>
+  const sel = (key, all, val, label) => `<select onchange="qbSourceFilter.${key}=this.value;${key === 'boardId' ? "qbSourceFilter.schoolId=''" : key === 'schoolId' ? "qbSourceFilter.boardId=''" : ''}"><option value="">${all}</option>
     ${opts(key, val, label).map(([v, l]) => `<option value="${escAttr(v)}" ${f[key] === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
   const filtersHtml = `<div class="row-form" style="flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center">
     ${sel('boardId', 'All boards', sp => sp.source_type === 'board' ? sp.board_id : '', sp => qbByName(boards, sp.board_id) || 'Unknown board')}
