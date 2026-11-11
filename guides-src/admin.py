@@ -194,23 +194,25 @@ def guide():
     ]) + note('Cannot be undone', 'Export a backup before any danger-zone action.', 'warn'))
 
 
-    g.add('knowledgearena', 'Teaching', 'Knowledge Arena content and controls', 'Manage the question supply and availability without changing the existing Question Bank or attendance rewards.', g2(
-        box('Grade and subject suitability', 'Configure which subjects are academically suitable for each grade, which games are enabled for each grade, and which subjects each game can draw from. These rules are enforced by the API.'),
-        box('Question generation', 'Queue a job with grade, subject, game, difficulty, language, count and optional topic. AI validates generated questions and publishes them automatically; Admin review is optional.'),
+    g.add('knowledgearena', 'Teaching', 'Knowledge Arena content and controls', 'Manage game content without changing the existing Question Bank, Online Assessment or attendance rewards.', g2(
+        box('Grade and subject suitability', 'Configure which subjects are suitable for each grade, which games are enabled for each grade, and which subjects each game can draw from. These rules are enforced by the API.'),
+        box('AI question generation', 'Queue a job by grade, subject, game, difficulty, language, count and optional topic. Generated questions must pass structural and quality validation before they can enter the Draft workflow.'),
     ) + g2(
-        box('Question Bank Review', 'Review recently generated or existing questions. Admin can edit prompts, options, answer keys, explanations and difficulty; remove a question from play; or delete it permanently. Historical aggregate XP and attempts remain intact.'),
-        box('Daily challenge', 'Daily challenges use grade-eligible Quick Quiz questions from subjects enabled for that grade. A challenge is available only when ten suitable questions can be assembled.'),
+        box('Question review', 'Review approved candidates and complete any missing or defective options. Edit the prompt, four options, correct answer, explanation and difficulty. Approving a candidate moves it to Draft; it does not publish it.'),
+        box('Rejected questions', 'Open the Rejected review queue to inspect candidates retained with their rejection stage and reason. Correct a recoverable question and approve it to Draft, or dismiss it. Rejected questions are not available to players.'),
+        box('Manual questions', 'Use Add Question to create a question yourself. Subject and Grade are dropdowns populated from the existing catalogue; duplicate labels are removed. Complete all four distinct options, select the correct answer and add an explanation. Save creates a Draft only.'),
+        box('Draft publishing', 'Review Drafts and publish only the selected, complete questions. Publishing is a separate Admin action; neither AI generation nor manual entry publishes automatically.'),
+        box('Daily challenge', 'Daily challenges use grade-eligible Quick Quiz questions from subjects enabled for that grade. A challenge is available only when ten suitable published questions can be assembled.'),
         box('AI budget and reservations', 'Daily and monthly INR limits are shared. Interrupted or uncertain provider calls remain reserved for review; verify actual cost before settling them.'),
     ) + bullets([
-        'The subject selector is hidden from Students, Teachers and Admins. Subject remains internal metadata for AI generation, suitability rules and reporting.',
-        'All fourteen named games are available for generation. A game appears to a player only when at least five published questions match its game, grade and enabled subjects.',
-        'Teachers and Admins can enter player mode and select a grade for the current session. This does not edit their LIB profiles. Students use their profile grade; Tina Student selects and saves a school grade.',
-        'The six existing games are retained. The additional games are World Explorer, History Quest, Society & Culture Challenge, Civics & Constitution Challenge, Economics Explorer, Money Matters, Word Builder and Math Sprint.',
-        'Math + Science is a combined course selection; its questions are generated and stored under Mathematics and Science separately.',
-        'The admin screen is summary-only and does not expose individual answers or question-level student history.',
+        'Knowledge Arena question management and publishing are Admin-only. Teachers and students do not receive access to the Admin review queues or manual-entry controls.',
+        'The existing Question Bank and Online Assessment remain separate systems. Do not copy Knowledge Arena questions into their tables or workflows.',
+        'A game appears to a player only when at least five published questions match its game, grade and enabled subjects.',
+        'The subject selector in player mode is not exposed to Students; subject remains internal metadata for suitability and question selection.',
         'Knowledge Arena Game XP is separate from attendance XP, levels, badges, streaks and the existing attendance leaderboard.',
-        'A no-published-questions message indicates that eligible published content is unavailable for that game and grade. Check publication, grade labels, subject and game type before changing student settings.',
-    ]) + note('Keep systems separate', 'Do not use the existing Question Bank / Online Assessment tables or workflows as Knowledge Arena storage. Review database and deployment changes separately; the guide does not authorise production changes.', 'warn'))
+        'The Admin screen is aggregate-only for player performance; it does not expose individual answers or question-level student history.',
+        'A no-published-questions message means eligible published content is unavailable for that game and grade. Check publication status, grade labels, subject and game type before changing student settings.',
+    ]) + note('Draft first; publish deliberately', 'AI-reviewed questions and manually entered questions remain Drafts until an Admin explicitly publishes them. Keep Knowledge Arena separate from the existing Question Bank / Online Assessment.', 'warn'))
 
     g.add('quickref', 'Quick reference', 'Quick reference', 'I want to… where do I go?', table(['I want to…', 'Go to'], [
         ['Log a class', 'Class Log'],
