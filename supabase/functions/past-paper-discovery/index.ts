@@ -32,7 +32,7 @@ function ddgTarget(href: string): string {
   try {
     const u = new URL(decodeEntities(href), "https://html.duckduckgo.com");
     const target = u.searchParams.get("uddg");
-    return target ? decodeURIComponent(target) : u.href;
+    return target || u.href;
   } catch { return ""; }
 }
 function parseSearchResults(html: string, limit: number) {
