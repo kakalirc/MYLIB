@@ -271,26 +271,42 @@
   };
   window.libPPDImport = async function (id) {
     var candidate = state.candidates.find(function (c) { return c.id === id; });
-    if (!candidate) return;
+    if (!candidate) { notify('This discovered paper is no longer in the review queue. Refresh and try again.', true); return; }
     var schoolId = candidate.source_type === 'school' ? val('ppd-school-' + id) : '';
     var boardId = candidate.source_type === 'school' ? '' : val('ppd-board-' + id);
     var gradeId = val('ppd-grade-' + id), subject = val('ppd-subject-' + id).trim();
     var year = Number(val('ppd-year-' + id)), exam = val('ppd-exam-' + id), medium = val('ppd-medium-' + id).trim();
-    if ((!schoolId && !boardId) || !gradeId || !subject || !Number.isInteger(year) || !medium) { notify('Complete Board / School, Class, Subject, Year and Medium before importing.', true); return; }
-    var { error: approvalError } = await sb.from('qb_paper_discovery_candidates').update({
-      status:'approved_for_import', board_id:boardId || null, school_id:schoolId || null, grade_id:gradeId,
-      subject_name:subject, year:year, exam_type:exam, medium:medium, reviewed_by:currentUserId,
-      reviewed_at:new Date().toISOString(), updated_at:new Date().toISOString()
-    }).eq('id', id);
-    if (approvalError) { notify('Could not save review metadata: ' + approvalError.message, true); return; }
-    notify('Importing verified PDF into the existing Past Papers review queue…');
+    if ((!schoolId && !boardId) || !gradeId || !subject || !Number.isInteger(year) || !medium) {
+      notify('Complete Board / School, Class, Subject, Year and Medium before importing.', true); return;
+    }
+    if (candidate.verification_status !== 'verified') {
+      notify('Verify this PDF successfully before importing.', true); return;
+    }
+    notify('Preparing the verified PDF for import…');
     try {
-      var result = await invoke({ action:'import', candidate_id:id, board_id:boardId, school_id:schoolId, grade_id:gradeId, subject_name:subject, year:year, exam_type:exam, medium:medium });
-      state.message = result.message || 'Imported.';
-      state.error = false;
-      state.loaded = false; await loadData(true);
+      // Save the explicit Admin review decision first. Selecting the row also
+      // detects RLS/no-row cases that an UPDATE without SELECT can hide.
+      var approval = await sb.from('qb_paper_discovery_candidates').update({
+        status:'approved_for_import', board_id:boardId || null, school_id:schoolId || null, grade_id:gradeId,
+        subject_name:subject, year:year, exam_type:exam, medium:medium, reviewed_by:currentUserId,
+        reviewed_at:new Date().toISOString(), updated_at:new Date().toISOString()
+      }).eq('id', id).select('id').maybeSingle();
+      if (approval.error) throw new Error('Could not save review metadata: ' + approval.error.message);
+      if (!approval.data) throw new Error('Review metadata was not saved. Check Admin access and refresh the candidate.');
+      notify('Importing verified PDF into the existing Past Papers review queue…');
+      var result = await invoke({ action:'import', candidate_id:id, board_id:boardId, school_id:schoolId,
+        grade_id:gradeId, subject_name:subject, year:year, exam_type:exam, medium:medium });
+      state.message = result.message || 'Imported into Past Papers.';
+      state.error = '';
+      state.loaded = false;
+      await loadData(true);
       if (typeof loadQbSourcePapers === 'function') await loadQbSourcePapers();
-    } catch (e) { state.message = e.message || String(e); state.error = state.message; state.loaded = false; await loadData(true); }
+    } catch (e) {
+      state.message = 'Import failed: ' + (e && e.message ? e.message : String(e));
+      state.error = state.message;
+      state.loaded = false;
+      await loadData(true);
+    }
     if (typeof render === 'function') render();
   };
 
