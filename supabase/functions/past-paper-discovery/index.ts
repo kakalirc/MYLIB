@@ -32,14 +32,11 @@ function ddgTarget(href: string): string {
   try {
     const u = new URL(decodeEntities(href), "https://html.duckduckgo.com");
     const target = u.searchParams.get("uddg");
-    return target ? decodeURIComponent(target) : u.href;
+    return target || u.href;
   } catch { return ""; }
 }
 function parseSearchResults(html: string, limit: number) {
   const rows: Array<{ title: string; url: string; snippet: string; domain: string }> = [];
-  // Attribute order varies between search-provider responses. Parse each anchor
-  // first, then inspect its attributes independently rather than relying on one
-  // exact class/href ordering.
   const anchors = html.match(/<a\b[^>]*>[\s\S]*?<\/a>/gi) || [];
   for (const anchor of anchors) {
     if (rows.length >= limit) break;
@@ -50,25 +47,60 @@ function parseSearchResults(html: string, limit: number) {
     if (!target) continue;
     let parsed: URL;
     try { parsed = new URL(target); } catch { continue; }
-    if (!safeHost(parsed, [parsed.hostname])) continue;
+    if (parsed.protocol !== "https:" || !parsed.hostname || parsed.hostname === "html.duckduckgo.com") continue;
     const title = htmlText(anchor.replace(/^<a\b[^>]*>/i, "").replace(/<\/a>$/i, ""));
+    const tail = html.slice(html.indexOf(anchor) + anchor.length, html.indexOf(anchor) + anchor.length + 1800);
+    const snippetMatch = tail.match(/class\s*=\s*["'][^"']*result__snippet[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/i);
     rows.push({
       title: title.slice(0, 500) || parsed.pathname.split("/").pop() || parsed.hostname,
       url: parsed.href,
-      snippet: "",
+      snippet: snippetMatch ? htmlText(snippetMatch[1]).slice(0, 1200) : "",
       domain: parsed.hostname.toLowerCase().replace(/^www\./, ""),
     });
   }
+  if (!rows.length) {
+    const lower = html.toLowerCase();
+    const challenge = /anomaly-modal|captcha|bot detection|automated queries|unusual traffic|challenge-form|cf-chl-|verify you are human/.test(lower);
+    if (challenge) throw new Error("Search provider returned a bot-check or challenge page.");
+    const explicitEmpty = /no results found|no results for|class=["'][^"']*no-results|result--no-results/.test(lower);
+    if (!explicitEmpty) throw new Error("Search provider returned an unrecognized page; zero results cannot be trusted.");
+  }
   return rows;
 }
-async function searchWeb(query: string, limit = 50) {
-  const res = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(query), {
-    headers: { "User-Agent": "Mozilla/5.0 (compatible; LIBEducationPastPaperDiscovery/1.0)" },
-    signal: AbortSignal.timeout(15000),
+async function searchWeb(query: string, limit = 20, domain?: string) {
+  const targeted = domain ? query + " site:" + domain : query;
+  const res = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(targeted), {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml",
+    },
+    signal: AbortSignal.timeout(12000),
   });
   if (!res.ok) throw new Error("Search provider returned HTTP " + res.status + ".");
   const html = new TextDecoder().decode(await readBounded(res, 2 * 1024 * 1024));
-  return parseSearchResults(html, limit);
+  return parseSearchResults(html, limit).filter((row) => !domain || row.domain === domain || row.domain.endsWith("." + domain));
+}
+async function searchInBatches(sources: any[], query: string, batchSize = 4) {
+  const results: Array<{ title: string; url: string; snippet: string; domain: string; source: any }> = [];
+  const errors: string[] = [];
+  let successfulQueries = 0;
+  for (let i = 0; i < sources.length; i += batchSize) {
+    const batch = sources.slice(i, i + batchSize);
+    const settled = await Promise.all(batch.map(async (source: any) => {
+      try {
+        const rows = await searchWeb(query + " question paper PDF", 8, source.domain);
+        return { source, rows, error: "" };
+      } catch (e) {
+        return { source, rows: [], error: source.domain + ": " + clip((e as Error)?.message || e, 220) };
+      }
+    }));
+    for (const item of settled) {
+      if (item.error) errors.push(item.error);
+      else successfulQueries++;
+      for (const row of item.rows) results.push({ ...row, source: item.source });
+    }
+  }
+  return { results, errors, successfulQueries };
 }
 async function fetchAllowed(urlText: string, domains: string[], accept: string) {
   let url: URL;
@@ -162,36 +194,57 @@ Deno.serve(async (req) => {
     const schoolName = scope === "school" ? clip(body.school_name, 200) : "";
     const searchQuery = [schoolName, query].filter(Boolean).join(" ").slice(0, 500);
     if (searchQuery.length < 2) return reply(400, { error: "Enter a search phrase." });
+
     const { data: sources, error: sourceError } = await admin.from("qb_paper_discovery_sources")
       .select("id,display_name,domain,source_type,trust_level,priority")
-      .eq("enabled", true).order("priority").limit(50);
+      .eq("enabled", true).order("priority").limit(200);
     if (sourceError) return reply(500, { error: "Could not load approved source registry: " + sourceError.message });
     const eligible = (sources || []).filter((s: any) => s.source_type === scope || s.source_type === "education_portal");
-    const { data: run, error: runError } = await admin.from("qb_paper_discovery_runs")
-      .insert({ query_text: searchQuery, filters: { scope, school_name: schoolName || null, search_mode: "broad_web" }, started_by: auth.user.id }).select("id").single();
-    if (runError || !run) return reply(500, { error: "Could not start the discovery run." });
-
-    let results: Array<{title:string;url:string;snippet:string;domain:string}> = [];
-    try {
-      // Broad discovery intentionally includes unregistered education sites.
-      // They remain untrusted until an Admin approves their exact domain.
-      results = await searchWeb(searchQuery + " question paper PDF", 50);
-    } catch (e) {
-      const message = clip((e as Error)?.message || e, 500);
-      await admin.from("qb_paper_discovery_runs").update({ status: "failed", error_message: message, completed_at: new Date().toISOString() }).eq("id", run.id);
-      return reply(502, { error: "Web search failed: " + message, provider: "DuckDuckGo HTML" });
+    const searchTargets = scope === "school"
+      ? eligible.filter((s: any) => s.source_type === "school").slice(0, 16)
+      : eligible.filter((s: any) => s.source_type === "board" || s.source_type === "education_portal");
+    if (scope === "board" && !searchTargets.some((s: any) => s.source_type === "board")) {
+      return reply(400, { error: "No enabled official board sources. Enable at least one board domain." });
     }
 
-    const flattened = results.map((r) => {
-      const matched = eligible.find((source: any) => r.domain === source.domain || r.domain.endsWith("." + source.domain));
+    const { data: run, error: runError } = await admin.from("qb_paper_discovery_runs")
+      .insert({ query_text: searchQuery, filters: { scope, school_name: schoolName || null, search_mode: "targeted_domains_plus_web" }, started_by: auth.user.id }).select("id").single();
+    if (runError || !run) return reply(500, { error: "Could not start the discovery run." });
+
+    const targeted = await searchInBatches(searchTargets, searchQuery, 4);
+    let broadResults: Array<{title:string;url:string;snippet:string;domain:string}> = [];
+    let broadError = "";
+    // Broad fallback is essential for newly discovered sites and domains not yet in the registry.
+    if (targeted.results.length < 5 || scope === "school") {
+      try { broadResults = await searchWeb(searchQuery + " question paper PDF", 40); }
+      catch (e) { broadError = clip((e as Error)?.message || e, 300); }
+    }
+
+    const allRows = [...targeted.results, ...broadResults.map((r) => {
+      const matched = eligible.find((s: any) => r.domain === s.domain || r.domain.endsWith("." + s.domain));
       return { ...r, source: matched || null };
-    });
+    })];
     const unique = new Map<string, any>();
-    for (const row of flattened) if (!unique.has(row.url.toLowerCase())) unique.set(row.url.toLowerCase(), row);
-    const inserts = [...unique.values()].slice(0, 80).map((r) => ({
+    for (const row of allRows) if (!unique.has(row.url.toLowerCase())) unique.set(row.url.toLowerCase(), row);
+    const flattened = [...unique.values()];
+    const providerErrors = [...targeted.errors];
+    if (broadError) providerErrors.push("Broad web search: " + broadError);
+
+    if (!targeted.successfulQueries && !broadResults.length) {
+      const message = providerErrors.join(" | ") || "No search provider returned a usable response.";
+      await admin.from("qb_paper_discovery_runs").update({
+        status: "failed", error_message: clip(message, 1000), completed_at: new Date().toISOString(),
+      }).eq("id", run.id);
+      return reply(502, {
+        error: "Search provider was unavailable or returned an unrecognized response. This is not a genuine zero-result search.",
+        provider: "DuckDuckGo HTML", provider_errors: providerErrors,
+      });
+    }
+
+    const inserts = flattened.slice(0, 80).map((r) => ({
       discovery_run_id: run.id, source_id: r.source?.id || null, source_type: scope,
       source_domain: r.domain, title: r.title, source_url: r.url,
-      pdf_url: /\\.pdf(?:$|[?#])/i.test(r.url) ? r.url : null,
+      pdf_url: /\.pdf(?:$|[?#])/i.test(r.url) ? r.url : null,
       discovered_school_name: scope === "school" ? schoolName || null : null,
       discovery_metadata: {
         snippet: r.snippet,
@@ -199,6 +252,7 @@ Deno.serve(async (req) => {
         source_name: r.source?.display_name || r.domain,
         source_match: r.source ? "approved_registry" : "unregistered_domain",
         search_provider: "DuckDuckGo HTML",
+        search_method: r.source ? "targeted_domain" : "broad_web",
       },
     }));
     let inserted = 0;
@@ -212,12 +266,20 @@ Deno.serve(async (req) => {
       inserted = data?.length || 0;
     }
     const matchedCount = flattened.filter((r) => r.source).length;
-    await admin.from("qb_paper_discovery_runs").update({ status: "completed", results_found: flattened.length, completed_at: new Date().toISOString() }).eq("id", run.id);
+    const runStatus = providerErrors.length && !flattened.length ? "failed" : "completed";
+    await admin.from("qb_paper_discovery_runs").update({
+      status: runStatus, results_found: flattened.length,
+      error_message: providerErrors.length ? clip(providerErrors.join(" | "), 1000) : null,
+      completed_at: new Date().toISOString(),
+    }).eq("id", run.id);
     return reply(200, {
       run_id: run.id, found: flattened.length, new_candidates: inserted,
       approved_source_results: matchedCount, unregistered_source_results: flattened.length - matchedCount,
-      provider: "DuckDuckGo HTML", source_errors: [],
-      message: "Broad web search completed. Unregistered domains require Admin approval before PDF verification.",
+      provider: "DuckDuckGo HTML", provider_successful_queries: targeted.successfulQueries,
+      provider_errors: providerErrors,
+      message: providerErrors.length
+        ? "Search completed with partial provider failures. Review the provider diagnostics before concluding no papers exist."
+        : "Search completed. Review candidates before importing.",
     });
   }
 
