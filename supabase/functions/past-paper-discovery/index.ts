@@ -144,7 +144,7 @@ function linkRows(html: string, baseUrl: string, source: any, terms: string[], l
     try { target = new URL(decodeEntities(href), baseUrl); } catch { continue; }
     if (!safeHost(target, [source.domain])) continue;
     const isPdf = /\.pdf(?:$|[?#])/i.test(target.href);
-    if (!isPdf && !matchesQuery(label + " " + target.pathname, terms)) continue;
+    if (!matchesQuery(label + " " + target.pathname, terms)) continue;
     if (!isPdf && !/(question|paper|sample|specimen|exam|academic|download|resource)/i.test(label + " " + target.pathname)) continue;
     rows.push({ title: (label || target.pathname.split("/").pop() || source.display_name).slice(0, 500),
       url: target.href, snippet: "Official source page · " + source.display_name,
@@ -195,13 +195,19 @@ async function crawlCbseOfficial(source: any, query: string): Promise<DiscoveryR
       for (const page of [...new Set(pages)]) {
         const pageRes = page === url ? { response: new Response(html), url } : await fetchAllowed(page, [source.domain], "text/html,application/xhtml+xml");
         const pageHtml = new TextDecoder().decode(await readBounded(pageRes.response, 2 * 1024 * 1024));
-        for (const link of pageHtml.matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
-          const label = htmlText(link[2]);
-          if (!matchesQuery(label, terms)) continue;
-          let target: URL; try { target = new URL(decodeEntities(link[1]), pageRes.url); } catch { continue; }
-          if (!safeHost(target, [source.domain]) || !/\.pdf(?:$|[?#])/i.test(target.href)) continue;
-          rows.push({ title: "Class " + cls + " Sample Paper — " + label, url: target.href,
-            snippet: "Official CBSE sample paper / marking scheme", domain: target.hostname.toLowerCase(), source });
+        const tableRows = pageHtml.match(/<tr\b[\s\S]*?<\/tr>/gi) || [];
+        for (const row of tableRows) {
+          const cells = [...row.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)];
+          if (cells.length < 2) continue;
+          const subject = htmlText(cells[0][1]);
+          if (!subject || /subject/i.test(subject) || !matchesQuery(subject, terms)) continue;
+          // Column two contains the sample paper; the next column is the marking scheme.
+          for (const link of cells[1][1].matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+            let target: URL; try { target = new URL(decodeEntities(link[1]), pageRes.url); } catch { continue; }
+            if (!safeHost(target, [source.domain]) || !/\.pdf(?:$|[?#])/i.test(target.href)) continue;
+            rows.push({ title: "Class " + cls + " Sample Paper — " + subject, url: target.href,
+              snippet: "Official CBSE sample question paper", domain: target.hostname.toLowerCase(), source });
+          }
         }
       }
     }
