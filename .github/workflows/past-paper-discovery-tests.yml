@@ -19,6 +19,6 @@ jobs:
         with:
           deno-version: v2.x
       - name: Run ZIP archive unit tests
-        run: deno test supabase/functions/past-paper-discovery/archive_test.ts
+        run: deno test supabase/functions/past-paper-discovery/archive_test.ts supabase/functions/past-paper-discovery/source-domain_test.ts
       - name: Type-check Past Paper discovery Edge Function
         run: deno check supabase/functions/past-paper-discovery/index.ts
