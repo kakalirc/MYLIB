@@ -188,42 +188,60 @@ async function crawlCbseOfficial(source: any, query: string): Promise<DiscoveryR
       }
     }
   } else {
-    for (const cls of ["X", "XII"]) {
-      if (/\b(10|x)\b/i.test(query) && cls !== "X") continue;
-      if (/\b(12|xii)\b/i.test(query) && cls !== "XII") continue;
-      const indexUrl = "https://cbseacademic.nic.in/SQP_CLASS" + cls + ".html";
-      const { response, url } = await fetchAllowed(indexUrl, [source.domain], "text/html,application/xhtml+xml");
-      const html = new TextDecoder().decode(await readBounded(response, 2 * 1024 * 1024));
-      const anchors = [...html.matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
-      const pages = [url, ...anchors.map((m) => { try { return new URL(decodeEntities(m[1]), url).href; } catch { return ""; } })
-        .filter((u) => { try { return /SQP_CLASS(?:X|XII).*\.html/i.test(new URL(u).pathname); } catch { return false; } })].slice(0, 10);
-      for (const page of [...new Set(pages)]) {
-        const pageRes = page === url ? { response: new Response(html), url } : await fetchAllowed(page, [source.domain], "text/html,application/xhtml+xml");
-        const pageHtml = new TextDecoder().decode(await readBounded(pageRes.response, 2 * 1024 * 1024));
-        const tableRows = pageHtml.match(/<tr\b[\s\S]*?<\/tr>/gi) || [];
-        for (const row of tableRows) {
-          const cells = [...row.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)];
-          if (cells.length < 2) continue;
-          const subject = htmlText(cells[0][1]);
-          if (!subject || /subject/i.test(subject) || !matchesQuery(subject, terms)) continue;
-          // Column two contains the sample paper; the next column is the marking scheme.
-          for (const link of cells[1][1].matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
-            let target: URL; try { target = new URL(decodeEntities(link[1]), pageRes.url); } catch { continue; }
-            if (!safeHost(target, [source.domain]) || !/\.pdf(?:$|[?#])/i.test(target.href)) continue;
-            let markingSchemeUrl = "";
-            if (cells.length >= 3) {
-              const msLink = cells[2][1].match(/<a\b[^>]*href\s*=\s*["']([^"']+)["']/i)?.[1];
-              if (msLink) {
-                try {
-                  const msTarget = new URL(decodeEntities(msLink), pageRes.url);
-                  if (safeHost(msTarget, [source.domain]) && /\.pdf(?:$|[?#])/i.test(msTarget.href)) markingSchemeUrl = msTarget.href;
-                } catch { /* Ignore malformed marking-scheme links. */ }
+    // CBSE Academic publishes year-specific pages and maintains an archive index.
+    // The old unversioned SQP_CLASSX.html / SQP_CLASSXII.html paths return 404.
+    const archiveUrl = "https://cbseacademic.nic.in/sqp_archive.html";
+    const archive = await fetchAllowed(archiveUrl, [source.domain], "text/html,application/xhtml+xml");
+    const archiveHtml = new TextDecoder().decode(await readBounded(archive.response, 2 * 1024 * 1024));
+    const wantedClasses = /\b(12|xii)\b/i.test(query) ? ["XII"]
+      : /\b(10|x)\b/i.test(query) ? ["X"] : ["X", "XII"];
+    const archiveLinks = [...archiveHtml.matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
+    for (const cls of wantedClasses) {
+      const classPattern = new RegExp("SQP_CLASS" + cls + "_(\\d{4}-\\d{2})\\.html", "i");
+      const pages = archiveLinks.map((m) => {
+        let href = ""; try { href = new URL(decodeEntities(m[1]), archive.url).href; } catch { return null; }
+        const match = new URL(href).pathname.match(classPattern);
+        return match ? { url: href, year: match[1] } : null;
+      }).filter((x): x is {url:string;year:string} => !!x)
+        .sort((a, b) => b.year.localeCompare(a.year)).slice(0, 5);
+      // If the archive index markup changes, try the currently published session pages.
+      if (!pages.length) {
+        for (const year of ["2026-27", "2025-26", "2024-25"]) {
+          pages.push({ url: "https://cbseacademic.nic.in/SQP_CLASS" + cls + "_" + year + ".html", year });
+        }
+      }
+      for (const page of pages) {
+        try {
+          const pageRes = await fetchAllowed(page.url, [source.domain], "text/html,application/xhtml+xml");
+          const pageHtml = new TextDecoder().decode(await readBounded(pageRes.response, 2 * 1024 * 1024));
+          const tableRows = pageHtml.match(/<tr\b[\s\S]*?<\/tr>/gi) || [];
+          for (const row of tableRows) {
+            const cells = [...row.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)];
+            if (cells.length < 2) continue;
+            const subject = htmlText(cells[0][1]);
+            if (!subject || /subject/i.test(subject) || !matchesQuery(subject, terms)) continue;
+            // Column two contains the sample paper; the next column is the marking scheme.
+            for (const link of cells[1][1].matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+              let target: URL; try { target = new URL(decodeEntities(link[1]), pageRes.url); } catch { continue; }
+              if (!safeHost(target, [source.domain]) || !/\.pdf(?:$|[?#])/i.test(target.href)) continue;
+              let markingSchemeUrl = "";
+              if (cells.length >= 3) {
+                const msLink = cells[2][1].match(/<a\b[^>]*href\s*=\s*["']([^"']+)["']/i)?.[1];
+                if (msLink) {
+                  try {
+                    const msTarget = new URL(decodeEntities(msLink), pageRes.url);
+                    if (safeHost(msTarget, [source.domain]) && /\.pdf(?:$|[?#])/i.test(msTarget.href)) markingSchemeUrl = msTarget.href;
+                  } catch { /* Ignore malformed marking-scheme links. */ }
+                }
               }
+              rows.push({ title: "Class " + cls + " Sample Paper " + page.year + " — " + subject, url: target.href,
+                snippet: "Official CBSE Academic sample question paper", domain: target.hostname.toLowerCase(), source,
+                marking_scheme_url: markingSchemeUrl } as any);
             }
-            rows.push({ title: "Class " + cls + " Sample Paper — " + subject, url: target.href,
-              snippet: "Official CBSE sample question paper", domain: target.hostname.toLowerCase(), source,
-              marking_scheme_url: markingSchemeUrl } as any);
           }
+        } catch (e) {
+          // An archived session may be withdrawn; keep searching the other published sessions.
+          if (pages.length === 1) throw e;
         }
       }
     }
@@ -428,7 +446,7 @@ Deno.serve(async (req) => {
         .insert({ query_text: query, filters: { scope, school_name: schoolName || null,
           search_mode: "targeted_domains_plus_web_batched", discovery_progress: {
             next_offset: 0, successful_queries: 0, provider_errors: [], results_found: 0, new_candidates: 0,
-          } }, started_by: auth.user.id }).select("*").single();
+          } }, heartbeat_at: new Date().toISOString(), started_by: auth.user.id }).select("*").single();
       if (createError || !created) return reply(500, { error: "Could not start the discovery run." });
       run = created;
       runId = created.id;
@@ -453,7 +471,7 @@ Deno.serve(async (req) => {
         } };
         const { data: restarted, error: restartError } = await admin.from("qb_paper_discovery_runs")
           .update({ status: "running", filters: resetFilters, results_found: preservedCount,
-            error_message: null, completed_at: null, started_at: new Date().toISOString() })
+            heartbeat_at: new Date().toISOString(), error_message: null, completed_at: null, started_at: new Date().toISOString() })
           .eq("id", runId).eq("status", existing.status).select("*").maybeSingle();
         if (restartError || !restarted) return reply(409, { error: "The run changed while restart was requested. Refresh Recent searches and try again." });
         run = restarted;
@@ -464,7 +482,7 @@ Deno.serve(async (req) => {
             return reply(409, { error: "This run has no saved checkpoint. Use Restart from beginning to run it again." });
           }
           const { data: resumed, error: resumeError } = await admin.from("qb_paper_discovery_runs")
-            .update({ status: "running", error_message: null, completed_at: null })
+            .update({ status: "running", heartbeat_at: new Date().toISOString(), error_message: null, completed_at: null })
             .eq("id", runId).eq("status", "failed").select("*").maybeSingle();
           if (resumeError || !resumed) return reply(409, { error: "The run changed while resume was requested. Refresh Recent searches." });
           run = resumed;
@@ -472,7 +490,20 @@ Deno.serve(async (req) => {
           return reply(200, { run_id: runId, complete: true,
             found: existing.results_found || 0, new_candidates: 0, message: "This discovery run is already complete." });
         } else {
-          run = existing;
+          // A previous invocation may have been killed by the Edge Function CPU limit.
+          // Claim only an idle or expired lease; the conditional update prevents two
+          // concurrent Resume requests from processing the same source checkpoint.
+          const staleBefore = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+          const leaseAt = new Date().toISOString();
+          const { data: claimed, error: claimError } = await admin.from("qb_paper_discovery_runs")
+            .update({ heartbeat_at: leaseAt })
+            .eq("id", runId).eq("status", "running")
+            .or("heartbeat_at.is.null,heartbeat_at.lt." + staleBefore)
+            .select("*").maybeSingle();
+          if (claimError || !claimed) {
+            return reply(409, { error: "This discovery run is already being processed. If its previous attempt timed out, wait five minutes and select Resume again." });
+          }
+          run = claimed;
         }
       }
     }
@@ -486,12 +517,12 @@ Deno.serve(async (req) => {
       ? eligible.filter((s: any) => s.source_type === "school").slice(0, 16)
       : eligible.filter((s: any) => s.source_type === "board" || s.source_type === "education_portal");
     if (scope === "board" && !searchTargets.some((s: any) => s.source_type === "board")) {
-      await admin.from("qb_paper_discovery_runs").update({ status: "failed", error_message: "No enabled official board sources.",
+      await admin.from("qb_paper_discovery_runs").update({ status: "failed", heartbeat_at: null, error_message: "No enabled official board sources.",
         completed_at: new Date().toISOString() }).eq("id", runId);
       return reply(400, { error: "No enabled official board sources. Enable at least one board domain." });
     }
     if (!searchTargets.length) {
-      await admin.from("qb_paper_discovery_runs").update({ status: "failed", error_message: "No enabled sources match this search scope.",
+      await admin.from("qb_paper_discovery_runs").update({ status: "failed", heartbeat_at: null, error_message: "No enabled sources match this search scope.",
         completed_at: new Date().toISOString() }).eq("id", runId);
       return reply(400, { error: "No enabled sources match this search scope." });
     }
@@ -569,7 +600,7 @@ Deno.serve(async (req) => {
       const { data, error } = await admin.from("qb_paper_discovery_candidates")
         .upsert(inserts, { onConflict: "source_url", ignoreDuplicates: true }).select("id");
       if (error) {
-        await admin.from("qb_paper_discovery_runs").update({ status: "failed",
+        await admin.from("qb_paper_discovery_runs").update({ status: "failed", heartbeat_at: null,
           error_message: "Could not save search results: " + error.message, completed_at: new Date().toISOString() }).eq("id", runId);
         return reply(500, { error: "Could not save search results: " + error.message });
       }
@@ -580,7 +611,8 @@ Deno.serve(async (req) => {
     const nextProgress = { next_offset: nextOffset, successful_queries: successfulQueries,
       provider_errors: providerErrors.slice(0, 80), results_found: foundTotal, new_candidates: insertedTotal };
     const update: any = { filters: { ...run.filters, discovery_progress: nextProgress },
-      results_found: foundTotal, error_message: providerErrors.length ? clip(providerErrors.join(" | "), 1000) : null };
+      results_found: foundTotal, heartbeat_at: null,
+      error_message: providerErrors.length ? clip(providerErrors.join(" | "), 1000) : null };
     if (complete) {
       update.status = successfulQueries > 0 || foundTotal > 0 ? "completed" : "failed";
       update.completed_at = new Date().toISOString();
