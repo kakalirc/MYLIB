@@ -188,42 +188,60 @@ async function crawlCbseOfficial(source: any, query: string): Promise<DiscoveryR
       }
     }
   } else {
-    for (const cls of ["X", "XII"]) {
-      if (/\b(10|x)\b/i.test(query) && cls !== "X") continue;
-      if (/\b(12|xii)\b/i.test(query) && cls !== "XII") continue;
-      const indexUrl = "https://cbseacademic.nic.in/SQP_CLASS" + cls + ".html";
-      const { response, url } = await fetchAllowed(indexUrl, [source.domain], "text/html,application/xhtml+xml");
-      const html = new TextDecoder().decode(await readBounded(response, 2 * 1024 * 1024));
-      const anchors = [...html.matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
-      const pages = [url, ...anchors.map((m) => { try { return new URL(decodeEntities(m[1]), url).href; } catch { return ""; } })
-        .filter((u) => { try { return /SQP_CLASS(?:X|XII).*\.html/i.test(new URL(u).pathname); } catch { return false; } })].slice(0, 10);
-      for (const page of [...new Set(pages)]) {
-        const pageRes = page === url ? { response: new Response(html), url } : await fetchAllowed(page, [source.domain], "text/html,application/xhtml+xml");
-        const pageHtml = new TextDecoder().decode(await readBounded(pageRes.response, 2 * 1024 * 1024));
-        const tableRows = pageHtml.match(/<tr\b[\s\S]*?<\/tr>/gi) || [];
-        for (const row of tableRows) {
-          const cells = [...row.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)];
-          if (cells.length < 2) continue;
-          const subject = htmlText(cells[0][1]);
-          if (!subject || /subject/i.test(subject) || !matchesQuery(subject, terms)) continue;
-          // Column two contains the sample paper; the next column is the marking scheme.
-          for (const link of cells[1][1].matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
-            let target: URL; try { target = new URL(decodeEntities(link[1]), pageRes.url); } catch { continue; }
-            if (!safeHost(target, [source.domain]) || !/\.pdf(?:$|[?#])/i.test(target.href)) continue;
-            let markingSchemeUrl = "";
-            if (cells.length >= 3) {
-              const msLink = cells[2][1].match(/<a\b[^>]*href\s*=\s*["']([^"']+)["']/i)?.[1];
-              if (msLink) {
-                try {
-                  const msTarget = new URL(decodeEntities(msLink), pageRes.url);
-                  if (safeHost(msTarget, [source.domain]) && /\.pdf(?:$|[?#])/i.test(msTarget.href)) markingSchemeUrl = msTarget.href;
-                } catch { /* Ignore malformed marking-scheme links. */ }
+    // CBSE Academic publishes year-specific pages and maintains an archive index.
+    // The old unversioned SQP_CLASSX.html / SQP_CLASSXII.html paths return 404.
+    const archiveUrl = "https://cbseacademic.nic.in/sqp_archive.html";
+    const archive = await fetchAllowed(archiveUrl, [source.domain], "text/html,application/xhtml+xml");
+    const archiveHtml = new TextDecoder().decode(await readBounded(archive.response, 2 * 1024 * 1024));
+    const wantedClasses = /\\b(12|xii)\\b/i.test(query) ? ["XII"]
+      : /\\b(10|x)\\b/i.test(query) ? ["X"] : ["X", "XII"];
+    const archiveLinks = [...archiveHtml.matchAll(/<a\\b[^>]*href\\s*=\\s*["']([^"']+)["'][^>]*>([\\s\\S]*?)<\\/a>/gi)];
+    for (const cls of wantedClasses) {
+      const classPattern = new RegExp("SQP_CLASS" + cls + "_(\\\\d{4}-\\\\d{2})\\\\.html", "i");
+      const pages = archiveLinks.map((m) => {
+        let href = ""; try { href = new URL(decodeEntities(m[1]), archive.url).href; } catch { return null; }
+        const match = new URL(href).pathname.match(classPattern);
+        return match ? { url: href, year: match[1] } : null;
+      }).filter((x): x is {url:string;year:string} => !!x)
+        .sort((a, b) => b.year.localeCompare(a.year)).slice(0, 5);
+      // If the archive index markup changes, try the currently published session pages.
+      if (!pages.length) {
+        for (const year of ["2026-27", "2025-26", "2024-25"]) {
+          pages.push({ url: "https://cbseacademic.nic.in/SQP_CLASS" + cls + "_" + year + ".html", year });
+        }
+      }
+      for (const page of pages) {
+        try {
+          const pageRes = await fetchAllowed(page.url, [source.domain], "text/html,application/xhtml+xml");
+          const pageHtml = new TextDecoder().decode(await readBounded(pageRes.response, 2 * 1024 * 1024));
+          const tableRows = pageHtml.match(/<tr\\b[\\s\\S]*?<\\/tr>/gi) || [];
+          for (const row of tableRows) {
+            const cells = [...row.matchAll(/<td\\b[^>]*>([\\s\\S]*?)<\\/td>/gi)];
+            if (cells.length < 2) continue;
+            const subject = htmlText(cells[0][1]);
+            if (!subject || /subject/i.test(subject) || !matchesQuery(subject, terms)) continue;
+            // Column two contains the sample paper; the next column is the marking scheme.
+            for (const link of cells[1][1].matchAll(/<a\\b[^>]*href\\s*=\\s*["']([^"']+)["'][^>]*>([\\s\\S]*?)<\\/a>/gi)) {
+              let target: URL; try { target = new URL(decodeEntities(link[1]), pageRes.url); } catch { continue; }
+              if (!safeHost(target, [source.domain]) || !/\\.pdf(?:$|[?#])/i.test(target.href)) continue;
+              let markingSchemeUrl = "";
+              if (cells.length >= 3) {
+                const msLink = cells[2][1].match(/<a\\b[^>]*href\\s*=\\s*["']([^"']+)["']/i)?.[1];
+                if (msLink) {
+                  try {
+                    const msTarget = new URL(decodeEntities(msLink), pageRes.url);
+                    if (safeHost(msTarget, [source.domain]) && /\\.pdf(?:$|[?#])/i.test(msTarget.href)) markingSchemeUrl = msTarget.href;
+                  } catch { /* Ignore malformed marking-scheme links. */ }
+                }
               }
+              rows.push({ title: "Class " + cls + " Sample Paper " + page.year + " — " + subject, url: target.href,
+                snippet: "Official CBSE Academic sample question paper", domain: target.hostname.toLowerCase(), source,
+                marking_scheme_url: markingSchemeUrl } as any);
             }
-            rows.push({ title: "Class " + cls + " Sample Paper — " + subject, url: target.href,
-              snippet: "Official CBSE sample question paper", domain: target.hostname.toLowerCase(), source,
-              marking_scheme_url: markingSchemeUrl } as any);
           }
+        } catch (e) {
+          // An archived session may be withdrawn; keep searching the other published sessions.
+          if (pages.length === 1) throw e;
         }
       }
     }
