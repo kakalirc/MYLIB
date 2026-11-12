@@ -93,7 +93,7 @@ create table if not exists public.qb_paper_discovery_candidates (
   )
 );
 create unique index if not exists qb_paper_discovery_candidates_source_url_uidx
-  on public.qb_paper_discovery_candidates (lower(source_url));
+  on public.qb_paper_discovery_candidates (source_url);
 create index if not exists qb_paper_discovery_candidates_review_queue_idx
   on public.qb_paper_discovery_candidates (status, discovered_at desc);
 create index if not exists qb_paper_discovery_candidates_school_lookup_idx
