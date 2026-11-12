@@ -129,7 +129,7 @@
     state.searchBusy = true; state.message = 'Searching the wider web…'; state.error = ''; if (typeof render === 'function') render();
     try {
       var result = await invoke({ action:'search', query:query, scope:scope, school_name:state.lastSchool });
-      state.message = 'Broad web search complete (' + (result.provider || 'web search') + '): ' + result.found + ' results found; ' + result.new_candidates + ' new candidates saved. Approved sources: ' + (result.approved_source_results || 0) + '; new/unregistered domains: ' + (result.unregistered_source_results || 0) + '. Unregistered domains need Admin approval before PDF verification.';
+      state.message = 'Search complete (' + (result.provider || 'web search') + '): ' + result.found + ' results found; ' + result.new_candidates + ' new candidates saved. Approved sources: ' + (result.approved_source_results || 0) + '; new/unregistered domains: ' + (result.unregistered_source_results || 0) + '.' + (result.provider_errors && result.provider_errors.length ? ' Provider warnings: ' + result.provider_errors.slice(0, 3).join(' | ') : '') + ' Unregistered domains need Admin approval before PDF verification.';
       state.loaded = false; await loadData(true);
     } catch (e) { state.message = e.message || String(e); state.error = state.message; }
     finally { state.searchBusy = false; if (typeof render === 'function') render(); }
