@@ -3,6 +3,7 @@
 // Verification is restricted to enabled source domains; imports use the existing qb_source_papers workflow.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { getPdfZipMember, listPdfMembersFromZip } from "./archive.ts";
+import { matchesApprovedSourceDomain } from "./source-domain.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -689,7 +690,7 @@ Deno.serve(async (req) => {
   if (candidateError || !candidate) return reply(404, { error: "Candidate not found." });
   const { data: sourceRows } = await admin.from("qb_paper_discovery_sources").select("domain").eq("enabled", true);
   const domains = (sourceRows || []).map((s: any) => s.domain);
-  if (!domains.includes(candidate.source_domain)) return reply(400, { error: "This source is no longer enabled." });
+  if (!matchesApprovedSourceDomain(candidate.source_domain, domains)) return reply(400, { error: "This source is no longer enabled. Enable its registered domain in Approved sources, then retry verification." });
 
   if (action === "verify") {
     try {
