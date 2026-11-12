@@ -105,7 +105,7 @@
       + '<select id="ppd-scope" onchange="libPPDSetScope(this.value)"><option value="board"' + (state.scope === 'board' ? ' selected' : '') + '>Board papers</option><option value="school"' + (state.scope === 'school' ? ' selected' : '') + '>Individual school papers</option></select>'
       + '<input id="ppd-query" placeholder="e.g. CBSE Class 10 Sanskrit question paper 2025" value="' + esc(state.lastQuery || '') + '">'
       + '<input id="ppd-school-name" placeholder="School name (optional)" value="' + esc(state.lastSchool || '') + '">'
-      + '<button class="btn-small btn-primary" onclick="libPPDSearch()" ' + (state.searchBusy ? 'disabled' : '') + '>' + (state.searchBusy ? 'Searching…' : (state.scope === 'school' ? 'Search the web' : 'Search approved websites')) + '</button></div>'
+      + '<button class="btn-small btn-primary" onclick="libPPDSearch()" ' + (state.searchBusy ? 'disabled' : '') + '>' + (state.searchBusy ? 'Searching…' : ('Search the web')) + '</button></div>'
       + '<p class="hint">Search results are candidates only. No paper enters the Question Bank until you verify its PDF and explicitly import it.</p>'
       + (state.message ? '<div class="hint" style="color:' + (state.error ? 'var(--brick)' : 'var(--forest)') + ';margin:8px 0">' + esc(state.message) + '</div>' : '') + '</div>';
     var candidates = '<div class="lib-ppd-section"><div class="lib-ppd-title"><h3>Discovered papers (' + state.candidates.length + ')</h3><button class="btn-small" onclick="libPPDRefresh()">Refresh</button></div>'
@@ -126,10 +126,10 @@
     var scope = val('ppd-scope') || state.scope;
     if (query.length < 2) { notify('Enter at least two characters to search.', true); return; }
     state.scope = scope; state.lastQuery = query; state.lastSchool = val('ppd-school-name');
-    state.searchBusy = true; state.message = 'Searching approved domains…'; state.error = ''; if (typeof render === 'function') render();
+    state.searchBusy = true; state.message = 'Searching the wider web…'; state.error = ''; if (typeof render === 'function') render();
     try {
       var result = await invoke({ action:'search', query:query, scope:scope, school_name:state.lastSchool });
-      state.message = 'Search complete: ' + result.found + ' results found; ' + result.new_candidates + ' new candidates saved.';
+      state.message = 'Broad web search complete (' + (result.provider || 'web search') + '): ' + result.found + ' results found; ' + result.new_candidates + ' new candidates saved. Approved sources: ' + (result.approved_source_results || 0) + '; new/unregistered domains: ' + (result.unregistered_source_results || 0) + '. Unregistered domains need Admin approval before PDF verification.';
       state.loaded = false; await loadData(true);
     } catch (e) { state.message = e.message || String(e); state.error = state.message; }
     finally { state.searchBusy = false; if (typeof render === 'function') render(); }
