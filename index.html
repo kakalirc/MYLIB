@@ -25092,8 +25092,9 @@ function renderAdminQuestionBank() {
     ${currentRole === 'Admin' ? `<div class="lib-pp-method-tabs" role="tablist" aria-label="Past paper collection method" style="display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 12px">
       <button type="button" class="btn-small ${(window.qbCollectionMethod || 'online')==='online'?'btn-primary':''}" role="tab" aria-selected="${(window.qbCollectionMethod || 'online')==='online'}" onclick="window.qbCollectionMethod='online';render()">Discover papers online</button>
       <button type="button" class="btn-small ${window.qbCollectionMethod==='upload'?'btn-primary':''}" role="tab" aria-selected="${window.qbCollectionMethod==='upload'}" onclick="window.qbCollectionMethod='upload';render()">Upload from computer</button>
+      <button type="button" class="btn-small ${window.qbCollectionMethod==='manage'?'btn-primary':''}" role="tab" aria-selected="${window.qbCollectionMethod==='manage'}" onclick="window.qbCollectionMethod='manage';render()">Review &amp; manage papers</button>
     </div>
-    <div id="lib-pp-online-panel" role="tabpanel" style="${window.qbCollectionMethod==='upload'?'display:none':''}">
+    <div id="lib-pp-online-panel" role="tabpanel" style="${(window.qbCollectionMethod || 'online')==='online'?'':'display:none'}">
       <div style="padding:16px;border:1px solid var(--line);border-radius:13px;background:linear-gradient(135deg,rgba(56,104,70,.10),rgba(56,104,70,.025))">
         <div style="font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--forest);margin-bottom:7px">Primary collection method</div>
         <h3 style="margin:0 0 6px;font-family:Zilla Slab,serif">Discover papers online</h3>
@@ -25110,11 +25111,9 @@ function renderAdminQuestionBank() {
       </div>
     </div>` : ''}
     ${qbSourceUploadMsg ? `<div class="hint" style="color:var(--brick);margin:8px 0">${esc(qbSourceUploadMsg)}</div>` : ''}
-    ${currentRole === 'Admin' && qbSourceUploadOpen ? qbSourceUploaderHtml() : ''}
+    ${currentRole === 'Admin' && window.qbCollectionMethod === 'upload' && qbSourceUploadOpen ? qbSourceUploaderHtml() : ''}
     ${qbMsg ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${esc(qbMsg)}</div>` : ''}
-    ${qbSourcePendingReviewHtml()}
-    ${qbSourcePapersHtml()}
-    ${qbSourceReviewHistoryHtml()}
+    ${window.qbCollectionMethod === 'manage' ? qbSourcePendingReviewHtml() + qbSourcePapersHtml() + qbSourceReviewHistoryHtml() : ''}
     ${currentRole === 'Admin' ? '</div>' : ''}
   </div>`;
 
