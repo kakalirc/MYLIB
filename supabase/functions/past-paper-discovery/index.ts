@@ -2,6 +2,7 @@
 // Board search uses Admin-approved domains; school search discovers new hosts that require Admin approval before PDF fetch.
 // Verification is restricted to enabled source domains; imports use the existing qb_source_papers workflow.
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { getPdfZipMember, listPdfMembersFromZip } from "./archive.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -81,7 +82,7 @@ async function searchWeb(query: string, limit = 20, domain?: string) {
   return parseSearchResults(html, limit).filter((row) => !domain || row.domain === domain || row.domain.endsWith("." + domain));
 }
 async function searchInBatches(sources: any[], query: string, batchSize = 4) {
-  const results: Array<{ title: string; url: string; snippet: string; domain: string; source: any }> = [];
+  const results: Array<{ title: string; url: string; snippet: string; domain: string; source: any; archive_member?: string }> = [];
   const errors: string[] = [];
   let successfulQueries = 0;
   for (let i = 0; i < sources.length; i += batchSize) {
@@ -123,6 +124,226 @@ async function fetchAllowed(urlText: string, domains: string[], accept: string) 
   }
   throw new Error("Too many redirects.");
 }
+type DiscoveryRow = {title:string;url:string;snippet:string;domain:string;source:any};
+function queryTerms(query: string): string[] {
+  return query.toLowerCase().replace(/\b(cbse|cisce|icse|isc|question papers?|previous year|past papers?|sample papers?|specimen|pdf|class|grade)\b/g, " ")
+    .replace(/\b(x|xii|10|12)\b/g, " ").split(/[^a-z0-9]+/).filter((x) => x.length > 1);
+}
+function matchesQuery(label: string, terms: string[]): boolean {
+  const value = label.toLowerCase();
+  return !terms.length || terms.some((term) => value.includes(term));
+}
+function linkRows(html: string, baseUrl: string, source: any, terms: string[], limit = 60): DiscoveryRow[] {
+  const rows: DiscoveryRow[] = [];
+  const anchors = html.match(/<a\b[^>]*>[\s\S]*?<\/a>/gi) || [];
+  for (const anchor of anchors) {
+    if (rows.length >= limit) break;
+    const href = anchor.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1] || "";
+    if (!href) continue;
+    const label = htmlText(anchor.replace(/^<a\b[^>]*>/i, "").replace(/<\/a>$/i, ""));
+    const anchorAt = html.indexOf(anchor);
+    const rowStart = html.lastIndexOf("<tr", anchorAt);
+    const rowEnd = html.indexOf("</tr>", anchorAt);
+    const context = rowStart >= 0 && rowEnd > anchorAt ? htmlText(html.slice(rowStart, rowEnd + 5)) : "";
+    let target: URL;
+    try { target = new URL(decodeEntities(href), baseUrl); } catch { continue; }
+    if (!safeHost(target, [source.domain])) continue;
+    const isPdf = /\.pdf(?:$|[?#])/i.test(target.href);
+    if (!matchesQuery(label + " " + context + " " + target.pathname, terms)) continue;
+    if (!isPdf && !/(question|paper|sample|specimen|exam|academic|download|resource)/i.test(label + " " + target.pathname)) continue;
+    rows.push({ title: (label || target.pathname.split("/").pop() || source.display_name).slice(0, 500),
+      url: target.href, snippet: "Official source page · " + source.display_name + (context ? " · " + context.slice(0, 260) : ""),
+      domain: target.hostname.toLowerCase().replace(/^www\./, ""), source });
+  }
+  return rows;
+}
+async function crawlCbseOfficial(source: any, query: string): Promise<DiscoveryRow[]> {
+  const terms = queryTerms(query);
+  const rows: DiscoveryRow[] = [];
+  if (source.domain === "cbse.gov.in") {
+    const landing = "https://www.cbse.gov.in/cbsenew/question-paper.html";
+    const { response, url } = await fetchAllowed(landing, [source.domain], "text/html,application/xhtml+xml");
+    const html = new TextDecoder().decode(await readBounded(response, 2 * 1024 * 1024));
+    const tableRows = html.match(/<tr\b[\s\S]*?<\/tr>/gi) || [];
+    let offset = 0;
+    for (const row of tableRows) {
+      const position = html.indexOf(row, offset); offset = position + row.length;
+      const before = html.slice(Math.max(0, position - 12000), position);
+      const headings = [...before.matchAll(/Question Paper for\s*([^<\n]{0,180})/gi)];
+      const section = headings.length ? htmlText(headings[headings.length - 1][1]) : "";
+      const classMatch = section.match(/class\s*(xii|x|12|10)/i);
+      const wantedClass = /\b(12|xii)\b/i.test(query) ? "xii" : /\b(10|x)\b/i.test(query) ? "x" : "";
+      const actualClass = classMatch ? (/xii|12/i.test(classMatch[1]) ? "xii" : "x") : "";
+      if (wantedClass && actualClass && wantedClass !== actualClass) continue;
+      const cells = [...row.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)];
+      if (cells.length < 2) continue;
+      const subject = htmlText(cells[0][1]).toUpperCase();
+      if (!subject || /SUBJECT NAME|TOTAL/i.test(subject) || !matchesQuery(subject, terms)) continue;
+      const links = [...cells[1][1].matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
+      for (const link of links) {
+        let target: URL; try { target = new URL(decodeEntities(link[1]), url); } catch { continue; }
+        if (!safeHost(target, [source.domain]) || !/\.pdf(?:$|[?#])/i.test(target.href)) continue;
+        rows.push({ title: [section, subject].filter(Boolean).join(" — "), url: target.href,
+          snippet: "Official CBSE previous-year paper · " + subject, domain: target.hostname.toLowerCase(), source });
+      }
+    }
+  } else {
+    for (const cls of ["X", "XII"]) {
+      if (/\b(10|x)\b/i.test(query) && cls !== "X") continue;
+      if (/\b(12|xii)\b/i.test(query) && cls !== "XII") continue;
+      const indexUrl = "https://cbseacademic.nic.in/SQP_CLASS" + cls + ".html";
+      const { response, url } = await fetchAllowed(indexUrl, [source.domain], "text/html,application/xhtml+xml");
+      const html = new TextDecoder().decode(await readBounded(response, 2 * 1024 * 1024));
+      const anchors = [...html.matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
+      const pages = [url, ...anchors.map((m) => { try { return new URL(decodeEntities(m[1]), url).href; } catch { return ""; } })
+        .filter((u) => { try { return /SQP_CLASS(?:X|XII).*\.html/i.test(new URL(u).pathname); } catch { return false; } })].slice(0, 10);
+      for (const page of [...new Set(pages)]) {
+        const pageRes = page === url ? { response: new Response(html), url } : await fetchAllowed(page, [source.domain], "text/html,application/xhtml+xml");
+        const pageHtml = new TextDecoder().decode(await readBounded(pageRes.response, 2 * 1024 * 1024));
+        const tableRows = pageHtml.match(/<tr\b[\s\S]*?<\/tr>/gi) || [];
+        for (const row of tableRows) {
+          const cells = [...row.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)];
+          if (cells.length < 2) continue;
+          const subject = htmlText(cells[0][1]);
+          if (!subject || /subject/i.test(subject) || !matchesQuery(subject, terms)) continue;
+          // Column two contains the sample paper; the next column is the marking scheme.
+          for (const link of cells[1][1].matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+            let target: URL; try { target = new URL(decodeEntities(link[1]), pageRes.url); } catch { continue; }
+            if (!safeHost(target, [source.domain]) || !/\.pdf(?:$|[?#])/i.test(target.href)) continue;
+            let markingSchemeUrl = "";
+            if (cells.length >= 3) {
+              const msLink = cells[2][1].match(/<a\b[^>]*href\s*=\s*["']([^"']+)["']/i)?.[1];
+              if (msLink) {
+                try {
+                  const msTarget = new URL(decodeEntities(msLink), pageRes.url);
+                  if (safeHost(msTarget, [source.domain]) && /\.pdf(?:$|[?#])/i.test(msTarget.href)) markingSchemeUrl = msTarget.href;
+                } catch { /* Ignore malformed marking-scheme links. */ }
+              }
+            }
+            rows.push({ title: "Class " + cls + " Sample Paper — " + subject, url: target.href,
+              snippet: "Official CBSE sample question paper", domain: target.hostname.toLowerCase(), source,
+              marking_scheme_url: markingSchemeUrl } as any);
+          }
+        }
+      }
+    }
+  }
+  if (source.domain === "cbse.gov.in") {
+    try { rows.push(...await crawlCbseZipArchives(source, query)); }
+    catch (e) { throw new Error("CBSE ZIP archive: " + clip((e as Error)?.message || e, 180)); }
+  }
+  return rows.slice(0, 80);
+}
+async function crawlCisceOfficial(source: any, query: string): Promise<DiscoveryRow[]> {
+  const terms = queryTerms(query);
+  const rows: DiscoveryRow[] = [];
+  const mediaEndpoint = "https://cisce.org/wp-json/wp/v2/media?search=" + encodeURIComponent([...terms, "question paper"].join(" "))
+    + "&media_type=application&mime_type=application%2Fpdf&per_page=50";
+  try {
+    const { response } = await fetchAllowed(mediaEndpoint, [source.domain], "application/json");
+    const data = await response.json();
+    if (!Array.isArray(data)) throw new Error("CISCE media search returned an unexpected response.");
+    for (const item of data) {
+      const raw = String(item.source_url || ""); let target: URL;
+      try { target = new URL(raw); } catch { continue; }
+      const title = htmlText(String(item.title?.rendered || item.slug || "CISCE question paper"));
+      if (!safeHost(target, [source.domain]) || !/\.pdf(?:$|[?#])/i.test(target.href) || !matchesQuery(title + " " + raw, terms)) continue;
+      rows.push({ title, url: target.href, snippet: "Official CISCE PDF library item", domain: target.hostname.toLowerCase(), source });
+    }
+  } catch (e) {
+    // Continue with the public WordPress search endpoint when media search is unavailable.
+  }
+  const searchEndpoint = "https://cisce.org/wp-json/wp/v2/search?search=" + encodeURIComponent([...terms, "specimen question paper"].join(" "))
+    + "&per_page=30";
+  const search = await fetchAllowed(searchEndpoint, [source.domain], "application/json");
+  const pages = await search.response.json();
+  if (!Array.isArray(pages)) throw new Error("CISCE public search returned an unexpected response.");
+  for (const item of pages.slice(0, 20)) {
+    const pageUrl = String(item.url || item.url?.rendered || "");
+    let target: URL; try { target = new URL(pageUrl); } catch { continue; }
+    if (!safeHost(target, [source.domain])) continue;
+    const page = await fetchAllowed(target.href, [source.domain], "text/html,application/xhtml+xml");
+    const html = new TextDecoder().decode(await readBounded(page.response, 2 * 1024 * 1024));
+    rows.push(...linkRows(html, page.url, source, terms, 20).map((row) => ({
+      ...row, snippet: "Official CISCE paper linked from " + htmlText(String(item.title || "CISCE page")).slice(0, 120),
+    })));
+  }
+  const unique = new Map<string, DiscoveryRow>();
+  for (const row of rows) if (!unique.has(row.url)) unique.set(row.url, row);
+  return [...unique.values()].slice(0, 80);
+}
+async function crawlSchoolOfficial(source: any, query: string): Promise<DiscoveryRow[]> {
+  const terms = queryTerms(query); const rows: DiscoveryRow[] = [];
+  const home = "https://" + source.domain + "/";
+  const { response, url } = await fetchAllowed(home, [source.domain], "text/html,application/xhtml+xml");
+  const html = new TextDecoder().decode(await readBounded(response, 1024 * 1024));
+  rows.push(...linkRows(html, url, source, terms, 30));
+  try {
+    const map = await fetchAllowed("https://" + source.domain + "/sitemap.xml", [source.domain], "application/xml,text/xml");
+    const xml = new TextDecoder().decode(await readBounded(map.response, 1024 * 1024));
+    let sitemapLocations = [...xml.matchAll(/<loc>([\s\S]*?)<\/loc>/gi)].map((m) => decodeEntities(m[1].trim()));
+    const nestedSitemaps = sitemapLocations.filter((u) => /sitemap/i.test(u)).slice(0, 4);
+    for (const sitemapUrl of nestedSitemaps) {
+      try {
+        const nested = await fetchAllowed(sitemapUrl, [source.domain], "application/xml,text/xml");
+        const nestedXml = new TextDecoder().decode(await readBounded(nested.response, 1024 * 1024));
+        sitemapLocations.push(...[...nestedXml.matchAll(/<loc>([\s\S]*?)<\/loc>/gi)].map((m) => decodeEntities(m[1].trim())));
+      } catch { /* Continue with other public sitemap entries. */ }
+    }
+    const pages = [...new Set(sitemapLocations)]
+      .filter((u) => /question|exam|academic|download|resource|paper|assessment/i.test(u) && !/sitemap/i.test(u)).slice(0, 12);
+    for (const page of pages) {
+      let target: URL; try { target = new URL(page); } catch { continue; }
+      if (!safeHost(target, [source.domain])) continue;
+      const result = await fetchAllowed(target.href, [source.domain], "text/html,application/xhtml+xml");
+      const pageHtml = new TextDecoder().decode(await readBounded(result.response, 1024 * 1024));
+      rows.push(...linkRows(pageHtml, result.url, source, terms, 15));
+    }
+  } catch { /* A missing sitemap is normal; homepage links remain usable. */ }
+  const unique = new Map<string, DiscoveryRow>(); for (const row of rows) if (!unique.has(row.url)) unique.set(row.url, row);
+  return [...unique.values()].slice(0, 40);
+}
+
+async function fetchCandidatePdf(candidate: any, domains: string[]) {
+  const archiveMember = String(candidate.discovery_metadata?.archive_member || "");
+  const urlText = candidate.pdf_url || candidate.source_url;
+  const archive = await fetchAllowed(urlText, domains, archiveMember
+    ? "application/zip,application/octet-stream,application/x-zip-compressed"
+    : "application/pdf,application/octet-stream");
+  if (!archiveMember) return archive;
+  const zipBytes = await readBounded(archive.response);
+  const memberBytes = getPdfZipMember(zipBytes, archiveMember);
+  const responseBytes = new ArrayBuffer(memberBytes.byteLength);
+  new Uint8Array(responseBytes).set(memberBytes);
+  return { response: new Response(responseBytes, { headers: { "Content-Type": "application/pdf", "Content-Length": String(memberBytes.length) } }), url: archive.url };
+}
+async function crawlCbseZipArchives(source: any, query: string): Promise<DiscoveryRow[]> {
+  const landing = "https://www.cbse.gov.in/cbsenew/question-paper.html";
+  const { response, url } = await fetchAllowed(landing, [source.domain], "text/html,application/xhtml+xml");
+  const html = new TextDecoder().decode(await readBounded(response, 2 * 1024 * 1024));
+  const rows: DiscoveryRow[] = [];
+  const tableRows = html.match(/<tr\b[\s\S]*?<\/tr>/gi) || [];
+  for (const row of tableRows) {
+    const cells = [...row.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)];
+    if (cells.length < 2) continue;
+    const subject = htmlText(cells[0][1]);
+    if (!subject || !matchesQuery(subject, queryTerms(query))) continue;
+    for (const link of cells[1][1].matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+      let target: URL; try { target = new URL(decodeEntities(link[1]), url); } catch { continue; }
+      if (!safeHost(target, [source.domain]) || !/\.zip(?:$|[?#])/i.test(target.href)) continue;
+      const { response: zipResponse } = await fetchAllowed(target.href, [source.domain], "application/zip,application/octet-stream");
+      const zipBytes = await readBounded(zipResponse);
+      const members = listPdfMembersFromZip(zipBytes);
+      for (const member of members) rows.push({
+        title: subject + " — " + member.name.split("/").pop(),
+        url: target.href, snippet: "Official CBSE paper inside ZIP archive",
+        domain: target.hostname.toLowerCase(), source, archive_member: member.name,
+      } as any);
+    }
+  }
+  return rows.slice(0, 80);
+}
+
 async function readBounded(res: Response, maxBytes = MAX_PDF_BYTES): Promise<Uint8Array> {
   const declared = Number(res.headers.get("content-length") || 0);
   if (declared > maxBytes) throw new Error(maxBytes === MAX_PDF_BYTES ? "PDF exceeds the 50 MB limit." : "Source page exceeds the 2 MB inspection limit.");
@@ -212,6 +433,32 @@ Deno.serve(async (req) => {
     if (runError || !run) return reply(500, { error: "Could not start the discovery run." });
 
     const targeted = await searchInBatches(searchTargets, searchQuery, 4);
+    // Direct source adapters keep discovery independent of DuckDuckGo availability.
+    if (scope === "board") {
+      for (const source of searchTargets.filter((s: any) => ["cbse.gov.in", "cbseacademic.nic.in"].includes(s.domain))) {
+        try { targeted.results.push(...await crawlCbseOfficial(source, searchQuery)); targeted.successfulQueries++; }
+        catch (e) { targeted.errors.push(source.domain + ": " + clip((e as Error)?.message || e, 220)); }
+      }
+      const cisceSource = searchTargets.find((s: any) => s.domain === "cisce.org");
+      if (cisceSource) {
+        try { targeted.results.push(...await crawlCisceOfficial(cisceSource, searchQuery)); targeted.successfulQueries++; }
+        catch (e) { targeted.errors.push("cisce.org: " + clip((e as Error)?.message || e, 220)); }
+      }
+      // Registered education portals are crawled directly through their public pages and sitemaps.
+      for (const source of searchTargets.filter((s: any) => s.source_type === "education_portal").slice(0, 8)) {
+        try { targeted.results.push(...await crawlSchoolOfficial(source, searchQuery)); targeted.successfulQueries++; }
+        catch (e) { targeted.errors.push(source.domain + ": " + clip((e as Error)?.message || e, 220)); }
+      }
+    } else {
+      const selectedSchools = schoolName
+        ? searchTargets.filter((s: any) => (s.display_name + " " + s.domain).toLowerCase().includes(schoolName.toLowerCase()))
+        : [];
+      const schoolTargets = (selectedSchools.length ? selectedSchools : searchTargets).slice(0, 8);
+      for (const source of schoolTargets) {
+        try { targeted.results.push(...await crawlSchoolOfficial(source, searchQuery)); targeted.successfulQueries++; }
+        catch (e) { targeted.errors.push(source.domain + ": " + clip((e as Error)?.message || e, 220)); }
+      }
+    }
     let broadResults: Array<{title:string;url:string;snippet:string;domain:string}> = [];
     let broadError = "";
     // Broad fallback is essential for newly discovered sites and domains not yet in the registry.
@@ -237,21 +484,25 @@ Deno.serve(async (req) => {
       }).eq("id", run.id);
       return reply(502, {
         error: "Search provider was unavailable or returned an unrecognized response. This is not a genuine zero-result search.",
-        provider: "DuckDuckGo HTML", provider_errors: providerErrors,
+        provider: "Official board archive + DuckDuckGo fallback", provider_errors: providerErrors,
       });
     }
 
     const inserts = flattened.slice(0, 80).map((r) => ({
       discovery_run_id: run.id, source_id: r.source?.id || null, source_type: scope,
       source_domain: r.domain, title: r.title, source_url: r.url,
-      pdf_url: /\.pdf(?:$|[?#])/i.test(r.url) ? r.url : null,
+      pdf_url: r.archive_member || /\.pdf(?:$|[?#])/i.test(r.url) ? r.url : null,
       discovered_school_name: scope === "school" ? schoolName || null : null,
       discovery_metadata: {
         snippet: r.snippet,
+        archive_member: r.archive_member || null,
+        marking_scheme_url: r.marking_scheme_url || null,
         trust_level: r.source?.trust_level || "unverified",
         source_name: r.source?.display_name || r.domain,
         source_match: r.source ? "approved_registry" : "unregistered_domain",
-        search_provider: "DuckDuckGo HTML",
+        search_provider: r.snippet.startsWith("Official CBSE") ? "CBSE official archive crawler"
+          : r.snippet.startsWith("Official CISCE") ? "CISCE official media crawler"
+          : r.snippet.startsWith("Official source page") ? (r.source?.source_type === "education_portal" ? "Registered education portal crawler" : "Registered school website crawler") : "DuckDuckGo HTML",
         search_method: r.source ? "targeted_domain" : "broad_web",
       },
     }));
@@ -275,7 +526,7 @@ Deno.serve(async (req) => {
     return reply(200, {
       run_id: run.id, found: flattened.length, new_candidates: inserted,
       approved_source_results: matchedCount, unregistered_source_results: flattened.length - matchedCount,
-      provider: "DuckDuckGo HTML", provider_successful_queries: targeted.successfulQueries,
+      provider: "Official board archive + DuckDuckGo fallback", provider_successful_queries: targeted.successfulQueries,
       provider_errors: providerErrors,
       message: providerErrors.length
         ? "Search completed with partial provider failures. Review the provider diagnostics before concluding no papers exist."
@@ -293,7 +544,8 @@ Deno.serve(async (req) => {
 
   if (action === "verify") {
     try {
-      const pdf = await resolvePdf(candidate, domains);
+      const pdf = candidate.discovery_metadata?.archive_member
+        ? await fetchCandidatePdf(candidate, domains) : await resolvePdf(candidate, domains);
       const bytes = await readBounded(pdf.response);
       if (!isPdf(bytes)) {
         await admin.from("qb_paper_discovery_candidates").update({ verification_status: "invalid_pdf", status: "needs_review", updated_at: new Date().toISOString() }).eq("id", candidateId);
@@ -333,7 +585,7 @@ Deno.serve(async (req) => {
       await admin.from("qb_paper_discovery_candidates").update({ status: "duplicate", duplicate_of_paper_id: duplicate.id, updated_at: new Date().toISOString() }).eq("id", candidateId);
       return reply(409, { error: "This PDF already exists in Past Papers.", duplicate_paper_id: duplicate.id });
     }
-    const pdf = await fetchAllowed(candidate.pdf_url, domains, "application/pdf,application/octet-stream");
+    const pdf = await fetchCandidatePdf(candidate, domains);
     const bytes = await readBounded(pdf.response);
     if (!isPdf(bytes)) return reply(422, { error: "The PDF content changed after verification. Verify it again." });
     const checksum = await sha256(bytes);
