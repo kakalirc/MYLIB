@@ -146,7 +146,9 @@ Deno.serve(async (req) => {
   if (action === "search") {
     const query = clip(body.query, 400);
     const scope = body.scope === "school" ? "school" : "board";
-    if (query.length < 2) return reply(400, { error: "Enter a search phrase." });
+    const schoolName = scope === "school" ? clip(body.school_name, 200) : "";
+    const searchQuery = [schoolName, query].filter(Boolean).join(" ").slice(0, 500);
+    if (searchQuery.length < 2) return reply(400, { error: "Enter a search phrase." });
     const { data: sources, error: sourceError } = await admin.from("qb_paper_discovery_sources")
       .select("id,display_name,domain,source_type,trust_level,priority")
       .eq("enabled", true).order("priority").limit(30);
@@ -154,10 +156,10 @@ Deno.serve(async (req) => {
     const eligible = (sources || []).filter((s: any) => s.source_type === scope || s.source_type === "education_portal");
     if (!eligible.length) return reply(400, { error: "No enabled " + scope + " sources. Add an approved domain under Source management first." });
     const { data: run, error: runError } = await admin.from("qb_paper_discovery_runs")
-      .insert({ query_text: query, filters: { scope }, started_by: auth.user.id }).select("id").single();
+      .insert({ query_text: searchQuery, filters: { scope, school_name: schoolName || null }, started_by: auth.user.id }).select("id").single();
     if (runError || !run) return reply(500, { error: "Could not start the discovery run." });
     const results = await Promise.all(eligible.slice(0, 12).map(async (source: any) => {
-      try { return (await searchDomain(query, source.domain)).map((r) => ({ ...r, source })); }
+      try { return (await searchDomain(searchQuery, source.domain)).map((r) => ({ ...r, source })); }
       catch (e) { return []; }
     }));
     const flattened = results.flat();
@@ -167,7 +169,7 @@ Deno.serve(async (req) => {
       discovery_run_id: run.id, source_id: r.source.id, source_type: scope,
       source_domain: r.source.domain, title: r.title, source_url: r.url,
       pdf_url: /\.pdf(?:$|[?#])/i.test(r.url) ? r.url : null,
-      discovered_school_name: scope === "school" ? clip(body.school_name, 200) || null : null,
+      discovered_school_name: scope === "school" ? schoolName || null : null,
       discovery_metadata: { snippet: r.snippet, trust_level: r.source.trust_level, source_name: r.source.display_name },
     }));
     let inserted = 0;
@@ -240,7 +242,7 @@ Deno.serve(async (req) => {
     const checksum = await sha256(bytes);
     if (checksum !== candidate.checksum) return reply(409, { error: "The PDF changed after verification. Verify it again." });
     const path = "source-papers/admin/discovery/" + crypto.randomUUID() + ".pdf";
-    const upload = await admin.storage.from("qb-papers").upload(path, bytes, { contentType: "application/pdf", upsert: false });
+    const upload = await admin.storage.from("qb-papers").upload(path, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, { contentType: "application/pdf", upsert: false });
     if (upload.error) return reply(500, { error: "Could not store the PDF: " + upload.error.message });
     const paper = {
       source_type: schoolId ? "school" : "board", board_id: boardId, school_id: schoolId,
