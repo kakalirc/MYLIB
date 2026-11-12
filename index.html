@@ -2139,6 +2139,7 @@ let qbSourceType = 'board';
 let qbSourceSchoolSearch = '';
 let qbSourceApplied = null;
 let qbSourceUploadOpen=false, qbSourceUploadFiles=[], qbSourceUploading=false, qbSourceUploadMsg='';
+let qbSourceUploadMeta = { boardId: '', gradeId: '', subject: '', year: String(new Date().getFullYear()), examType: 'main', medium: '' };
 let qbAdminPaperFilter = { teacherId: '', subject: '', gradeId: '', waiting: false };  // admin's view of all teachers' papers
 let qbPaperTab = null;          // 'students' | 'questions' on the open paper; null = pick by whether it's assigned
 let qbStudentFilter = null;     // 'all' | an assignment status; null = 'submitted' when any need marking
@@ -26432,8 +26433,21 @@ async function qbAddSchoolFromUploader() {
   qbSourceUploadMsg = 'School added to the master list.';
   render();
 }
+function qbCaptureSourceUploadMeta() {
+  const read = id => document.getElementById(id);
+  const board = read('qbSourceUploadBoard'), grade = read('qbSourceUploadGrade'), subject = read('qbSourceUploadSubject');
+  const year = read('qbSourceUploadYear'), exam = read('qbSourceUploadExam'), medium = read('qbSourceUploadMedium');
+  if (board) qbSourceUploadMeta.boardId = board.value;
+  if (grade) qbSourceUploadMeta.gradeId = grade.value;
+  if (subject) qbSourceUploadMeta.subject = subject.value;
+  if (year) qbSourceUploadMeta.year = year.value;
+  if (exam) qbSourceUploadMeta.examType = exam.value;
+  if (medium) qbSourceUploadMeta.medium = medium.value;
+}
 function qbSourceUploaderHtml() {
-  const opts = rows => rows.filter(x => !x.archived).map(x => `<option value="${escAttr(x.id)}">${esc(x.name)}</option>`).join('');
+  // render() replaces the portal DOM; capture metadata first so an unrelated render never clears the form.
+  qbCaptureSourceUploadMeta();
+  const opts = (rows, selected = '') => rows.filter(x => !x.archived).map(x => `<option value="${escAttr(x.id)}" ${x.id === selected ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
   const subjects = [...new Set((data.subjects || []).map(x => String(x.name || '').trim()).filter(Boolean))].sort();
   const schoolOptions = qbSchools.filter(x => !x.archived).map(x => `<option value="${escAttr(x.name)}"></option>`).join('');
   const field = (label, control) => `<label style="display:flex;flex-direction:column;gap:6px;min-width:0;font-size:13px;font-weight:600;color:var(--ink)">${label}${control}</label>`;
@@ -26446,16 +26460,16 @@ function qbSourceUploaderHtml() {
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px 18px">
         ${field('Paper source', `<select id="qbSourceUploadType" style="${css}" onchange="qbSourceType=this.value;qbToggleSourceFields(this.value)"><option value="board" ${qbSourceType === 'board' ? 'selected' : ''}>Board</option><option value="school" ${qbSourceType === 'school' ? 'selected' : ''}>School</option></select>`)}
-        <div id="qbSourceBoardWrap" style="${qbSourceType === 'board' ? '' : 'display:none;'}">${field('Board', `<select id="qbSourceUploadBoard" style="${css}"><option value="">Select board</option>${opts(boards)}</select>`)}</div>
+        <div id="qbSourceBoardWrap" style="${qbSourceType === 'board' ? '' : 'display:none;'}">${field('Board', `<select id="qbSourceUploadBoard" style="${css}" onchange="qbSourceUploadMeta.boardId=this.value"><option value="">Select board</option>${opts(boards, qbSourceUploadMeta.boardId)}</select>`)}</div>
         <div id="qbSourceSchoolWrap" style="${qbSourceType === 'school' ? '' : 'display:none;'}">
           ${field('School name (search)', `<input id="qbSourceUploadSchool" list="qbSourceSchoolList" value="${escAttr(qbSourceSchoolSearch)}" placeholder="Type to search schools" style="${css}" oninput="qbSourceSchoolSearch=this.value"><datalist id="qbSourceSchoolList">${schoolOptions}</datalist>`)}
           ${currentRole === 'Admin' ? `<div style="display:flex;gap:6px;margin-top:8px"><input id="qbSourceNewSchoolName" placeholder="Add a new school to master list" style="${css}"><button type="button" class="btn-small" onclick="qbAddSchoolFromUploader()">Add</button></div>` : ''}
         </div>
-        ${field('Class', `<select id="qbSourceUploadGrade" style="${css}"><option value="">Select class</option>${opts(grades)}</select>`)}
-        ${field('Subject', `<select id="qbSourceUploadSubject" style="${css}"><option value="">Select subject</option>${subjects.map(x => `<option>${esc(x)}</option>`).join('')}</select>`)}
-        ${field('Examination year', `<input id="qbSourceUploadYear" type="number" min="1950" max="${new Date().getFullYear()+1}" value="${new Date().getFullYear()}" style="${css}">`)}
-        ${field('Exam type', `<select id="qbSourceUploadExam" style="${css}"><option value="main">Main</option><option value="compartment">Compartment</option><option value="supplementary">Supplementary</option><option value="other">Other</option></select>`)}
-        ${field('Medium of question paper', `<select id="qbSourceUploadMedium" style="${css}"><option value="">Select medium</option><option>English</option><option>Hindi</option><option>Kannada</option><option>Sanskrit</option><option>Other</option></select>`)}
+        ${field('Class', `<select id="qbSourceUploadGrade" style="${css}" onchange="qbSourceUploadMeta.gradeId=this.value"><option value="">Select class</option>${opts(grades, qbSourceUploadMeta.gradeId)}</select>`)}
+        ${field('Subject', `<select id="qbSourceUploadSubject" style="${css}" onchange="qbSourceUploadMeta.subject=this.value"><option value="">Select subject</option>${subjects.map(x => `<option ${x === qbSourceUploadMeta.subject ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>`)}
+        ${field('Examination year', `<input id="qbSourceUploadYear" type="number" min="1950" max="${new Date().getFullYear()+1}" value="${escAttr(qbSourceUploadMeta.year)}" oninput="qbSourceUploadMeta.year=this.value" style="${css}">`)}
+        ${field('Exam type', `<select id="qbSourceUploadExam" style="${css}" onchange="qbSourceUploadMeta.examType=this.value"><option value="main" ${qbSourceUploadMeta.examType === 'main' ? 'selected' : ''}>Main</option><option value="compartment" ${qbSourceUploadMeta.examType === 'compartment' ? 'selected' : ''}>Compartment</option><option value="supplementary" ${qbSourceUploadMeta.examType === 'supplementary' ? 'selected' : ''}>Supplementary</option><option value="sample" ${qbSourceUploadMeta.examType === 'sample' ? 'selected' : ''}>Sample Question Paper</option><option value="other" ${qbSourceUploadMeta.examType === 'other' ? 'selected' : ''}>Other</option></select>`)}
+        ${field('Medium of question paper', `<select id="qbSourceUploadMedium" style="${css}" onchange="qbSourceUploadMeta.medium=this.value"><option value="" ${qbSourceUploadMeta.medium === '' ? 'selected' : ''}>Select medium</option><option ${qbSourceUploadMeta.medium === 'English' ? 'selected' : ''}>English</option><option ${qbSourceUploadMeta.medium === 'Hindi' ? 'selected' : ''}>Hindi</option><option ${qbSourceUploadMeta.medium === 'Kannada' ? 'selected' : ''}>Kannada</option><option ${qbSourceUploadMeta.medium === 'Sanskrit' ? 'selected' : ''}>Sanskrit</option><option ${qbSourceUploadMeta.medium === 'Other' ? 'selected' : ''}>Other</option></select>`)}
       </div>
       <div style="margin-top:20px;padding:16px;border:1px dashed var(--line);border-radius:12px;background:var(--surface-alt,rgba(0,0,0,.02))">
         <label for="qbSourceUploadInput" style="display:block;font-weight:700;margin-bottom:8px">Select PDF files</label>
@@ -26469,11 +26483,13 @@ function qbSourceUploaderHtml() {
     </section>`;
 }
 function qbSetSourceUploadFiles(input) {
+  qbCaptureSourceUploadMeta();
   qbSourceUploadFiles = Array.from(input.files || []);
   const el = document.getElementById('qbSourceUploadFileNames');
   if (el) el.textContent = qbSourceUploadFiles.map(f=>f.name).join(' · ') || 'No files selected.';
 }
 async function qbUploadSourcePapers() {
+  qbCaptureSourceUploadMeta();
   if (!['Admin','Teacher'].includes(currentRole)) { qbSourceUploadMsg='You do not have permission to upload past papers.'; render(); return; }
   if (currentRole === 'Teacher' && !teacherQbAccess) { qbSourceUploadMsg='Question Bank access is not enabled for your account.'; render(); return; }
   if (!sb || qbSourceUploading) return;
@@ -26508,7 +26524,7 @@ async function qbUploadSourcePapers() {
   qbSourceUploading=false;const ok=results.filter(x=>x.ok).length,fail=results.filter(x=>!x.ok);
   qbSourceUploadMsg='Upload complete: '+ok+' saved as Pending Review'+(fail.length?'; '+fail.length+' failed.':'.');
   if(fail.length)qbSourceUploadMsg+=' '+fail.map(x=>x.name+': '+x.error).join('; ');
-  qbSourceUploadFiles=[];qbSourceUploadOpen=false;qbSourceSchoolSearch='';await loadQbSourcePapers();render();
+  qbSourceUploadFiles=[];qbSourceUploadOpen=false;qbSourceSchoolSearch='';qbSourceUploadMeta={boardId:'',gradeId:'',subject:'',year:String(new Date().getFullYear()),examType:'main',medium:''};await loadQbSourcePapers();render();
 }
 
 async function qbSetSourcePaperStatus(id, status) {
