@@ -80,18 +80,18 @@ async function searchBingRss(query: string, limit = 20, domain?: string) {
   if (!res.ok) throw new Error("Bing RSS returned HTTP " + res.status + ".");
   const xml = new TextDecoder().decode(await readBounded(res, 2 * 1024 * 1024));
   const rows: Array<{ title: string; url: string; snippet: string; domain: string }> = [];
-  const items = xml.match(/<item\\b[\\s\\S]*?<\\/item>/gi) || [];
+  const items = xml.match(/<item\b[\s\S]*?<\/item>/gi) || [];
   for (const item of items) {
     if (rows.length >= limit) break;
     const tag = (name: string) => {
       const match = item.match(new RegExp("<" + name + "[^>]*>([\\s\\S]*?)</" + name + ">", "i"));
-      return match ? decodeEntities(match[1].replace(/^<!\\[CDATA\\[/, "").replace(/\\]\\]>$/, "").trim()) : "";
+      return match ? decodeEntities(match[1].replace(/^<!\[CDATA\[/, "").replace(/\]\]>$/, "").trim()) : "";
     };
     const rawUrl = tag("link");
     let target: URL;
     try { target = new URL(rawUrl); } catch { continue; }
     if (target.protocol !== "https:" && target.protocol !== "http:") continue;
-    const host = target.hostname.toLowerCase().replace(/^www\\./, "");
+    const host = target.hostname.toLowerCase().replace(/^www\./, "");
     if (domain && host !== domain && !host.endsWith("." + domain)) continue;
     rows.push({ title: htmlText(tag("title")).slice(0, 500) || target.hostname,
       url: target.href, snippet: "Bing RSS search · " + htmlText(tag("description")).slice(0, 1000), domain: host });
