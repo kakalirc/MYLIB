@@ -72,29 +72,28 @@
     var meta = c.discovery_metadata || {};
     var previewUrl = c.pdf_url || c.source_url;
     var isSchool = c.source_type === 'school';
-    // Discovery metadata is often title-only. Derive safe review defaults without
-    // persisting them until the Admin explicitly imports the verified paper.
+    // Derive review defaults from the title and approved source; persist only on explicit import.
     var title = String(c.title || '');
-    var sessionMatch = title.match(/\\b(19\\d{2}|20\\d{2})\\s*[-–/]\\s*(\\d{2}|20\\d{2})\\b/);
+    var sessionMatch = title.match(/\b(19\d{2}|20\d{2})\s*[-–/]\s*(\d{2}|20\d{2})\b/);
     var inferredYear = sessionMatch
       ? (sessionMatch[2].length === 2 ? Number(String(Math.floor(Number(sessionMatch[1]) / 100)) + sessionMatch[2]) : Number(sessionMatch[2]))
-      : Number((title.match(/\\b(19\\d{2}|20\\d{2})\\b/) || [])[1]) || new Date().getFullYear();
-    var subjectMatch = title.match(/[—–-]\\s*([^—–-]+)\\s*$/);
+      : Number((title.match(/\b(19\d{2}|20\d{2})\b/) || [])[1]) || new Date().getFullYear();
+    var subjectMatch = title.match(/[—–-]\s*([^—–-]+)\s*$/);
     var inferredSubject = subjectMatch ? subjectMatch[1].trim() : '';
-    var classMatch = title.match(/\\bClass\\s+(XII|XI|X|[1-9]|1[0-2])\\b/i);
+    var classMatch = title.match(/\bClass\s+(XII|XI|X|[1-9]|1[0-2])\b/i);
     var classNumber = classMatch ? ({X:'10',XI:'11',XII:'12'}[classMatch[1].toUpperCase()] || classMatch[1]) : '';
     var inferredBoard = c.board_id || (boardsList.find(function (b) {
-      return /cbse/i.test(String(b.name || '')) && (/cbse/i.test(String(meta.source_name || '')) || /cbseacademic\\.nic\\.in$/i.test(String(c.source_domain || '')));
+      return /cbse/i.test(String(b.name || '')) && (/cbse/i.test(String(meta.source_name || '')) || /cbseacademic\.nic\.in$/i.test(String(c.source_domain || '')));
     }) || {}).id || '';
     var inferredGrade = c.grade_id || (gradesList.find(function (g) { return String(g.name).trim() === classNumber; }) || {}).id || '';
-    var inferredExam = c.exam_type || (/sample\\s*(question\\s*)?paper/i.test(title) ? 'sample' : 'main');
+    var inferredExam = c.exam_type || (/sample\s*(question\s*)?paper/i.test(title) ? 'sample' : 'main');
     var mediumOptions = ['English','Hindi','Kannada','Sanskrit','Other'];
     var inferredMedium = c.medium || (mediumOptions.find(function (m) { return inferredSubject.toLowerCase() === m.toLowerCase(); }) || 'English');
     var metadata = '<div class="lib-ppd-meta">'
       + (isSchool
         ? '<label>School<select id="ppd-school-' + esc(c.id) + '">' + selectOptions(state.schools, c.school_id, 'Select school') + '</select></label>'
           + '<label>New school name<input id="ppd-newschool-' + esc(c.id) + '" value="' + esc(c.discovered_school_name || '') + '" placeholder="Add if not listed"></label>'
-          + '<button class="btn-small" type="button" onclick="libPPDAddSchool(\\'' + esc(c.id) + '\\')">Add to school directory</button>'
+          + '<button class="btn-small" type="button" onclick="libPPDAddSchool(\'' + esc(c.id) + '\')">Add to school directory</button>'
         : '<label>Board<select id="ppd-board-' + esc(c.id) + '">' + selectOptions(boardsList, inferredBoard, 'Select board') + '</select></label>')
       + '<label>Class<select id="ppd-grade-' + esc(c.id) + '">' + selectOptions(gradesList, inferredGrade, 'Select class') + '</select></label>'
       + '<label>Subject<input id="ppd-subject-' + esc(c.id) + '" value="' + esc(c.subject_name || inferredSubject) + '" placeholder="e.g. Sanskrit"></label>'
