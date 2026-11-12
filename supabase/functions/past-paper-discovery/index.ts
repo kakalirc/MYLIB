@@ -79,7 +79,7 @@ async function searchSchoolWeb(query: string) {
     rows.push({
       title: htmlText(m[2]).slice(0, 500) || parsed.pathname.split("/").pop() || parsed.hostname,
       url: parsed.href, snippet: sm ? htmlText(sm[1]).slice(0, 1200) : "",
-      domain: parsed.hostname.toLowerCase(),
+      domain: parsed.hostname.toLowerCase().replace(/^www\\./, ""),
     });
   }
   return rows;
