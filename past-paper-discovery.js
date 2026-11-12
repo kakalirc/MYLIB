@@ -228,8 +228,20 @@
       var html = original.apply(this, arguments);
       if (currentRole === 'Admin' && typeof qbSubTab !== 'undefined' && qbSubTab === 'past') {
         var panel = renderPanel();
-        html = html.replace('Online discovery engine · Planned next phase', 'Online discovery engine · Admin search and review');
-        html = html.replace(/(<div style="font-size:12px;font-weight:700;color:var\(--muted\)">Online discovery engine · Admin search and review<\/div>)/, '$1' + panel);
+        var marker = 'Online discovery engine · Planned next phase';
+        var replacement = 'Online discovery engine · Admin search and review';
+        html = html.replace(marker, replacement);
+
+        // Match the label independently of its inline style and exact wrapper
+        // attributes. The previous exact-style regex changed the heading but
+        // could leave the discovery controls out of the rendered page.
+        var markerNode = /(<(?:div|p|span)[^>]*>\s*Online discovery engine · Admin search and review\s*<\/(?:div|p|span)>)/i;
+        if (markerNode.test(html)) {
+          html = html.replace(markerNode, '$1' + panel);
+        } else if (html.indexOf(replacement) >= 0) {
+          // Fail visibly and safely if the host markup changes again.
+          html += panel;
+        }
       }
       return html;
     };
