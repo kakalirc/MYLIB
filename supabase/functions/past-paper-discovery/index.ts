@@ -177,7 +177,7 @@ async function crawlCbseOfficial(source: any, query: string): Promise<DiscoveryR
       const links = [...cells[1][1].matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
       for (const link of links) {
         let target: URL; try { target = new URL(decodeEntities(link[1]), url); } catch { continue; }
-        if (!safeHost(target, [source.domain]) || !/\.(pdf|zip)(?:$|[?#])/i.test(target.href)) continue;
+        if (!safeHost(target, [source.domain]) || !/\.pdf(?:$|[?#])/i.test(target.href)) continue;
         rows.push({ title: [section, subject].filter(Boolean).join(" — "), url: target.href,
           snippet: "Official CBSE previous-year paper · " + subject, domain: target.hostname.toLowerCase(), source });
       }
