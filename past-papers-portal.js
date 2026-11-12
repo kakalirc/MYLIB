@@ -333,38 +333,6 @@
     };
   }
 
-  // Teacher Past Papers default to the subjects assigned to the logged-in teacher.
-  // The underlying QB list includes the full published catalogue, so scope the default
-  // view to the teacher's own subject/grade assignments without changing Admin access.
-  var originalTeacherPastPapersRenderer = window.qbSourcePapersHtml;
-  if (typeof originalTeacherPastPapersRenderer === 'function') {
-    window.qbSourcePapersHtml = function () {
-      if (typeof currentRole === 'undefined' || currentRole !== 'Teacher') {
-        return originalTeacherPastPapersRenderer.apply(this, arguments);
-      }
-      var allPapers = qbSourcePapers;
-      var subjectRows = (typeof data !== 'undefined' && data && Array.isArray(data.subjects))
-        ? data.subjects.filter(function (subject) {
-            return String(subject.teacher_id || '') === String(currentLinkedId || '');
-          }) : [];
-      var subjectNames = subjectRows.map(function (subject) {
-        return String(subject.name || '').trim().toLocaleLowerCase();
-      }).filter(Boolean);
-      if (!subjectNames.length) {
-        return originalTeacherPastPapersRenderer.apply(this, arguments);
-      }
-      qbSourcePapers = allPapers.filter(function (paper) {
-        return subjectNames.indexOf(String(paper.subject_name || '').trim().toLocaleLowerCase()) !== -1;
-      });
-      try {
-        return String(originalTeacherPastPapersRenderer.apply(this, arguments))
-          .replace(/All Subjects/g, 'My Subjects');
-      } finally {
-        qbSourcePapers = allPapers;
-      }
-    };
-  }
-
   // The main app may finish restoring a saved session before this deferred module loads.
   try {
     if (typeof isLoggedIn !== 'undefined' && isLoggedIn && typeof loaded !== 'undefined' && loaded
