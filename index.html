@@ -26579,10 +26579,18 @@ function qbSourceReviewHistoryHtml() {
 function qbSourcePapersHtml() {
   if (qbSourceLoading) return `<div class="empty">Loading past papers…</div>`;
   if (!qbSourcePapers.length) return `<div class="empty">No published past papers or your own submissions are available yet.</div>`;
-  const f = qbSourceFilter, a = qbSourceApplied || (currentRole === 'Teacher' ? { boardId: '', schoolId: '', gradeId: '', subject: '', year: '' } : null);
+  if (currentRole === 'Teacher' && qbSourceApplied === null && !qbSourceFilter.subject) qbSourceFilter.subject = '__my_subjects__';
+  const f = qbSourceFilter;
+  const teacherSubjectNames = currentRole === 'Teacher'
+    ? (data.subjects || []).filter(subject => String(subject.teacher_id || '') === String(currentLinkedId || ''))
+      .map(subject => String(subject.name || '').trim().toLocaleLowerCase()).filter(Boolean)
+    : [];
+  const a = qbSourceApplied || (currentRole === 'Teacher'
+    ? { boardId: '', schoolId: '', gradeId: '', subject: '__my_subjects__', year: '' } : null);
   const opts = (key, val, label) => [...new Map(qbSourcePapers.map(sp => [String(val(sp) ?? ''), label(sp)])).entries()]
     .filter(([v]) => v).sort((x, y) => key === 'year' ? y[0].localeCompare(x[0]) : String(x[1]).localeCompare(String(y[1]), undefined, { numeric: true }));
   const sel = (key, all, val, label) => `<select onchange="qbSourceFilter.${key}=this.value;${key === 'boardId' ? "qbSourceFilter.schoolId=''" : key === 'schoolId' ? "qbSourceFilter.boardId=''" : ''}"><option value="">${all}</option>
+    ${key === 'subject' && currentRole === 'Teacher' ? `<option value="__my_subjects__" ${f.subject === '__my_subjects__' ? 'selected' : ''}>My Subjects</option>` : ''}
     ${opts(key, val, label).map(([v, l]) => `<option value="${escAttr(v)}" ${f[key] === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
   const filtersHtml = `<div class="row-form" style="flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center">
     ${sel('boardId', 'All boards', sp => sp.source_type === 'board' ? sp.board_id : '', sp => qbByName(boards, sp.board_id) || 'Unknown board')}
@@ -26597,7 +26605,11 @@ function qbSourcePapersHtml() {
     ${filtersHtml}<div class="empty">Choose filters and press Apply filter to see the papers.</div>`;
   const match = sp => (!a.boardId || (sp.source_type === 'board' && sp.board_id === a.boardId))
     && (!a.schoolId || (sp.source_type === 'school' && sp.school_id === a.schoolId))
-    && (!a.gradeId || sp.grade_id === a.gradeId) && (!a.subject || sp.subject_name === a.subject) && (!a.year || String(sp.year) === a.year);
+    && (!a.gradeId || sp.grade_id === a.gradeId)
+    && (!a.subject || (a.subject === '__my_subjects__'
+      ? teacherSubjectNames.indexOf(String(sp.subject_name || '').trim().toLocaleLowerCase()) !== -1
+      : sp.subject_name === a.subject))
+    && (!a.year || String(sp.year) === a.year);
   const list = qbSourcePapers.filter(match);
   if (!list.length) return `${filtersHtml}<div class="empty">No past papers match these filters.</div>`;
   const groups = new Map();
