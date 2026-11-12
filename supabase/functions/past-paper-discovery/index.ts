@@ -37,25 +37,25 @@ function ddgTarget(href: string): string {
 }
 function parseSearchResults(html: string, limit: number) {
   const rows: Array<{ title: string; url: string; snippet: string; domain: string }> = [];
-  const anchors = html.match(/<a\\b[^>]*>[\\s\\S]*?<\\/a>/gi) || [];
+  const anchors = html.match(/<a\b[^>]*>[\s\S]*?<\/a>/gi) || [];
   for (const anchor of anchors) {
     if (rows.length >= limit) break;
-    const className = anchor.match(/\\bclass\\s*=\\s*["']([^"']*)["']/i)?.[1] || "";
-    if (!/(^|\\s)result__a(\\s|$)/i.test(className)) continue;
-    const href = anchor.match(/\\bhref\\s*=\\s*["']([^"']+)["']/i)?.[1] || "";
+    const className = anchor.match(/\bclass\s*=\s*["']([^"']*)["']/i)?.[1] || "";
+    if (!/(^|\s)result__a(\s|$)/i.test(className)) continue;
+    const href = anchor.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1] || "";
     const target = ddgTarget(href);
     if (!target) continue;
     let parsed: URL;
     try { parsed = new URL(target); } catch { continue; }
     if (parsed.protocol !== "https:" || !parsed.hostname || parsed.hostname === "html.duckduckgo.com") continue;
-    const title = htmlText(anchor.replace(/^<a\\b[^>]*>/i, "").replace(/<\\/a>$/i, ""));
+    const title = htmlText(anchor.replace(/^<a\b[^>]*>/i, "").replace(/<\/a>$/i, ""));
     const tail = html.slice(html.indexOf(anchor) + anchor.length, html.indexOf(anchor) + anchor.length + 1800);
-    const snippetMatch = tail.match(/class\\s*=\\s*["'][^"']*result__snippet[^"']*["'][^>]*>([\\s\\S]*?)<\\/[^>]+>/i);
+    const snippetMatch = tail.match(/class\s*=\s*["'][^"']*result__snippet[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/i);
     rows.push({
       title: title.slice(0, 500) || parsed.pathname.split("/").pop() || parsed.hostname,
       url: parsed.href,
       snippet: snippetMatch ? htmlText(snippetMatch[1]).slice(0, 1200) : "",
-      domain: parsed.hostname.toLowerCase().replace(/^www\\./, ""),
+      domain: parsed.hostname.toLowerCase().replace(/^www\./, ""),
     });
   }
   if (!rows.length) {
@@ -244,7 +244,7 @@ Deno.serve(async (req) => {
     const inserts = flattened.slice(0, 80).map((r) => ({
       discovery_run_id: run.id, source_id: r.source?.id || null, source_type: scope,
       source_domain: r.domain, title: r.title, source_url: r.url,
-      pdf_url: /\\.pdf(?:$|[?#])/i.test(r.url) ? r.url : null,
+      pdf_url: /\.pdf(?:$|[?#])/i.test(r.url) ? r.url : null,
       discovered_school_name: scope === "school" ? schoolName || null : null,
       discovery_metadata: {
         snippet: r.snippet,
