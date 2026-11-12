@@ -255,11 +255,16 @@ Deno.serve(async (req) => {
       await admin.storage.from("qb-papers").remove([path]);
       return reply(500, { error: "PDF stored but Past Papers registration failed: " + (insertError?.message || "unknown error") });
     }
-    await admin.from("qb_paper_discovery_candidates").update({
+    const { error: candidateUpdateError } = await admin.from("qb_paper_discovery_candidates").update({
       status: "imported", imported_paper_id: inserted.id, checksum, file_size_bytes: bytes.length,
       board_id: boardId, school_id: schoolId, grade_id: gradeId, subject_name: subject, year, exam_type: examType, medium,
       reviewed_by: auth.user.id, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     }).eq("id", candidateId);
+    if (candidateUpdateError) {
+      await admin.from("qb_source_papers").delete().eq("id", inserted.id);
+      await admin.storage.from("qb-papers").remove([path]);
+      return reply(500, { error: "Could not finalize the import; the temporary paper and PDF were rolled back." });
+    }
     return reply(200, { imported: true, paper_id: inserted.id, status: "pending_review", message: "Imported into the existing Past Papers review workflow." });
   }
 
