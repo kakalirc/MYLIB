@@ -129,7 +129,16 @@
     state.searchBusy = true; state.message = 'Searching the wider web…'; state.error = ''; if (typeof render === 'function') render();
     try {
       var result = await invoke({ action:'search', query:query, scope:scope, school_name:state.lastSchool });
-      state.message = 'Search complete (' + (result.provider || 'web search') + '): ' + result.found + ' results found; ' + result.new_candidates + ' new candidates saved. Approved sources: ' + (result.approved_source_results || 0) + '; new/unregistered domains: ' + (result.unregistered_source_results || 0) + '.' + (result.provider_errors && result.provider_errors.length ? ' Provider warnings: ' + result.provider_errors.slice(0, 3).join(' | ') : '') + ' Unregistered domains need Admin approval before PDF verification.';
+      var calls = 0;
+      while (!result.complete && result.run_id && calls < 200) {
+        state.message = 'Searching source ' + result.sources_processed + ' of ' + result.sources_total
+          + (result.next_source ? ' · Next: ' + result.next_source : '') + ' · ' + result.found + ' candidates found so far…';
+        if (typeof render === 'function') render();
+        result = await invoke({ action:'continue_search', run_id:result.run_id });
+        calls++;
+      }
+      if (!result.complete) throw new Error('Discovery is still in progress. Refresh the page and check Recent searches before starting another run.');
+      state.message = 'Search complete (' + (result.provider || 'web search') + '): ' + result.found + ' results found; ' + result.new_candidates + ' new candidates saved. Approved-source matches: ' + (result.approved_source_results || 0) + '.' + (result.provider_errors && result.provider_errors.length ? ' Provider warnings: ' + result.provider_errors.slice(0, 3).join(' | ') : '') + ' Unregistered domains need Admin approval before PDF verification.';
       state.loaded = false; await loadData(true);
     } catch (e) { state.message = e.message || String(e); state.error = state.message; }
     finally { state.searchBusy = false; if (typeof render === 'function') render(); }
