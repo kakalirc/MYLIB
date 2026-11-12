@@ -396,7 +396,9 @@ Deno.serve(async (req) => {
         trust_level: r.source?.trust_level || "unverified",
         source_name: r.source?.display_name || r.domain,
         source_match: r.source ? "approved_registry" : "unregistered_domain",
-        search_provider: r.snippet.startsWith("Official CBSE") ? "CBSE official archive crawler" : "DuckDuckGo HTML",
+        search_provider: r.snippet.startsWith("Official CBSE") ? "CBSE official archive crawler"
+          : r.snippet.startsWith("Official CISCE") ? "CISCE official media crawler"
+          : r.snippet.startsWith("Official source page") ? "Registered school website crawler" : "DuckDuckGo HTML",
         search_method: r.source ? "targeted_domain" : "broad_web",
       },
     }));
