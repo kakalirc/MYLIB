@@ -409,12 +409,41 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { return reply(400, { error: "Invalid request." }); }
   const action = clip(body.action, 30);
 
-  if (action === "search") {
-    const query = clip(body.query, 400);
-    const scope = body.scope === "school" ? "school" : "board";
-    const schoolName = scope === "school" ? clip(body.school_name, 200) : "";
-    const searchQuery = [schoolName, query].filter(Boolean).join(" ").slice(0, 500);
-    if (searchQuery.length < 2) return reply(400, { error: "Enter a search phrase." });
+  if (action === "search" || action === "continue_search") {
+    const isNewRun = action === "search";
+    let run: any = null;
+    let query = "";
+    let scope = "board";
+    let schoolName = "";
+    let runId = "";
+
+    if (isNewRun) {
+      const rawQuery = clip(body.query, 400);
+      scope = body.scope === "school" ? "school" : "board";
+      schoolName = scope === "school" ? clip(body.school_name, 200) : "";
+      query = [schoolName, rawQuery].filter(Boolean).join(" ").slice(0, 500);
+      if (query.length < 2) return reply(400, { error: "Enter a search phrase." });
+      const { data: created, error: createError } = await admin.from("qb_paper_discovery_runs")
+        .insert({ query_text: query, filters: { scope, school_name: schoolName || null,
+          search_mode: "targeted_domains_plus_web_batched", discovery_progress: {
+            next_offset: 0, successful_queries: 0, provider_errors: [], results_found: 0, new_candidates: 0,
+          } }, started_by: auth.user.id }).select("*").single();
+      if (createError || !created) return reply(500, { error: "Could not start the discovery run." });
+      run = created;
+      runId = created.id;
+    } else {
+      runId = clip(body.run_id, 64);
+      if (!uuid(runId)) return reply(400, { error: "Invalid discovery run." });
+      const { data: existing, error: loadError } = await admin.from("qb_paper_discovery_runs")
+        .select("*").eq("id", runId).maybeSingle();
+      if (loadError || !existing) return reply(404, { error: "Discovery run not found." });
+      if (existing.status !== "running") return reply(200, { run_id: runId, complete: true,
+        found: existing.results_found || 0, new_candidates: 0, message: "This discovery run is already complete." });
+      run = existing;
+      query = String(existing.query_text || "");
+      scope = existing.filters?.scope === "school" ? "school" : "board";
+      schoolName = clip(existing.filters?.school_name, 200);
+    }
 
     const { data: sources, error: sourceError } = await admin.from("qb_paper_discovery_sources")
       .select("id,display_name,domain,source_type,trust_level,priority")
@@ -425,77 +454,74 @@ Deno.serve(async (req) => {
       ? eligible.filter((s: any) => s.source_type === "school").slice(0, 16)
       : eligible.filter((s: any) => s.source_type === "board" || s.source_type === "education_portal");
     if (scope === "board" && !searchTargets.some((s: any) => s.source_type === "board")) {
+      await admin.from("qb_paper_discovery_runs").update({ status: "failed", error_message: "No enabled official board sources.",
+        completed_at: new Date().toISOString() }).eq("id", runId);
       return reply(400, { error: "No enabled official board sources. Enable at least one board domain." });
     }
-
-    const { data: run, error: runError } = await admin.from("qb_paper_discovery_runs")
-      .insert({ query_text: searchQuery, filters: { scope, school_name: schoolName || null, search_mode: "targeted_domains_plus_web" }, started_by: auth.user.id }).select("id").single();
-    if (runError || !run) return reply(500, { error: "Could not start the discovery run." });
-
-    const targeted = await searchInBatches(searchTargets, searchQuery, 4);
-    // Direct source adapters keep discovery independent of DuckDuckGo availability.
-    if (scope === "board") {
-      for (const source of searchTargets.filter((s: any) => ["cbse.gov.in", "cbseacademic.nic.in"].includes(s.domain))) {
-        try { targeted.results.push(...await crawlCbseOfficial(source, searchQuery)); targeted.successfulQueries++; }
-        catch (e) { targeted.errors.push(source.domain + ": " + clip((e as Error)?.message || e, 220)); }
-      }
-      const cisceSource = searchTargets.find((s: any) => s.domain === "cisce.org");
-      if (cisceSource) {
-        try { targeted.results.push(...await crawlCisceOfficial(cisceSource, searchQuery)); targeted.successfulQueries++; }
-        catch (e) { targeted.errors.push("cisce.org: " + clip((e as Error)?.message || e, 220)); }
-      }
-      // Registered education portals are crawled directly through their public pages and sitemaps.
-      for (const source of searchTargets.filter((s: any) => s.source_type === "education_portal").slice(0, 8)) {
-        try { targeted.results.push(...await crawlSchoolOfficial(source, searchQuery)); targeted.successfulQueries++; }
-        catch (e) { targeted.errors.push(source.domain + ": " + clip((e as Error)?.message || e, 220)); }
-      }
-    } else {
-      const selectedSchools = schoolName
-        ? searchTargets.filter((s: any) => (s.display_name + " " + s.domain).toLowerCase().includes(schoolName.toLowerCase()))
-        : [];
-      const schoolTargets = (selectedSchools.length ? selectedSchools : searchTargets).slice(0, 8);
-      for (const source of schoolTargets) {
-        try { targeted.results.push(...await crawlSchoolOfficial(source, searchQuery)); targeted.successfulQueries++; }
-        catch (e) { targeted.errors.push(source.domain + ": " + clip((e as Error)?.message || e, 220)); }
-      }
-    }
-    let broadResults: Array<{title:string;url:string;snippet:string;domain:string}> = [];
-    let broadError = "";
-    // Broad fallback is essential for newly discovered sites and domains not yet in the registry.
-    if (targeted.results.length < 5 || scope === "school") {
-      try { broadResults = await searchWeb(searchQuery + " question paper PDF", 40); }
-      catch (e) { broadError = clip((e as Error)?.message || e, 300); }
+    if (!searchTargets.length) {
+      await admin.from("qb_paper_discovery_runs").update({ status: "failed", error_message: "No enabled sources match this search scope.",
+        completed_at: new Date().toISOString() }).eq("id", runId);
+      return reply(400, { error: "No enabled sources match this search scope." });
     }
 
-    const allRows = [...targeted.results, ...broadResults.map((r) => {
+    const progress = run.filters?.discovery_progress || {};
+    const offset = Math.max(0, Number(progress.next_offset) || 0);
+    const batch = searchTargets.slice(offset, offset + 1);
+    const providerErrors: string[] = Array.isArray(progress.provider_errors) ? progress.provider_errors.slice(0, 80) : [];
+    let successfulQueries = Math.max(0, Number(progress.successful_queries) || 0);
+    let foundTotal = Math.max(0, Number(progress.results_found) || 0);
+    let insertedTotal = Math.max(0, Number(progress.new_candidates) || 0);
+    const batchRows: any[] = [];
+
+    // One registered domain per invocation keeps each Edge Function execution bounded.
+    const targeted = await searchInBatches(batch, query, 1);
+    batchRows.push(...targeted.results);
+    providerErrors.push(...targeted.errors);
+    successfulQueries += targeted.successfulQueries;
+
+    for (const source of batch) {
+      try {
+        if (scope === "board" && ["cbse.gov.in", "cbseacademic.nic.in"].includes(source.domain)) {
+          batchRows.push(...await crawlCbseOfficial(source, query));
+          successfulQueries++;
+        } else if (scope === "board" && source.domain === "cisce.org") {
+          batchRows.push(...await crawlCisceOfficial(source, query));
+          successfulQueries++;
+        } else if (source.source_type === "education_portal" || source.source_type === "school") {
+          batchRows.push(...await crawlSchoolOfficial(source, query));
+          successfulQueries++;
+        }
+      } catch (e) {
+        providerErrors.push(source.domain + ": " + clip((e as Error)?.message || e, 220));
+      }
+    }
+
+    const nextOffset = offset + batch.length;
+    const complete = nextOffset >= searchTargets.length;
+    let broadResults: any[] = [];
+    if (complete && (foundTotal + batchRows.length < 5 || scope === "school")) {
+      try {
+        broadResults = await searchWeb(query + " question paper PDF", 20);
+        successfulQueries++;
+      } catch (e) {
+        providerErrors.push("Broad web search: " + clip((e as Error)?.message || e, 300));
+      }
+    }
+    const rows = [...batchRows, ...broadResults.map((r) => {
       const matched = eligible.find((s: any) => r.domain === s.domain || r.domain.endsWith("." + s.domain));
       return { ...r, source: matched || null };
     })];
     const unique = new Map<string, any>();
-    for (const row of allRows) if (!unique.has(row.url.toLowerCase())) unique.set(row.url.toLowerCase(), row);
+    for (const row of rows) if (!unique.has(String(row.url).toLowerCase())) unique.set(String(row.url).toLowerCase(), row);
     const flattened = [...unique.values()];
-    const providerErrors = [...targeted.errors];
-    if (broadError) providerErrors.push("Broad web search: " + broadError);
-
-    if (!targeted.successfulQueries && !broadResults.length) {
-      const message = providerErrors.join(" | ") || "No search provider returned a usable response.";
-      await admin.from("qb_paper_discovery_runs").update({
-        status: "failed", error_message: clip(message, 1000), completed_at: new Date().toISOString(),
-      }).eq("id", run.id);
-      return reply(502, {
-        error: "Search provider was unavailable or returned an unrecognized response. This is not a genuine zero-result search.",
-        provider: "Official board archive + DuckDuckGo fallback", provider_errors: providerErrors,
-      });
-    }
 
     const inserts = flattened.slice(0, 80).map((r) => ({
-      discovery_run_id: run.id, source_id: r.source?.id || null, source_type: scope,
+      discovery_run_id: runId, source_id: r.source?.id || null, source_type: scope,
       source_domain: r.domain, title: r.title, source_url: r.url,
-      pdf_url: r.archive_member || /\.pdf(?:$|[?#])/i.test(r.url) ? r.url : null,
+      pdf_url: r.archive_member || /\\.pdf(?:$|[?#])/i.test(r.url) ? r.url : null,
       discovered_school_name: scope === "school" ? schoolName || null : null,
       discovery_metadata: {
-        snippet: r.snippet,
-        archive_member: r.archive_member || null,
+        snippet: r.snippet, archive_member: r.archive_member || null,
         marking_scheme_url: r.marking_scheme_url || null,
         trust_level: r.source?.trust_level || "unverified",
         source_name: r.source?.display_name || r.domain,
@@ -511,26 +537,34 @@ Deno.serve(async (req) => {
       const { data, error } = await admin.from("qb_paper_discovery_candidates")
         .upsert(inserts, { onConflict: "source_url", ignoreDuplicates: true }).select("id");
       if (error) {
-        await admin.from("qb_paper_discovery_runs").update({ status: "failed", error_message: error.message, completed_at: new Date().toISOString() }).eq("id", run.id);
+        await admin.from("qb_paper_discovery_runs").update({ status: "failed",
+          error_message: "Could not save search results: " + error.message, completed_at: new Date().toISOString() }).eq("id", runId);
         return reply(500, { error: "Could not save search results: " + error.message });
       }
       inserted = data?.length || 0;
     }
-    const matchedCount = flattened.filter((r) => r.source).length;
-    const runStatus = providerErrors.length && !flattened.length ? "failed" : "completed";
-    await admin.from("qb_paper_discovery_runs").update({
-      status: runStatus, results_found: flattened.length,
-      error_message: providerErrors.length ? clip(providerErrors.join(" | "), 1000) : null,
-      completed_at: new Date().toISOString(),
-    }).eq("id", run.id);
+    foundTotal += flattened.length;
+    insertedTotal += inserted;
+    const nextProgress = { next_offset: nextOffset, successful_queries: successfulQueries,
+      provider_errors: providerErrors.slice(0, 80), results_found: foundTotal, new_candidates: insertedTotal };
+    const update: any = { filters: { ...run.filters, discovery_progress: nextProgress },
+      results_found: foundTotal, error_message: providerErrors.length ? clip(providerErrors.join(" | "), 1000) : null };
+    if (complete) {
+      update.status = successfulQueries > 0 || foundTotal > 0 ? "completed" : "failed";
+      update.completed_at = new Date().toISOString();
+    }
+    const { error: progressError } = await admin.from("qb_paper_discovery_runs").update(update).eq("id", runId);
+    if (progressError) return reply(500, { error: "Results were saved, but discovery progress could not be updated: " + progressError.message });
     return reply(200, {
-      run_id: run.id, found: flattened.length, new_candidates: inserted,
-      approved_source_results: matchedCount, unregistered_source_results: flattened.length - matchedCount,
-      provider: "Official board archive + DuckDuckGo fallback", provider_successful_queries: targeted.successfulQueries,
-      provider_errors: providerErrors,
-      message: providerErrors.length
-        ? "Search completed with partial provider failures. Review the provider diagnostics before concluding no papers exist."
-        : "Search completed. Review candidates before importing.",
+      run_id: runId, complete, next_source: complete ? null : searchTargets[nextOffset]?.display_name,
+      sources_processed: nextOffset, sources_total: searchTargets.length,
+      found: foundTotal, new_candidates: insertedTotal,
+      approved_source_results: flattened.filter((r) => r.source).length,
+      provider: "Official board archive + DuckDuckGo fallback",
+      provider_successful_queries: successfulQueries, provider_errors: providerErrors.slice(-8),
+      message: complete
+        ? (providerErrors.length ? "Search completed with partial provider failures. Review provider diagnostics before concluding no papers exist." : "Search completed. Review candidates before importing.")
+        : "Batch saved. Continuing discovery with the next registered source.",
     });
   }
 
