@@ -123,43 +123,127 @@ async function fetchAllowed(urlText: string, domains: string[], accept: string) 
   }
   throw new Error("Too many redirects.");
 }
-async function crawlCbseOfficial(source: any, query: string): Promise<Array<{title:string;url:string;snippet:string;domain:string;source:any}>> {
-  const landing = "https://www.cbse.gov.in/cbsenew/question-paper.html";
-  const { response, url } = await fetchAllowed(landing, [source.domain], "text/html,application/xhtml+xml");
-  const html = new TextDecoder().decode(await readBounded(response, 2 * 1024 * 1024));
-  const wanted = query.toLowerCase().replace(/cbse|question paper|previous year|past paper|pdf/g, " ").replace(/\s+/g, " ").trim();
-  const classMatch = wanted.match(/\b(class|grade)\s*(10|12|xii|x)\b/);
-  const wantedClass = classMatch ? (classMatch[2] === "12" || classMatch[2] === "xii" ? "xii" : "x") : "";
-  const terms = wanted.replace(/\b(class|grade)\s*(10|12|xii|x)\b/g, " ").split(/\s+/).filter((x) => x.length > 1);
-  const rows: Array<{title:string;url:string;snippet:string;domain:string;source:any}> = [];
-  const tableRows = html.match(/<tr\b[\s\S]*?<\/tr>/gi) || [];
-  let offset = 0;
-  for (const row of tableRows) {
-    const position = html.indexOf(row, offset);
-    offset = position + row.length;
-    const before = html.slice(Math.max(0, position - 50000), position);
-    const headings = [...before.matchAll(/(?:Question Paper for|Question Papers for)\s*([^<\n]{0,160})/gi)];
-    const section = headings.length ? htmlText(headings[headings.length - 1][1]) : "";
-    const sectionClass = /class\s*xii|class\s*12/i.test(section) ? "xii" : /class\s*x(?:\s|$)|class\s*10/i.test(section) ? "x" : "";
-    if (wantedClass && sectionClass && wantedClass !== sectionClass) continue;
-    const cells = [...row.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)];
-    if (cells.length < 2) continue;
-    const subject = htmlText(cells[0][1]).toUpperCase();
-    if (!subject || /SUBJECT NAME|TOTAL/i.test(subject)) continue;
-    if (terms.some((term) => !subject.toLowerCase().includes(term) && !section.toLowerCase().includes(term))) continue;
-    const links = [...cells[1][1].matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
-    for (const link of links) {
-      let pdfUrl: URL;
-      try { pdfUrl = new URL(decodeEntities(link[1]), url); } catch { continue; }
-      if (!safeHost(pdfUrl, [source.domain])) continue;
-      rows.push({
-        title: [section, subject].filter(Boolean).join(" — ").slice(0, 500),
-        url: pdfUrl.href, snippet: "Official CBSE question-paper directory · " + subject,
-        domain: pdfUrl.hostname.toLowerCase().replace(/^www\./, ""), source,
-      });
+type DiscoveryRow = {title:string;url:string;snippet:string;domain:string;source:any};
+function queryTerms(query: string): string[] {
+  return query.toLowerCase().replace(/\b(cbse|cisce|icse|isc|question papers?|previous year|past papers?|sample papers?|specimen|pdf|class|grade)\b/g, " ")
+    .replace(/\b(x|xii|10|12)\b/g, " ").split(/[^a-z0-9]+/).filter((x) => x.length > 1);
+}
+function matchesQuery(label: string, terms: string[]): boolean {
+  const value = label.toLowerCase();
+  return !terms.length || terms.some((term) => value.includes(term));
+}
+function linkRows(html: string, baseUrl: string, source: any, terms: string[], limit = 60): DiscoveryRow[] {
+  const rows: DiscoveryRow[] = [];
+  const anchors = html.match(/<a\b[^>]*>[\s\S]*?<\/a>/gi) || [];
+  for (const anchor of anchors) {
+    if (rows.length >= limit) break;
+    const href = anchor.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1] || "";
+    if (!href) continue;
+    const label = htmlText(anchor.replace(/^<a\b[^>]*>/i, "").replace(/<\/a>$/i, ""));
+    let target: URL;
+    try { target = new URL(decodeEntities(href), baseUrl); } catch { continue; }
+    if (!safeHost(target, [source.domain])) continue;
+    const isPdf = /\.pdf(?:$|[?#])/i.test(target.href);
+    if (!isPdf && !matchesQuery(label + " " + target.pathname, terms)) continue;
+    if (!isPdf && !/(question|paper|sample|specimen|exam|academic|download|resource)/i.test(label + " " + target.pathname)) continue;
+    rows.push({ title: (label || target.pathname.split("/").pop() || source.display_name).slice(0, 500),
+      url: target.href, snippet: "Official source page · " + source.display_name,
+      domain: target.hostname.toLowerCase().replace(/^www\./, ""), source });
+  }
+  return rows;
+}
+async function crawlCbseOfficial(source: any, query: string): Promise<DiscoveryRow[]> {
+  const terms = queryTerms(query);
+  const rows: DiscoveryRow[] = [];
+  if (source.domain === "cbse.gov.in") {
+    const landing = "https://www.cbse.gov.in/cbsenew/question-paper.html";
+    const { response, url } = await fetchAllowed(landing, [source.domain], "text/html,application/xhtml+xml");
+    const html = new TextDecoder().decode(await readBounded(response, 2 * 1024 * 1024));
+    const tableRows = html.match(/<tr\b[\s\S]*?<\/tr>/gi) || [];
+    let offset = 0;
+    for (const row of tableRows) {
+      const position = html.indexOf(row, offset); offset = position + row.length;
+      const before = html.slice(Math.max(0, position - 12000), position);
+      const headings = [...before.matchAll(/Question Paper for\s*([^<\n]{0,180})/gi)];
+      const section = headings.length ? htmlText(headings[headings.length - 1][1]) : "";
+      const classMatch = section.match(/class\s*(xii|x|12|10)/i);
+      const wantedClass = /\b(12|xii)\b/i.test(query) ? "xii" : /\b(10|x)\b/i.test(query) ? "x" : "";
+      const actualClass = classMatch ? (/xii|12/i.test(classMatch[1]) ? "xii" : "x") : "";
+      if (wantedClass && actualClass && wantedClass !== actualClass) continue;
+      const cells = [...row.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)];
+      if (cells.length < 2) continue;
+      const subject = htmlText(cells[0][1]).toUpperCase();
+      if (!subject || /SUBJECT NAME|TOTAL/i.test(subject) || !matchesQuery(subject, terms)) continue;
+      const links = [...cells[1][1].matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
+      for (const link of links) {
+        let target: URL; try { target = new URL(decodeEntities(link[1]), url); } catch { continue; }
+        if (!safeHost(target, [source.domain]) || !/\.(pdf|zip)(?:$|[?#])/i.test(target.href)) continue;
+        rows.push({ title: [section, subject].filter(Boolean).join(" — "), url: target.href,
+          snippet: "Official CBSE previous-year paper · " + subject, domain: target.hostname.toLowerCase(), source });
+      }
+    }
+  } else {
+    for (const cls of ["X", "XII"]) {
+      if (/\b(10|x)\b/i.test(query) && cls !== "X") continue;
+      if (/\b(12|xii)\b/i.test(query) && cls !== "XII") continue;
+      const indexUrl = "https://cbseacademic.nic.in/SQP_CLASS" + cls + ".html";
+      const { response, url } = await fetchAllowed(indexUrl, [source.domain], "text/html,application/xhtml+xml");
+      const html = new TextDecoder().decode(await readBounded(response, 2 * 1024 * 1024));
+      const anchors = [...html.matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
+      const pages = [url, ...anchors.map((m) => { try { return new URL(decodeEntities(m[1]), url).href; } catch { return ""; } })
+        .filter((u) => /SQP_CLASS(?:X|XII).*\.html/i.test(new URL(u).pathname))].slice(0, 10);
+      for (const page of [...new Set(pages)]) {
+        const pageRes = page === url ? { response: new Response(html), url } : await fetchAllowed(page, [source.domain], "text/html,application/xhtml+xml");
+        const pageHtml = new TextDecoder().decode(await readBounded(pageRes.response, 2 * 1024 * 1024));
+        for (const link of pageHtml.matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+          const label = htmlText(link[2]);
+          if (!matchesQuery(label, terms)) continue;
+          let target: URL; try { target = new URL(decodeEntities(link[1]), pageRes.url); } catch { continue; }
+          if (!safeHost(target, [source.domain]) || !/\.pdf(?:$|[?#])/i.test(target.href)) continue;
+          rows.push({ title: "Class " + cls + " Sample Paper — " + label, url: target.href,
+            snippet: "Official CBSE sample paper / marking scheme", domain: target.hostname.toLowerCase(), source });
+        }
+      }
     }
   }
-  return rows.slice(0, 60);
+  return rows.slice(0, 80);
+}
+async function crawlCisceOfficial(source: any, query: string): Promise<DiscoveryRow[]> {
+  const terms = queryTerms(query);
+  const endpoint = "https://cisce.org/wp-json/wp/v2/media?search=" + encodeURIComponent([...terms, "question paper"].join(" "))
+    + "&media_type=application&mime_type=application%2Fpdf&per_page=50";
+  const { response } = await fetchAllowed(endpoint, [source.domain], "application/json");
+  const data = await response.json();
+  if (!Array.isArray(data)) throw new Error("CISCE media search returned an unexpected response.");
+  return data.flatMap((item: any) => {
+    const raw = String(item.source_url || ""); let target: URL;
+    try { target = new URL(raw); } catch { return []; }
+    const title = htmlText(String(item.title?.rendered || item.slug || "CISCE question paper"));
+    if (!safeHost(target, [source.domain]) || !/\.pdf(?:$|[?#])/i.test(target.href) || !matchesQuery(title + " " + raw, terms)) return [];
+    return [{ title, url: target.href, snippet: "Official CISCE PDF library item", domain: target.hostname.toLowerCase(), source }];
+  }).slice(0, 60);
+}
+async function crawlSchoolOfficial(source: any, query: string): Promise<DiscoveryRow[]> {
+  const terms = queryTerms(query); const rows: DiscoveryRow[] = [];
+  const home = "https://" + source.domain + "/";
+  const { response, url } = await fetchAllowed(home, [source.domain], "text/html,application/xhtml+xml");
+  const html = new TextDecoder().decode(await readBounded(response, 1024 * 1024));
+  rows.push(...linkRows(html, url, source, terms, 30));
+  try {
+    const map = await fetchAllowed("https://" + source.domain + "/sitemap.xml", [source.domain], "application/xml,text/xml");
+    const xml = new TextDecoder().decode(await readBounded(map.response, 1024 * 1024));
+    const pages = [...xml.matchAll(/<loc>([\s\S]*?)<\/loc>/gi)].map((m) => decodeEntities(m[1].trim()))
+      .filter((u) => /question|exam|academic|download|resource|paper|assessment/i.test(u)).slice(0, 6);
+    for (const page of pages) {
+      let target: URL; try { target = new URL(page); } catch { continue; }
+      if (!safeHost(target, [source.domain])) continue;
+      const result = await fetchAllowed(target.href, [source.domain], "text/html,application/xhtml+xml");
+      const pageHtml = new TextDecoder().decode(await readBounded(result.response, 1024 * 1024));
+      rows.push(...linkRows(pageHtml, result.url, source, terms, 15));
+    }
+  } catch { /* A missing sitemap is normal; homepage links remain usable. */ }
+  const unique = new Map<string, DiscoveryRow>(); for (const row of rows) if (!unique.has(row.url)) unique.set(row.url, row);
+  return [...unique.values()].slice(0, 40);
 }
 async function readBounded(res: Response, maxBytes = MAX_PDF_BYTES): Promise<Uint8Array> {
   const declared = Number(res.headers.get("content-length") || 0);
@@ -250,15 +334,21 @@ Deno.serve(async (req) => {
     if (runError || !run) return reply(500, { error: "Could not start the discovery run." });
 
     const targeted = await searchInBatches(searchTargets, searchQuery, 4);
-    // CBSE's official archive is crawled directly; this path is independent of external search providers.
-    const cbseSource = searchTargets.find((s: any) => s.source_type === "board" && /(^|\\.)cbse\\.gov\\.in$/i.test(s.domain));
-    if (scope === "board" && cbseSource) {
-      try {
-        const officialRows = await crawlCbseOfficial(cbseSource, searchQuery);
-        targeted.results.push(...officialRows);
-        if (officialRows.length) targeted.successfulQueries++;
-      } catch (e) {
-        targeted.errors.push("CBSE official archive: " + clip((e as Error)?.message || e, 220));
+    // Direct source adapters keep discovery independent of DuckDuckGo availability.
+    if (scope === "board") {
+      for (const source of searchTargets.filter((s: any) => ["cbse.gov.in", "cbseacademic.nic.in"].includes(s.domain))) {
+        try { targeted.results.push(...await crawlCbseOfficial(source, searchQuery)); targeted.successfulQueries++; }
+        catch (e) { targeted.errors.push(source.domain + ": " + clip((e as Error)?.message || e, 220)); }
+      }
+      const cisceSource = searchTargets.find((s: any) => s.domain === "cisce.org");
+      if (cisceSource) {
+        try { targeted.results.push(...await crawlCisceOfficial(cisceSource, searchQuery)); targeted.successfulQueries++; }
+        catch (e) { targeted.errors.push("cisce.org: " + clip((e as Error)?.message || e, 220)); }
+      }
+    } else {
+      for (const source of searchTargets.slice(0, 8)) {
+        try { targeted.results.push(...await crawlSchoolOfficial(source, searchQuery)); targeted.successfulQueries++; }
+        catch (e) { targeted.errors.push(source.domain + ": " + clip((e as Error)?.message || e, 220)); }
       }
     }
     let broadResults: Array<{title:string;url:string;snippet:string;domain:string}> = [];
