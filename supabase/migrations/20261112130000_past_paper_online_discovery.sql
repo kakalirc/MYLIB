@@ -84,9 +84,9 @@ create table if not exists public.qb_paper_discovery_candidates (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint qb_paper_discovery_candidate_source_check check (
-    (source_type = 'board' and board_id is not null and school_id is null)
+    (source_type = 'board' and school_id is null)
     or (source_type = 'school' and board_id is null)
-    or (source_type = 'education_portal' and ((board_id is null) <> (school_id is null)))
+    or (source_type = 'education_portal' and not (board_id is not null and school_id is not null))
   ),
   constraint qb_paper_discovery_candidate_import_check check (
     status <> 'imported' or imported_paper_id is not null
