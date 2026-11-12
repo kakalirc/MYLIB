@@ -131,7 +131,7 @@
     finally { state.searchBusy = false; if (typeof render === 'function') render(); }
   };
   window.libPPDAddSource = async function () {
-    var name = val('ppd-source-name').trim(), domain = val('ppd-source-domain').trim().toLowerCase().replace(/^https?:\\/\\//,'').replace(/\\/$/,'').split('/')[0];
+    var name = val('ppd-source-name').trim(), domain = val('ppd-source-domain').trim().toLowerCase().replace(/^https?:\/\//,'').replace(/\/$/,'').split('/')[0];
     var type = val('ppd-source-type'), trust = val('ppd-source-trust');
     if (name.length < 2 || !/^(?=.{3,253}$)[a-z0-9.-]+$/.test(domain) || domain.indexOf('..') >= 0) { notify('Enter a source name and a valid domain only (without a path).', true); return; }
     var { error } = await sb.from('qb_paper_discovery_sources').insert({ display_name:name, domain:domain, source_type:type, trust_level:trust, priority:100, enabled:true });
@@ -144,7 +144,7 @@
     state.loaded = false; await loadData(true); if (typeof render === 'function') render();
   };
   window.libPPDAddSchool = async function (id) {
-    var name = val('ppd-newschool-' + id).trim().replace(/\\s+/g,' ');
+    var name = val('ppd-newschool-' + id).trim().replace(/\s+/g,' ');
     if (name.length < 2) { notify('Enter the school name first.', true); return; }
     var existing = state.schools.find(function (s) { return s.name.trim().toLowerCase() === name.toLowerCase(); });
     var school = existing;
@@ -203,7 +203,7 @@
       if (currentRole === 'Admin' && typeof qbSubTab !== 'undefined' && qbSubTab === 'past') {
         var panel = renderPanel();
         html = html.replace('Online discovery engine · Planned next phase', 'Online discovery engine · Admin search and review');
-        html = html.replace(/(<div style="font-size:12px;font-weight:700;color:var\\(--muted\\)">Online discovery engine · Admin search and review<\\/div>)/, '$1' + panel);
+        html = html.replace(/(<div style="font-size:12px;font-weight:700;color:var\(--muted\)">Online discovery engine · Admin search and review<\/div>)/, '$1' + panel);
       }
       return html;
     };
