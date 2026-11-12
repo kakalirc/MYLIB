@@ -26638,7 +26638,7 @@ function qbSourcePaperEditHtml(p) {
     field('Examination year','<input id="qbPaperMetaYear" type="number" min="1950" max="'+(new Date().getFullYear()+1)+'" value="'+escAttr(String(p.year||''))+'" style="'+css+'">')+
     field('Exam type',choices('Exam',[['main','Main'],['compartment','Compartment'],['supplementary','Supplementary'],['sample','Sample Question Paper'],['other','Other']],p.exam_type||'main'))+
     field('Medium',choices('Medium',[['','Not specified'],['English','English'],['Hindi','Hindi'],['Kannada','Kannada'],['Sanskrit','Sanskrit'],['Other','Other']],p.medium||''))+'</div>'+
-    '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn-small btn-primary" onclick="qbSaveSourcePaperMetadata(\''+escAttr(p.id)+'\')">Save metadata</button><button class="btn-small" onclick="qbCancelSourcePaperEdit()">Cancel</button></div><p class="hint">Only catalogue metadata changes; PDF and Published status are preserved.</p></section>';
+    '<div style="display:flex;gap:8px;margin-top:12px"><button type="button" class="btn-small btn-primary" onclick="qbSaveSourcePaperMetadata(\''+escAttr(p.id)+'\')">Save metadata</button><button type="button" class="btn-small" onclick="qbCancelSourcePaperEdit()">Cancel</button></div><p class="hint">Only catalogue metadata changes; PDF and Published status are preserved.</p></section>';
 }
 function qbSourcePapersHtml() {
   if (qbSourceLoading) return `<div class="empty">Loading past papers…</div>`;
@@ -26707,7 +26707,7 @@ function qbSourcePapersHtml() {
         <span><b>${esc(String(sp.year || ''))}</b> ${esc(sp.exam_type || '')}${duplicateIds.has(sp.id) ? ' <span class="badge" style="background:rgba(214,163,74,.16);color:#805b16">Possible duplicate</span>' : ''}${sp.medium ? ` <span style="color:var(--muted);font-size:12px">· ${esc(sp.medium)}</span>` : ''}${sp.question_count ? ` <span style="color:var(--muted);font-size:12px">· ${esc(String(sp.question_count))} questions</span>` : ''}<br><span class="hint">${esc(sp.source_type === 'school' ? 'School: ' + (qbByName(qbSchools, sp.school_id) || 'Unknown school') : 'Board: ' + (qbByName(boards, sp.board_id) || 'Unknown board'))} · ${esc(sp.subject_name || '')} · ${esc(sp.uploader_name || 'Legacy upload')} · ${esc(sp.status || 'published')}</span></span>
         <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${sp.stored_pdf_url || sp.source_url ? `<button class="btn-small" onclick="qbOpenSourcePdf('${sp.id}')">⬇ Open PDF</button>` : '<span class="hint">No PDF</span>'}
         ${sp.status === 'pending_review' && currentRole === 'Admin' ? `<button class="btn-small btn-primary" onclick="qbSetSourcePaperStatus('${sp.id}','published')">Publish</button><button class="btn-small" onclick="qbSetSourcePaperStatus('${sp.id}','rejected')">Reject</button>` : ''}
-        ${currentRole === 'Admin' && sp.status === 'published' ? `<button class="btn-small" onclick="qbBeginSourcePaperEdit('${sp.id}')">Edit metadata</button>` : ''}${currentRole === 'Admin' ? `<button class="btn-small" onclick="qbDeleteSourcePaper('${sp.id}')">Delete</button>` : ''}
+        ${currentRole === 'Admin' && sp.status === 'published' ? `<button type="button" class="btn-small" onclick="qbBeginSourcePaperEdit('${sp.id}')">Edit metadata</button>` : ''}${currentRole === 'Admin' ? `<button class="btn-small" onclick="qbDeleteSourcePaper('${sp.id}')">Delete</button>` : ''}
         </span>
       </div>`).join('')}</div>`).join('')}`;
 }
