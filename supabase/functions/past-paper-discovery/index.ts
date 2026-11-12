@@ -2,6 +2,7 @@
 // Board search uses Admin-approved domains; school search discovers new hosts that require Admin approval before PDF fetch.
 // Verification is restricted to enabled source domains; imports use the existing qb_source_papers workflow.
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { unzipSync } from "npm:fflate@0.8.2";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -212,6 +213,10 @@ async function crawlCbseOfficial(source: any, query: string): Promise<DiscoveryR
       }
     }
   }
+  if (source.domain === "cbse.gov.in") {
+    try { rows.push(...await crawlCbseZipArchives(source, query)); }
+    catch (e) { throw new Error("CBSE ZIP archive: " + clip((e as Error)?.message || e, 180)); }
+  }
   return rows.slice(0, 80);
 }
 async function crawlCisceOfficial(source: any, query: string): Promise<DiscoveryRow[]> {
@@ -251,6 +256,63 @@ async function crawlSchoolOfficial(source: any, query: string): Promise<Discover
   const unique = new Map<string, DiscoveryRow>(); for (const row of rows) if (!unique.has(row.url)) unique.set(row.url, row);
   return [...unique.values()].slice(0, 40);
 }
+
+function zipPdfMembers(bytes: Uint8Array, query: string): Array<{name:string;bytes:Uint8Array}> {
+  if (bytes.length < 22 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) throw new Error("Archive is not a valid ZIP file.");
+  const terms = queryTerms(query);
+  const files = unzipSync(bytes, {
+    filter: (file) => /\.pdf$/i.test(file.name) && file.originalSize > 0 && file.originalSize <= MAX_PDF_BYTES,
+  });
+  const out: Array<{name:string;bytes:Uint8Array}> = [];
+  for (const [name, data] of Object.entries(files)) {
+    if (!/\.pdf$/i.test(name) || data.length > MAX_PDF_BYTES || !isPdf(data)) continue;
+    const leaf = name.split("/").pop() || name;
+    if (!matchesQuery(leaf + " " + name, terms)) continue;
+    out.push({ name, bytes: data });
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+async function fetchCandidatePdf(candidate: any, domains: string[]) {
+  const archiveMember = String(candidate.discovery_metadata?.archive_member || "");
+  const urlText = candidate.pdf_url || candidate.source_url;
+  const archive = await fetchAllowed(urlText, domains, archiveMember
+    ? "application/zip,application/octet-stream,application/x-zip-compressed"
+    : "application/pdf,application/octet-stream");
+  if (!archiveMember) return archive;
+  const zipBytes = await readBounded(archive.response);
+  const members = zipPdfMembers(zipBytes, "");
+  const match = members.find((item) => item.name === archiveMember);
+  if (!match) throw new Error("The selected PDF was not found inside the ZIP archive. Run discovery again.");
+  return { response: new Response(match.bytes, { headers: { "Content-Type": "application/pdf", "Content-Length": String(match.bytes.length) } }), url: archive.url };
+}
+async function crawlCbseZipArchives(source: any, query: string): Promise<DiscoveryRow[]> {
+  const landing = "https://www.cbse.gov.in/cbsenew/question-paper.html";
+  const { response, url } = await fetchAllowed(landing, [source.domain], "text/html,application/xhtml+xml");
+  const html = new TextDecoder().decode(await readBounded(response, 2 * 1024 * 1024));
+  const rows: DiscoveryRow[] = [];
+  const tableRows = html.match(/<tr\b[\s\S]*?<\/tr>/gi) || [];
+  for (const row of tableRows) {
+    const cells = [...row.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)];
+    if (cells.length < 2) continue;
+    const subject = htmlText(cells[0][1]);
+    if (!subject || !matchesQuery(subject, queryTerms(query))) continue;
+    for (const link of cells[1][1].matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+      let target: URL; try { target = new URL(decodeEntities(link[1]), url); } catch { continue; }
+      if (!safeHost(target, [source.domain]) || !/\.zip(?:$|[?#])/i.test(target.href)) continue;
+      const { response: zipResponse } = await fetchAllowed(target.href, [source.domain], "application/zip,application/octet-stream");
+      const zipBytes = await readBounded(zipResponse);
+      const members = zipPdfMembers(zipBytes, query);
+      for (const member of members) rows.push({
+        title: subject + " — " + member.name.split("/").pop(),
+        url: target.href, snippet: "Official CBSE paper inside ZIP archive",
+        domain: target.hostname.toLowerCase(), source, archive_member: member.name,
+      } as any);
+    }
+  }
+  return rows.slice(0, 80);
+}
+
 async function readBounded(res: Response, maxBytes = MAX_PDF_BYTES): Promise<Uint8Array> {
   const declared = Number(res.headers.get("content-length") || 0);
   if (declared > maxBytes) throw new Error(maxBytes === MAX_PDF_BYTES ? "PDF exceeds the 50 MB limit." : "Source page exceeds the 2 MB inspection limit.");
@@ -393,6 +455,7 @@ Deno.serve(async (req) => {
       discovered_school_name: scope === "school" ? schoolName || null : null,
       discovery_metadata: {
         snippet: r.snippet,
+        archive_member: r.archive_member || null,
         trust_level: r.source?.trust_level || "unverified",
         source_name: r.source?.display_name || r.domain,
         source_match: r.source ? "approved_registry" : "unregistered_domain",
@@ -440,7 +503,8 @@ Deno.serve(async (req) => {
 
   if (action === "verify") {
     try {
-      const pdf = await resolvePdf(candidate, domains);
+      const pdf = candidate.discovery_metadata?.archive_member
+        ? await fetchCandidatePdf(candidate, domains) : await resolvePdf(candidate, domains);
       const bytes = await readBounded(pdf.response);
       if (!isPdf(bytes)) {
         await admin.from("qb_paper_discovery_candidates").update({ verification_status: "invalid_pdf", status: "needs_review", updated_at: new Date().toISOString() }).eq("id", candidateId);
@@ -480,7 +544,7 @@ Deno.serve(async (req) => {
       await admin.from("qb_paper_discovery_candidates").update({ status: "duplicate", duplicate_of_paper_id: duplicate.id, updated_at: new Date().toISOString() }).eq("id", candidateId);
       return reply(409, { error: "This PDF already exists in Past Papers.", duplicate_paper_id: duplicate.id });
     }
-    const pdf = await fetchAllowed(candidate.pdf_url, domains, "application/pdf,application/octet-stream");
+    const pdf = await fetchCandidatePdf(candidate, domains);
     const bytes = await readBounded(pdf.response);
     if (!isPdf(bytes)) return reply(422, { error: "The PDF content changed after verification. Verify it again." });
     const checksum = await sha256(bytes);
