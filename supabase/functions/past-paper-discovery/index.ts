@@ -31,7 +31,7 @@ function ddgTarget(href: string): string {
   try {
     const u = new URL(decodeEntities(href), "https://html.duckduckgo.com");
     const target = u.searchParams.get("uddg");
-    return target ? decodeURIComponent(target) : u.href;
+    return target || u.href;
   } catch { return ""; }
 }
 async function searchDomain(query: string, domain: string) {
@@ -217,6 +217,7 @@ Deno.serve(async (req) => {
   }
 
   if (action === "import") {
+    if (candidate.status !== "approved_for_import") return reply(409, { error: "Review and approve this candidate for import first." });
     const boardId = uuid(body.board_id) ? String(body.board_id) : null;
     const schoolId = uuid(body.school_id) ? String(body.school_id) : null;
     const gradeId = uuid(body.grade_id) ? String(body.grade_id) : null;
