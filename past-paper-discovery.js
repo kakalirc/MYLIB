@@ -72,17 +72,34 @@
     var meta = c.discovery_metadata || {};
     var previewUrl = c.pdf_url || c.source_url;
     var isSchool = c.source_type === 'school';
+    // Derive review defaults from the title and approved source; persist only on explicit import.
+    var title = String(c.title || '');
+    var sessionMatch = title.match(/\b(19\d{2}|20\d{2})\s*[-–/]\s*(\d{2}|20\d{2})\b/);
+    var inferredYear = sessionMatch
+      ? (sessionMatch[2].length === 2 ? Number(String(Math.floor(Number(sessionMatch[1]) / 100)) + sessionMatch[2]) : Number(sessionMatch[2]))
+      : Number((title.match(/\b(19\d{2}|20\d{2})\b/) || [])[1]) || new Date().getFullYear();
+    var subjectMatch = title.match(/[—–-]\s*([^—–-]+)\s*$/);
+    var inferredSubject = subjectMatch ? subjectMatch[1].trim() : '';
+    var classMatch = title.match(/\bClass\s+(XII|XI|X|[1-9]|1[0-2])\b/i);
+    var classNumber = classMatch ? ({X:'10',XI:'11',XII:'12'}[classMatch[1].toUpperCase()] || classMatch[1]) : '';
+    var inferredBoard = c.board_id || (boardsList.find(function (b) {
+      return /cbse/i.test(String(b.name || '')) && (/cbse/i.test(String(meta.source_name || '')) || /cbseacademic\.nic\.in$/i.test(String(c.source_domain || '')));
+    }) || {}).id || '';
+    var inferredGrade = c.grade_id || (gradesList.find(function (g) { return String(g.name).trim() === classNumber; }) || {}).id || '';
+    var inferredExam = c.exam_type || (/sample\s*(question\s*)?paper/i.test(title) ? 'sample' : 'main');
+    var mediumOptions = ['English','Hindi','Kannada','Sanskrit','Other'];
+    var inferredMedium = c.medium || (mediumOptions.find(function (m) { return inferredSubject.toLowerCase() === m.toLowerCase(); }) || 'English');
     var metadata = '<div class="lib-ppd-meta">'
       + (isSchool
         ? '<label>School<select id="ppd-school-' + esc(c.id) + '">' + selectOptions(state.schools, c.school_id, 'Select school') + '</select></label>'
           + '<label>New school name<input id="ppd-newschool-' + esc(c.id) + '" value="' + esc(c.discovered_school_name || '') + '" placeholder="Add if not listed"></label>'
           + '<button class="btn-small" type="button" onclick="libPPDAddSchool(\'' + esc(c.id) + '\')">Add to school directory</button>'
-        : '<label>Board<select id="ppd-board-' + esc(c.id) + '">' + selectOptions(boardsList, c.board_id, 'Select board') + '</select></label>')
-      + '<label>Class<select id="ppd-grade-' + esc(c.id) + '">' + selectOptions(gradesList, c.grade_id, 'Select class') + '</select></label>'
-      + '<label>Subject<input id="ppd-subject-' + esc(c.id) + '" value="' + esc(c.subject_name || '') + '" placeholder="e.g. Sanskrit"></label>'
-      + '<label>Year<input id="ppd-year-' + esc(c.id) + '" type="number" min="1950" max="' + (new Date().getFullYear()+1) + '" value="' + esc(c.year || new Date().getFullYear()) + '"></label>'
-      + '<label>Exam type<select id="ppd-exam-' + esc(c.id) + '"><option value="main"' + (c.exam_type === 'main' || !c.exam_type ? ' selected' : '') + '>Main</option><option value="compartment"' + (c.exam_type === 'compartment' ? ' selected' : '') + '>Compartment</option><option value="supplementary"' + (c.exam_type === 'supplementary' ? ' selected' : '') + '>Supplementary</option><option value="sample"' + (c.exam_type === 'sample' ? ' selected' : '') + '>Sample Question Paper</option><option value="other"' + (c.exam_type === 'other' ? ' selected' : '') + '>Other</option></select></label>'
-      + '<label>Medium<select id="ppd-medium-' + esc(c.id) + '"><option value="English"' + (!c.medium || c.medium === 'English' ? ' selected' : '') + '>English</option><option value="Hindi"' + (c.medium === 'Hindi' ? ' selected' : '') + '>Hindi</option><option value="Kannada"' + (c.medium === 'Kannada' ? ' selected' : '') + '>Kannada</option><option value="Sanskrit"' + (c.medium === 'Sanskrit' ? ' selected' : '') + '>Sanskrit</option><option value="Other"' + (c.medium === 'Other' ? ' selected' : '') + '>Other</option></select></label>'
+        : '<label>Board<select id="ppd-board-' + esc(c.id) + '">' + selectOptions(boardsList, inferredBoard, 'Select board') + '</select></label>')
+      + '<label>Class<select id="ppd-grade-' + esc(c.id) + '">' + selectOptions(gradesList, inferredGrade, 'Select class') + '</select></label>'
+      + '<label>Subject<input id="ppd-subject-' + esc(c.id) + '" value="' + esc(c.subject_name || inferredSubject) + '" placeholder="e.g. Sanskrit"></label>'
+      + '<label>Year<input id="ppd-year-' + esc(c.id) + '" type="number" min="1950" max="' + (new Date().getFullYear()+1) + '" value="' + esc(c.year || inferredYear) + '"></label>'
+      + '<label>Exam type<select id="ppd-exam-' + esc(c.id) + '"><option value="main"' + (inferredExam === 'main' ? ' selected' : '') + '>Main</option><option value="compartment"' + (inferredExam === 'compartment' ? ' selected' : '') + '>Compartment</option><option value="supplementary"' + (inferredExam === 'supplementary' ? ' selected' : '') + '>Supplementary</option><option value="sample"' + (inferredExam === 'sample' ? ' selected' : '') + '>Sample Question Paper</option><option value="other"' + (inferredExam === 'other' ? ' selected' : '') + '>Other</option></select></label>'
+      + '<label>Medium<select id="ppd-medium-' + esc(c.id) + '">' + mediumOptions.map(function (m) { return '<option value="' + esc(m) + '"' + (inferredMedium === m ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('') + '</select></label>'
       + '</div>';
     var actions = '<div class="lib-ppd-actions"><a class="btn-small" href="' + esc(previewUrl) + '" target="_blank" rel="noopener noreferrer">Open source / PDF</a>'
       + '<button class="btn-small" onclick="libPPDVerify(\'' + esc(c.id) + '\')" ' + (['verified','duplicate'].indexOf(c.verification_status) >= 0 ? 'disabled' : '') + '>Verify PDF</button>'
@@ -91,10 +108,10 @@
         : '')
       + (c.status !== 'rejected' && c.status !== 'imported' ? '<button class="btn-small" onclick="libPPDReject(\'' + esc(c.id) + '\')">Reject</button>' : '')
       + '</div>';
-    return '<article class="lib-ppd-candidate"><div class="lib-ppd-candidate-head"><div><b>' + esc(c.title) + '</b><div class="hint">' + esc(c.source_domain) + ' · ' + esc(c.source_type) + ' · ' + esc(c.status) + ' · PDF: ' + esc(c.verification_status) + '</div>'
+    return '<article class="lib-ppd-candidate"><div class="lib-ppd-review-layout"><div class="lib-ppd-review-summary"><div class="lib-ppd-candidate-head"><div><b>' + esc(c.title) + '</b><div class="hint">' + esc(c.source_domain) + ' · ' + esc(c.source_type) + ' · ' + esc(c.status) + ' · PDF: ' + esc(c.verification_status) + '</div>'
       + (meta.snippet ? '<p class="hint">' + esc(meta.snippet) + '</p>' : '')
       + (school ? '<div class="hint">School: ' + esc(school.name) + '</div>' : (c.discovered_school_name ? '<div class="hint">Possible school: ' + esc(c.discovered_school_name) + '</div>' : ''))
-      + '</div>' + actions + '</div>' + domainAction + metadata + '</article>';
+      + '</div></div>' + actions + domainAction + '</div><div class="lib-ppd-review-fields">' + metadata + '</div></div></article>';
   }
   function renderPanel() {
     ensureLoaded();
@@ -118,7 +135,7 @@
       return '<div class="hint">' + esc(new Date(r.started_at).toLocaleString()) + ' · ' + esc(r.query_text) + ' · ' + esc(r.status) + ' · ' + esc(r.results_found) + ' results' + esc(progressText) + resume + restart + '</div>';
     }).join('') : '<p class="hint">No searches yet.</p>') + '</div>';
     return '<section class="lib-ppd"><style>'
-      + '.lib-ppd{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}.lib-ppd h3{font-family:Zilla Slab,serif;margin:0 0 7px}.lib-ppd-section{margin:14px 0 20px}.lib-ppd-search,.lib-ppd-source-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.lib-ppd-search input{flex:1;min-width:190px}.lib-ppd-search select,.lib-ppd-search input,.lib-ppd-source-form input,.lib-ppd-source-form select,.lib-ppd-meta input,.lib-ppd-meta select{min-height:38px;padding:7px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);box-sizing:border-box}.lib-ppd-source-form input{flex:1;min-width:170px}.lib-ppd-source{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line)}.lib-ppd-candidate{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}.lib-ppd-candidate-head,.lib-ppd-title,.lib-ppd-actions{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}.lib-ppd-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:12px}.lib-ppd-meta label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);font-weight:700}.lib-ppd-meta input,.lib-ppd-meta select{width:100%}.lib-ppd-actions{justify-content:flex-start;margin-top:10px}.lib-ppd-domain-approval{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}.lib-ppd-domain-approval select{min-height:34px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink)}.lib-ppd p.hint{margin:5px 0 10px}@media(max-width:600px){.lib-ppd-search,.lib-ppd-source-form{align-items:stretch}.lib-ppd-search>* ,.lib-ppd-source-form>*{width:100%;min-width:0}.lib-ppd-candidate-head{align-items:flex-start}}'
+      + '.lib-ppd{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}.lib-ppd h3{font-family:Zilla Slab,serif;margin:0 0 7px}.lib-ppd-section{margin:14px 0 20px}.lib-ppd-search,.lib-ppd-source-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.lib-ppd-search input{flex:1;min-width:190px}.lib-ppd-search select,.lib-ppd-search input,.lib-ppd-source-form input,.lib-ppd-source-form select,.lib-ppd-meta input,.lib-ppd-meta select{min-height:38px;padding:7px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);box-sizing:border-box}.lib-ppd-source-form input{flex:1;min-width:170px}.lib-ppd-source{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line)}.lib-ppd-candidate{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}.lib-ppd-review-layout{display:grid;grid-template-columns:minmax(0,0.9fr) minmax(0,1.1fr);gap:16px;align-items:start}.lib-ppd-review-summary,.lib-ppd-review-fields{min-width:0}.lib-ppd-review-fields{border-left:1px solid var(--line);padding-left:16px}.lib-ppd-candidate-head,.lib-ppd-title,.lib-ppd-actions{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}.lib-ppd-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:0}.lib-ppd-meta label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);font-weight:700}.lib-ppd-meta input,.lib-ppd-meta select{width:100%}.lib-ppd-actions{justify-content:flex-start;margin-top:10px}.lib-ppd-domain-approval{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}.lib-ppd-domain-approval select{min-height:34px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink)}.lib-ppd p.hint{margin:5px 0 10px}@media(max-width:700px){.lib-ppd-review-layout{grid-template-columns:minmax(0,1fr)}.lib-ppd-review-fields{border-left:0;border-top:1px solid var(--line);padding:12px 0 0}.lib-ppd-search,.lib-ppd-source-form{align-items:stretch}.lib-ppd-search>* ,.lib-ppd-source-form>*{width:100%;min-width:0}.lib-ppd-candidate-head{align-items:flex-start}}'
       + '</style>' + search + sources + candidates + runs + '</section>';
   }
 
@@ -254,26 +271,42 @@
   };
   window.libPPDImport = async function (id) {
     var candidate = state.candidates.find(function (c) { return c.id === id; });
-    if (!candidate) return;
+    if (!candidate) { notify('This discovered paper is no longer in the review queue. Refresh and try again.', true); return; }
     var schoolId = candidate.source_type === 'school' ? val('ppd-school-' + id) : '';
     var boardId = candidate.source_type === 'school' ? '' : val('ppd-board-' + id);
     var gradeId = val('ppd-grade-' + id), subject = val('ppd-subject-' + id).trim();
     var year = Number(val('ppd-year-' + id)), exam = val('ppd-exam-' + id), medium = val('ppd-medium-' + id).trim();
-    if ((!schoolId && !boardId) || !gradeId || !subject || !Number.isInteger(year) || !medium) { notify('Complete Board / School, Class, Subject, Year and Medium before importing.', true); return; }
-    var { error: approvalError } = await sb.from('qb_paper_discovery_candidates').update({
-      status:'approved_for_import', board_id:boardId || null, school_id:schoolId || null, grade_id:gradeId,
-      subject_name:subject, year:year, exam_type:exam, medium:medium, reviewed_by:currentUserId,
-      reviewed_at:new Date().toISOString(), updated_at:new Date().toISOString()
-    }).eq('id', id);
-    if (approvalError) { notify('Could not save review metadata: ' + approvalError.message, true); return; }
-    notify('Importing verified PDF into the existing Past Papers review queue…');
+    if ((!schoolId && !boardId) || !gradeId || !subject || !Number.isInteger(year) || !medium) {
+      notify('Complete Board / School, Class, Subject, Year and Medium before importing.', true); return;
+    }
+    if (candidate.verification_status !== 'verified') {
+      notify('Verify this PDF successfully before importing.', true); return;
+    }
+    notify('Preparing the verified PDF for import…');
     try {
-      var result = await invoke({ action:'import', candidate_id:id, board_id:boardId, school_id:schoolId, grade_id:gradeId, subject_name:subject, year:year, exam_type:exam, medium:medium });
-      state.message = result.message || 'Imported.';
-      state.error = false;
-      state.loaded = false; await loadData(true);
+      // Save the explicit Admin review decision first. Selecting the row also
+      // detects RLS/no-row cases that an UPDATE without SELECT can hide.
+      var approval = await sb.from('qb_paper_discovery_candidates').update({
+        status:'approved_for_import', board_id:boardId || null, school_id:schoolId || null, grade_id:gradeId,
+        subject_name:subject, year:year, exam_type:exam, medium:medium, reviewed_by:currentUserId,
+        reviewed_at:new Date().toISOString(), updated_at:new Date().toISOString()
+      }).eq('id', id).select('id').maybeSingle();
+      if (approval.error) throw new Error('Could not save review metadata: ' + approval.error.message);
+      if (!approval.data) throw new Error('Review metadata was not saved. Check Admin access and refresh the candidate.');
+      notify('Importing verified PDF into the existing Past Papers review queue…');
+      var result = await invoke({ action:'import', candidate_id:id, board_id:boardId, school_id:schoolId,
+        grade_id:gradeId, subject_name:subject, year:year, exam_type:exam, medium:medium });
+      state.message = result.message || 'Imported into Past Papers.';
+      state.error = '';
+      state.loaded = false;
+      await loadData(true);
       if (typeof loadQbSourcePapers === 'function') await loadQbSourcePapers();
-    } catch (e) { state.message = e.message || String(e); state.error = state.message; state.loaded = false; await loadData(true); }
+    } catch (e) {
+      state.message = 'Import failed: ' + (e && e.message ? e.message : String(e));
+      state.error = state.message;
+      state.loaded = false;
+      await loadData(true);
+    }
     if (typeof render === 'function') render();
   };
 
