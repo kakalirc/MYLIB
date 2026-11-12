@@ -281,8 +281,17 @@ async function crawlSchoolOfficial(source: any, query: string): Promise<Discover
   try {
     const map = await fetchAllowed("https://" + source.domain + "/sitemap.xml", [source.domain], "application/xml,text/xml");
     const xml = new TextDecoder().decode(await readBounded(map.response, 1024 * 1024));
-    const pages = [...xml.matchAll(/<loc>([\s\S]*?)<\/loc>/gi)].map((m) => decodeEntities(m[1].trim()))
-      .filter((u) => /question|exam|academic|download|resource|paper|assessment/i.test(u)).slice(0, 6);
+    let sitemapLocations = [...xml.matchAll(/<loc>([\s\S]*?)<\/loc>/gi)].map((m) => decodeEntities(m[1].trim()));
+    const nestedSitemaps = sitemapLocations.filter((u) => /sitemap/i.test(u)).slice(0, 4);
+    for (const sitemapUrl of nestedSitemaps) {
+      try {
+        const nested = await fetchAllowed(sitemapUrl, [source.domain], "application/xml,text/xml");
+        const nestedXml = new TextDecoder().decode(await readBounded(nested.response, 1024 * 1024));
+        sitemapLocations.push(...[...nestedXml.matchAll(/<loc>([\s\S]*?)<\/loc>/gi)].map((m) => decodeEntities(m[1].trim())));
+      } catch { /* Continue with other public sitemap entries. */ }
+    }
+    const pages = [...new Set(sitemapLocations)]
+      .filter((u) => /question|exam|academic|download|resource|paper|assessment/i.test(u) && !/sitemap/i.test(u)).slice(0, 12);
     for (const page of pages) {
       let target: URL; try { target = new URL(page); } catch { continue; }
       if (!safeHost(target, [source.domain])) continue;
