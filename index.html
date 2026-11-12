@@ -25086,19 +25086,35 @@ function renderAdminQuestionBank() {
   if (qbSubTab === 'past') return `<div class="card">
     <div class="row-form" style="justify-content:space-between;align-items:center;margin-bottom:16px">
       <h2 style="font-family:'Zilla Slab',serif;margin:0">Question Bank ${helpBtn('qb-' + qbSubTab)}</h2>
-      ${currentRole === 'Admin' ? `<button class="btn-small btn-primary" onclick="qbSourceUploadOpen=!qbSourceUploadOpen;render()">${qbSourceUploadOpen?'Close uploader':'+ Upload Past Papers'}</button>` : ''}
+      ${currentRole === 'Admin' ? `<button class="btn-small btn-primary" onclick="window.qbCollectionMethod='upload';qbSourceUploadOpen=!qbSourceUploadOpen;render()">${qbSourceUploadOpen?'Close uploader':'+ Upload Past Papers'}</button>` : ''}
     </div>
     ${subTabsHtml}
-    ${currentRole === 'Admin' ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin:16px 0 18px">
-      <div style="padding:18px;border:1px solid var(--line);border-radius:13px;background:linear-gradient(135deg,rgba(56,104,70,.10),rgba(56,104,70,.025))"><div style="font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--forest);margin-bottom:7px">Primary collection method</div><h3 style="margin:0 0 6px;font-family:Zilla Slab,serif">Discover papers online</h3><p class="hint" style="margin:0">Search official board, school and trusted education sources, then review papers before importing them.</p><div style="margin-top:12px;font-size:12px;font-weight:700;color:var(--muted)">Online discovery engine · Planned next phase</div></div>
-      <div style="padding:18px;border:1px solid var(--line);border-radius:13px;background:var(--surface)"><div style="font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:7px">Secondary collection method</div><h3 style="margin:0 0 6px;font-family:Zilla Slab,serif">Upload from computer</h3><p class="hint" style="margin:0">Add PDFs saved on your computer. Review and publish your own teacher submissions; Admin can review any submission.</p><button class="btn-small btn-primary" style="margin-top:12px" onclick="qbSourceUploadOpen=!qbSourceUploadOpen;render()">${qbSourceUploadOpen?'Close upload form':'Choose PDF files'}</button></div>
+    ${currentRole === 'Admin' ? `<div class="lib-pp-method-tabs" role="tablist" aria-label="Past paper collection method" style="display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 12px">
+      <button type="button" class="btn-small ${(window.qbCollectionMethod || 'online')==='online'?'btn-primary':''}" role="tab" aria-selected="${(window.qbCollectionMethod || 'online')==='online'}" onclick="window.qbCollectionMethod='online';render()">Discover papers online</button>
+      <button type="button" class="btn-small ${window.qbCollectionMethod==='upload'?'btn-primary':''}" role="tab" aria-selected="${window.qbCollectionMethod==='upload'}" onclick="window.qbCollectionMethod='upload';render()">Upload from computer</button>
+      <button type="button" class="btn-small ${window.qbCollectionMethod==='manage'?'btn-primary':''}" role="tab" aria-selected="${window.qbCollectionMethod==='manage'}" onclick="window.qbCollectionMethod='manage';render()">Review &amp; manage papers</button>
+    </div>
+    <div id="lib-pp-online-panel" role="tabpanel" style="${(window.qbCollectionMethod || 'online')==='online'?'':'display:none'}">
+      <div style="padding:16px;border:1px solid var(--line);border-radius:13px;background:linear-gradient(135deg,rgba(56,104,70,.10),rgba(56,104,70,.025))">
+        <div style="font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--forest);margin-bottom:7px">Primary collection method</div>
+        <h3 style="margin:0 0 6px;font-family:Zilla Slab,serif">Discover papers online</h3>
+        <p class="hint" style="margin:0">Search official board, school and trusted education sources, then review papers before importing them.</p>
+        <div style="margin-top:12px;font-size:12px;font-weight:700;color:var(--muted)">Online discovery engine · Planned next phase</div>
+      </div>
+    </div>
+    <div id="lib-pp-upload-panel" role="tabpanel" style="${window.qbCollectionMethod==='upload'?'':'display:none'}">
+      <div style="padding:16px;border:1px solid var(--line);border-radius:13px;background:var(--surface)">
+        <div style="font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:7px">Secondary collection method</div>
+        <h3 style="margin:0 0 6px;font-family:Zilla Slab,serif">Upload from computer</h3>
+        <p class="hint" style="margin:0">Add PDFs saved on your computer. Review and publish your own teacher submissions; Admin can review any submission.</p>
+        <button class="btn-small btn-primary" style="margin-top:12px" onclick="qbSourceUploadOpen=!qbSourceUploadOpen;render()">${qbSourceUploadOpen?'Close upload form':'Choose PDF files'}</button>
+      </div>
     </div>` : ''}
     ${qbSourceUploadMsg ? `<div class="hint" style="color:var(--brick);margin:8px 0">${esc(qbSourceUploadMsg)}</div>` : ''}
-    ${currentRole === 'Admin' && qbSourceUploadOpen ? qbSourceUploaderHtml() : ''}
+    ${currentRole === 'Admin' && window.qbCollectionMethod === 'upload' && qbSourceUploadOpen ? qbSourceUploaderHtml() : ''}
     ${qbMsg ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${esc(qbMsg)}</div>` : ''}
-    ${qbSourcePendingReviewHtml()}
-    ${qbSourcePapersHtml()}
-    ${qbSourceReviewHistoryHtml()}
+    ${window.qbCollectionMethod === 'manage' ? qbSourcePendingReviewHtml() + qbSourcePapersHtml() + qbSourceReviewHistoryHtml() : ''}
+    ${currentRole === 'Admin' ? '</div>' : ''}
   </div>`;
 
   if (qbSubTab === 'papers') return `<div class="card">
