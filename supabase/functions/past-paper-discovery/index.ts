@@ -64,7 +64,7 @@ async function searchSchoolWeb(query: string) {
     signal: AbortSignal.timeout(12000),
   });
   if (!res.ok) throw new Error("Search provider returned " + res.status + ".");
-  const html = await res.text();
+  const html = new TextDecoder().decode(await readBounded(res, 2 * 1024 * 1024));
   const rows: Array<{ title: string; url: string; snippet: string; domain: string }> = [];
   const re = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
   let m: RegExpExecArray | null;
