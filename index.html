@@ -26512,6 +26512,7 @@ async function qbUploadSourcePapers() {
 }
 
 async function qbSetSourcePaperStatus(id, status) {
+  if (currentRole !== 'Admin') { qbMsg = 'Only Admin can review and publish past papers.'; render(); return; }
   if (!['published','rejected'].includes(status)) return;
   const paper = qbSourcePapers.find(x => x.id === id);
   if (!paper || !sb) return;
@@ -26564,7 +26565,7 @@ function qbSourcePapersHtml() {
       ${list.map(sp => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px">
         <span><b>${esc(String(sp.year || ''))}</b> ${esc(sp.exam_type || '')}${sp.medium ? ` <span style="color:var(--muted);font-size:12px">· ${esc(sp.medium)}</span>` : ''}${sp.question_count ? ` <span style="color:var(--muted);font-size:12px">· ${esc(String(sp.question_count))} questions</span>` : ''}<br><span class="hint">${esc(sp.source_type === 'school' ? 'School: ' + (qbByName(qbSchools, sp.school_id) || 'Unknown school') : 'Board: ' + (qbByName(boards, sp.board_id) || 'Unknown board'))} · ${esc(sp.subject_name || '')} · ${esc(sp.uploader_name || 'Legacy upload')} · ${esc(sp.status || 'published')}</span></span>
         <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${sp.stored_pdf_url || sp.source_url ? `<button class="btn-small" onclick="qbOpenSourcePdf('${sp.id}')">⬇ Open PDF</button>` : '<span class="hint">No PDF</span>'}
-        ${sp.status === 'pending_review' && (currentRole === 'Admin' || (currentRole === 'Teacher' && sp.uploaded_by)) ? `<button class="btn-small btn-primary" onclick="qbSetSourcePaperStatus('${sp.id}','published')">Publish</button><button class="btn-small" onclick="qbSetSourcePaperStatus('${sp.id}','rejected')">Reject</button>` : ''}
+        ${sp.status === 'pending_review' && currentRole === 'Admin' ? `<button class="btn-small btn-primary" onclick="qbSetSourcePaperStatus('${sp.id}','published')">Publish</button><button class="btn-small" onclick="qbSetSourcePaperStatus('${sp.id}','rejected')">Reject</button>` : ''}
         </span>
       </div>`).join('')}</div>`).join('')}`;
 }
