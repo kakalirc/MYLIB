@@ -40,23 +40,23 @@ function parseSearchResults(html: string, limit: number) {
   // Attribute order varies between search-provider responses. Parse each anchor
   // first, then inspect its attributes independently rather than relying on one
   // exact class/href ordering.
-  const anchors = html.match(/<a\\b[^>]*>[\\s\\S]*?<\\/a>/gi) || [];
+  const anchors = html.match(/<a\b[^>]*>[\s\S]*?<\/a>/gi) || [];
   for (const anchor of anchors) {
     if (rows.length >= limit) break;
-    const className = anchor.match(/\\bclass\\s*=\\s*["']([^"']*)["']/i)?.[1] || "";
-    if (!/(^|\\s)result__a(\\s|$)/i.test(className)) continue;
-    const href = anchor.match(/\\bhref\\s*=\\s*["']([^"']+)["']/i)?.[1] || "";
+    const className = anchor.match(/\bclass\s*=\s*["']([^"']*)["']/i)?.[1] || "";
+    if (!/(^|\s)result__a(\s|$)/i.test(className)) continue;
+    const href = anchor.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1] || "";
     const target = ddgTarget(href);
     if (!target) continue;
     let parsed: URL;
     try { parsed = new URL(target); } catch { continue; }
     if (!safeHost(parsed, [parsed.hostname])) continue;
-    const title = htmlText(anchor.replace(/^<a\\b[^>]*>/i, "").replace(/<\\/a>$/i, ""));
+    const title = htmlText(anchor.replace(/^<a\b[^>]*>/i, "").replace(/<\/a>$/i, ""));
     rows.push({
       title: title.slice(0, 500) || parsed.pathname.split("/").pop() || parsed.hostname,
       url: parsed.href,
       snippet: "",
-      domain: parsed.hostname.toLowerCase().replace(/^www\\./, ""),
+      domain: parsed.hostname.toLowerCase().replace(/^www\./, ""),
     });
   }
   return rows;
