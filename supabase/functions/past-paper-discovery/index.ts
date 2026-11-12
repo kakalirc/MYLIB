@@ -141,14 +141,18 @@ function linkRows(html: string, baseUrl: string, source: any, terms: string[], l
     const href = anchor.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1] || "";
     if (!href) continue;
     const label = htmlText(anchor.replace(/^<a\b[^>]*>/i, "").replace(/<\/a>$/i, ""));
+    const anchorAt = html.indexOf(anchor);
+    const rowStart = html.lastIndexOf("<tr", anchorAt);
+    const rowEnd = html.indexOf("</tr>", anchorAt);
+    const context = rowStart >= 0 && rowEnd > anchorAt ? htmlText(html.slice(rowStart, rowEnd + 5)) : "";
     let target: URL;
     try { target = new URL(decodeEntities(href), baseUrl); } catch { continue; }
     if (!safeHost(target, [source.domain])) continue;
     const isPdf = /\.pdf(?:$|[?#])/i.test(target.href);
-    if (!matchesQuery(label + " " + target.pathname, terms)) continue;
+    if (!matchesQuery(label + " " + context + " " + target.pathname, terms)) continue;
     if (!isPdf && !/(question|paper|sample|specimen|exam|academic|download|resource)/i.test(label + " " + target.pathname)) continue;
     rows.push({ title: (label || target.pathname.split("/").pop() || source.display_name).slice(0, 500),
-      url: target.href, snippet: "Official source page · " + source.display_name,
+      url: target.href, snippet: "Official source page · " + source.display_name + (context ? " · " + context.slice(0, 260) : ""),
       domain: target.hostname.toLowerCase().replace(/^www\./, ""), source });
   }
   return rows;
@@ -302,7 +306,7 @@ async function crawlCbseZipArchives(source: any, query: string): Promise<Discove
       if (!safeHost(target, [source.domain]) || !/\.zip(?:$|[?#])/i.test(target.href)) continue;
       const { response: zipResponse } = await fetchAllowed(target.href, [source.domain], "application/zip,application/octet-stream");
       const zipBytes = await readBounded(zipResponse);
-      const members = zipPdfMembers(zipBytes, query);
+      const members = zipPdfMembers(zipBytes, "");
       for (const member of members) rows.push({
         title: subject + " — " + member.name.split("/").pop(),
         url: target.href, snippet: "Official CBSE paper inside ZIP archive",
@@ -412,6 +416,11 @@ Deno.serve(async (req) => {
       if (cisceSource) {
         try { targeted.results.push(...await crawlCisceOfficial(cisceSource, searchQuery)); targeted.successfulQueries++; }
         catch (e) { targeted.errors.push("cisce.org: " + clip((e as Error)?.message || e, 220)); }
+      }
+      // Registered education portals are crawled directly through their public pages and sitemaps.
+      for (const source of searchTargets.filter((s: any) => s.source_type === "education_portal").slice(0, 8)) {
+        try { targeted.results.push(...await crawlSchoolOfficial(source, searchQuery)); targeted.successfulQueries++; }
+        catch (e) { targeted.errors.push(source.domain + ": " + clip((e as Error)?.message || e, 220)); }
       }
     } else {
       for (const source of searchTargets.slice(0, 8)) {
