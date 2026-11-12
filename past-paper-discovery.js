@@ -35,6 +35,7 @@
       state.error = '';
     } catch (e) {
       state.error = 'Online Discovery database is not ready: ' + (e && e.message ? e.message : String(e));
+      state.loaded = true;
     } finally {
       state.loading = false;
     }
@@ -76,12 +77,12 @@
       + '<label>Class<select id="ppd-grade-' + esc(c.id) + '">' + selectOptions(gradesList, c.grade_id, 'Select class') + '</select></label>'
       + '<label>Subject<input id="ppd-subject-' + esc(c.id) + '" value="' + esc(c.subject_name || '') + '" placeholder="e.g. Sanskrit"></label>'
       + '<label>Year<input id="ppd-year-' + esc(c.id) + '" type="number" min="1950" max="' + (new Date().getFullYear()+1) + '" value="' + esc(c.year || new Date().getFullYear()) + '"></label>'
-      + '<label>Exam type<select id="ppd-exam-' + esc(c.id) + '"><option value="main">Main</option><option value="sample">Sample</option><option value="pre_board">Pre-board</option><option value="mid_term">Mid-term</option><option value="periodic">Periodic</option><option value="practice">Practice</option><option value="revision">Revision</option></select></label>'
+      + '<label>Exam type<select id="ppd-exam-' + esc(c.id) + '"><option value="main"' + (c.exam_type === 'main' ? ' selected' : '') + '>Main</option><option value="sample"' + (c.exam_type === 'sample' ? ' selected' : '') + '>Sample</option><option value="pre_board"' + (c.exam_type === 'pre_board' ? ' selected' : '') + '>Pre-board</option><option value="mid_term"' + (c.exam_type === 'mid_term' ? ' selected' : '') + '>Mid-term</option><option value="periodic"' + (c.exam_type === 'periodic' ? ' selected' : '') + '>Periodic</option><option value="practice"' + (c.exam_type === 'practice' ? ' selected' : '') + '>Practice</option><option value="revision"' + (c.exam_type === 'revision' ? ' selected' : '') + '>Revision</option></select></label>'
       + '<label>Medium<input id="ppd-medium-' + esc(c.id) + '" value="' + esc(c.medium || 'English') + '"></label>'
       + '</div>';
     var actions = '<div class="lib-ppd-actions"><a class="btn-small" href="' + esc(previewUrl) + '" target="_blank" rel="noopener noreferrer">Open source / PDF</a>'
-      + '<button class="btn-small" onclick="libPPDVerify(\'' + esc(c.id) + '\')" ' + (c.verification_status === 'verified' ? 'disabled' : '') + '>Verify PDF</button>'
-      + (c.verification_status === 'verified'
+      + '<button class="btn-small" onclick="libPPDVerify(\'' + esc(c.id) + '\')" ' + (['verified','duplicate'].indexOf(c.verification_status) >= 0 ? 'disabled' : '') + '>Verify PDF</button>'
+      + (c.verification_status === 'verified' && c.status !== 'imported' && c.status !== 'rejected' && c.status !== 'duplicate'
         ? '<button class="btn-small btn-primary" onclick="libPPDImport(\'' + esc(c.id) + '\')">Import to Past Papers</button>'
         : '')
       + (c.status !== 'rejected' && c.status !== 'imported' ? '<button class="btn-small" onclick="libPPDReject(\'' + esc(c.id) + '\')">Reject</button>' : '')
@@ -96,7 +97,7 @@
     if (state.loading && !state.loaded) return '<section class="lib-ppd"><h3>Discover papers online</h3><p class="hint">Loading discovery sources and review queue…</p></section>';
     var sources = '<div class="lib-ppd-section"><h3>Approved sources</h3><p class="hint">Search is restricted to domains approved here. Individual school websites can be added as the directory grows.</p>' + sourceRowsHtml()
       + '<div class="lib-ppd-source-form"><input id="ppd-source-name" placeholder="Source name (e.g. Delhi Public School)"><input id="ppd-source-domain" placeholder="Domain only (e.g. dps.example.edu)"><select id="ppd-source-type"><option value="board">Board</option><option value="school">School</option><option value="education_portal">Education portal</option></select><select id="ppd-source-trust"><option value="official">Official</option><option value="trusted">Trusted</option><option value="review">Review</option></select><button class="btn-small btn-primary" onclick="libPPDAddSource()">Add source</button></div></div>';
-    var search = '<div class="lib-ppd-section"><h3>Find question papers online</h3><div class="lib-ppd-search">'
+    var search = (state.error ? '<div class="hint" style="color:var(--brick);margin:8px 0">' + esc(state.error) + '</div>' : '') + '<div class="lib-ppd-section"><h3>Find question papers online</h3><div class="lib-ppd-search">'
       + '<select id="ppd-scope" onchange="libPPDSetScope(this.value)"><option value="board"' + (state.scope === 'board' ? ' selected' : '') + '>Board papers</option><option value="school"' + (state.scope === 'school' ? ' selected' : '') + '>Individual school papers</option></select>'
       + '<input id="ppd-query" placeholder="e.g. CBSE Class 10 Sanskrit question paper 2025" value="' + esc(state.lastQuery || '') + '">'
       + '<input id="ppd-school-name" placeholder="School name (optional)" value="' + esc(state.lastSchool || '') + '">'
