@@ -493,7 +493,7 @@ Deno.serve(async (req) => {
           // A previous invocation may have been killed by the Edge Function CPU limit.
           // Claim only an idle or expired lease; the conditional update prevents two
           // concurrent Resume requests from processing the same source checkpoint.
-          const staleBefore = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+          const staleBefore = new Date(Date.now() - 5 * 60 * 1000).toISOString();
           const leaseAt = new Date().toISOString();
           const { data: claimed, error: claimError } = await admin.from("qb_paper_discovery_runs")
             .update({ heartbeat_at: leaseAt })
@@ -501,7 +501,7 @@ Deno.serve(async (req) => {
             .or("heartbeat_at.is.null,heartbeat_at.lt." + staleBefore)
             .select("*").maybeSingle();
           if (claimError || !claimed) {
-            return reply(409, { error: "This discovery run is already being processed. If its previous attempt timed out, wait two minutes and select Resume again." });
+            return reply(409, { error: "This discovery run is already being processed. If its previous attempt timed out, wait five minutes and select Resume again." });
           }
           run = claimed;
         }
