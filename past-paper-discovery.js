@@ -66,9 +66,9 @@
     var gradesList = typeof grades !== 'undefined' ? grades.filter(function (x) { return !x.archived; }) : [];
     var school = c.school_id ? state.schools.find(function (s) { return s.id === c.school_id; }) : null;
     var registeredSource = state.sources.find(function (s) { return s.id === c.source_id || c.source_domain === s.domain || c.source_domain.endsWith('.' + s.domain); });
-    var domainAction = !registeredSource
-      ? '<div class="lib-ppd-domain-approval"><select id="ppd-domaintype-' + esc(c.id) + '"><option value="school">School website</option><option value="education_portal">Education portal</option></select><button class="btn-small" onclick="libPPDApproveDomain(' + "'" + esc(c.id) + "'" + ')">Approve domain for PDF verification</button></div>'
-      : (!registeredSource.enabled ? '<button class="btn-small" onclick="libPPDToggleSource(' + "'" + esc(registeredSource.id) + "'" + ',true)">Enable source domain</button>' : '');
+    var domainAction = (!registeredSource || c.source_id !== registeredSource.id || !registeredSource.enabled)
+      ? '<div class="lib-ppd-domain-approval">' + (!registeredSource ? '<select id="ppd-domaintype-' + esc(c.id) + '"><option value="school">School website</option><option value="education_portal">Education portal</option></select>' : '') + '<button class="btn-small" onclick="libPPDApproveDomain(' + "'" + esc(c.id) + "'" + ')">' + (registeredSource && !registeredSource.enabled ? 'Enable and link source domain' : 'Approve / link source domain') + '</button></div>'
+      : '';
     var meta = c.discovery_metadata || {};
     var previewUrl = c.pdf_url || c.source_url;
     var isSchool = c.source_type === 'school';
@@ -99,7 +99,7 @@
   function renderPanel() {
     ensureLoaded();
     if (state.loading && !state.loaded) return '<section class="lib-ppd"><h3>Discover papers online</h3><p class="hint">Loading discovery sources and review queue…</p></section>';
-    var sources = '<div class="lib-ppd-section"><h3>Approved sources</h3><p class="hint">Search is restricted to domains approved here. Individual school websites can be added as the directory grows.</p>' + sourceRowsHtml()
+    var sources = '<div class="lib-ppd-section"><h3>Approved sources</h3><p class="hint">Board searches use approved domains. School searches can discover new websites across the web; Admin must approve each new domain before PDF verification.</p>' + sourceRowsHtml()
       + '<div class="lib-ppd-source-form"><input id="ppd-source-name" placeholder="Source name (e.g. Delhi Public School)"><input id="ppd-source-domain" placeholder="Domain only (e.g. dps.example.edu)"><select id="ppd-source-type"><option value="board">Board</option><option value="school">School</option><option value="education_portal">Education portal</option></select><select id="ppd-source-trust"><option value="official">Official</option><option value="trusted">Trusted</option><option value="review">Review</option></select><button class="btn-small btn-primary" onclick="libPPDAddSource()">Add source</button></div></div>';
     var search = (state.error ? '<div class="hint" style="color:var(--brick);margin:8px 0">' + esc(state.error) + '</div>' : '') + '<div class="lib-ppd-section"><h3>Find question papers online</h3><div class="lib-ppd-search">'
       + '<select id="ppd-scope" onchange="libPPDSetScope(this.value)"><option value="board"' + (state.scope === 'board' ? ' selected' : '') + '>Board papers</option><option value="school"' + (state.scope === 'school' ? ' selected' : '') + '>Individual school papers</option></select>'
@@ -148,7 +148,7 @@
     var domain = String(candidate.source_domain || '').toLowerCase().trim();
     var sourceType = val('ppd-domaintype-' + id) === 'education_portal' ? 'education_portal' : 'school';
     if (!/^(?=.{3,253}$)[a-z0-9.-]+$/.test(domain) || domain.indexOf('..') >= 0) { notify('This candidate has an invalid source domain.', true); return; }
-    var source = state.sources.find(function (s) { return s.domain === domain; });
+    var source = state.sources.find(function (s) { return domain === s.domain || domain.endsWith('.' + s.domain); });
     if (!source) {
       var created = await sb.from('qb_paper_discovery_sources').insert({
         display_name:domain, domain:domain, source_type:sourceType, trust_level:'review', priority:100, enabled:true
@@ -160,7 +160,7 @@
       if (enabled.error) { notify('Could not enable source domain: ' + enabled.error.message, true); return; }
       source = enabled.data;
     }
-    var linked = await sb.from('qb_paper_discovery_candidates').update({ source_id:source.id, updated_at:new Date().toISOString() }).eq('id', id);
+    var linked = await sb.from('qb_paper_discovery_candidates').update({ source_id:source.id, source_domain:source.domain, updated_at:new Date().toISOString() }).eq('id', id);
     if (linked.error) { notify('Domain approved but candidate linking failed: ' + linked.error.message, true); return; }
     state.loaded = false; await loadData(true); notify('Domain approved. You can now verify PDFs from this website.');
   };
