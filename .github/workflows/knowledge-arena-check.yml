@@ -5,6 +5,8 @@ on:
     paths:
       - "supabase/functions/knowledge-arena/**"
       - "supabase/functions/knowledge-arena-worker/**"
+      - "supabase/functions/past-paper-discovery/**"
+      - "past-paper-discovery.js"
       - "supabase/functions/_shared/knowledge-arena.ts"
       - "supabase/config.toml"
       - "supabase/migrations/**"
@@ -66,6 +68,13 @@ jobs:
           psql "$GUEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261109150000_knowledge_arena_international_guest_numbers.sql
           psql "$GUEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261109160000_knowledge_arena_atomic_guest_registration.sql
           psql "$GUEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/tests/guest-leads-smoke.sql
+      - name: Test Past Paper Discovery migration in a separate disposable database
+        run: |
+          createdb --maintenance-db="$DATABASE_URL" past_paper_ci
+          PAPER_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/past_paper_ci
+          psql "$PAPER_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/past-paper-discovery-fixture.sql
+          psql "$PAPER_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261112130000_past_paper_online_discovery.sql
+          psql "$PAPER_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/past-paper-discovery-schema-smoke.sql
       - name: Apply proposed Knowledge Arena schema to disposable database
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/proposed-schema.sql
       - name: Test grade challenges, duplicate prevention, worker lease and grants
@@ -93,6 +102,8 @@ jobs:
         run: deno check supabase/functions/knowledge-arena/index.ts
       - name: Type check generation worker
         run: deno check supabase/functions/knowledge-arena-worker/index.ts
+      - name: Type check Past Paper Discovery API
+        run: deno check supabase/functions/past-paper-discovery/index.ts
       - name: Test game catalogue and subject routing
         run: deno test supabase/functions/_shared/knowledge-arena_test.ts
       - name: Test AI JSON response parsing and malformed-output handling
@@ -101,3 +112,4 @@ jobs:
         run: |
           node --check knowledge-arena/knowledge-arena.js
           node --check student-portal-tabs.js
+          node --check past-paper-discovery.js
