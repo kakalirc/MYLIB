@@ -191,7 +191,7 @@ async function crawlCbseOfficial(source: any, query: string): Promise<DiscoveryR
       const html = new TextDecoder().decode(await readBounded(response, 2 * 1024 * 1024));
       const anchors = [...html.matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
       const pages = [url, ...anchors.map((m) => { try { return new URL(decodeEntities(m[1]), url).href; } catch { return ""; } })
-        .filter((u) => /SQP_CLASS(?:X|XII).*\.html/i.test(new URL(u).pathname))].slice(0, 10);
+        .filter((u) => { try { return /SQP_CLASS(?:X|XII).*\.html/i.test(new URL(u).pathname); } catch { return false; } })].slice(0, 10);
       for (const page of [...new Set(pages)]) {
         const pageRes = page === url ? { response: new Response(html), url } : await fetchAllowed(page, [source.domain], "text/html,application/xhtml+xml");
         const pageHtml = new TextDecoder().decode(await readBounded(pageRes.response, 2 * 1024 * 1024));
