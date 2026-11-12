@@ -2131,6 +2131,7 @@ let qbAssignIds = new Set();    // students ticked in the assign panel
 let qbAssignUntil = '';         // due date (yyyy-mm-dd) for new assignments
 let qbAssignAllGrades = false;  // also list the teacher's students who don't match the paper's board / grade / subject
 let qbSourcePapers = [];        // qb_source_papers rows (published papers + own submissions)
+let qbSourceEditId = '';
 let qbSourceReviews = [];       // Admin-visible status history across all submissions
 let qbSourceLoading = false;
 let qbSourceFilter = { boardId: '', schoolId: '', gradeId: '', subject: '', year: '' };
@@ -26610,6 +26611,35 @@ function qbSourceReviewHistoryHtml() {
     qbSourceReviews.map(r => { const p = qbSourcePapers.find(x => x.id === r.source_paper_id); return '<tr><td>' + esc(p ? [p.subject_name, p.year, p.exam_type].filter(Boolean).join(' · ') : 'Past paper (deleted)') + '</td><td>' + esc(r.from_status || 'New') + ' → ' + esc(r.to_status) + '</td><td>' + esc(r.reviewer_name || 'Unknown reviewer') + '</td><td>' + esc(r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : '') + '</td></tr>'; }).join('') +
     '</tbody></table></div>' : '<div class="empty" style="margin-top:10px">No past-paper review actions recorded yet.</div>') + '</details>';
 }
+function qbBeginSourcePaperEdit(id) { if (currentRole !== 'Admin') return; const p = qbSourcePapers.find(x => x.id === id && x.status === 'published'); if (!p) return; qbSourceEditId = id; render(); }
+function qbCancelSourcePaperEdit() { qbSourceEditId = ''; render(); }
+async function qbSaveSourcePaperMetadata(id) {
+  if (currentRole !== 'Admin' || !sb || qbSourceEditId !== id) return;
+  const v = key => (document.getElementById('qbPaperMeta' + key)?.value || '').trim();
+  const p = qbSourcePapers.find(x => x.id === id && x.status === 'published'); if (!p) return;
+  const year = Number(v('Year')), subject = v('Subject');
+  if (!subject || !Number.isInteger(year) || year < 1950 || year > new Date().getFullYear()+1) { qbMsg = 'Enter a subject and valid examination year.'; render(); return; }
+  const update = { board_id: p.source_type === 'board' ? v('Board') : null, school_id: p.source_type === 'school' ? v('School') : null, grade_id: v('Grade') || null, subject_name: subject, year, exam_type: v('Exam'), medium: v('Medium') || null };
+  if ((p.source_type === 'board' && !update.board_id) || (p.source_type === 'school' && !update.school_id) || !update.grade_id || !update.exam_type) { qbMsg = 'Complete the source, class and exam type fields.'; render(); return; }
+  const { error } = await sb.from('qb_source_papers').update(update).eq('id', id).eq('status', 'published');
+  if (error) { qbMsg = 'Could not update paper metadata: ' + error.message; render(); return; }
+  qbSourceEditId = ''; qbMsg = 'Metadata updated. The PDF and publication status were left unchanged.'; await loadQbSourcePapers();
+}
+function qbSourcePaperEditHtml(p) {
+  if (currentRole !== 'Admin' || !p || p.id !== qbSourceEditId || p.status !== 'published') return '';
+  const opts = (rows, selected) => rows.filter(x => !x.archived).map(x => '<option value="'+escAttr(x.id)+'" '+(x.id===selected?'selected':'')+'>'+esc(x.name)+'</option>').join('');
+  const css = 'width:100%;box-sizing:border-box;min-height:40px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)';
+  const field = (label, control) => '<label style="display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:700">'+label+control+'</label>';
+  const sel = (id, rows, selected, first) => '<select id="qbPaperMeta'+id+'" style="'+css+'"><option value="">'+first+'</option>'+opts(rows,selected)+'</select>';
+  const choices = (id, values, selected) => '<select id="qbPaperMeta'+id+'" style="'+css+'">'+values.map(x=>'<option value="'+escAttr(x[0])+'" '+(x[0]===selected?'selected':'')+'>'+esc(x[1])+'</option>').join('')+'</select>';
+  return '<section class="card" style="margin:10px 0;padding:14px;border:1px solid var(--line);border-radius:12px"><h4 style="margin:0 0 10px">Edit published paper metadata</h4><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));gap:10px">'+
+    (p.source_type==='school'?field('School',sel('School',qbSchools,p.school_id,'Select school')):field('Board',sel('Board',boards,p.board_id,'Select board')))+
+    field('Class',sel('Grade',grades,p.grade_id,'Select class'))+field('Subject','<input id="qbPaperMetaSubject" maxlength="120" value="'+escAttr(p.subject_name||'')+'" style="'+css+'">')+
+    field('Examination year','<input id="qbPaperMetaYear" type="number" min="1950" max="'+(new Date().getFullYear()+1)+'" value="'+escAttr(String(p.year||''))+'" style="'+css+'">')+
+    field('Exam type',choices('Exam',[['main','Main'],['compartment','Compartment'],['supplementary','Supplementary'],['sample','Sample Question Paper'],['other','Other']],p.exam_type||'main'))+
+    field('Medium',choices('Medium',[['','Not specified'],['English','English'],['Hindi','Hindi'],['Kannada','Kannada'],['Sanskrit','Sanskrit'],['Other','Other']],p.medium||''))+'</div>'+
+    '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn-small btn-primary" onclick="qbSaveSourcePaperMetadata(\''+escAttr(p.id)+'\')">Save metadata</button><button class="btn-small" onclick="qbCancelSourcePaperEdit()">Cancel</button></div><p class="hint">Only catalogue metadata changes; PDF and Published status are preserved.</p></section>';
+}
 function qbSourcePapersHtml() {
   if (qbSourceLoading) return `<div class="empty">Loading past papers…</div>`;
   if (!qbSourcePapers.length) return `<div class="empty">No published past papers or your own submissions are available yet.</div>`;
@@ -26671,13 +26701,13 @@ function qbSourcePapersHtml() {
     groups.get(k).push(sp);
   });
   return `<p class="hint" style="margin-bottom:12px">Published papers across all subjects, plus your own submissions awaiting review or rejected.</p>
-    ${filtersHtml}${duplicateWarning}<div style="font-size:12px;color:var(--muted);margin-bottom:8px">${list.length} paper${list.length === 1 ? '' : 's'}</div>
+    ${qbSourceEditId ? qbSourcePaperEditHtml(qbSourcePapers.find(x => x.id === qbSourceEditId)) : ''}${filtersHtml}${duplicateWarning}<div style="font-size:12px;color:var(--muted);margin-bottom:8px">${list.length} paper${list.length === 1 ? '' : 's'}</div>
     ${[...groups.entries()].map(([k, list]) => `<div style="margin-bottom:16px"><div style="font-weight:700;border-bottom:2px solid var(--line);padding-bottom:4px;margin-bottom:6px">${esc(k)}</div>
       ${list.map(sp => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px">
         <span><b>${esc(String(sp.year || ''))}</b> ${esc(sp.exam_type || '')}${duplicateIds.has(sp.id) ? ' <span class="badge" style="background:rgba(214,163,74,.16);color:#805b16">Possible duplicate</span>' : ''}${sp.medium ? ` <span style="color:var(--muted);font-size:12px">· ${esc(sp.medium)}</span>` : ''}${sp.question_count ? ` <span style="color:var(--muted);font-size:12px">· ${esc(String(sp.question_count))} questions</span>` : ''}<br><span class="hint">${esc(sp.source_type === 'school' ? 'School: ' + (qbByName(qbSchools, sp.school_id) || 'Unknown school') : 'Board: ' + (qbByName(boards, sp.board_id) || 'Unknown board'))} · ${esc(sp.subject_name || '')} · ${esc(sp.uploader_name || 'Legacy upload')} · ${esc(sp.status || 'published')}</span></span>
         <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${sp.stored_pdf_url || sp.source_url ? `<button class="btn-small" onclick="qbOpenSourcePdf('${sp.id}')">⬇ Open PDF</button>` : '<span class="hint">No PDF</span>'}
         ${sp.status === 'pending_review' && currentRole === 'Admin' ? `<button class="btn-small btn-primary" onclick="qbSetSourcePaperStatus('${sp.id}','published')">Publish</button><button class="btn-small" onclick="qbSetSourcePaperStatus('${sp.id}','rejected')">Reject</button>` : ''}
-        ${currentRole === 'Admin' ? `<button class="btn-small" onclick="qbDeleteSourcePaper('${sp.id}')">Delete</button>` : ''}
+        ${currentRole === 'Admin' && sp.status === 'published' ? `<button class="btn-small" onclick="qbBeginSourcePaperEdit('${sp.id}')">Edit metadata</button>` : ''}${currentRole === 'Admin' ? `<button class="btn-small" onclick="qbDeleteSourcePaper('${sp.id}')">Delete</button>` : ''}
         </span>
       </div>`).join('')}</div>`).join('')}`;
 }
