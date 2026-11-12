@@ -14,7 +14,7 @@ const MAX_PDF_BYTES = 50 * 1024 * 1024;
 const uuid = (v: unknown) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v ?? ""));
 
 function safeHost(url: URL, domains: string[]): boolean {
-  if (url.protocol !== "https:" || url.username || url.password) return false;
+  if (url.protocol !== "https:" || url.username || url.password || (url.port && url.port !== "443")) return false;
   const host = url.hostname.toLowerCase().replace(/\.$/, "");
   if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")
       || /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":")) return false;
@@ -41,7 +41,7 @@ async function searchDomain(query: string, domain: string) {
     signal: AbortSignal.timeout(12000),
   });
   if (!res.ok) throw new Error("Search provider returned " + res.status + " for " + domain);
-  const html = await res.text();
+  const html = new TextDecoder().decode(await readBounded(res, 2 * 1024 * 1024));
   const rows: Array<{ title: string; url: string; snippet: string }> = [];
   const re = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
   let m: RegExpExecArray | null;
