@@ -65,6 +65,10 @@
     var boardsList = typeof boards !== 'undefined' ? boards.filter(function (x) { return !x.archived; }) : [];
     var gradesList = typeof grades !== 'undefined' ? grades.filter(function (x) { return !x.archived; }) : [];
     var school = c.school_id ? state.schools.find(function (s) { return s.id === c.school_id; }) : null;
+    var registeredSource = state.sources.find(function (s) { return s.id === c.source_id || c.source_domain === s.domain || c.source_domain.endsWith('.' + s.domain); });
+    var domainAction = !registeredSource
+      ? '<div class="lib-ppd-domain-approval"><select id="ppd-domaintype-' + esc(c.id) + '"><option value="school">School website</option><option value="education_portal">Education portal</option></select><button class="btn-small" onclick="libPPDApproveDomain(' + "'" + esc(c.id) + "'" + ')">Approve domain for PDF verification</button></div>'
+      : (!registeredSource.enabled ? '<button class="btn-small" onclick="libPPDToggleSource(' + "'" + esc(registeredSource.id) + "'" + ',true)">Enable source domain</button>' : '');
     var meta = c.discovery_metadata || {};
     var previewUrl = c.pdf_url || c.source_url;
     var isSchool = c.source_type === 'school';
@@ -90,7 +94,7 @@
     return '<article class="lib-ppd-candidate"><div class="lib-ppd-candidate-head"><div><b>' + esc(c.title) + '</b><div class="hint">' + esc(c.source_domain) + ' · ' + esc(c.source_type) + ' · ' + esc(c.status) + ' · PDF: ' + esc(c.verification_status) + '</div>'
       + (meta.snippet ? '<p class="hint">' + esc(meta.snippet) + '</p>' : '')
       + (school ? '<div class="hint">School: ' + esc(school.name) + '</div>' : (c.discovered_school_name ? '<div class="hint">Possible school: ' + esc(c.discovered_school_name) + '</div>' : ''))
-      + '</div>' + actions + '</div>' + metadata + '</article>';
+      + '</div>' + actions + '</div>' + domainAction + metadata + '</article>';
   }
   function renderPanel() {
     ensureLoaded();
@@ -110,7 +114,7 @@
       return '<div class="hint">' + esc(new Date(r.started_at).toLocaleString()) + ' · ' + esc(r.query_text) + ' · ' + esc(r.status) + ' · ' + esc(r.results_found) + ' results</div>';
     }).join('') : '<p class="hint">No searches yet.</p>') + '</div>';
     return '<section class="lib-ppd"><style>'
-      + '.lib-ppd{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}.lib-ppd h3{font-family:Zilla Slab,serif;margin:0 0 7px}.lib-ppd-section{margin:14px 0 20px}.lib-ppd-search,.lib-ppd-source-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.lib-ppd-search input{flex:1;min-width:190px}.lib-ppd-search select,.lib-ppd-search input,.lib-ppd-source-form input,.lib-ppd-source-form select,.lib-ppd-meta input,.lib-ppd-meta select{min-height:38px;padding:7px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);box-sizing:border-box}.lib-ppd-source-form input{flex:1;min-width:170px}.lib-ppd-source{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line)}.lib-ppd-candidate{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}.lib-ppd-candidate-head,.lib-ppd-title,.lib-ppd-actions{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}.lib-ppd-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:12px}.lib-ppd-meta label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);font-weight:700}.lib-ppd-meta input,.lib-ppd-meta select{width:100%}.lib-ppd-actions{justify-content:flex-start;margin-top:10px}.lib-ppd p.hint{margin:5px 0 10px}@media(max-width:600px){.lib-ppd-search,.lib-ppd-source-form{align-items:stretch}.lib-ppd-search>* ,.lib-ppd-source-form>*{width:100%;min-width:0}.lib-ppd-candidate-head{align-items:flex-start}}'
+      + '.lib-ppd{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}.lib-ppd h3{font-family:Zilla Slab,serif;margin:0 0 7px}.lib-ppd-section{margin:14px 0 20px}.lib-ppd-search,.lib-ppd-source-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.lib-ppd-search input{flex:1;min-width:190px}.lib-ppd-search select,.lib-ppd-search input,.lib-ppd-source-form input,.lib-ppd-source-form select,.lib-ppd-meta input,.lib-ppd-meta select{min-height:38px;padding:7px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);box-sizing:border-box}.lib-ppd-source-form input{flex:1;min-width:170px}.lib-ppd-source{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line)}.lib-ppd-candidate{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}.lib-ppd-candidate-head,.lib-ppd-title,.lib-ppd-actions{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}.lib-ppd-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:12px}.lib-ppd-meta label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);font-weight:700}.lib-ppd-meta input,.lib-ppd-meta select{width:100%}.lib-ppd-actions{justify-content:flex-start;margin-top:10px}.lib-ppd-domain-approval{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}.lib-ppd-domain-approval select{min-height:34px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink)}.lib-ppd p.hint{margin:5px 0 10px}@media(max-width:600px){.lib-ppd-search,.lib-ppd-source-form{align-items:stretch}.lib-ppd-search>* ,.lib-ppd-source-form>*{width:100%;min-width:0}.lib-ppd-candidate-head{align-items:flex-start}}'
       + '</style>' + search + sources + candidates + runs + '</section>';
   }
 
@@ -137,6 +141,28 @@
     var { error } = await sb.from('qb_paper_discovery_sources').insert({ display_name:name, domain:domain, source_type:type, trust_level:trust, priority:100, enabled:true });
     if (error) { notify('Could not add source: ' + error.message, true); return; }
     state.loaded = false; await loadData(true); notify('Source added. It is now available for discovery searches.');
+  };
+  window.libPPDApproveDomain = async function (id) {
+    var candidate = state.candidates.find(function (c) { return c.id === id; });
+    if (!candidate) return;
+    var domain = String(candidate.source_domain || '').toLowerCase().trim();
+    var sourceType = val('ppd-domaintype-' + id) === 'education_portal' ? 'education_portal' : 'school';
+    if (!/^(?=.{3,253}$)[a-z0-9.-]+$/.test(domain) || domain.indexOf('..') >= 0) { notify('This candidate has an invalid source domain.', true); return; }
+    var source = state.sources.find(function (s) { return s.domain === domain; });
+    if (!source) {
+      var created = await sb.from('qb_paper_discovery_sources').insert({
+        display_name:domain, domain:domain, source_type:sourceType, trust_level:'review', priority:100, enabled:true
+      }).select('*').single();
+      if (created.error) { notify('Could not approve source domain: ' + created.error.message, true); return; }
+      source = created.data;
+    } else if (!source.enabled) {
+      var enabled = await sb.from('qb_paper_discovery_sources').update({ enabled:true, updated_at:new Date().toISOString() }).eq('id', source.id).select('*').single();
+      if (enabled.error) { notify('Could not enable source domain: ' + enabled.error.message, true); return; }
+      source = enabled.data;
+    }
+    var linked = await sb.from('qb_paper_discovery_candidates').update({ source_id:source.id, updated_at:new Date().toISOString() }).eq('id', id);
+    if (linked.error) { notify('Domain approved but candidate linking failed: ' + linked.error.message, true); return; }
+    state.loaded = false; await loadData(true); notify('Domain approved. You can now verify PDFs from this website.');
   };
   window.libPPDToggleSource = async function (id, enabled) {
     var { error } = await sb.from('qb_paper_discovery_sources').update({ enabled:enabled, updated_at:new Date().toISOString() }).eq('id', id);
