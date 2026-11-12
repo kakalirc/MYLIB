@@ -84,7 +84,7 @@ async function searchBingRss(query: string, limit = 20, domain?: string) {
   for (const item of items) {
     if (rows.length >= limit) break;
     const tag = (name: string) => {
-      const match = item.match(new RegExp("<" + name + "[^>]*>([\\\\s\\\\S]*?)</" + name + ">", "i"));
+      const match = item.match(new RegExp("<" + name + "[^>]*>([\\s\\S]*?)</" + name + ">", "i"));
       return match ? decodeEntities(match[1].replace(/^<!\\[CDATA\\[/, "").replace(/\\]\\]>$/, "").trim()) : "";
     };
     const rawUrl = tag("link");
