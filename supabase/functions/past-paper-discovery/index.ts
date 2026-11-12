@@ -458,9 +458,22 @@ Deno.serve(async (req) => {
         if (restartError || !restarted) return reply(409, { error: "The run changed while restart was requested. Refresh Recent searches and try again." });
         run = restarted;
       } else {
-        if (existing.status !== "running") return reply(200, { run_id: runId, complete: true,
-          found: existing.results_found || 0, new_candidates: 0, message: "This discovery run is already complete." });
-        run = existing;
+        if (existing.status === "failed") {
+          const savedProgress = existing.filters?.discovery_progress;
+          if (!savedProgress || !Number.isFinite(Number(savedProgress.next_offset))) {
+            return reply(409, { error: "This run has no saved checkpoint. Use Restart from beginning to run it again." });
+          }
+          const { data: resumed, error: resumeError } = await admin.from("qb_paper_discovery_runs")
+            .update({ status: "running", error_message: null, completed_at: null })
+            .eq("id", runId).eq("status", "failed").select("*").maybeSingle();
+          if (resumeError || !resumed) return reply(409, { error: "The run changed while resume was requested. Refresh Recent searches." });
+          run = resumed;
+        } else if (existing.status !== "running") {
+          return reply(200, { run_id: runId, complete: true,
+            found: existing.results_found || 0, new_candidates: 0, message: "This discovery run is already complete." });
+        } else {
+          run = existing;
+        }
       }
     }
 
