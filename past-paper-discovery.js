@@ -235,7 +235,7 @@
         // Match the label independently of its inline style and exact wrapper
         // attributes. The previous exact-style regex changed the heading but
         // could leave the discovery controls out of the rendered page.
-        var markerNode = /(<(?:div|p|span)[^>]*>\\s*Online discovery engine · Admin search and review\\s*<\\/(?:div|p|span)>)/i;
+        var markerNode = /(<(?:div|p|span)[^>]*>\s*Online discovery engine · Admin search and review\s*<\/(?:div|p|span)>)/i;
         if (markerNode.test(html)) {
           html = html.replace(markerNode, '$1' + panel);
         } else if (html.indexOf(replacement) >= 0) {
