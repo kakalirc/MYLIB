@@ -123,6 +123,44 @@ async function fetchAllowed(urlText: string, domains: string[], accept: string) 
   }
   throw new Error("Too many redirects.");
 }
+async function crawlCbseOfficial(source: any, query: string): Promise<Array<{title:string;url:string;snippet:string;domain:string;source:any}>> {
+  const landing = "https://www.cbse.gov.in/cbsenew/question-paper.html";
+  const { response, url } = await fetchAllowed(landing, [source.domain], "text/html,application/xhtml+xml");
+  const html = new TextDecoder().decode(await readBounded(response, 2 * 1024 * 1024));
+  const wanted = query.toLowerCase().replace(/cbse|question paper|previous year|past paper|pdf/g, " ").replace(/\\s+/g, " ").trim();
+  const classMatch = wanted.match(/\\b(class|grade)\\s*(10|12|xii|x)\\b/);
+  const wantedClass = classMatch ? (classMatch[2] === "12" || classMatch[2] === "xii" ? "xii" : "x") : "";
+  const terms = wanted.replace(/\\b(class|grade)\\s*(10|12|xii|x)\\b/g, " ").split(/\\s+/).filter((x) => x.length > 1);
+  const rows: Array<{title:string;url:string;snippet:string;domain:string;source:any}> = [];
+  const tableRows = html.match(/<tr\\b[\\s\\S]*?<\\/tr>/gi) || [];
+  let offset = 0;
+  for (const row of tableRows) {
+    const position = html.indexOf(row, offset);
+    offset = position + row.length;
+    const before = html.slice(Math.max(0, position - 50000), position);
+    const headings = [...before.matchAll(/(?:Question Paper for|Question Papers for)\\s*([^<\\n]{0,160})/gi)];
+    const section = headings.length ? htmlText(headings[headings.length - 1][1]) : "";
+    const sectionClass = /class\\s*xii|class\\s*12/i.test(section) ? "xii" : /class\\s*x(?:\\s|$)|class\\s*10/i.test(section) ? "x" : "";
+    if (wantedClass && sectionClass && wantedClass !== sectionClass) continue;
+    const cells = [...row.matchAll(/<td\\b[^>]*>([\\s\\S]*?)<\\/td>/gi)];
+    if (cells.length < 2) continue;
+    const subject = htmlText(cells[0][1]).toUpperCase();
+    if (!subject || /SUBJECT NAME|TOTAL/i.test(subject)) continue;
+    if (terms.some((term) => !subject.toLowerCase().includes(term) && !section.toLowerCase().includes(term))) continue;
+    const links = [...cells[1][1].matchAll(/<a\\b[^>]*href\\s*=\\s*["']([^"']+)["'][^>]*>([\\s\\S]*?)<\\/a>/gi)];
+    for (const link of links) {
+      let pdfUrl: URL;
+      try { pdfUrl = new URL(decodeEntities(link[1]), url); } catch { continue; }
+      if (!safeHost(pdfUrl, [source.domain])) continue;
+      rows.push({
+        title: [section, subject].filter(Boolean).join(" — ").slice(0, 500),
+        url: pdfUrl.href, snippet: "Official CBSE question-paper directory · " + subject,
+        domain: pdfUrl.hostname.toLowerCase().replace(/^www\\./, ""), source,
+      });
+    }
+  }
+  return rows.slice(0, 60);
+}
 async function readBounded(res: Response, maxBytes = MAX_PDF_BYTES): Promise<Uint8Array> {
   const declared = Number(res.headers.get("content-length") || 0);
   if (declared > maxBytes) throw new Error(maxBytes === MAX_PDF_BYTES ? "PDF exceeds the 50 MB limit." : "Source page exceeds the 2 MB inspection limit.");
@@ -212,6 +250,17 @@ Deno.serve(async (req) => {
     if (runError || !run) return reply(500, { error: "Could not start the discovery run." });
 
     const targeted = await searchInBatches(searchTargets, searchQuery, 4);
+    // CBSE's official archive is crawled directly; this path is independent of external search providers.
+    const cbseSource = searchTargets.find((s: any) => s.source_type === "board" && /(^|\\.)cbse\\.gov\\.in$/i.test(s.domain));
+    if (scope === "board" && cbseSource) {
+      try {
+        const officialRows = await crawlCbseOfficial(cbseSource, searchQuery);
+        targeted.results.push(...officialRows);
+        if (officialRows.length) targeted.successfulQueries++;
+      } catch (e) {
+        targeted.errors.push("CBSE official archive: " + clip((e as Error)?.message || e, 220));
+      }
+    }
     let broadResults: Array<{title:string;url:string;snippet:string;domain:string}> = [];
     let broadError = "";
     // Broad fallback is essential for newly discovered sites and domains not yet in the registry.
@@ -237,7 +286,7 @@ Deno.serve(async (req) => {
       }).eq("id", run.id);
       return reply(502, {
         error: "Search provider was unavailable or returned an unrecognized response. This is not a genuine zero-result search.",
-        provider: "DuckDuckGo HTML", provider_errors: providerErrors,
+        provider: "Official board archive + DuckDuckGo fallback", provider_errors: providerErrors,
       });
     }
 
@@ -251,7 +300,7 @@ Deno.serve(async (req) => {
         trust_level: r.source?.trust_level || "unverified",
         source_name: r.source?.display_name || r.domain,
         source_match: r.source ? "approved_registry" : "unregistered_domain",
-        search_provider: "DuckDuckGo HTML",
+        search_provider: r.snippet.startsWith("Official CBSE") ? "CBSE official archive crawler" : "DuckDuckGo HTML",
         search_method: r.source ? "targeted_domain" : "broad_web",
       },
     }));
@@ -275,7 +324,7 @@ Deno.serve(async (req) => {
     return reply(200, {
       run_id: run.id, found: flattened.length, new_candidates: inserted,
       approved_source_results: matchedCount, unregistered_source_results: flattened.length - matchedCount,
-      provider: "DuckDuckGo HTML", provider_successful_queries: targeted.successfulQueries,
+      provider: "Official board archive + DuckDuckGo fallback", provider_successful_queries: targeted.successfulQueries,
       provider_errors: providerErrors,
       message: providerErrors.length
         ? "Search completed with partial provider failures. Review the provider diagnostics before concluding no papers exist."
