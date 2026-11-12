@@ -25096,6 +25096,7 @@ function renderAdminQuestionBank() {
     ${qbSourceUploadMsg ? `<div class="hint" style="color:var(--brick);margin:8px 0">${esc(qbSourceUploadMsg)}</div>` : ''}
     ${currentRole === 'Admin' && qbSourceUploadOpen ? qbSourceUploaderHtml() : ''}
     ${qbMsg ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${esc(qbMsg)}</div>` : ''}
+    ${qbSourcePendingReviewHtml()}
     ${qbSourcePapersHtml()}
     ${qbSourceReviewHistoryHtml()}
   </div>`;
@@ -25174,6 +25175,7 @@ function renderTeacherQuestionBank(teacher) {
     ${subTabsHtml}
     ${currentRole === 'Teacher' && qbSourceUploadOpen ? qbSourceUploaderHtml() : ''}
     ${qbMsg ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${esc(qbMsg)}</div>` : ''}
+    ${qbSourcePendingReviewHtml()}
     ${qbSourcePapersHtml()}
   </div>`;
 
@@ -26528,14 +26530,44 @@ async function qbUploadSourcePapers() {
 }
 
 async function qbSetSourcePaperStatus(id, status) {
-  if (currentRole !== 'Admin') { qbMsg = 'Only Admin can review and publish past papers.'; render(); return; }
+  const isAdmin = currentRole === 'Admin';
+  const isTeacherApproval = currentRole === 'Teacher' && teacherQbAccess && status === 'published';
+  if (!isAdmin && !isTeacherApproval) { qbMsg = 'You do not have permission to review this past paper.'; render(); return; }
   if (!['published','rejected'].includes(status)) return;
   const paper = qbSourcePapers.find(x => x.id === id);
-  if (!paper || !sb) return;
+  if (!paper || paper.status !== 'pending_review' || !sb) return;
+  if (isTeacherApproval && paper.uploaded_by == null) { qbMsg = 'Only your own uploaded papers can be approved.'; render(); return; }
   const { error } = await sb.from('qb_source_papers').update({status}).eq('id', id);
   if (error) { qbMsg = 'Could not update paper status: ' + error.message; render(); return; }
-  qbMsg = status === 'published' ? 'Past paper published.' : 'Past paper marked as rejected.';
+  qbMsg = status === 'published' ? 'Past paper approved and published.' : 'Past paper marked as rejected.';
   await loadQbSourcePapers();
+}
+function qbSourcePendingReviewHtml() {
+  const pending = qbSourcePapers.filter(sp => sp.status === 'pending_review'
+    && (currentRole === 'Admin' || (currentRole === 'Teacher' && sp.uploaded_by)));
+  if (!['Admin','Teacher'].includes(currentRole)) return '';
+  const title = currentRole === 'Teacher' ? 'Your submissions awaiting approval' : 'Pending paper review';
+  const note = currentRole === 'Teacher'
+    ? 'You can approve only papers you uploaded. Other teachers’ submissions are not available for your review.'
+    : 'Review submissions from all teachers before publishing them.';
+  return `<section class="card" style="margin:14px 0;padding:16px;border:1px solid var(--line);border-radius:12px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+      <h3 style="margin:0;font-family:Zilla Slab,serif">${esc(title)}</h3>
+      <span class="badge">${pending.length} pending</span>
+    </div>
+    <p class="hint" style="margin:0 0 10px">${esc(note)}</p>
+    ${pending.length ? pending.map(sp => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--line)">
+      <div><b>${esc([sp.subject_name, qbByName(grades, sp.grade_id) ? 'Class ' + qbByName(grades, sp.grade_id) : '', sp.year, sp.exam_type].filter(Boolean).join(' · ') || 'Past paper')}</b>
+        <div class="hint">${esc(sp.uploader_name || 'Teacher submission')} · ${esc(sp.source_type === 'school' ? 'School: ' + (qbByName(qbSchools, sp.school_id) || 'Unknown school') : 'Board: ' + (qbByName(boards, sp.board_id) || 'Unknown board'))}${sp.medium ? ' · ' + esc(sp.medium) : ''}</div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        ${sp.stored_pdf_url || sp.source_url ? `<button class="btn-small" onclick="qbOpenSourcePdf('${sp.id}')">Open PDF</button>` : '<span class="hint">No PDF</span>'}
+        ${currentRole === 'Admin'
+          ? `<button class="btn-small btn-primary" onclick="qbSetSourcePaperStatus('${sp.id}','published')">Publish</button><button class="btn-small" onclick="qbSetSourcePaperStatus('${sp.id}','rejected')">Reject</button>`
+          : `<button class="btn-small btn-primary" onclick="qbSetSourcePaperStatus('${sp.id}','published')">Approve &amp; publish</button>`}
+      </div>
+    </div>`).join('') : '<div class="empty" style="padding:10px 0">No papers are awaiting your review.</div>'}
+  </section>`;
 }
 function qbSourceReviewHistoryHtml() {
   if (currentRole !== 'Admin') return '';
