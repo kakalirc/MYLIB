@@ -518,7 +518,7 @@ Deno.serve(async (req) => {
     const inserts = flattened.slice(0, 80).map((r) => ({
       discovery_run_id: runId, source_id: r.source?.id || null, source_type: scope,
       source_domain: r.domain, title: r.title, source_url: r.url,
-      pdf_url: r.archive_member || /\\.pdf(?:$|[?#])/i.test(r.url) ? r.url : null,
+      pdf_url: r.archive_member || /\.pdf(?:$|[?#])/i.test(r.url) ? r.url : null,
       discovered_school_name: scope === "school" ? schoolName || null : null,
       discovery_metadata: {
         snippet: r.snippet, archive_member: r.archive_member || null,
