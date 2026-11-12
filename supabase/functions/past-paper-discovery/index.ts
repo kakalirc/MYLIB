@@ -313,7 +313,9 @@ async function fetchCandidatePdf(candidate: any, domains: string[]) {
   if (!archiveMember) return archive;
   const zipBytes = await readBounded(archive.response);
   const memberBytes = getPdfZipMember(zipBytes, archiveMember);
-  return { response: new Response(memberBytes, { headers: { "Content-Type": "application/pdf", "Content-Length": String(memberBytes.length) } }), url: archive.url };
+  const responseBytes = new ArrayBuffer(memberBytes.byteLength);
+  new Uint8Array(responseBytes).set(memberBytes);
+  return { response: new Response(responseBytes, { headers: { "Content-Type": "application/pdf", "Content-Length": String(memberBytes.length) } }), url: archive.url };
 }
 async function crawlCbseZipArchives(source: any, query: string): Promise<DiscoveryRow[]> {
   const landing = "https://www.cbse.gov.in/cbsenew/question-paper.html";
