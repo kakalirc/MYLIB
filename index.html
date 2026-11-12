@@ -26392,7 +26392,7 @@ function qbTeacherTeaches(subject, gradeId) {
 async function loadQbSourcePapers() {
   if (!sb) return;
   qbSourceLoading = true; render();
-  const { data: rows, error } = await sb.from('qb_source_papers').select('id, source_type, school_id, board_id, grade_id, subject_name, year, exam_type, medium, question_count, stored_pdf_url, source_url, status, uploaded_by, uploader_name, reviewed_by, reviewed_at').order('year', { ascending: false });
+  const { data: rows, error } = await sb.from('qb_source_papers').select('id, source_type, school_id, board_id, grade_id, subject_name, year, exam_type, medium, question_count, checksum, stored_pdf_url, source_url, status, uploaded_by, uploader_name, reviewed_by, reviewed_at').order('year', { ascending: false });
   qbSourceLoading = false;
   if (error) { qbMsg = 'Could not load past papers: ' + error.message; qbSourcePapers = []; }
   else qbSourcePapers = rows || [];
@@ -26558,6 +26558,24 @@ async function qbSetSourcePaperStatus(id, status) {
   qbMsg = status === 'published' ? 'Past paper approved and published.' : 'Past paper marked as rejected.';
   await loadQbSourcePapers();
 }
+async function qbDeleteSourcePaper(id) {
+  if (currentRole !== 'Admin' || !sb) return;
+  const paper = qbSourcePapers.find(x => x.id === id);
+  if (!paper) return;
+  const label = [paper.subject_name, paper.year, paper.exam_type].filter(Boolean).join(' · ') || 'this past paper';
+  if (!window.confirm('Permanently delete ' + label + '? The paper record and its stored PDF will be removed. Review history will be retained. This cannot be undone.')) return;
+  const ref = qbStorageRef(paper.stored_pdf_url);
+  const shared = ref && qbSourcePapers.some(x => x.id !== id && qbStorageRef(x.stored_pdf_url)?.bucket === ref.bucket && qbStorageRef(x.stored_pdf_url)?.path === ref.path);
+  const { error } = await sb.from('qb_source_papers').delete().eq('id', id);
+  if (error) { qbMsg = 'Could not delete past paper: ' + error.message; render(); return; }
+  let cleanupWarning = '';
+  if (ref && !shared) {
+    const { error: storageError } = await sb.storage.from(ref.bucket).remove([ref.path]);
+    if (storageError) cleanupWarning = ' The database record was deleted, but the stored PDF could not be removed: ' + storageError.message;
+  }
+  qbMsg = 'Past paper deleted. Its review history has been retained.' + cleanupWarning;
+  await loadQbSourcePapers();
+}
 function qbSourcePendingReviewHtml() {
   const pending = qbSourcePapers.filter(sp => sp.status === 'pending_review'
     && (currentRole === 'Admin' || (currentRole === 'Teacher' && sp.uploaded_by)));
@@ -26579,7 +26597,7 @@ function qbSourcePendingReviewHtml() {
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         ${sp.stored_pdf_url || sp.source_url ? `<button class="btn-small" onclick="qbOpenSourcePdf('${sp.id}')">Open PDF</button>` : '<span class="hint">No PDF</span>'}
         ${currentRole === 'Admin'
-          ? `<button class="btn-small btn-primary" onclick="qbSetSourcePaperStatus('${sp.id}','published')">Publish</button><button class="btn-small" onclick="qbSetSourcePaperStatus('${sp.id}','rejected')">Reject</button>`
+          ? `<button class="btn-small btn-primary" onclick="qbSetSourcePaperStatus('${sp.id}','published')">Publish</button><button class="btn-small" onclick="qbSetSourcePaperStatus('${sp.id}','rejected')">Reject</button><button class="btn-small" onclick="qbDeleteSourcePaper('${sp.id}')">Delete</button>`
           : `<button class="btn-small btn-primary" onclick="qbSetSourcePaperStatus('${sp.id}','published')">Approve &amp; publish</button>`}
       </div>
     </div>`).join('') : '<div class="empty" style="padding:10px 0">No papers are awaiting your review.</div>'}
@@ -26587,10 +26605,10 @@ function qbSourcePendingReviewHtml() {
 }
 function qbSourceReviewHistoryHtml() {
   if (currentRole !== 'Admin') return '';
-  if (!qbSourceReviews.length) return '<section class="card" style="margin-top:16px"><h3 style="margin-top:0">Review history</h3><div class="empty">No past-paper review actions recorded yet.</div></section>';
-  return '<section class="card" style="margin-top:16px"><h3 style="margin-top:0">Review history</h3><div class="table-scroll"><table><thead><tr><th>Paper</th><th>Change</th><th>Reviewer</th><th>When</th></tr></thead><tbody>' +
-    qbSourceReviews.map(r => { const p = qbSourcePapers.find(x => x.id === r.source_paper_id); return '<tr><td>' + esc(p ? [p.subject_name, p.year, p.exam_type].filter(Boolean).join(' · ') : 'Past paper') + '</td><td>' + esc(r.from_status || 'New') + ' → ' + esc(r.to_status) + '</td><td>' + esc(r.reviewer_name || 'Unknown reviewer') + '</td><td>' + esc(r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : '') + '</td></tr>'; }).join('') +
-    '</tbody></table></div></section>';
+  return '<details class="card" style="margin-top:16px;padding:14px 16px"><summary style="cursor:pointer;font-weight:700">Review history (' + qbSourceReviews.length + ')</summary>' +
+    (qbSourceReviews.length ? '<div class="table-scroll" style="margin-top:12px"><table><thead><tr><th>Paper</th><th>Change</th><th>Reviewer</th><th>When</th></tr></thead><tbody>' +
+    qbSourceReviews.map(r => { const p = qbSourcePapers.find(x => x.id === r.source_paper_id); return '<tr><td>' + esc(p ? [p.subject_name, p.year, p.exam_type].filter(Boolean).join(' · ') : 'Past paper (deleted)') + '</td><td>' + esc(r.from_status || 'New') + ' → ' + esc(r.to_status) + '</td><td>' + esc(r.reviewer_name || 'Unknown reviewer') + '</td><td>' + esc(r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : '') + '</td></tr>'; }).join('') +
+    '</tbody></table></div>' : '<div class="empty" style="margin-top:10px">No past-paper review actions recorded yet.</div>') + '</details>';
 }
 function qbSourcePapersHtml() {
   if (qbSourceLoading) return `<div class="empty">Loading past papers…</div>`;
@@ -26627,7 +26645,24 @@ function qbSourcePapersHtml() {
       : sp.subject_name === a.subject))
     && (!a.year || String(sp.year) === a.year);
   const list = qbSourcePapers.filter(match);
-  if (!list.length) return `${filtersHtml}<div class="empty">No past papers match these filters.</div>`;
+  if (!list.length) return filtersHtml + '<div class="empty">No past papers match these filters.</div>';
+  const duplicateKey = sp => [sp.source_type, sp.source_type === 'school' ? sp.school_id : sp.board_id, sp.grade_id,
+    String(sp.subject_name || '').trim().toLocaleLowerCase(), sp.year, String(sp.exam_type || '').trim().toLocaleLowerCase(),
+    String(sp.medium || '').trim().toLocaleLowerCase()].join('|');
+  const duplicateGroups = new Map();
+  list.forEach(sp => { const key = duplicateKey(sp); if (!duplicateGroups.has(key)) duplicateGroups.set(key, []); duplicateGroups.get(key).push(sp); });
+  const duplicateIds = new Set();
+  const duplicateNotices = [];
+  duplicateGroups.forEach(rows => {
+    if (rows.length > 1) {
+      rows.forEach(sp => duplicateIds.add(sp.id));
+      const first = rows[0];
+      duplicateNotices.push(rows.length + ' records: ' + [qbByName(grades, first.grade_id) ? 'Class ' + qbByName(grades, first.grade_id) : '', first.subject_name, first.year, first.exam_type].filter(Boolean).join(' · '));
+    }
+  });
+  const duplicateWarning = duplicateNotices.length
+    ? '<div style="padding:10px 12px;margin:0 0 12px;border:1px solid #d6a34a;border-radius:9px;background:rgba(214,163,74,.10)"><b>Possible duplicate papers detected</b><div class="hint" style="margin-top:4px">' + duplicateNotices.map(esc).join('<br>') + '</div><div class="hint" style="margin-top:4px">Compare the PDFs before deleting a copy. Matching details do not guarantee identical file contents.</div></div>'
+    : '';
   const groups = new Map();
   list.forEach(sp => {
     const sourceName = sp.source_type === 'school' ? (qbByName(qbSchools, sp.school_id) || 'Unknown school') : (qbByName(boards, sp.board_id) || 'Unknown board');
@@ -26636,12 +26671,13 @@ function qbSourcePapersHtml() {
     groups.get(k).push(sp);
   });
   return `<p class="hint" style="margin-bottom:12px">Published papers across all subjects, plus your own submissions awaiting review or rejected.</p>
-    ${filtersHtml}<div style="font-size:12px;color:var(--muted);margin-bottom:8px">${list.length} paper${list.length === 1 ? '' : 's'}</div>
+    ${filtersHtml}${duplicateWarning}<div style="font-size:12px;color:var(--muted);margin-bottom:8px">${list.length} paper${list.length === 1 ? '' : 's'}</div>
     ${[...groups.entries()].map(([k, list]) => `<div style="margin-bottom:16px"><div style="font-weight:700;border-bottom:2px solid var(--line);padding-bottom:4px;margin-bottom:6px">${esc(k)}</div>
       ${list.map(sp => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px">
-        <span><b>${esc(String(sp.year || ''))}</b> ${esc(sp.exam_type || '')}${sp.medium ? ` <span style="color:var(--muted);font-size:12px">· ${esc(sp.medium)}</span>` : ''}${sp.question_count ? ` <span style="color:var(--muted);font-size:12px">· ${esc(String(sp.question_count))} questions</span>` : ''}<br><span class="hint">${esc(sp.source_type === 'school' ? 'School: ' + (qbByName(qbSchools, sp.school_id) || 'Unknown school') : 'Board: ' + (qbByName(boards, sp.board_id) || 'Unknown board'))} · ${esc(sp.subject_name || '')} · ${esc(sp.uploader_name || 'Legacy upload')} · ${esc(sp.status || 'published')}</span></span>
+        <span><b>${esc(String(sp.year || ''))}</b> ${esc(sp.exam_type || '')}${duplicateIds.has(sp.id) ? ' <span class="badge" style="background:rgba(214,163,74,.16);color:#805b16">Possible duplicate</span>' : ''}${sp.medium ? ` <span style="color:var(--muted);font-size:12px">· ${esc(sp.medium)}</span>` : ''}${sp.question_count ? ` <span style="color:var(--muted);font-size:12px">· ${esc(String(sp.question_count))} questions</span>` : ''}<br><span class="hint">${esc(sp.source_type === 'school' ? 'School: ' + (qbByName(qbSchools, sp.school_id) || 'Unknown school') : 'Board: ' + (qbByName(boards, sp.board_id) || 'Unknown board'))} · ${esc(sp.subject_name || '')} · ${esc(sp.uploader_name || 'Legacy upload')} · ${esc(sp.status || 'published')}</span></span>
         <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${sp.stored_pdf_url || sp.source_url ? `<button class="btn-small" onclick="qbOpenSourcePdf('${sp.id}')">⬇ Open PDF</button>` : '<span class="hint">No PDF</span>'}
         ${sp.status === 'pending_review' && currentRole === 'Admin' ? `<button class="btn-small btn-primary" onclick="qbSetSourcePaperStatus('${sp.id}','published')">Publish</button><button class="btn-small" onclick="qbSetSourcePaperStatus('${sp.id}','rejected')">Reject</button>` : ''}
+        ${currentRole === 'Admin' ? `<button class="btn-small" onclick="qbDeleteSourcePaper('${sp.id}')">Delete</button>` : ''}
         </span>
       </div>`).join('')}</div>`).join('')}`;
 }
