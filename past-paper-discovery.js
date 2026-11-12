@@ -30,7 +30,7 @@
       var failure = results.find(function (r) { return r.error; });
       if (failure) throw failure.error;
       state.sources = results[0].data || [];
-      state.candidates = (results[1].data || []).filter(function (c) { return ['imported', 'rejected', 'duplicate'].indexOf(c.status) < 0; });
+      state.candidates = (results[1].data || []).filter(function (c) { return ['rejected', 'duplicate'].indexOf(c.status) < 0 && (c.status !== 'imported' || !!state.actionMessages[c.id]); });
       state.rejectedCandidates = results[2].data || [];
       state.schools = results[3].data || [];
       state.runs = results[4].data || [];
@@ -132,6 +132,7 @@
   function renderQueueTabs() {
     var isRejected = state.queueTab === 'rejected';
     var items = isRejected ? state.rejectedCandidates : state.candidates;
+    var activeCount = state.candidates.filter(function (c) { return c.status !== 'imported'; }).length;
     var content = isRejected
       ? (items.length ? items.map(rejectedCandidateHtml).join('') : '<div class="empty">No rejected papers found. Rejected candidates will appear here for recovery.</div>')
       : (items.length ? items.map(candidateHtml).join('') : '<div class="empty">No candidates awaiting review. Search approved websites to begin.</div>');
