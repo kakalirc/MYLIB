@@ -428,7 +428,7 @@ Deno.serve(async (req) => {
         .insert({ query_text: query, filters: { scope, school_name: schoolName || null,
           search_mode: "targeted_domains_plus_web_batched", discovery_progress: {
             next_offset: 0, successful_queries: 0, provider_errors: [], results_found: 0, new_candidates: 0,
-          } }, started_by: auth.user.id }).select("*").single();
+          } }, heartbeat_at: new Date().toISOString(), started_by: auth.user.id }).select("*").single();
       if (createError || !created) return reply(500, { error: "Could not start the discovery run." });
       run = created;
       runId = created.id;
@@ -453,7 +453,7 @@ Deno.serve(async (req) => {
         } };
         const { data: restarted, error: restartError } = await admin.from("qb_paper_discovery_runs")
           .update({ status: "running", filters: resetFilters, results_found: preservedCount,
-            error_message: null, completed_at: null, started_at: new Date().toISOString() })
+            heartbeat_at: new Date().toISOString(), error_message: null, completed_at: null, started_at: new Date().toISOString() })
           .eq("id", runId).eq("status", existing.status).select("*").maybeSingle();
         if (restartError || !restarted) return reply(409, { error: "The run changed while restart was requested. Refresh Recent searches and try again." });
         run = restarted;
@@ -464,7 +464,7 @@ Deno.serve(async (req) => {
             return reply(409, { error: "This run has no saved checkpoint. Use Restart from beginning to run it again." });
           }
           const { data: resumed, error: resumeError } = await admin.from("qb_paper_discovery_runs")
-            .update({ status: "running", error_message: null, completed_at: null })
+            .update({ status: "running", heartbeat_at: new Date().toISOString(), error_message: null, completed_at: null })
             .eq("id", runId).eq("status", "failed").select("*").maybeSingle();
           if (resumeError || !resumed) return reply(409, { error: "The run changed while resume was requested. Refresh Recent searches." });
           run = resumed;
@@ -472,7 +472,20 @@ Deno.serve(async (req) => {
           return reply(200, { run_id: runId, complete: true,
             found: existing.results_found || 0, new_candidates: 0, message: "This discovery run is already complete." });
         } else {
-          run = existing;
+          // A previous invocation may have been killed by the Edge Function CPU limit.
+          // Claim only an idle or expired lease; the conditional update prevents two
+          // concurrent Resume requests from processing the same source checkpoint.
+          const staleBefore = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+          const leaseAt = new Date().toISOString();
+          const { data: claimed, error: claimError } = await admin.from("qb_paper_discovery_runs")
+            .update({ heartbeat_at: leaseAt })
+            .eq("id", runId).eq("status", "running")
+            .or("heartbeat_at.is.null,heartbeat_at.lt." + staleBefore)
+            .select("*").maybeSingle();
+          if (claimError || !claimed) {
+            return reply(409, { error: "This discovery run is already being processed. If its previous attempt timed out, wait two minutes and select Resume again." });
+          }
+          run = claimed;
         }
       }
     }
@@ -486,12 +499,12 @@ Deno.serve(async (req) => {
       ? eligible.filter((s: any) => s.source_type === "school").slice(0, 16)
       : eligible.filter((s: any) => s.source_type === "board" || s.source_type === "education_portal");
     if (scope === "board" && !searchTargets.some((s: any) => s.source_type === "board")) {
-      await admin.from("qb_paper_discovery_runs").update({ status: "failed", error_message: "No enabled official board sources.",
+      await admin.from("qb_paper_discovery_runs").update({ status: "failed", heartbeat_at: null, error_message: "No enabled official board sources.",
         completed_at: new Date().toISOString() }).eq("id", runId);
       return reply(400, { error: "No enabled official board sources. Enable at least one board domain." });
     }
     if (!searchTargets.length) {
-      await admin.from("qb_paper_discovery_runs").update({ status: "failed", error_message: "No enabled sources match this search scope.",
+      await admin.from("qb_paper_discovery_runs").update({ status: "failed", heartbeat_at: null, error_message: "No enabled sources match this search scope.",
         completed_at: new Date().toISOString() }).eq("id", runId);
       return reply(400, { error: "No enabled sources match this search scope." });
     }
@@ -569,7 +582,7 @@ Deno.serve(async (req) => {
       const { data, error } = await admin.from("qb_paper_discovery_candidates")
         .upsert(inserts, { onConflict: "source_url", ignoreDuplicates: true }).select("id");
       if (error) {
-        await admin.from("qb_paper_discovery_runs").update({ status: "failed",
+        await admin.from("qb_paper_discovery_runs").update({ status: "failed", heartbeat_at: null,
           error_message: "Could not save search results: " + error.message, completed_at: new Date().toISOString() }).eq("id", runId);
         return reply(500, { error: "Could not save search results: " + error.message });
       }
@@ -580,7 +593,8 @@ Deno.serve(async (req) => {
     const nextProgress = { next_offset: nextOffset, successful_queries: successfulQueries,
       provider_errors: providerErrors.slice(0, 80), results_found: foundTotal, new_candidates: insertedTotal };
     const update: any = { filters: { ...run.filters, discovery_progress: nextProgress },
-      results_found: foundTotal, error_message: providerErrors.length ? clip(providerErrors.join(" | "), 1000) : null };
+      results_found: foundTotal, heartbeat_at: null,
+      error_message: providerErrors.length ? clip(providerErrors.join(" | "), 1000) : null };
     if (complete) {
       update.status = successfulQueries > 0 || foundTotal > 0 ? "completed" : "failed";
       update.completed_at = new Date().toISOString();
