@@ -465,7 +465,11 @@ Deno.serve(async (req) => {
         catch (e) { targeted.errors.push(source.domain + ": " + clip((e as Error)?.message || e, 220)); }
       }
     } else {
-      for (const source of searchTargets.slice(0, 8)) {
+      const selectedSchools = schoolName
+        ? searchTargets.filter((s: any) => (s.display_name + " " + s.domain).toLowerCase().includes(schoolName.toLowerCase()))
+        : [];
+      const schoolTargets = (selectedSchools.length ? selectedSchools : searchTargets).slice(0, 8);
+      for (const source of schoolTargets) {
         try { targeted.results.push(...await crawlSchoolOfficial(source, searchQuery)); targeted.successfulQueries++; }
         catch (e) { targeted.errors.push(source.domain + ": " + clip((e as Error)?.message || e, 220)); }
       }
@@ -513,7 +517,7 @@ Deno.serve(async (req) => {
         source_match: r.source ? "approved_registry" : "unregistered_domain",
         search_provider: r.snippet.startsWith("Official CBSE") ? "CBSE official archive crawler"
           : r.snippet.startsWith("Official CISCE") ? "CISCE official media crawler"
-          : r.snippet.startsWith("Official source page") ? "Registered school website crawler" : "DuckDuckGo HTML",
+          : r.snippet.startsWith("Official source page") ? (r.source?.source_type === "education_portal" ? "Registered education portal crawler" : "Registered school website crawler") : "DuckDuckGo HTML",
         search_method: r.source ? "targeted_domain" : "broad_web",
       },
     }));
