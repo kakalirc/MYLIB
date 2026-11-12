@@ -137,7 +137,7 @@
       ? (items.length ? items.map(rejectedCandidateHtml).join('') : '<div class="empty">No rejected papers found. Rejected candidates will appear here for recovery.</div>')
       : (items.length ? items.map(candidateHtml).join('') : '<div class="empty">No candidates awaiting review. Search approved websites to begin.</div>');
     return '<div class="lib-ppd-queue-tabs" role="tablist" aria-label="Past paper discovery queues">'
-      + '<button type="button" role="tab" aria-selected="' + (!isRejected) + '" class="lib-ppd-queue-tab ' + (!isRejected ? 'active' : '') + '" onclick="libPPDSetQueueTab(\'review\')">Discovered papers (' + state.candidates.length + ')</button>'
+      + '<button type="button" role="tab" aria-selected="' + (!isRejected) + '" class="lib-ppd-queue-tab ' + (!isRejected ? 'active' : '') + '" onclick="libPPDSetQueueTab(\'review\')">Discovered papers (' + activeCount + ')</button>'
       + '<button type="button" role="tab" aria-selected="' + isRejected + '" class="lib-ppd-queue-tab ' + (isRejected ? 'active' : '') + '" onclick="libPPDSetQueueTab(\'rejected\')">Rejected papers (' + state.rejectedCandidates.length + ')</button></div>'
       + '<div class="lib-ppd-section"><div class="lib-ppd-title"><h3>' + (isRejected ? 'Rejected papers · Recovery' : 'Discovered papers · Review queue') + '</h3><button class="btn-small" type="button" onclick="libPPDRefresh()">Refresh</button></div>' + content + '</div>';
   }
