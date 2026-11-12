@@ -2,7 +2,7 @@
 // Board search uses Admin-approved domains; school search discovers new hosts that require Admin approval before PDF fetch.
 // Verification is restricted to enabled source domains; imports use the existing qb_source_papers workflow.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { unzipSync } from "npm:fflate@0.8.2";
+import { getPdfZipMember, listPdfMembersFromZip } from "./archive.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -295,30 +295,6 @@ async function crawlSchoolOfficial(source: any, query: string): Promise<Discover
   return [...unique.values()].slice(0, 40);
 }
 
-function zipPdfMembers(bytes: Uint8Array, query: string): Array<{name:string;bytes:Uint8Array}> {
-  if (bytes.length < 22 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) throw new Error("Archive is not a valid ZIP file.");
-  const terms = queryTerms(query);
-  let selectedBytes = 0;
-  let selectedFiles = 0;
-  const files = unzipSync(bytes, {
-    filter: (file) => {
-      if (!/\.pdf$/i.test(file.name) || file.originalSize <= 0 || file.originalSize > MAX_PDF_BYTES) return false;
-      if (selectedFiles >= 20 || selectedBytes + file.originalSize > 80 * 1024 * 1024) return false;
-      selectedFiles++;
-      selectedBytes += file.originalSize;
-      return true;
-    },
-  });
-  const out: Array<{name:string;bytes:Uint8Array}> = [];
-  for (const [name, data] of Object.entries(files)) {
-    if (!/\.pdf$/i.test(name) || data.length > MAX_PDF_BYTES || !isPdf(data)) continue;
-    const leaf = name.split("/").pop() || name;
-    if (!matchesQuery(leaf + " " + name, terms)) continue;
-    out.push({ name, bytes: data });
-    if (out.length >= 20) break;
-  }
-  return out;
-}
 async function fetchCandidatePdf(candidate: any, domains: string[]) {
   const archiveMember = String(candidate.discovery_metadata?.archive_member || "");
   const urlText = candidate.pdf_url || candidate.source_url;
@@ -327,10 +303,8 @@ async function fetchCandidatePdf(candidate: any, domains: string[]) {
     : "application/pdf,application/octet-stream");
   if (!archiveMember) return archive;
   const zipBytes = await readBounded(archive.response);
-  const members = zipPdfMembers(zipBytes, "");
-  const match = members.find((item) => item.name === archiveMember);
-  if (!match) throw new Error("The selected PDF was not found inside the ZIP archive. Run discovery again.");
-  return { response: new Response(match.bytes, { headers: { "Content-Type": "application/pdf", "Content-Length": String(match.bytes.length) } }), url: archive.url };
+  const memberBytes = getPdfZipMember(zipBytes, archiveMember);
+  return { response: new Response(memberBytes, { headers: { "Content-Type": "application/pdf", "Content-Length": String(memberBytes.length) } }), url: archive.url };
 }
 async function crawlCbseZipArchives(source: any, query: string): Promise<DiscoveryRow[]> {
   const landing = "https://www.cbse.gov.in/cbsenew/question-paper.html";
@@ -348,7 +322,7 @@ async function crawlCbseZipArchives(source: any, query: string): Promise<Discove
       if (!safeHost(target, [source.domain]) || !/\.zip(?:$|[?#])/i.test(target.href)) continue;
       const { response: zipResponse } = await fetchAllowed(target.href, [source.domain], "application/zip,application/octet-stream");
       const zipBytes = await readBounded(zipResponse);
-      const members = zipPdfMembers(zipBytes, "");
+      const members = listPdfMembersFromZip(zipBytes);
       for (const member of members) rows.push({
         title: subject + " — " + member.name.split("/").pop(),
         url: target.href, snippet: "Official CBSE paper inside ZIP archive",
