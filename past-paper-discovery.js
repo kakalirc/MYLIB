@@ -4,7 +4,7 @@
   if (window.__libPastPaperDiscoveryInstalled) return;
   window.__libPastPaperDiscoveryInstalled = true;
 
-  var state = { loaded:false, loading:false, sources:[], candidates:[], schools:[], runs:[], message:'', error:'', searchBusy:false, scope:'board' };
+  var state = { loaded:false, loading:false, sources:[], candidates:[], rejectedCandidates:[], schools:[], runs:[], message:'', error:'', searchBusy:false, scope:'board', queueTab:'review' };
   function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
   function byId(id) { return document.getElementById(id); }
   function val(id) { return byId(id) ? byId(id).value : ''; }
@@ -21,7 +21,8 @@
     try {
       var results = await Promise.all([
         sb.from('qb_paper_discovery_sources').select('*').order('priority').order('display_name'),
-        sb.from('qb_paper_discovery_candidates').select('*').order('discovered_at', {ascending:false}).limit(60),
+        sb.from('qb_paper_discovery_candidates').select('*').order('discovered_at', {ascending:false}).limit(100),
+        sb.from('qb_paper_discovery_candidates').select('*').eq('status', 'rejected').order('reviewed_at', {ascending:false}).limit(100),
         sb.from('qb_schools').select('id,name,archived').eq('archived', false).order('name'),
         sb.from('qb_paper_discovery_runs').select('*').order('started_at', {ascending:false}).limit(8)
       ]);
@@ -29,8 +30,9 @@
       if (failure) throw failure.error;
       state.sources = results[0].data || [];
       state.candidates = (results[1].data || []).filter(function (c) { return ['imported', 'rejected', 'duplicate'].indexOf(c.status) < 0; });
-      state.schools = results[2].data || [];
-      state.runs = results[3].data || [];
+      state.rejectedCandidates = results[2].data || [];
+      state.schools = results[3].data || [];
+      state.runs = results[4].data || [];
       state.loaded = true;
       state.error = '';
     } catch (e) {
@@ -113,6 +115,26 @@
       + (school ? '<div class="hint">School: ' + esc(school.name) + '</div>' : (c.discovered_school_name ? '<div class="hint">Possible school: ' + esc(c.discovered_school_name) + '</div>' : ''))
       + '</div></div>' + actions + domainAction + '</div><div class="lib-ppd-review-fields">' + metadata + '</div></div></article>';
   }
+  function rejectedCandidateHtml(c) {
+    var previewUrl = c.pdf_url || c.source_url;
+    var rejectedAt = c.reviewed_at || c.updated_at || c.discovered_at;
+    return '<article class="lib-ppd-candidate lib-ppd-rejected"><div class="lib-ppd-candidate-head"><div><b>' + esc(c.title) + '</b><div class="hint">' + esc(c.source_domain) + ' · ' + esc(c.source_type) + ' · Rejected ' + (rejectedAt ? esc(new Date(rejectedAt).toLocaleString()) : '') + ' · PDF: ' + esc(c.verification_status || 'not checked') + '</div>'
+      + (c.rejection_reason ? '<p class="hint">Reason: ' + esc(c.rejection_reason) + '</p>' : '<p class="hint">No rejection reason was recorded.</p>')
+      + (c.discovered_school_name ? '<div class="hint">School: ' + esc(c.discovered_school_name) + '</div>' : '')
+      + '</div></div><div class="lib-ppd-actions">' + (previewUrl ? '<a class="btn-small" href="' + esc(previewUrl) + '" target="_blank" rel="noopener noreferrer">Open source / PDF</a>' : '')
+      + '<button class="btn-small btn-primary" type="button" onclick="libPPDRestore(\'' + esc(c.id) + '\')">Restore to Needs Review</button></div></article>';
+  }
+  function renderQueueTabs() {
+    var isRejected = state.queueTab === 'rejected';
+    var items = isRejected ? state.rejectedCandidates : state.candidates;
+    var content = isRejected
+      ? (items.length ? items.map(rejectedCandidateHtml).join('') : '<div class="empty">No rejected papers found. Rejected candidates will appear here for recovery.</div>')
+      : (items.length ? items.map(candidateHtml).join('') : '<div class="empty">No candidates awaiting review. Search approved websites to begin.</div>');
+    return '<div class="lib-ppd-queue-tabs" role="tablist" aria-label="Past paper discovery queues">'
+      + '<button type="button" role="tab" aria-selected="' + (!isRejected) + '" class="lib-ppd-queue-tab ' + (!isRejected ? 'active' : '') + '" onclick="libPPDSetQueueTab(\'review\')">Discovered papers (' + state.candidates.length + ')</button>'
+      + '<button type="button" role="tab" aria-selected="' + isRejected + '" class="lib-ppd-queue-tab ' + (isRejected ? 'active' : '') + '" onclick="libPPDSetQueueTab(\'rejected\')">Rejected papers (' + state.rejectedCandidates.length + ')</button></div>'
+      + '<div class="lib-ppd-section"><div class="lib-ppd-title"><h3>' + (isRejected ? 'Rejected papers · Recovery' : 'Discovered papers · Review queue') + '</h3><button class="btn-small" type="button" onclick="libPPDRefresh()">Refresh</button></div>' + content + '</div>';
+  }
   function renderPanel() {
     ensureLoaded();
     if (state.loading && !state.loaded) return '<section class="lib-ppd"><h3>Discover papers online</h3><p class="hint">Loading discovery sources and review queue…</p></section>';
@@ -125,8 +147,7 @@
       + '<button class="btn-small btn-primary" onclick="libPPDSearch()" ' + (state.searchBusy ? 'disabled' : '') + '>' + (state.searchBusy ? 'Searching…' : ('Search the web')) + '</button></div>'
       + '<p class="hint">Search results are candidates only. No paper enters the Question Bank until you verify its PDF and explicitly import it.</p>'
       + (state.message ? '<div class="hint" style="color:' + (state.error ? 'var(--brick)' : 'var(--forest)') + ';margin:8px 0">' + esc(state.message) + '</div>' : '') + '</div>';
-    var candidates = '<div class="lib-ppd-section"><div class="lib-ppd-title"><h3>Discovered papers (' + state.candidates.length + ')</h3><button class="btn-small" onclick="libPPDRefresh()">Refresh</button></div>'
-      + (state.candidates.length ? state.candidates.map(candidateHtml).join('') : '<div class="empty">No candidates yet. Search approved websites to begin.</div>') + '</div>';
+    var candidates = renderQueueTabs();
     var runs = '<div class="lib-ppd-section"><h3>Recent searches</h3>' + (state.runs.length ? state.runs.map(function (r) {
       var progress = r.filters && r.filters.discovery_progress ? r.filters.discovery_progress : {};
       var progressText = r.status === 'running' ? ' · ' + Number(progress.next_offset || 0) + ' sources processed' : '';
@@ -135,11 +156,21 @@
       return '<div class="hint">' + esc(new Date(r.started_at).toLocaleString()) + ' · ' + esc(r.query_text) + ' · ' + esc(r.status) + ' · ' + esc(r.results_found) + ' results' + esc(progressText) + resume + restart + '</div>';
     }).join('') : '<p class="hint">No searches yet.</p>') + '</div>';
     return '<section class="lib-ppd"><style>'
-      + '.lib-ppd{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}.lib-ppd h3{font-family:Zilla Slab,serif;margin:0 0 7px}.lib-ppd-section{margin:14px 0 20px}.lib-ppd-approved-sources{border:1px solid var(--line);border-radius:9px;padding:10px 12px}.lib-ppd-approved-sources>summary{cursor:pointer;font-weight:700;list-style:disclosure-closed}.lib-ppd-approved-sources[open]>summary{margin-bottom:10px;list-style:disclosure-open}.lib-ppd-search,.lib-ppd-source-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.lib-ppd-search input{flex:1;min-width:190px}.lib-ppd-search select,.lib-ppd-search input,.lib-ppd-source-form input,.lib-ppd-source-form select,.lib-ppd-meta input,.lib-ppd-meta select{min-height:38px;padding:7px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);box-sizing:border-box}.lib-ppd-source-form input{flex:1;min-width:170px}.lib-ppd-source{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line)}.lib-ppd-candidate{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}.lib-ppd-review-layout{display:grid;grid-template-columns:minmax(0,0.9fr) minmax(0,1.1fr);gap:16px;align-items:start}.lib-ppd-review-summary,.lib-ppd-review-fields{min-width:0}.lib-ppd-review-fields{border-left:1px solid var(--line);padding-left:16px}.lib-ppd-candidate-head,.lib-ppd-title,.lib-ppd-actions{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}.lib-ppd-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:0}.lib-ppd-meta label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);font-weight:700}.lib-ppd-meta input,.lib-ppd-meta select{width:100%}.lib-ppd-actions{justify-content:flex-start;margin-top:10px}.lib-ppd-domain-approval{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}.lib-ppd-domain-approval select{min-height:34px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink)}.lib-ppd p.hint{margin:5px 0 10px}@media(max-width:700px){.lib-ppd-review-layout{grid-template-columns:minmax(0,1fr)}.lib-ppd-review-fields{border-left:0;border-top:1px solid var(--line);padding:12px 0 0}.lib-ppd-search,.lib-ppd-source-form{align-items:stretch}.lib-ppd-search>* ,.lib-ppd-source-form>*{width:100%;min-width:0}.lib-ppd-candidate-head{align-items:flex-start}}'
+      + '.lib-ppd{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}.lib-ppd-queue-tabs{display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:14px 0 10px}.lib-ppd-queue-tab{border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;background:var(--surface);color:var(--ink);padding:9px 13px;cursor:pointer;font:inherit}.lib-ppd-queue-tab.active{background:var(--surface-2,var(--surface));font-weight:700;border-color:var(--accent,var(--line))}.lib-ppd-rejected{border-left:3px solid var(--brick,var(--line))}.lib-ppd h3{font-family:Zilla Slab,serif;margin:0 0 7px}.lib-ppd-section{margin:14px 0 20px}.lib-ppd-approved-sources{border:1px solid var(--line);border-radius:9px;padding:10px 12px}.lib-ppd-approved-sources>summary{cursor:pointer;font-weight:700;list-style:disclosure-closed}.lib-ppd-approved-sources[open]>summary{margin-bottom:10px;list-style:disclosure-open}.lib-ppd-search,.lib-ppd-source-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.lib-ppd-search input{flex:1;min-width:190px}.lib-ppd-search select,.lib-ppd-search input,.lib-ppd-source-form input,.lib-ppd-source-form select,.lib-ppd-meta input,.lib-ppd-meta select{min-height:38px;padding:7px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);box-sizing:border-box}.lib-ppd-source-form input{flex:1;min-width:170px}.lib-ppd-source{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line)}.lib-ppd-candidate{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}.lib-ppd-review-layout{display:grid;grid-template-columns:minmax(0,0.9fr) minmax(0,1.1fr);gap:16px;align-items:start}.lib-ppd-review-summary,.lib-ppd-review-fields{min-width:0}.lib-ppd-review-fields{border-left:1px solid var(--line);padding-left:16px}.lib-ppd-candidate-head,.lib-ppd-title,.lib-ppd-actions{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}.lib-ppd-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:0}.lib-ppd-meta label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);font-weight:700}.lib-ppd-meta input,.lib-ppd-meta select{width:100%}.lib-ppd-actions{justify-content:flex-start;margin-top:10px}.lib-ppd-domain-approval{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}.lib-ppd-domain-approval select{min-height:34px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink)}.lib-ppd p.hint{margin:5px 0 10px}@media(max-width:700px){.lib-ppd-review-layout{grid-template-columns:minmax(0,1fr)}.lib-ppd-review-fields{border-left:0;border-top:1px solid var(--line);padding:12px 0 0}.lib-ppd-search,.lib-ppd-source-form{align-items:stretch}.lib-ppd-search>* ,.lib-ppd-source-form>*{width:100%;min-width:0}.lib-ppd-candidate-head{align-items:flex-start}}'
       + '</style>' + search + sources + candidates + runs + '</section>';
   }
 
   window.libPPDSetScope = function (v) { state.scope = v === 'school' ? 'school' : 'board'; };
+  window.libPPDSetQueueTab = function (v) { state.queueTab = v === 'rejected' ? 'rejected' : 'review'; if (typeof render === 'function') render(); };
+  window.libPPDRestore = async function (id) {
+    var candidate = state.rejectedCandidates.find(function (c) { return c.id === id; });
+    if (!candidate) { notify('This rejected paper is no longer in the recovery queue. Refresh and try again.', true); return; }
+    if (!window.confirm('Restore this paper to Needs Review? It will reappear in Discovered papers. The PDF will not be uploaded again.')) return;
+    var result = await sb.from('qb_paper_discovery_candidates').update({ status:'needs_review', rejection_reason:null, reviewed_by:null, reviewed_at:null, updated_at:new Date().toISOString() }).eq('id', id).eq('status', 'rejected').select('id').maybeSingle();
+    if (result.error) { notify('Could not restore paper: ' + result.error.message, true); return; }
+    if (!result.data) { notify('Paper was not restored because its status changed. Refresh and check the queue.', true); return; }
+    state.queueTab = 'review'; state.loaded = false; await loadData(true); notify('Paper restored to Needs Review.');
+  };
   window.libPPDRefresh = async function () { state.loaded = false; await loadData(true); if (typeof render === 'function') render(); };
   window.libPPDSearch = async function () {
     if (state.searchBusy) return;
@@ -265,9 +296,13 @@
     if (typeof render === 'function') render();
   };
   window.libPPDReject = async function (id) {
-    var { error } = await sb.from('qb_paper_discovery_candidates').update({ status:'rejected', reviewed_by:currentUserId, reviewed_at:new Date().toISOString(), updated_at:new Date().toISOString() }).eq('id', id);
-    if (error) { notify('Could not reject candidate: ' + error.message, true); return; }
-    state.loaded = false; await loadData(true); notify('Candidate rejected.');
+    var candidate = state.candidates.find(function (c) { return c.id === id; });
+    if (!candidate) { notify('This discovered paper is no longer in the review queue. Refresh and try again.', true); return; }
+    if (!window.confirm('Reject “' + String(candidate.title || 'this paper') + '”?\n\nWarning: it will disappear from Discovered papers and will not be imported. You can recover it later from the Rejected papers tab.')) return;
+    var result = await sb.from('qb_paper_discovery_candidates').update({ status:'rejected', reviewed_by:currentUserId, reviewed_at:new Date().toISOString(), updated_at:new Date().toISOString() }).eq('id', id).select('id').maybeSingle();
+    if (result.error) { notify('Could not reject candidate: ' + result.error.message, true); return; }
+    if (!result.data) { notify('Candidate was not rejected. Refresh and try again.', true); return; }
+    state.loaded = false; await loadData(true); notify('Candidate rejected. It can be recovered from the Rejected papers tab.');
   };
   window.libPPDImport = async function (id) {
     var candidate = state.candidates.find(function (c) { return c.id === id; });
