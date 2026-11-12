@@ -68,18 +68,58 @@ function parseSearchResults(html: string, limit: number) {
   }
   return rows;
 }
-async function searchWeb(query: string, limit = 20, domain?: string) {
+async function searchBingRss(query: string, limit = 20, domain?: string) {
   const targeted = domain ? query + " site:" + domain : query;
-  const res = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(targeted), {
+  const res = await fetch("https://www.bing.com/search?format=rss&q=" + encodeURIComponent(targeted), {
     headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-      "Accept": "text/html,application/xhtml+xml",
+      "User-Agent": "Mozilla/5.0 (compatible; LIBEducationPastPaperDiscovery/1.0)",
+      "Accept": "application/rss+xml, application/xml, text/xml",
     },
     signal: AbortSignal.timeout(12000),
   });
-  if (!res.ok) throw new Error("Search provider returned HTTP " + res.status + ".");
-  const html = new TextDecoder().decode(await readBounded(res, 2 * 1024 * 1024));
-  return parseSearchResults(html, limit).filter((row) => !domain || row.domain === domain || row.domain.endsWith("." + domain));
+  if (!res.ok) throw new Error("Bing RSS returned HTTP " + res.status + ".");
+  const xml = new TextDecoder().decode(await readBounded(res, 2 * 1024 * 1024));
+  const rows: Array<{ title: string; url: string; snippet: string; domain: string }> = [];
+  const items = xml.match(/<item\\b[\\s\\S]*?<\\/item>/gi) || [];
+  for (const item of items) {
+    if (rows.length >= limit) break;
+    const tag = (name: string) => {
+      const match = item.match(new RegExp("<" + name + "[^>]*>([\\\\s\\\\S]*?)</" + name + ">", "i"));
+      return match ? decodeEntities(match[1].replace(/^<!\\[CDATA\\[/, "").replace(/\\]\\]>$/, "").trim()) : "";
+    };
+    const rawUrl = tag("link");
+    let target: URL;
+    try { target = new URL(rawUrl); } catch { continue; }
+    if (target.protocol !== "https:" && target.protocol !== "http:") continue;
+    const host = target.hostname.toLowerCase().replace(/^www\\./, "");
+    if (domain && host !== domain && !host.endsWith("." + domain)) continue;
+    rows.push({ title: htmlText(tag("title")).slice(0, 500) || target.hostname,
+      url: target.href, snippet: "Bing RSS search · " + htmlText(tag("description")).slice(0, 1000), domain: host });
+  }
+  return rows;
+}
+async function searchWeb(query: string, limit = 20, domain?: string) {
+  const targeted = domain ? query + " site:" + domain : query;
+  try {
+    const res = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(targeted), {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+      },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!res.ok) throw new Error("DuckDuckGo returned HTTP " + res.status + ".");
+    const html = new TextDecoder().decode(await readBounded(res, 2 * 1024 * 1024));
+    const rows = parseSearchResults(html, limit).filter((row) => !domain || row.domain === domain || row.domain.endsWith("." + domain));
+    if (rows.length) return rows;
+    return await searchBingRss(query, limit, domain);
+  } catch (ddgError) {
+    try { return await searchBingRss(query, limit, domain); }
+    catch (bingError) {
+      throw new Error("DuckDuckGo: " + clip((ddgError as Error)?.message || ddgError, 180)
+        + " · Bing: " + clip((bingError as Error)?.message || bingError, 180));
+    }
+  }
 }
 async function searchInBatches(sources: any[], query: string, batchSize = 4) {
   const results: Array<{ title: string; url: string; snippet: string; domain: string; source: any; archive_member?: string }> = [];
