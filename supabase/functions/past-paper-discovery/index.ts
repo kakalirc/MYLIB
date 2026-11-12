@@ -68,18 +68,58 @@ function parseSearchResults(html: string, limit: number) {
   }
   return rows;
 }
-async function searchWeb(query: string, limit = 20, domain?: string) {
+async function searchBingRss(query: string, limit = 20, domain?: string) {
   const targeted = domain ? query + " site:" + domain : query;
-  const res = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(targeted), {
+  const res = await fetch("https://www.bing.com/search?format=rss&q=" + encodeURIComponent(targeted), {
     headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-      "Accept": "text/html,application/xhtml+xml",
+      "User-Agent": "Mozilla/5.0 (compatible; LIBEducationPastPaperDiscovery/1.0)",
+      "Accept": "application/rss+xml, application/xml, text/xml",
     },
     signal: AbortSignal.timeout(12000),
   });
-  if (!res.ok) throw new Error("Search provider returned HTTP " + res.status + ".");
-  const html = new TextDecoder().decode(await readBounded(res, 2 * 1024 * 1024));
-  return parseSearchResults(html, limit).filter((row) => !domain || row.domain === domain || row.domain.endsWith("." + domain));
+  if (!res.ok) throw new Error("Bing RSS returned HTTP " + res.status + ".");
+  const xml = new TextDecoder().decode(await readBounded(res, 2 * 1024 * 1024));
+  const rows: Array<{ title: string; url: string; snippet: string; domain: string }> = [];
+  const items = xml.match(/<item\b[\s\S]*?<\/item>/gi) || [];
+  for (const item of items) {
+    if (rows.length >= limit) break;
+    const tag = (name: string) => {
+      const match = item.match(new RegExp("<" + name + "[^>]*>([\\s\\S]*?)</" + name + ">", "i"));
+      return match ? decodeEntities(match[1].replace(/^<!\[CDATA\[/, "").replace(/\]\]>$/, "").trim()) : "";
+    };
+    const rawUrl = tag("link");
+    let target: URL;
+    try { target = new URL(rawUrl); } catch { continue; }
+    if (target.protocol !== "https:" && target.protocol !== "http:") continue;
+    const host = target.hostname.toLowerCase().replace(/^www\./, "");
+    if (domain && host !== domain && !host.endsWith("." + domain)) continue;
+    rows.push({ title: htmlText(tag("title")).slice(0, 500) || target.hostname,
+      url: target.href, snippet: "Bing RSS search · " + htmlText(tag("description")).slice(0, 1000), domain: host });
+  }
+  return rows;
+}
+async function searchWeb(query: string, limit = 20, domain?: string) {
+  const targeted = domain ? query + " site:" + domain : query;
+  try {
+    const res = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(targeted), {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+      },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!res.ok) throw new Error("DuckDuckGo returned HTTP " + res.status + ".");
+    const html = new TextDecoder().decode(await readBounded(res, 2 * 1024 * 1024));
+    const rows = parseSearchResults(html, limit).filter((row) => !domain || row.domain === domain || row.domain.endsWith("." + domain));
+    if (rows.length) return rows;
+    return await searchBingRss(query, limit, domain);
+  } catch (ddgError) {
+    try { return await searchBingRss(query, limit, domain); }
+    catch (bingError) {
+      throw new Error("DuckDuckGo: " + clip((ddgError as Error)?.message || ddgError, 180)
+        + " · Bing: " + clip((bingError as Error)?.message || bingError, 180));
+    }
+  }
 }
 async function searchInBatches(sources: any[], query: string, batchSize = 4) {
   const results: Array<{ title: string; url: string; snippet: string; domain: string; source: any; archive_member?: string }> = [];
@@ -514,7 +554,7 @@ Deno.serve(async (req) => {
     if (sourceError) return reply(500, { error: "Could not load approved source registry: " + sourceError.message });
     const eligible = (sources || []).filter((s: any) => s.source_type === scope || s.source_type === "education_portal");
     const searchTargets = scope === "school"
-      ? eligible.filter((s: any) => s.source_type === "school").slice(0, 16)
+      ? eligible.filter((s: any) => s.source_type === "school")
       : eligible.filter((s: any) => s.source_type === "board" || s.source_type === "education_portal");
     if (scope === "board" && !searchTargets.some((s: any) => s.source_type === "board")) {
       await admin.from("qb_paper_discovery_runs").update({ status: "failed", heartbeat_at: null, error_message: "No enabled official board sources.",
@@ -562,12 +602,23 @@ Deno.serve(async (req) => {
     const nextOffset = offset + batch.length;
     const complete = nextOffset >= searchTargets.length;
     let broadResults: any[] = [];
-    if (complete && (foundTotal + batchRows.length < 5 || scope === "school")) {
-      try {
-        broadResults = await searchWeb(query + " question paper PDF", 20);
-        successfulQueries++;
-      } catch (e) {
-        providerErrors.push("Broad web search: " + clip((e as Error)?.message || e, 300));
+    if (complete) {
+      // Always run broad discovery after registered-source crawling. A handful of
+      // sample-paper hits must not suppress searches for annual / previous-year papers.
+      const broadQueries = [
+        query + " previous year board examination question paper PDF",
+        query + " annual examination question paper PDF",
+        query + " past exam question paper PDF",
+      ];
+      const broadSettled = await Promise.all(broadQueries.map(async (broadQuery) => {
+        try { return { rows: await searchWeb(broadQuery, 20), error: "" }; }
+        catch (e) { return { rows: [], error: clip((e as Error)?.message || e, 300) }; }
+      }));
+      for (let i = 0; i < broadSettled.length; i++) {
+        const item = broadSettled[i];
+        if (item.error) providerErrors.push("Broad web search (" + (i + 1) + "): " + item.error);
+        else successfulQueries++;
+        broadResults.push(...item.rows);
       }
     }
     const rows = [...batchRows, ...broadResults.map((r) => {
@@ -589,7 +640,7 @@ Deno.serve(async (req) => {
         trust_level: r.source?.trust_level || "unverified",
         source_name: r.source?.display_name || r.domain,
         source_match: r.source ? "approved_registry" : "unregistered_domain",
-        search_provider: r.snippet.startsWith("Official CBSE") ? "CBSE official archive crawler"
+        search_provider: r.snippet.startsWith("Bing RSS search") ? "Bing RSS" : r.snippet.startsWith("Official CBSE") ? "CBSE official archive crawler"
           : r.snippet.startsWith("Official CISCE") ? "CISCE official media crawler"
           : r.snippet.startsWith("Official source page") ? (r.source?.source_type === "education_portal" ? "Registered education portal crawler" : "Registered school website crawler") : "DuckDuckGo HTML",
         search_method: r.source ? "targeted_domain" : "broad_web",
