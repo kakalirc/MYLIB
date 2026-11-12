@@ -1,5 +1,6 @@
 // Admin-only online Past Paper discovery.
-// Searches only Admin-approved domains, verifies PDF bytes, and imports into the existing qb_source_papers workflow.
+// Board search uses Admin-approved domains; school search discovers new hosts that require Admin approval before PDF fetch.
+// Verification is restricted to enabled source domains; imports use the existing qb_source_papers workflow.
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const CORS = {
