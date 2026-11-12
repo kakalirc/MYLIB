@@ -82,7 +82,7 @@ async function searchWeb(query: string, limit = 20, domain?: string) {
   return parseSearchResults(html, limit).filter((row) => !domain || row.domain === domain || row.domain.endsWith("." + domain));
 }
 async function searchInBatches(sources: any[], query: string, batchSize = 4) {
-  const results: Array<{ title: string; url: string; snippet: string; domain: string; source: any }> = [];
+  const results: Array<{ title: string; url: string; snippet: string; domain: string; source: any; archive_member?: string }> = [];
   const errors: string[] = [];
   let successfulQueries = 0;
   for (let i = 0; i < sources.length; i += batchSize) {
@@ -210,8 +210,19 @@ async function crawlCbseOfficial(source: any, query: string): Promise<DiscoveryR
           for (const link of cells[1][1].matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
             let target: URL; try { target = new URL(decodeEntities(link[1]), pageRes.url); } catch { continue; }
             if (!safeHost(target, [source.domain]) || !/\.pdf(?:$|[?#])/i.test(target.href)) continue;
+            let markingSchemeUrl = "";
+            if (cells.length >= 3) {
+              const msLink = cells[2][1].match(/<a\b[^>]*href\s*=\s*["']([^"']+)["']/i)?.[1];
+              if (msLink) {
+                try {
+                  const msTarget = new URL(decodeEntities(msLink), pageRes.url);
+                  if (safeHost(msTarget, [source.domain]) && /\.pdf(?:$|[?#])/i.test(msTarget.href)) markingSchemeUrl = msTarget.href;
+                } catch { /* Ignore malformed marking-scheme links. */ }
+              }
+            }
             rows.push({ title: "Class " + cls + " Sample Paper — " + subject, url: target.href,
-              snippet: "Official CBSE sample question paper", domain: target.hostname.toLowerCase(), source });
+              snippet: "Official CBSE sample question paper", domain: target.hostname.toLowerCase(), source,
+              marking_scheme_url: markingSchemeUrl } as any);
           }
         }
       }
@@ -460,11 +471,12 @@ Deno.serve(async (req) => {
     const inserts = flattened.slice(0, 80).map((r) => ({
       discovery_run_id: run.id, source_id: r.source?.id || null, source_type: scope,
       source_domain: r.domain, title: r.title, source_url: r.url,
-      pdf_url: /\.pdf(?:$|[?#])/i.test(r.url) ? r.url : null,
+      pdf_url: r.archive_member || /\.pdf(?:$|[?#])/i.test(r.url) ? r.url : null,
       discovered_school_name: scope === "school" ? schoolName || null : null,
       discovery_metadata: {
         snippet: r.snippet,
         archive_member: r.archive_member || null,
+        marking_scheme_url: r.marking_scheme_url || null,
         trust_level: r.source?.trust_level || "unverified",
         source_name: r.source?.display_name || r.domain,
         source_match: r.source ? "approved_registry" : "unregistered_domain",
