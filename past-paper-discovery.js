@@ -113,7 +113,7 @@
     var runs = '<div class="lib-ppd-section"><h3>Recent searches</h3>' + (state.runs.length ? state.runs.map(function (r) {
       var progress = r.filters && r.filters.discovery_progress ? r.filters.discovery_progress : {};
       var progressText = r.status === 'running' ? ' · ' + Number(progress.next_offset || 0) + ' sources processed' : '';
-      var resume = r.status === 'running' ? ' <button class="btn-small" onclick="libPPDResumeRun(\\'' + esc(r.id) + '\\')">Resume</button>' : '';
+      var resume = r.status === 'running' ? ' <button class="btn-small" onclick="libPPDResumeRun(&#39;' + esc(r.id) + '&#39;)">Resume</button>' : '';
       return '<div class="hint">' + esc(new Date(r.started_at).toLocaleString()) + ' · ' + esc(r.query_text) + ' · ' + esc(r.status) + ' · ' + esc(r.results_found) + ' results' + esc(progressText) + resume + '</div>';
     }).join('') : '<p class="hint">No searches yet.</p>') + '</div>';
     return '<section class="lib-ppd"><style>'
