@@ -8,7 +8,8 @@
   function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
   function byId(id) { return document.getElementById(id); }
   function val(id) { return byId(id) ? byId(id).value : ''; }
-  function notify(message, isError) { state.message = message || ''; state.error = isError ? message : ''; if (typeof render === 'function') render(); }\n  function notifyAction(id, message, isError) { state.actionMessages[id] = { message:message || '', error:!!isError }; if (typeof render === 'function') render(); }
+  function notify(message, isError) { state.message = message || ''; state.error = isError ? message : ''; if (typeof render === 'function') render(); }
+  function notifyAction(id, message, isError) { state.actionMessages[id] = { message:message || '', error:!!isError }; if (typeof render === 'function') render(); }
   function selectOptions(rows, selected, label) {
     return '<option value="">' + esc(label) + '</option>' + (rows || []).map(function (r) {
       return '<option value="' + esc(r.id) + '"' + (String(r.id) === String(selected || '') ? ' selected' : '') + '>' + esc(r.name) + '</option>';
