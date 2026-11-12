@@ -127,27 +127,27 @@ async function crawlCbseOfficial(source: any, query: string): Promise<Array<{tit
   const landing = "https://www.cbse.gov.in/cbsenew/question-paper.html";
   const { response, url } = await fetchAllowed(landing, [source.domain], "text/html,application/xhtml+xml");
   const html = new TextDecoder().decode(await readBounded(response, 2 * 1024 * 1024));
-  const wanted = query.toLowerCase().replace(/cbse|question paper|previous year|past paper|pdf/g, " ").replace(/\\s+/g, " ").trim();
-  const classMatch = wanted.match(/\\b(class|grade)\\s*(10|12|xii|x)\\b/);
+  const wanted = query.toLowerCase().replace(/cbse|question paper|previous year|past paper|pdf/g, " ").replace(/\s+/g, " ").trim();
+  const classMatch = wanted.match(/\b(class|grade)\s*(10|12|xii|x)\b/);
   const wantedClass = classMatch ? (classMatch[2] === "12" || classMatch[2] === "xii" ? "xii" : "x") : "";
-  const terms = wanted.replace(/\\b(class|grade)\\s*(10|12|xii|x)\\b/g, " ").split(/\\s+/).filter((x) => x.length > 1);
+  const terms = wanted.replace(/\b(class|grade)\s*(10|12|xii|x)\b/g, " ").split(/\s+/).filter((x) => x.length > 1);
   const rows: Array<{title:string;url:string;snippet:string;domain:string;source:any}> = [];
-  const tableRows = html.match(/<tr\\b[\\s\\S]*?<\\/tr>/gi) || [];
+  const tableRows = html.match(/<tr\b[\s\S]*?<\/tr>/gi) || [];
   let offset = 0;
   for (const row of tableRows) {
     const position = html.indexOf(row, offset);
     offset = position + row.length;
     const before = html.slice(Math.max(0, position - 50000), position);
-    const headings = [...before.matchAll(/(?:Question Paper for|Question Papers for)\\s*([^<\\n]{0,160})/gi)];
+    const headings = [...before.matchAll(/(?:Question Paper for|Question Papers for)\s*([^<\n]{0,160})/gi)];
     const section = headings.length ? htmlText(headings[headings.length - 1][1]) : "";
-    const sectionClass = /class\\s*xii|class\\s*12/i.test(section) ? "xii" : /class\\s*x(?:\\s|$)|class\\s*10/i.test(section) ? "x" : "";
+    const sectionClass = /class\s*xii|class\s*12/i.test(section) ? "xii" : /class\s*x(?:\s|$)|class\s*10/i.test(section) ? "x" : "";
     if (wantedClass && sectionClass && wantedClass !== sectionClass) continue;
-    const cells = [...row.matchAll(/<td\\b[^>]*>([\\s\\S]*?)<\\/td>/gi)];
+    const cells = [...row.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)];
     if (cells.length < 2) continue;
     const subject = htmlText(cells[0][1]).toUpperCase();
     if (!subject || /SUBJECT NAME|TOTAL/i.test(subject)) continue;
     if (terms.some((term) => !subject.toLowerCase().includes(term) && !section.toLowerCase().includes(term))) continue;
-    const links = [...cells[1][1].matchAll(/<a\\b[^>]*href\\s*=\\s*["']([^"']+)["'][^>]*>([\\s\\S]*?)<\\/a>/gi)];
+    const links = [...cells[1][1].matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
     for (const link of links) {
       let pdfUrl: URL;
       try { pdfUrl = new URL(decodeEntities(link[1]), url); } catch { continue; }
@@ -155,7 +155,7 @@ async function crawlCbseOfficial(source: any, query: string): Promise<Array<{tit
       rows.push({
         title: [section, subject].filter(Boolean).join(" — ").slice(0, 500),
         url: pdfUrl.href, snippet: "Official CBSE question-paper directory · " + subject,
-        domain: pdfUrl.hostname.toLowerCase().replace(/^www\\./, ""), source,
+        domain: pdfUrl.hostname.toLowerCase().replace(/^www\./, ""), source,
       });
     }
   }
