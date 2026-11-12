@@ -78,9 +78,9 @@ async function fetchAllowed(urlText: string, domains: string[], accept: string) 
   }
   throw new Error("Too many redirects.");
 }
-async function readBounded(res: Response): Promise<Uint8Array> {
+async function readBounded(res: Response, maxBytes = MAX_PDF_BYTES): Promise<Uint8Array> {
   const declared = Number(res.headers.get("content-length") || 0);
-  if (declared > MAX_PDF_BYTES) throw new Error("PDF exceeds the 50 MB limit.");
+  if (declared > maxBytes) throw new Error(maxBytes === MAX_PDF_BYTES ? "PDF exceeds the 50 MB limit." : "Source page exceeds the 2 MB inspection limit.");
   if (!res.body) throw new Error("Source returned an empty response.");
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -89,7 +89,7 @@ async function readBounded(res: Response): Promise<Uint8Array> {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.length;
-    if (total > MAX_PDF_BYTES) { await reader.cancel(); throw new Error("PDF exceeds the 50 MB limit."); }
+    if (total > maxBytes) { await reader.cancel(); throw new Error(maxBytes === MAX_PDF_BYTES ? "PDF exceeds the 50 MB limit." : "Source page exceeds the 2 MB inspection limit."); }
     chunks.push(value);
   }
   const all = new Uint8Array(total);
