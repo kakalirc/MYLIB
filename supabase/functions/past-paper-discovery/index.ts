@@ -57,6 +57,34 @@ async function searchDomain(query: string, domain: string) {
   }
   return rows;
 }
+async function searchSchoolWeb(query: string) {
+  const q = encodeURIComponent(query);
+  const res = await fetch("https://html.duckduckgo.com/html/?q=" + q, {
+    headers: { "User-Agent": "Mozilla/5.0 (compatible; LIBEducationPastPaperDiscovery/1.0)" },
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!res.ok) throw new Error("Search provider returned " + res.status + ".");
+  const html = await res.text();
+  const rows: Array<{ title: string; url: string; snippet: string; domain: string }> = [];
+  const re = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) && rows.length < 50) {
+    const target = ddgTarget(m[1]);
+    if (!target) continue;
+    let parsed: URL;
+    try { parsed = new URL(target); } catch { continue; }
+    if (!safeHost(parsed, [parsed.hostname])) continue;
+    const after = html.slice(re.lastIndex, re.lastIndex + 1600);
+    const sm = after.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/[^>]+>/i);
+    rows.push({
+      title: htmlText(m[2]).slice(0, 500) || parsed.pathname.split("/").pop() || parsed.hostname,
+      url: parsed.href, snippet: sm ? htmlText(sm[1]).slice(0, 1200) : "",
+      domain: parsed.hostname.toLowerCase(),
+    });
+  }
+  return rows;
+}
+
 async function fetchAllowed(urlText: string, domains: string[], accept: string) {
   let url: URL;
   try { url = new URL(urlText); } catch { throw new Error("Invalid URL."); }
@@ -154,23 +182,39 @@ Deno.serve(async (req) => {
       .eq("enabled", true).order("priority").limit(30);
     if (sourceError) return reply(500, { error: "Could not load approved search sources." });
     const eligible = (sources || []).filter((s: any) => s.source_type === scope || s.source_type === "education_portal");
-    if (!eligible.length) return reply(400, { error: "No enabled " + scope + " sources. Add an approved domain under Source management first." });
+    if (scope === "board" && !eligible.length) return reply(400, { error: "No enabled board sources. Add an approved domain under Source management first." });
     const { data: run, error: runError } = await admin.from("qb_paper_discovery_runs")
       .insert({ query_text: searchQuery, filters: { scope, school_name: schoolName || null }, started_by: auth.user.id }).select("id").single();
     if (runError || !run) return reply(500, { error: "Could not start the discovery run." });
-    const results = await Promise.all(eligible.slice(0, 12).map(async (source: any) => {
-      try { return (await searchDomain(searchQuery, source.domain)).map((r) => ({ ...r, source })); }
-      catch (e) { return []; }
-    }));
-    const flattened = results.flat();
+    let flattened: any[] = [];
+    if (scope === "school") {
+      // Broad web discovery finds school sites not yet in the registry. These remain unverified
+      // until an Admin explicitly approves the result domain in the candidate review screen.
+      try {
+        const rows = await searchSchoolWeb(searchQuery);
+        flattened = rows.map((r) => {
+          const matched = eligible.find((source: any) => r.domain === source.domain || r.domain.endsWith("." + source.domain));
+          return { ...r, source: matched || null };
+        });
+      } catch (e) {
+        await admin.from("qb_paper_discovery_runs").update({ status: "failed", error_message: clip((e as Error)?.message || e, 500), completed_at: new Date().toISOString() }).eq("id", run.id);
+        return reply(502, { error: "School-web search failed. Please try again later." });
+      }
+    } else {
+      const results = await Promise.all(eligible.slice(0, 12).map(async (source: any) => {
+        try { return (await searchDomain(searchQuery, source.domain)).map((r) => ({ ...r, source, domain: source.domain })); }
+        catch (e) { return []; }
+      }));
+      flattened = results.flat();
+    }
     const unique = new Map<string, any>();
     for (const row of flattened) if (!unique.has(row.url.toLowerCase())) unique.set(row.url.toLowerCase(), row);
     const inserts = [...unique.values()].slice(0, 80).map((r) => ({
-      discovery_run_id: run.id, source_id: r.source.id, source_type: scope,
-      source_domain: r.source.domain, title: r.title, source_url: r.url,
+      discovery_run_id: run.id, source_id: r.source?.id || null, source_type: scope,
+      source_domain: r.source?.domain || r.domain, title: r.title, source_url: r.url,
       pdf_url: /\.pdf(?:$|[?#])/i.test(r.url) ? r.url : null,
       discovered_school_name: scope === "school" ? schoolName || null : null,
-      discovery_metadata: { snippet: r.snippet, trust_level: r.source.trust_level, source_name: r.source.display_name },
+      discovery_metadata: { snippet: r.snippet, trust_level: r.source?.trust_level || "unverified", source_name: r.source?.display_name || r.domain },
     }));
     let inserted = 0;
     if (inserts.length) {
