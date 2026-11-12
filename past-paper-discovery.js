@@ -28,7 +28,7 @@
       var failure = results.find(function (r) { return r.error; });
       if (failure) throw failure.error;
       state.sources = results[0].data || [];
-      state.candidates = results[1].data || [];
+      state.candidates = (results[1].data || []).filter(function (c) { return ['imported', 'rejected', 'duplicate'].indexOf(c.status) < 0; });
       state.schools = results[2].data || [];
       state.runs = results[3].data || [];
       state.loaded = true;
