@@ -236,18 +236,41 @@ async function crawlCbseOfficial(source: any, query: string): Promise<DiscoveryR
 }
 async function crawlCisceOfficial(source: any, query: string): Promise<DiscoveryRow[]> {
   const terms = queryTerms(query);
-  const endpoint = "https://cisce.org/wp-json/wp/v2/media?search=" + encodeURIComponent([...terms, "question paper"].join(" "))
+  const rows: DiscoveryRow[] = [];
+  const mediaEndpoint = "https://cisce.org/wp-json/wp/v2/media?search=" + encodeURIComponent([...terms, "question paper"].join(" "))
     + "&media_type=application&mime_type=application%2Fpdf&per_page=50";
-  const { response } = await fetchAllowed(endpoint, [source.domain], "application/json");
-  const data = await response.json();
-  if (!Array.isArray(data)) throw new Error("CISCE media search returned an unexpected response.");
-  return data.flatMap((item: any) => {
-    const raw = String(item.source_url || ""); let target: URL;
-    try { target = new URL(raw); } catch { return []; }
-    const title = htmlText(String(item.title?.rendered || item.slug || "CISCE question paper"));
-    if (!safeHost(target, [source.domain]) || !/\.pdf(?:$|[?#])/i.test(target.href) || !matchesQuery(title + " " + raw, terms)) return [];
-    return [{ title, url: target.href, snippet: "Official CISCE PDF library item", domain: target.hostname.toLowerCase(), source }];
-  }).slice(0, 60);
+  try {
+    const { response } = await fetchAllowed(mediaEndpoint, [source.domain], "application/json");
+    const data = await response.json();
+    if (!Array.isArray(data)) throw new Error("CISCE media search returned an unexpected response.");
+    for (const item of data) {
+      const raw = String(item.source_url || ""); let target: URL;
+      try { target = new URL(raw); } catch { continue; }
+      const title = htmlText(String(item.title?.rendered || item.slug || "CISCE question paper"));
+      if (!safeHost(target, [source.domain]) || !/\.pdf(?:$|[?#])/i.test(target.href) || !matchesQuery(title + " " + raw, terms)) continue;
+      rows.push({ title, url: target.href, snippet: "Official CISCE PDF library item", domain: target.hostname.toLowerCase(), source });
+    }
+  } catch (e) {
+    // Continue with the public WordPress search endpoint when media search is unavailable.
+  }
+  const searchEndpoint = "https://cisce.org/wp-json/wp/v2/search?search=" + encodeURIComponent([...terms, "specimen question paper"].join(" "))
+    + "&per_page=30";
+  const search = await fetchAllowed(searchEndpoint, [source.domain], "application/json");
+  const pages = await search.response.json();
+  if (!Array.isArray(pages)) throw new Error("CISCE public search returned an unexpected response.");
+  for (const item of pages.slice(0, 20)) {
+    const pageUrl = String(item.url || item.url?.rendered || "");
+    let target: URL; try { target = new URL(pageUrl); } catch { continue; }
+    if (!safeHost(target, [source.domain])) continue;
+    const page = await fetchAllowed(target.href, [source.domain], "text/html,application/xhtml+xml");
+    const html = new TextDecoder().decode(await readBounded(page.response, 2 * 1024 * 1024));
+    rows.push(...linkRows(html, page.url, source, terms, 20).map((row) => ({
+      ...row, snippet: "Official CISCE paper linked from " + htmlText(String(item.title || "CISCE page")).slice(0, 120),
+    })));
+  }
+  const unique = new Map<string, DiscoveryRow>();
+  for (const row of rows) if (!unique.has(row.url)) unique.set(row.url, row);
+  return [...unique.values()].slice(0, 80);
 }
 async function crawlSchoolOfficial(source: any, query: string): Promise<DiscoveryRow[]> {
   const terms = queryTerms(query); const rows: DiscoveryRow[] = [];
@@ -275,8 +298,16 @@ async function crawlSchoolOfficial(source: any, query: string): Promise<Discover
 function zipPdfMembers(bytes: Uint8Array, query: string): Array<{name:string;bytes:Uint8Array}> {
   if (bytes.length < 22 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) throw new Error("Archive is not a valid ZIP file.");
   const terms = queryTerms(query);
+  let selectedBytes = 0;
+  let selectedFiles = 0;
   const files = unzipSync(bytes, {
-    filter: (file) => /\.pdf$/i.test(file.name) && file.originalSize > 0 && file.originalSize <= MAX_PDF_BYTES,
+    filter: (file) => {
+      if (!/\.pdf$/i.test(file.name) || file.originalSize <= 0 || file.originalSize > MAX_PDF_BYTES) return false;
+      if (selectedFiles >= 20 || selectedBytes + file.originalSize > 80 * 1024 * 1024) return false;
+      selectedFiles++;
+      selectedBytes += file.originalSize;
+      return true;
+    },
   });
   const out: Array<{name:string;bytes:Uint8Array}> = [];
   for (const [name, data] of Object.entries(files)) {
