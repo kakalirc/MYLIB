@@ -193,11 +193,11 @@ async function crawlCbseOfficial(source: any, query: string): Promise<DiscoveryR
     const archiveUrl = "https://cbseacademic.nic.in/sqp_archive.html";
     const archive = await fetchAllowed(archiveUrl, [source.domain], "text/html,application/xhtml+xml");
     const archiveHtml = new TextDecoder().decode(await readBounded(archive.response, 2 * 1024 * 1024));
-    const wantedClasses = /\\b(12|xii)\\b/i.test(query) ? ["XII"]
-      : /\\b(10|x)\\b/i.test(query) ? ["X"] : ["X", "XII"];
-    const archiveLinks = [...archiveHtml.matchAll(/<a\\b[^>]*href\\s*=\\s*["']([^"']+)["'][^>]*>([\\s\\S]*?)<\\/a>/gi)];
+    const wantedClasses = /\b(12|xii)\b/i.test(query) ? ["XII"]
+      : /\b(10|x)\b/i.test(query) ? ["X"] : ["X", "XII"];
+    const archiveLinks = [...archiveHtml.matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
     for (const cls of wantedClasses) {
-      const classPattern = new RegExp("SQP_CLASS" + cls + "_(\\\\d{4}-\\\\d{2})\\\\.html", "i");
+      const classPattern = new RegExp("SQP_CLASS" + cls + "_(\\d{4}-\\d{2})\\.html", "i");
       const pages = archiveLinks.map((m) => {
         let href = ""; try { href = new URL(decodeEntities(m[1]), archive.url).href; } catch { return null; }
         const match = new URL(href).pathname.match(classPattern);
@@ -214,23 +214,23 @@ async function crawlCbseOfficial(source: any, query: string): Promise<DiscoveryR
         try {
           const pageRes = await fetchAllowed(page.url, [source.domain], "text/html,application/xhtml+xml");
           const pageHtml = new TextDecoder().decode(await readBounded(pageRes.response, 2 * 1024 * 1024));
-          const tableRows = pageHtml.match(/<tr\\b[\\s\\S]*?<\\/tr>/gi) || [];
+          const tableRows = pageHtml.match(/<tr\b[\s\S]*?<\/tr>/gi) || [];
           for (const row of tableRows) {
-            const cells = [...row.matchAll(/<td\\b[^>]*>([\\s\\S]*?)<\\/td>/gi)];
+            const cells = [...row.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)];
             if (cells.length < 2) continue;
             const subject = htmlText(cells[0][1]);
             if (!subject || /subject/i.test(subject) || !matchesQuery(subject, terms)) continue;
             // Column two contains the sample paper; the next column is the marking scheme.
-            for (const link of cells[1][1].matchAll(/<a\\b[^>]*href\\s*=\\s*["']([^"']+)["'][^>]*>([\\s\\S]*?)<\\/a>/gi)) {
+            for (const link of cells[1][1].matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
               let target: URL; try { target = new URL(decodeEntities(link[1]), pageRes.url); } catch { continue; }
-              if (!safeHost(target, [source.domain]) || !/\\.pdf(?:$|[?#])/i.test(target.href)) continue;
+              if (!safeHost(target, [source.domain]) || !/\.pdf(?:$|[?#])/i.test(target.href)) continue;
               let markingSchemeUrl = "";
               if (cells.length >= 3) {
-                const msLink = cells[2][1].match(/<a\\b[^>]*href\\s*=\\s*["']([^"']+)["']/i)?.[1];
+                const msLink = cells[2][1].match(/<a\b[^>]*href\s*=\s*["']([^"']+)["']/i)?.[1];
                 if (msLink) {
                   try {
                     const msTarget = new URL(decodeEntities(msLink), pageRes.url);
-                    if (safeHost(msTarget, [source.domain]) && /\\.pdf(?:$|[?#])/i.test(msTarget.href)) markingSchemeUrl = msTarget.href;
+                    if (safeHost(msTarget, [source.domain]) && /\.pdf(?:$|[?#])/i.test(msTarget.href)) markingSchemeUrl = msTarget.href;
                   } catch { /* Ignore malformed marking-scheme links. */ }
                 }
               }
