@@ -409,8 +409,9 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { return reply(400, { error: "Invalid request." }); }
   const action = clip(body.action, 30);
 
-  if (action === "search" || action === "continue_search") {
+  if (action === "search" || action === "continue_search" || action === "restart_search") {
     const isNewRun = action === "search";
+    const isRestart = action === "restart_search";
     let run: any = null;
     let query = "";
     let scope = "board";
@@ -437,12 +438,30 @@ Deno.serve(async (req) => {
       const { data: existing, error: loadError } = await admin.from("qb_paper_discovery_runs")
         .select("*").eq("id", runId).maybeSingle();
       if (loadError || !existing) return reply(404, { error: "Discovery run not found." });
-      if (existing.status !== "running") return reply(200, { run_id: runId, complete: true,
-        found: existing.results_found || 0, new_candidates: 0, message: "This discovery run is already complete." });
-      run = existing;
       query = String(existing.query_text || "");
       scope = existing.filters?.scope === "school" ? "school" : "board";
       schoolName = clip(existing.filters?.school_name, 200);
+      if (isRestart) {
+        if (existing.status === "running") return reply(409, { error: "This run is already running. Resume it instead of restarting." });
+        const { data: priorCandidates, error: countError } = await admin.from("qb_paper_discovery_candidates")
+          .select("id").eq("discovery_run_id", runId);
+        if (countError) return reply(500, { error: "Could not inspect existing candidates before restart: " + countError.message });
+        const preservedCount = priorCandidates?.length || 0;
+        const resetFilters = { ...existing.filters, discovery_progress: {
+          next_offset: 0, successful_queries: 0, provider_errors: [],
+          results_found: preservedCount, new_candidates: 0,
+        } };
+        const { data: restarted, error: restartError } = await admin.from("qb_paper_discovery_runs")
+          .update({ status: "running", filters: resetFilters, results_found: preservedCount,
+            error_message: null, completed_at: null, started_at: new Date().toISOString() })
+          .eq("id", runId).eq("status", existing.status).select("*").maybeSingle();
+        if (restartError || !restarted) return reply(409, { error: "The run changed while restart was requested. Refresh Recent searches and try again." });
+        run = restarted;
+      } else {
+        if (existing.status !== "running") return reply(200, { run_id: runId, complete: true,
+          found: existing.results_found || 0, new_candidates: 0, message: "This discovery run is already complete." });
+        run = existing;
+      }
     }
 
     const { data: sources, error: sourceError } = await admin.from("qb_paper_discovery_sources")
