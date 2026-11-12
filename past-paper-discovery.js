@@ -159,7 +159,7 @@
         calls++;
       }
       if (!result.complete) throw new Error('Discovery is still in progress. Refresh the page and check Recent searches before starting another run.');
-      state.message = 'Search complete (' + (result.provider || 'web search') + '): ' + result.found + ' results found; ' + result.new_candidates + ' new candidates saved. Approved-source matches: ' + (result.approved_source_results || 0) + '.' + (result.provider_errors && result.provider_errors.length ? ' Provider warnings: ' + result.provider_errors.slice(0, 3).join(' | ') : '') + ' Unregistered domains need Admin approval before PDF verification.';
+      state.message = 'Search complete (' + (result.provider || 'web search') + '): checked ' + result.sources_processed + ' of ' + result.sources_total + ' registered sources; ' + (result.provider_successful_queries || 0) + ' provider queries succeeded; ' + result.found + ' results found; ' + result.new_candidates + ' new candidates saved. Approved-source matches: ' + (result.approved_source_results || 0) + '.' + (result.provider_errors && result.provider_errors.length ? ' Provider warnings: ' + result.provider_errors.slice(0, 3).join(' | ') : '') + ' Unregistered domains need Admin approval before PDF verification.';
       state.loaded = false; await loadData(true);
     } catch (e) { state.message = e.message || String(e); state.error = state.message; }
     finally { state.searchBusy = false; if (typeof render === 'function') render(); }
@@ -173,7 +173,7 @@
       while (!result.complete && calls < 200) {
         result = await invoke({ action:'continue_search', run_id:runId });
         state.message = result.complete
-          ? 'Search complete: ' + result.found + ' results found; ' + result.new_candidates + ' new candidates saved.'
+          ? 'Search complete: checked ' + result.sources_processed + ' of ' + result.sources_total + ' registered sources; ' + (result.provider_successful_queries || 0) + ' provider queries succeeded; ' + result.found + ' results found; ' + result.new_candidates + ' new candidates saved.'
           : 'Resuming source ' + result.sources_processed + ' of ' + result.sources_total
             + (result.next_source ? ' · Next: ' + result.next_source : '') + '…';
         if (typeof render === 'function') render();
