@@ -98,7 +98,7 @@ async function readBounded(res: Response): Promise<Uint8Array> {
   return all;
 }
 async function sha256(bytes: Uint8Array): Promise<string> {
-  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  const hash = await crypto.subtle.digest("SHA-256", bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
   return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 function isPdf(bytes: Uint8Array): boolean {
