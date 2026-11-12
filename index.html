@@ -26565,16 +26565,15 @@ async function qbDeleteSourcePaper(id) {
   const label = [paper.subject_name, paper.year, paper.exam_type].filter(Boolean).join(' · ') || 'this past paper';
   if (!window.confirm('Permanently delete ' + label + '? The paper record and its stored PDF will be removed. Review history will be retained. This cannot be undone.')) return;
   const ref = qbStorageRef(paper.stored_pdf_url);
-  if (ref) {
-    const shared = qbSourcePapers.some(x => x.id !== id && qbStorageRef(x.stored_pdf_url)?.bucket === ref.bucket && qbStorageRef(x.stored_pdf_url)?.path === ref.path);
-    if (!shared) {
-      const { error: storageError } = await sb.storage.from(ref.bucket).remove([ref.path]);
-      if (storageError) { qbMsg = 'Could not delete the stored PDF; the paper record was kept: ' + storageError.message; render(); return; }
-    }
-  }
+  const shared = ref && qbSourcePapers.some(x => x.id !== id && qbStorageRef(x.stored_pdf_url)?.bucket === ref.bucket && qbStorageRef(x.stored_pdf_url)?.path === ref.path);
   const { error } = await sb.from('qb_source_papers').delete().eq('id', id);
   if (error) { qbMsg = 'Could not delete past paper: ' + error.message; render(); return; }
-  qbMsg = 'Past paper deleted. Its review history has been retained.';
+  let cleanupWarning = '';
+  if (ref && !shared) {
+    const { error: storageError } = await sb.storage.from(ref.bucket).remove([ref.path]);
+    if (storageError) cleanupWarning = ' The database record was deleted, but the stored PDF could not be removed: ' + storageError.message;
+  }
+  qbMsg = 'Past paper deleted. Its review history has been retained.' + cleanupWarning;
   await loadQbSourcePapers();
 }
 function qbSourcePendingReviewHtml() {
