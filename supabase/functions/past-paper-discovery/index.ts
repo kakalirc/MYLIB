@@ -514,7 +514,7 @@ Deno.serve(async (req) => {
     if (sourceError) return reply(500, { error: "Could not load approved source registry: " + sourceError.message });
     const eligible = (sources || []).filter((s: any) => s.source_type === scope || s.source_type === "education_portal");
     const searchTargets = scope === "school"
-      ? eligible.filter((s: any) => s.source_type === "school").slice(0, 16)
+      ? eligible.filter((s: any) => s.source_type === "school")
       : eligible.filter((s: any) => s.source_type === "board" || s.source_type === "education_portal");
     if (scope === "board" && !searchTargets.some((s: any) => s.source_type === "board")) {
       await admin.from("qb_paper_discovery_runs").update({ status: "failed", heartbeat_at: null, error_message: "No enabled official board sources.",
@@ -562,12 +562,23 @@ Deno.serve(async (req) => {
     const nextOffset = offset + batch.length;
     const complete = nextOffset >= searchTargets.length;
     let broadResults: any[] = [];
-    if (complete && (foundTotal + batchRows.length < 5 || scope === "school")) {
-      try {
-        broadResults = await searchWeb(query + " question paper PDF", 20);
-        successfulQueries++;
-      } catch (e) {
-        providerErrors.push("Broad web search: " + clip((e as Error)?.message || e, 300));
+    if (complete) {
+      // Always run broad discovery after registered-source crawling. A handful of
+      // sample-paper hits must not suppress searches for annual / previous-year papers.
+      const broadQueries = [
+        query + " previous year board examination question paper PDF",
+        query + " annual examination question paper PDF",
+        query + " past exam question paper PDF",
+      ];
+      const broadSettled = await Promise.all(broadQueries.map(async (broadQuery) => {
+        try { return { rows: await searchWeb(broadQuery, 20), error: "" }; }
+        catch (e) { return { rows: [], error: clip((e as Error)?.message || e, 300) }; }
+      }));
+      for (let i = 0; i < broadSettled.length; i++) {
+        const item = broadSettled[i];
+        if (item.error) providerErrors.push("Broad web search (" + (i + 1) + "): " + item.error);
+        else successfulQueries++;
+        broadResults.push(...item.rows);
       }
     }
     const rows = [...batchRows, ...broadResults.map((r) => {
