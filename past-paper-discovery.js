@@ -114,7 +114,8 @@
       var progress = r.filters && r.filters.discovery_progress ? r.filters.discovery_progress : {};
       var progressText = r.status === 'running' ? ' · ' + Number(progress.next_offset || 0) + ' sources processed' : '';
       var resume = r.status === 'running' ? ' <button class="btn-small" onclick="libPPDResumeRun(&#39;' + esc(r.id) + '&#39;)">Resume</button>' : '';
-      return '<div class="hint">' + esc(new Date(r.started_at).toLocaleString()) + ' · ' + esc(r.query_text) + ' · ' + esc(r.status) + ' · ' + esc(r.results_found) + ' results' + esc(progressText) + resume + '</div>';
+      var restart = r.status !== 'running' ? ' <button class="btn-small" onclick="libPPDRestartRun(&#39;' + esc(r.id) + '&#39;)">Restart from beginning</button>' : '';
+      return '<div class="hint">' + esc(new Date(r.started_at).toLocaleString()) + ' · ' + esc(r.query_text) + ' · ' + esc(r.status) + ' · ' + esc(r.results_found) + ' results' + esc(progressText) + resume + restart + '</div>';
     }).join('') : '<p class="hint">No searches yet.</p>') + '</div>';
     return '<section class="lib-ppd"><style>'
       + '.lib-ppd{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}.lib-ppd h3{font-family:Zilla Slab,serif;margin:0 0 7px}.lib-ppd-section{margin:14px 0 20px}.lib-ppd-search,.lib-ppd-source-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.lib-ppd-search input{flex:1;min-width:190px}.lib-ppd-search select,.lib-ppd-search input,.lib-ppd-source-form input,.lib-ppd-source-form select,.lib-ppd-meta input,.lib-ppd-meta select{min-height:38px;padding:7px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);box-sizing:border-box}.lib-ppd-source-form input{flex:1;min-width:170px}.lib-ppd-source{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line)}.lib-ppd-candidate{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}.lib-ppd-candidate-head,.lib-ppd-title,.lib-ppd-actions{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}.lib-ppd-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:12px}.lib-ppd-meta label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);font-weight:700}.lib-ppd-meta input,.lib-ppd-meta select{width:100%}.lib-ppd-actions{justify-content:flex-start;margin-top:10px}.lib-ppd-domain-approval{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}.lib-ppd-domain-approval select{min-height:34px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink)}.lib-ppd p.hint{margin:5px 0 10px}@media(max-width:600px){.lib-ppd-search,.lib-ppd-source-form{align-items:stretch}.lib-ppd-search>* ,.lib-ppd-source-form>*{width:100%;min-width:0}.lib-ppd-candidate-head{align-items:flex-start}}'
@@ -162,6 +163,27 @@
         calls++;
       }
       if (!result.complete) throw new Error('The run remains in progress. You can resume it again from Recent searches.');
+      if (result.provider_errors && result.provider_errors.length) state.message += ' Provider warnings: ' + result.provider_errors.slice(0, 3).join(' | ');
+      state.loaded = false; await loadData(true);
+    } catch (e) { state.message = e.message || String(e); state.error = state.message; state.loaded = false; await loadData(true); }
+    finally { state.searchBusy = false; if (typeof render === 'function') render(); }
+  };
+  window.libPPDRestartRun = async function (runId) {
+    if (state.searchBusy) return;
+    if (!window.confirm('Restart this discovery from the first registered source? Existing candidates will be kept; duplicate URLs will not be added again.')) return;
+    state.searchBusy = true; state.error = ''; state.message = 'Restarting discovery from the beginning…';
+    if (typeof render === 'function') render();
+    try {
+      var result = await invoke({ action:'restart_search', run_id:runId }), calls = 0;
+      while (!result.complete && result.run_id && calls < 200) {
+        state.message = 'Restarted · source ' + result.sources_processed + ' of ' + result.sources_total
+          + (result.next_source ? ' · Next: ' + result.next_source : '') + '…';
+        if (typeof render === 'function') render();
+        result = await invoke({ action:'continue_search', run_id:runId });
+        calls++;
+      }
+      if (!result.complete) throw new Error('The restarted run remains in progress. Resume it from Recent searches.');
+      state.message = 'Restart complete: ' + result.found + ' results found; ' + result.new_candidates + ' additional candidates saved.';
       if (result.provider_errors && result.provider_errors.length) state.message += ' Provider warnings: ' + result.provider_errors.slice(0, 3).join(' | ');
       state.loaded = false; await loadData(true);
     } catch (e) { state.message = e.message || String(e); state.error = state.message; state.loaded = false; await loadData(true); }
