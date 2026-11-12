@@ -4,11 +4,12 @@
   if (window.__libPastPaperDiscoveryInstalled) return;
   window.__libPastPaperDiscoveryInstalled = true;
 
-  var state = { loaded:false, loading:false, sources:[], candidates:[], rejectedCandidates:[], schools:[], runs:[], message:'', error:'', searchBusy:false, scope:'board', queueTab:'review' };
+  var state = { loaded:false, loading:false, sources:[], candidates:[], rejectedCandidates:[], schools:[], runs:[], message:'', error:'', actionMessages:{}, searchBusy:false, scope:'board', queueTab:'review' };
   function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
   function byId(id) { return document.getElementById(id); }
   function val(id) { return byId(id) ? byId(id).value : ''; }
   function notify(message, isError) { state.message = message || ''; state.error = isError ? message : ''; if (typeof render === 'function') render(); }
+  function notifyAction(id, message, isError) { state.actionMessages[id] = { message:message || '', error:!!isError }; if (typeof render === 'function') render(); }
   function selectOptions(rows, selected, label) {
     return '<option value="">' + esc(label) + '</option>' + (rows || []).map(function (r) {
       return '<option value="' + esc(r.id) + '"' + (String(r.id) === String(selected || '') ? ' selected' : '') + '>' + esc(r.name) + '</option>';
@@ -29,7 +30,7 @@
       var failure = results.find(function (r) { return r.error; });
       if (failure) throw failure.error;
       state.sources = results[0].data || [];
-      state.candidates = (results[1].data || []).filter(function (c) { return ['imported', 'rejected', 'duplicate'].indexOf(c.status) < 0; });
+      state.candidates = (results[1].data || []).filter(function (c) { return ['rejected', 'duplicate'].indexOf(c.status) < 0 && (c.status !== 'imported' || !!state.actionMessages[c.id]); });
       state.rejectedCandidates = results[2].data || [];
       state.schools = results[3].data || [];
       state.runs = results[4].data || [];
@@ -110,10 +111,14 @@
         : '')
       + (c.status !== 'rejected' && c.status !== 'imported' ? '<button class="btn-small" onclick="libPPDReject(\'' + esc(c.id) + '\')">Reject</button>' : '')
       + '</div>';
+    var actionMessage = state.actionMessages[c.id];
+    var actionStatus = actionMessage && actionMessage.message
+      ? '<div class="lib-ppd-action-status hint" role="status" aria-live="polite" style="color:' + (actionMessage.error ? 'var(--brick)' : 'var(--forest)') + ';margin:6px 0 0">' + esc(actionMessage.message) + '</div>'
+      : '';
     return '<article class="lib-ppd-candidate"><div class="lib-ppd-review-layout"><div class="lib-ppd-review-summary"><div class="lib-ppd-candidate-head"><div><b>' + esc(c.title) + '</b><div class="hint">' + esc(c.source_domain) + ' · ' + esc(c.source_type) + ' · ' + esc(c.status) + ' · PDF: ' + esc(c.verification_status) + '</div>'
       + (meta.snippet ? '<p class="hint">' + esc(meta.snippet) + '</p>' : '')
       + (school ? '<div class="hint">School: ' + esc(school.name) + '</div>' : (c.discovered_school_name ? '<div class="hint">Possible school: ' + esc(c.discovered_school_name) + '</div>' : ''))
-      + '</div></div>' + actions + domainAction + '</div><div class="lib-ppd-review-fields">' + metadata + '</div></div></article>';
+      + '</div></div>' + actions + actionStatus + domainAction + '</div><div class="lib-ppd-review-fields">' + metadata + '</div></div></article>';
   }
   function rejectedCandidateHtml(c) {
     var previewUrl = c.pdf_url || c.source_url;
@@ -127,11 +132,12 @@
   function renderQueueTabs() {
     var isRejected = state.queueTab === 'rejected';
     var items = isRejected ? state.rejectedCandidates : state.candidates;
+    var activeCount = state.candidates.filter(function (c) { return c.status !== 'imported'; }).length;
     var content = isRejected
       ? (items.length ? items.map(rejectedCandidateHtml).join('') : '<div class="empty">No rejected papers found. Rejected candidates will appear here for recovery.</div>')
       : (items.length ? items.map(candidateHtml).join('') : '<div class="empty">No candidates awaiting review. Search approved websites to begin.</div>');
     return '<div class="lib-ppd-queue-tabs" role="tablist" aria-label="Past paper discovery queues">'
-      + '<button type="button" role="tab" aria-selected="' + (!isRejected) + '" class="lib-ppd-queue-tab ' + (!isRejected ? 'active' : '') + '" onclick="libPPDSetQueueTab(\'review\')">Discovered papers (' + state.candidates.length + ')</button>'
+      + '<button type="button" role="tab" aria-selected="' + (!isRejected) + '" class="lib-ppd-queue-tab ' + (!isRejected ? 'active' : '') + '" onclick="libPPDSetQueueTab(\'review\')">Discovered papers (' + activeCount + ')</button>'
       + '<button type="button" role="tab" aria-selected="' + isRejected + '" class="lib-ppd-queue-tab ' + (isRejected ? 'active' : '') + '" onclick="libPPDSetQueueTab(\'rejected\')">Rejected papers (' + state.rejectedCandidates.length + ')</button></div>'
       + '<div class="lib-ppd-section"><div class="lib-ppd-title"><h3>' + (isRejected ? 'Rejected papers · Recovery' : 'Discovered papers · Review queue') + '</h3><button class="btn-small" type="button" onclick="libPPDRefresh()">Refresh</button></div>' + content + '</div>';
   }
@@ -287,12 +293,12 @@
     state.loaded = false; await loadData(true); notify('School linked to the existing school directory.');
   };
   window.libPPDVerify = async function (id) {
-    notify('Checking the source page and validating its PDF…');
+    notifyAction(id, 'Checking the source page and validating its PDF…');
     try {
       var result = await invoke({ action:'verify', candidate_id:id });
-      state.message = result.duplicate ? 'This PDF is already in Past Papers; it has been marked as a duplicate.' : 'PDF verified (' + Math.round(result.file_size_bytes/1024) + ' KB). Review the metadata, then import when ready.';
-      state.error = false; state.loaded = false; await loadData(true);
-    } catch (e) { state.message = e.message || String(e); state.error = state.message; state.loaded = false; await loadData(true); }
+      notifyAction(id, result.duplicate ? 'This PDF is already in Past Papers; it has been marked as a duplicate.' : 'PDF verified (' + Math.round(result.file_size_bytes/1024) + ' KB). Review the metadata, then import when ready.');
+      state.loaded = false; await loadData(true);
+    } catch (e) { notifyAction(id, e.message || String(e), true); state.loaded = false; await loadData(true); }
     if (typeof render === 'function') render();
   };
   window.libPPDReject = async function (id) {
@@ -306,18 +312,18 @@
   };
   window.libPPDImport = async function (id) {
     var candidate = state.candidates.find(function (c) { return c.id === id; });
-    if (!candidate) { notify('This discovered paper is no longer in the review queue. Refresh and try again.', true); return; }
+    if (!candidate) { notifyAction(id, 'This discovered paper is no longer in the review queue. Refresh and try again.', true); return; }
     var schoolId = candidate.source_type === 'school' ? val('ppd-school-' + id) : '';
     var boardId = candidate.source_type === 'school' ? '' : val('ppd-board-' + id);
     var gradeId = val('ppd-grade-' + id), subject = val('ppd-subject-' + id).trim();
     var year = Number(val('ppd-year-' + id)), exam = val('ppd-exam-' + id), medium = val('ppd-medium-' + id).trim();
     if ((!schoolId && !boardId) || !gradeId || !subject || !Number.isInteger(year) || !medium) {
-      notify('Complete Board / School, Class, Subject, Year and Medium before importing.', true); return;
+      notifyAction(id, 'Complete Board / School, Class, Subject, Year and Medium before importing.', true); return;
     }
     if (candidate.verification_status !== 'verified') {
-      notify('Verify this PDF successfully before importing.', true); return;
+      notifyAction(id, 'Verify this PDF successfully before importing.', true); return;
     }
-    notify('Preparing the verified PDF for import…');
+    notifyAction(id, 'Preparing the verified PDF for import…');
     try {
       // Save the explicit Admin review decision first. Selecting the row also
       // detects RLS/no-row cases that an UPDATE without SELECT can hide.
@@ -328,17 +334,15 @@
       }).eq('id', id).select('id').maybeSingle();
       if (approval.error) throw new Error('Could not save review metadata: ' + approval.error.message);
       if (!approval.data) throw new Error('Review metadata was not saved. Check Admin access and refresh the candidate.');
-      notify('Importing verified PDF into the existing Past Papers review queue…');
+      notifyAction(id, 'Importing verified PDF into the existing Past Papers review queue…');
       var result = await invoke({ action:'import', candidate_id:id, board_id:boardId, school_id:schoolId,
         grade_id:gradeId, subject_name:subject, year:year, exam_type:exam, medium:medium });
-      state.message = result.message || 'Imported into Past Papers.';
-      state.error = '';
+      notifyAction(id, result.message || 'Imported into Past Papers.');
       state.loaded = false;
       await loadData(true);
       if (typeof loadQbSourcePapers === 'function') await loadQbSourcePapers();
     } catch (e) {
-      state.message = 'Import failed: ' + (e && e.message ? e.message : String(e));
-      state.error = state.message;
+      notifyAction(id, 'Import failed: ' + (e && e.message ? e.message : String(e)), true);
       state.loaded = false;
       await loadData(true);
     }
