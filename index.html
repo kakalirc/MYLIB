@@ -26582,7 +26582,7 @@ function qbSourcePapersHtml() {
   if (currentRole === 'Teacher' && qbSourceApplied === null && !qbSourceFilter.subject) qbSourceFilter.subject = '__my_subjects__';
   const f = qbSourceFilter;
   const teacherSubjectNames = currentRole === 'Teacher'
-    ? (data.subjects || []).filter(subject => String(subject.teacher_id || '') === String(currentLinkedId || ''))
+    ? (data.subjects || []).filter(subject => String(subject.teacherId || '') === String(currentLinkedId || ''))
       .map(subject => String(subject.name || '').trim().toLocaleLowerCase()).filter(Boolean)
     : [];
   const a = qbSourceApplied || (currentRole === 'Teacher'
