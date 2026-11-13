@@ -1,4 +1,4 @@
-/* Production UI guard and release attribution.
+/* Production UI guard and deployment release attribution.
  * The unfinished Question Bank shell remains available for development, but its
  * temporary Admin preview launcher is hidden. Existing Question Bank workflows
  * are not changed by this file.
@@ -39,8 +39,10 @@
   }
 
   async function applyReleaseAttribution() {
+    const target = document.getElementById('app-release-attribution');
+    if (!target || target.dataset.releaseApplied === 'true') return;
     try {
-      const response = await fetch('/release-info.json?release=' + Date.now(), {
+      const response = await fetch('/release-info.json', {
         cache: 'no-store',
         credentials: 'same-origin'
       });
@@ -48,21 +50,14 @@
       const release = await response.json();
       if (release.released_by !== 'Rishin') return;
       const stamp = formatReleaseTimestamp(release.released_at);
-      if (!stamp || !document.body) return;
-
-      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-      let node;
-      while ((node = walker.nextNode())) {
-        if (/Version\s+\S+.*Build\s+/i.test(node.nodeValue || '')) {
-          node.nodeValue = stamp;
-        }
-      }
+      if (!stamp) return;
+      target.textContent = stamp;
+      target.dataset.releaseApplied = 'true';
     } catch (error) {
-      // Keep the existing footer intact if release metadata is temporarily unavailable.
+      // Keep the source footer visible if release metadata cannot be loaded.
     }
   }
 
-  // Login and Admin content can render dynamically; retain the targeted UI guard.
   const observer = new MutationObserver((records) => {
     for (const record of records) {
       for (const node of record.addedNodes) {
