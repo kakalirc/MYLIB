@@ -105,6 +105,7 @@
       + '<label>Medium<select id="ppd-medium-' + esc(c.id) + '">' + mediumOptions.map(function (m) { return '<option value="' + esc(m) + '"' + (inferredMedium === m ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('') + '</select></label>'
       + '</div>';
     var actions = '<div class="lib-ppd-actions"><a class="btn-small" href="' + esc(previewUrl) + '" target="_blank" rel="noopener noreferrer">Open source / PDF</a>'
+      + '<button class="btn-small" type="button" onclick="libPPDSaveMetadata(\'' + esc(c.id) + '\')">Save Metadata</button>'
       + '<button class="btn-small" onclick="libPPDVerify(\'' + esc(c.id) + '\')" ' + (['verified','duplicate'].indexOf(c.verification_status) >= 0 ? 'disabled' : '') + '>Verify PDF</button>'
       + (c.verification_status === 'verified' && c.status !== 'imported' && c.status !== 'rejected' && c.status !== 'duplicate'
         ? '<button class="btn-small btn-primary" onclick="libPPDImport(\'' + esc(c.id) + '\')">Import to Past Papers</button>'
@@ -291,6 +292,29 @@
     var { error } = await sb.from('qb_paper_discovery_candidates').update({ school_id:school.id, board_id:null, discovered_school_name:school.name, updated_at:new Date().toISOString() }).eq('id', id);
     if (error) { notify('School was added but candidate could not be linked: ' + error.message, true); return; }
     state.loaded = false; await loadData(true); notify('School linked to the existing school directory.');
+  };
+  window.libPPDSaveMetadata = async function (id) {
+    var candidate = state.candidates.find(function (c) { return c.id === id; });
+    if (!candidate) { notifyAction(id, 'This discovered paper is no longer in the review queue. Refresh and try again.', true); return; }
+    var schoolId = candidate.source_type === 'school' ? val('ppd-school-' + id) : '';
+    var boardId = candidate.source_type === 'school' ? '' : val('ppd-board-' + id);
+    var gradeId = val('ppd-grade-' + id), subject = val('ppd-subject-' + id).trim();
+    var year = Number(val('ppd-year-' + id)), exam = val('ppd-exam-' + id), medium = val('ppd-medium-' + id).trim();
+    if ((!schoolId && !boardId) || !gradeId || !subject || !Number.isInteger(year) || year < 1950 || !medium) {
+      notifyAction(id, 'Complete Board / School, Class, Subject, Year and Medium before saving.', true); return;
+    }
+    notifyAction(id, 'Saving metadata…');
+    var result = await sb.from('qb_paper_discovery_candidates').update({
+      board_id:boardId || null, school_id:schoolId || null, grade_id:gradeId,
+      subject_name:subject, year:year, exam_type:exam, medium:medium,
+      updated_at:new Date().toISOString()
+    }).eq('id', id).select('id').maybeSingle();
+    if (result.error) { notifyAction(id, 'Could not save metadata: ' + result.error.message, true); return; }
+    if (!result.data) { notifyAction(id, 'Metadata was not saved. Check Admin access and refresh the candidate.', true); return; }
+    candidate.board_id = boardId || null; candidate.school_id = schoolId || null; candidate.grade_id = gradeId;
+    candidate.subject_name = subject; candidate.year = year; candidate.exam_type = exam; candidate.medium = medium;
+    notifyAction(id, 'Metadata saved. The paper remains in Discovered papers and has not been imported.');
+    if (typeof render === 'function') render();
   };
   window.libPPDVerify = async function (id) {
     notifyAction(id, 'Checking the source page and validating its PDF…');
