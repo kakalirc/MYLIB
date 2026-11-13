@@ -8188,6 +8188,9 @@ let refreshMsgTimer = null;
 let refreshWatchdog = null;
 let refreshGeneration = 0;
 async function refreshAllData(silent) {
+  // App Usage is an on-demand report: do not poll it in the background.
+  // Opening the page, changing filters/month, and the manual Refresh button still load fresh data.
+  if (silent && currentRole === 'Admin' && currentTab === 'appusage') return;
   if (!isLoggedIn || isRefreshing) return;
   const thisRefresh = ++refreshGeneration;
   isRefreshing = true;
