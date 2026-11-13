@@ -1036,6 +1036,7 @@ const APP_USAGE_SCREENS = {
   setup: 'Setup / Teachers & Subjects', dashboard: 'Dashboard', log: 'Class Log', chat: 'Communication', wixbookings: 'Demo Bookings',
   fees: 'Fees', rebuildclasses: 'Rebuild Pending Classes', expenses: 'Expenses', reports: 'Reports & Export', payroll: 'Payroll', parents: 'Parents', admins: 'Manage Admins', users: 'Settings', superadmin: 'Superadmin tools',
   audit: 'Audit Log', support: 'Support', ai: 'AI',
+  'student-portal': 'Student Portal', 'parent-portal': 'Parent Portal',
 };
 function appUsageFeatureLabel(f) {
   const a = APP_USAGE_ACTIONS.find(x => x[0] === f); if (a) return a[1];
@@ -8103,6 +8104,10 @@ async function loadAfterLogin() {
     currentRole === 'Teacher' ? loadClassFrequencyRows() : Promise.resolve(),
   ]);
   await loadMyPhoto();
+  // Student and Parent portals do not use the Admin/Teacher tab handlers.
+  // Record their portal entry after the authenticated profile and portal data are ready.
+  if (currentRole === 'Student') trackUse('tab:student-portal', true);
+  else if (currentRole === 'Parent') trackUse('tab:parent-portal', true);
 }
 async function attemptLogin() {
   const u = document.getElementById('loginUser').value.trim();
