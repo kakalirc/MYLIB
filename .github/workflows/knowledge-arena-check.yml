@@ -82,7 +82,7 @@ jobs:
       - name: Test Knowledge Arena usage tracking migration and private access
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261113230000_knowledge_arena_usage_tracking.sql
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DO \\$\$ BEGIN
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DO \$\$ BEGIN
             IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid='public.ka_usage_events'::regclass) THEN
               RAISE EXCEPTION 'ka_usage_events must have RLS enabled';
             END IF;
@@ -95,7 +95,7 @@ jobs:
                NOT has_table_privilege('service_role','public.ka_usage_events','SELECT') THEN
               RAISE EXCEPTION 'service_role must access ka_usage_events';
             END IF;
-          END \\$\$;"
+          END \$\$;"
       - name: Confirm schema preflight refuses a second application
         run: |
           if psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f knowledge-arena/proposed-schema.sql; then
