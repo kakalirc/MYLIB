@@ -660,6 +660,7 @@ let frequencyEditSubjectId = '';
 let frequencyDraft = { monday_count: 0, tuesday_count: 0, wednesday_count: 0, thursday_count: 0, friday_count: 0, saturday_count: 0, sunday_count: 0 };
 let frequencyEditorOpen = false;
 let frequencyConfirmPending = false;
+let frequencySaving = false;
 let frequencyNewPickerOpen = false;
 let frequencyFiltersApplied = false;
 let frequencyNewStudentSearch = '';
@@ -15106,42 +15107,20 @@ function setFrequencyDraft(key, value) {
   render();
 }
 async function saveClassFrequency() {
-  if (!frequencyEditStudentId || !frequencyEditSubjectId) return;
-  if (!frequencyConfirmPending) { frequencyConfirmPending = true; frequencyMsg = 'Review the old and new weekly frequency below, then click Confirm Save Frequency.'; render(); return; }
-  frequencyConfirmPending = false;
+  if (!frequencyEditStudentId || !frequencyEditSubjectId || frequencySaving) return;
   const teacher = data.subjects.find(s => s.id === frequencyEditSubjectId);
   const student = data.students.find(s => s.id === frequencyEditStudentId);
-  if (!student || !teacher || !subjectsForStudent(student.id).some(s => s.id === frequencyEditSubjectId)) {
-    frequencyMsg = 'This student is not currently enrolled in the selected subject.';
-    render(); return;
-  }
-  if (currentRole === 'Teacher' && (teacher.teacherId !== currentLinkedId || !subjectsForStudentAndTeacher(student.id, currentLinkedId).some(s => s.id === frequencyEditSubjectId))) {
-    frequencyMsg = 'You can only configure frequency for your assigned students and subjects.';
-    render(); return;
-  }
-  for (const [key] of FREQUENCY_DAYS) {
-    if (!Number.isInteger(Number(frequencyDraft[key])) || Number(frequencyDraft[key]) < 0) {
-      frequencyMsg = 'Every weekday count must be a whole number greater than or equal to zero.';
-      render(); return;
-    }
-  }
-  frequencyMsg = 'Saving…';
-  render();
-  const payload = {
-    student_id: frequencyEditStudentId,
-    subject_id: frequencyEditSubjectId,
-    ...Object.fromEntries(FREQUENCY_DAYS.map(([key]) => [key, Number(frequencyDraft[key]) || 0])),
-    updated_at: new Date().toISOString()
-  };
+  if (!student || !teacher || !subjectsForStudent(student.id).some(s => s.id === frequencyEditSubjectId)) { frequencyMsg = 'This student is not currently enrolled in the selected subject.'; render(); return; }
+  if (currentRole === 'Teacher' && (teacher.teacherId !== currentLinkedId || !subjectsForStudentAndTeacher(student.id, currentLinkedId).some(s => s.id === frequencyEditSubjectId))) { frequencyMsg = 'You can only configure frequency for your assigned students and subjects.'; render(); return; }
+  for (const [key] of FREQUENCY_DAYS) { if (!Number.isInteger(Number(frequencyDraft[key])) || Number(frequencyDraft[key]) < 0) { frequencyMsg = 'Every weekday count must be a whole number greater than or equal to zero.'; render(); return; } }
+  frequencySaving = true; frequencyConfirmPending = false; frequencyMsg = 'Saving…'; render();
+  const payload = { student_id: frequencyEditStudentId, subject_id: frequencyEditSubjectId, ...Object.fromEntries(FREQUENCY_DAYS.map(([key]) => [key, Number(frequencyDraft[key]) || 0])), updated_at: new Date().toISOString() };
   try {
     const { error } = await sb.from('student_subject_frequency').upsert(payload, { onConflict: 'student_id,subject_id' });
     if (error) throw error;
-    await loadClassFrequencyRows();
-    frequencyEditorOpen = false;
-    frequencyMsg = 'Frequency saved. Existing scheduled classes were not changed.';
-  } catch (e) {
-    frequencyMsg = 'Could not save frequency: ' + ((e && e.message) ? e.message : 'Unknown database error');
-  }
+    await loadClassFrequencyRows(); frequencyEditorOpen = false; frequencyMsg = 'Frequency saved. Existing scheduled classes were not changed.';
+  } catch (e) { frequencyMsg = 'Could not save frequency: ' + ((e && e.message) ? e.message : 'Unknown database error'); }
+  finally { frequencySaving = false; }
   render();
 }
 async function clearClassFrequency() {
@@ -15178,10 +15157,9 @@ function renderFrequencyEditor(teacherId) {
         }).join('')}
       </table></div>
       <div class="hint" style="margin-top:10px">Previous weekly total: <b>${oldTotal} classes</b> · New weekly total: <b>${total} classes</b> · <b>${total*60} minutes</b></div>
-      ${frequencyConfirmPending ? `<div class="hint" style="border:1px solid var(--gold-dark);padding:8px">Confirm frequency change: ${FREQUENCY_DAYS.map(([key,label])=>`${label} ${savedFrequency?Number(savedFrequency[key])||0:0} → ${Number(frequencyDraft[key])||0}`).join(' · ')}</div>` : ''}
       ${frequencyMsg ? `<div class="hint" style="color:${frequencyMsg.startsWith('Could not')?'var(--brick)':'var(--forest)'}">${esc(frequencyMsg)}</div>` : ''}
       <div class="row-form">
-        <button class="btn-primary" onclick="saveClassFrequency()">${frequencyConfirmPending?'Confirm Save Frequency':'Review Frequency Change'}</button>
+        <button class="btn-primary" type="button" onclick="saveClassFrequency()" ${frequencySaving?'disabled':''}>${frequencySaving?'Saving…':'Save Frequency'}</button>
         <button class="btn-small" onclick="clearClassFrequency()">Clear Frequency</button>
         <button class="btn-small" onclick="closeFrequencyEditor()">Cancel</button>
       </div>
