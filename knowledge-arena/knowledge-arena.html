@@ -302,6 +302,16 @@
           <div id="ka-usage-metrics" class="metric-grid"><p class="muted">Open this tab to load usage data.</p></div>
           <h4>Daily activity · Last 30 days</h4>
           <div id="ka-usage-daily" class="ka-usage-table-wrap"></div>
+          <h4>Student-wise activity · Last 30 days</h4>
+          <div class="ka-usage-student-filters">
+            <input id="ka-usage-student-search" type="search" placeholder="Search student name or ID" aria-label="Search student name or ID">
+            <select id="ka-usage-student-sort" aria-label="Sort student activity">
+              <option value="last_active">Sort: Last active</option>
+              <option value="visits">Sort: Most visits</option>
+              <option value="games">Sort: Most games</option>
+            </select>
+          </div>
+          <div id="ka-usage-student-list" class="ka-usage-table-wrap"><p class="muted">Open this tab to load student activity.</p></div>
           <p id="ka-usage-feedback" class="admin-feedback" role="status"></p>
         </div>
         <div class="panel admin-panel" id="guest-promotions-panel" data-admin-section="guests">

@@ -1342,11 +1342,31 @@
     $("ka-usage-metrics").innerHTML = metrics.map((m) =>
       '<article class="metric"><small>' + m[0] + '</small><strong>' + Number(m[1]).toLocaleString("en-IN") + '</strong></article>'
     ).join("");
+    adminUsageStudents = data.students || [];
+    renderAdminUsageStudents();
     const days = data.daily || [];
     $("ka-usage-daily").innerHTML = days.length
       ? '<div class="ka-usage-table"><div class="ka-usage-row ka-usage-header"><span>DATE</span><span>STUDENT VISITS</span><span>GUEST SESSIONS</span><span>STUDENT GAMES</span><span>GUEST GAMES</span></div>' +
         days.slice().reverse().map((d) => '<div class="ka-usage-row"><span>' + escapeHtml(d.date) + '</span><span>' + d.student_visits + '</span><span>' + d.guest_sessions + '</span><span>' + d.student_games + '</span><span>' + d.guest_games + '</span></div>').join("") + '</div>'
       : '<p class="muted">No usage has been recorded in the selected period.</p>';
+  }
+
+  let adminUsageStudents = [];
+  function renderAdminUsageStudents() {
+    const search = ($("ka-usage-student-search")?.value || "").trim().toLowerCase();
+    const sort = $("ka-usage-student-sort")?.value || "last_active";
+    const rows = adminUsageStudents.filter((x) =>
+      String(x.student_name || "").toLowerCase().includes(search) ||
+      String(x.student_code || "").toLowerCase().includes(search)
+    ).slice().sort((a, b) => {
+      if (sort === "visits") return b.visits - a.visits || b.games - a.games;
+      if (sort === "games") return b.games - a.games || b.visits - a.visits;
+      return String(b.last_active || "").localeCompare(String(a.last_active || ""));
+    });
+    $("ka-usage-student-list").innerHTML = rows.length
+      ? '<div class="ka-usage-student-table"><div class="ka-usage-student-row ka-usage-student-header"><span>STUDENT</span><span>STUDENT ID</span><span>VISITS</span><span>GAMES</span><span>LAST ACTIVE</span></div>' +
+        rows.map((x) => '<div class="ka-usage-student-row"><span>' + escapeHtml(x.student_name) + '</span><span>' + escapeHtml(x.student_code || "—") + '</span><span>' + Number(x.visits || 0) + '</span><span>' + Number(x.games || 0) + '</span><span>' + (x.last_active ? escapeHtml(new Date(x.last_active).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })) : "—") + '</span></div>').join("") + '</div>'
+      : '<p class="muted">No matching student activity in the last 30 days.</p>';
   }
 
   async function refreshLeadership() {
@@ -1631,6 +1651,8 @@
   $("player-grade-select").addEventListener("change", (event) => loadRolePlayerGrade(event.target.value));
   $("refresh-leadership").addEventListener("click", refreshLeadership);
   $("refresh-ka-usage").addEventListener("click", refreshAdminUsage);
+  $("ka-usage-student-search").addEventListener("input", renderAdminUsageStudents);
+  $("ka-usage-student-sort").addEventListener("change", renderAdminUsageStudents);
 
   initialise();
   // Refresh only the Admin dashboard data; never reload the full Knowledge Arena page.

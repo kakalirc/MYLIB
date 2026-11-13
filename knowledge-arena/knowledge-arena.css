@@ -106,3 +106,13 @@ footer{background:var(--navy);color:#fff;padding:22px max(24px,calc((100vw - 120
 .ka-usage-header { color: var(--muted, #64748b); font-size: .72rem; font-weight: 800; letter-spacing: .04em; }
 .ka-usage-row span:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
 @media (max-width: 640px) { .ka-usage-row { gap: 8px; font-size: .78rem; padding: 9px 8px; } .ka-usage-header { font-size: .65rem; } }
+
+/* Student-wise Knowledge Arena usage */
+.ka-usage-student-filters { display:flex; gap:12px; flex-wrap:wrap; margin:12px 0; }
+.ka-usage-student-filters input { flex:1 1 240px; min-width:180px; }
+.ka-usage-student-filters select { flex:0 1 220px; }
+.ka-usage-student-table { min-width:760px; }
+.ka-usage-student-row { display:grid; grid-template-columns:1.4fr 1fr .55fr .55fr 1.2fr; gap:12px; align-items:center; padding:11px 12px; border-bottom:1px solid var(--line,#e6eaf0); font-size:.88rem; }
+.ka-usage-student-header { color:var(--muted,#64748b); font-size:.72rem; font-weight:800; letter-spacing:.04em; }
+.ka-usage-student-row span:nth-child(3),.ka-usage-student-row span:nth-child(4) { text-align:right; font-variant-numeric:tabular-nums; }
+@media(max-width:640px) { .ka-usage-student-row { gap:8px; font-size:.78rem; padding:9px 8px; } .ka-usage-student-header { font-size:.65rem; } }
