@@ -28251,7 +28251,14 @@ async function initApp() {
 
   // Restore tab from URL hash (e.g. app.libeducation.com/#payroll)
   const hashTab = tabFromHash(location.hash.replace('#', ''));
-  const validTabs = ['dashboard','students','teachers','subjects','schedule','fees','expenses','payroll','reports','wixbookings','audit','ai','users','admins','parents','setup','support','settings','homework','superadmin','admissionsintelligence','teacherappraisal'];
+  // Every Admin sidebar page must be deep-linkable. Keep this list aligned with tabGroups in render().
+  const validTabs = ['dashboard','log','registrations','chat','wixbookings','democontrol','support','rebuildclasses','questionbank',
+    'fees','payroll','expenses','reports','students','attendancerewards','onboarding','setup','parents',
+    'staradmin','researchmonitor','appusage','aiusage','studyplans','homework','qbmonitoring','teacherappraisal',
+    'knowledgearena','users','admins','ai','audit','superadmin','admissionsintelligence','classdelivery',
+    'studentengagement','revenueintelligence','teacherperformance',
+    // Retain legacy/previously shared tab names.
+    'teachers','subjects','schedule','settings'];
   if (hashTab && validTabs.includes(hashTab)) currentTab = hashTab;
   // Deep link: #rates-fees → student portal with Rates & Fees panel open
   if (hashTab === 'rates-fees') {
@@ -28289,6 +28296,27 @@ setInterval(async () => {
     wixPaymentRefreshInFlight = false;
   }
 }, 30000);
+
+
+// Keep the visible page in sync when a deep link is opened or the hash changes in-place.
+// Admin hashes mirror the sidebar keys; teacher hashes mirror teacher portal tab keys.
+window.addEventListener('hashchange', function () {
+  const requested = tabFromHash(location.hash.replace(/^#/, ''));
+  if (!requested || !isLoggedIn) return;
+  if (currentRole === 'Admin' && ['dashboard','log','registrations','chat','wixbookings','democontrol','support','rebuildclasses','questionbank',
+    'fees','payroll','expenses','reports','students','attendancerewards','onboarding','setup','parents','staradmin','researchmonitor',
+    'appusage','aiusage','studyplans','homework','qbmonitoring','teacherappraisal','knowledgearena','users','admins','ai','audit',
+    'superadmin','admissionsintelligence','classdelivery','studentengagement','revenueintelligence','teacherperformance',
+    'teachers','subjects','schedule','settings'].includes(requested)) {
+    if (currentTab !== requested) setTab(requested);
+    return;
+  }
+  if (currentRole === 'Teacher' && ['dashboard','pendingactions','myfrequency','schedule','frequency','students','studyplans','homework',
+    'questionbank','research','availability','attendance','report','appraisalframework','profile','setup','starteacher',
+    'teacherperformance','demoanalysis','classdelivery','knowledgearena'].includes(requested)) {
+    if (teacherPortalTab !== requested) setTeacherPortalTab(requested);
+  }
+});
 
 initApp();
 </script>
