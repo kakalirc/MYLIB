@@ -769,7 +769,10 @@ Deno.serve(async (req) => {
       for (const row of sessions.data || []) { const day = dailyMap.get(dayKey(row.started_at)); if (day) day.guest_sessions++; }
       for (const row of attempts.data || []) { const day = dailyMap.get(dayKey(row.completed_at)); if (day) day.student_games++; }
       for (const row of guestGames.data || []) { const day = dailyMap.get(dayKey(row.completed_at)); if (day) day.guest_games++; }
-      const uniqueStudents = new Set((visits.data || []).map((x) => x.user_id));
+      const uniqueStudents = new Set([
+        ...(visits.data || []).map((x) => x.user_id),
+        ...(attempts.data || []).map((x) => x.user_id)
+      ]);
       const activeStudents7d = new Set([
         ...(visits.data || []).filter((x) => x.created_at >= since7d).map((x) => x.user_id),
         ...(attempts.data || []).filter((x) => x.completed_at >= since7d).map((x) => x.user_id)
