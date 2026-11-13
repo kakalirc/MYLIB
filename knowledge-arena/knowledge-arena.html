@@ -183,6 +183,7 @@
   <button type="button" class="admin-subnav-btn" data-admin-target="generation">Question Generation</button>
   <button type="button" class="admin-subnav-btn" data-admin-target="question-bank">Question Bank</button>
   <button type="button" class="admin-subnav-btn" data-admin-target="guests">Guest Management</button>
+  <button type="button" class="admin-subnav-btn" data-admin-target="usage">Usage</button>
 </nav>
 
         <div class="panel admin-panel leadership-panel" data-admin-section="overview">
@@ -295,6 +296,13 @@
           <div class="guest-lead-filters"><input id="guest-lead-search" type="search" placeholder="Search name or mobile"><select id="guest-lead-grade"><option value="">All grades</option></select><input id="guest-lead-from" type="date" aria-label="Registered from"><input id="guest-lead-to" type="date" aria-label="Registered to"><select id="guest-lead-status"><option value="">All statuses</option><option>New</option><option>Contacted</option><option>Interested</option><option>Demo Booked</option><option>Demo Completed</option><option>Converted to Student</option><option>Not Interested</option></select></div>
           <div id="guest-lead-metrics" class="metric-grid"></div><div id="guest-lead-list" class="guest-lead-list"><p class="muted">Loading guest leads…</p></div><div id="guest-lead-pagination" class="guest-lead-pagination"></div>
           <div id="guest-lead-detail" class="guest-lead-detail hidden"></div><p id="guest-lead-feedback" class="admin-feedback" role="status"></p>
+        </div>
+        <div class="panel admin-panel" id="ka-usage-panel" data-admin-section="usage">
+          <div class="admin-panel-head"><div><h3>Knowledge Arena Usage</h3><p class="muted">Student visits, guest sessions and completed games. Student visit tracking begins with this release; historical game records are retained.</p></div><button class="btn-secondary" id="refresh-ka-usage" type="button">Refresh usage</button></div>
+          <div id="ka-usage-metrics" class="metric-grid"><p class="muted">Open this tab to load usage data.</p></div>
+          <h4>Daily activity · Last 30 days</h4>
+          <div id="ka-usage-daily" class="ka-usage-table-wrap"></div>
+          <p id="ka-usage-feedback" class="admin-feedback" role="status"></p>
         </div>
         <div class="panel admin-panel" id="guest-promotions-panel" data-admin-section="guests">
           <div class="admin-panel-head"><div><h3>Guest Marketing Promotions</h3><p class="muted">Create dismissible course promotions. Promotions never interrupt an active question.</p></div><button class="btn-secondary" id="refresh-guest-promotions">Refresh promotions</button></div>

@@ -735,6 +735,57 @@ Deno.serve(async (req) => {
       })) });
     }
 
+    if (action === "record_usage") {
+      if (profile.role !== "Student") return errorResponse(403, "Student usage tracking only.");
+      const { error } = await db.from("ka_usage_events").insert({ user_id: user.id, event_type: "arena_open" });
+      if (error) {
+        console.error("Knowledge Arena usage event insert failed", error);
+        return errorResponse(503, "Could not record Knowledge Arena usage.");
+      }
+      return json(200, { recorded: true });
+    }
+
+    if (action === "get_admin_usage") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const since30d = new Date(Date.now() - 30 * 86400000).toISOString();
+      const since7d = new Date(Date.now() - 7 * 86400000).toISOString();
+      const [visits, attempts, sessions, guestGames] = await Promise.all([
+        db.from("ka_usage_events").select("user_id,created_at").gte("created_at", since30d).order("created_at", { ascending: false }).limit(10000),
+        db.from("ka_attempts").select("user_id,game_type,grade_label,accuracy,completed_at").gte("completed_at", since30d).order("completed_at", { ascending: false }).limit(10000),
+        db.from("ka_guest_sessions").select("started_at").gte("started_at", since30d).order("started_at", { ascending: false }).limit(10000),
+        db.from("ka_guest_activity").select("game_type,accuracy,completed_at").gte("completed_at", since30d).order("completed_at", { ascending: false }).limit(10000)
+      ]);
+      if ([visits, attempts, sessions, guestGames].some((x) => x.error)) {
+        console.error("Knowledge Arena usage query failed", [visits.error, attempts.error, sessions.error, guestGames.error]);
+        return errorResponse(503, "Could not load Knowledge Arena usage.");
+      }
+      const dailyMap = new Map<string, { date: string; student_visits: number; guest_sessions: number; student_games: number; guest_games: number }>();
+      const dayKey = (value: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(value));
+      for (let i = 29; i >= 0; i--) {
+        const date = dayKey(new Date(Date.now() - i * 86400000).toISOString());
+        dailyMap.set(date, { date, student_visits: 0, guest_sessions: 0, student_games: 0, guest_games: 0 });
+      }
+      for (const row of visits.data || []) { const day = dailyMap.get(dayKey(row.created_at)); if (day) day.student_visits++; }
+      for (const row of sessions.data || []) { const day = dailyMap.get(dayKey(row.started_at)); if (day) day.guest_sessions++; }
+      for (const row of attempts.data || []) { const day = dailyMap.get(dayKey(row.completed_at)); if (day) day.student_games++; }
+      for (const row of guestGames.data || []) { const day = dailyMap.get(dayKey(row.completed_at)); if (day) day.guest_games++; }
+      const uniqueStudents = new Set((visits.data || []).map((x) => x.user_id));
+      const activeStudents7d = new Set([
+        ...(visits.data || []).filter((x) => x.created_at >= since7d).map((x) => x.user_id),
+        ...(attempts.data || []).filter((x) => x.completed_at >= since7d).map((x) => x.user_id)
+      ]);
+      return json(200, {
+        summary: {
+          student_visits_30d: (visits.data || []).length,
+          unique_students_30d: uniqueStudents.size,
+          active_students_7d: activeStudents7d.size,
+          games_completed_30d: (attempts.data || []).length + (guestGames.data || []).length,
+          guest_sessions_30d: (sessions.data || []).length
+        },
+        daily: [...dailyMap.values()]
+      });
+    }
+
     if (action === "get_admin_summary") {
       if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
       return json(200, { summary: await adminSummary(db) });

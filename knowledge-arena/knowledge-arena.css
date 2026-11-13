@@ -97,3 +97,12 @@ footer{background:var(--navy);color:#fff;padding:22px max(24px,calc((100vw - 120
   #view-play .subject-choice{width:100%;}
   #view-play .subject-choice select{width:100%;max-width:100%;}
 }
+
+
+/* Knowledge Arena usage tracker */
+.ka-usage-table-wrap { overflow-x: auto; }
+.ka-usage-table { min-width: 640px; }
+.ka-usage-row { display: grid; grid-template-columns: 1.1fr repeat(4, 1fr); gap: 12px; align-items: center; padding: 11px 12px; border-bottom: 1px solid var(--line, #e6eaf0); font-size: .88rem; }
+.ka-usage-header { color: var(--muted, #64748b); font-size: .72rem; font-weight: 800; letter-spacing: .04em; }
+.ka-usage-row span:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .ka-usage-row { gap: 8px; font-size: .78rem; padding: 9px 8px; } .ka-usage-header { font-size: .65rem; } }
