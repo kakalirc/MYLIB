@@ -155,7 +155,6 @@
     try {
       const context = await api("get_context");
       role = context.role || "";
-      if (role === "Student") api("record_usage").catch((error) => console.warn("KA usage event was not recorded:", error));
       const isLearningRole = role === "Student" || role === "Teacher";
       const backToLearning = $("back-learning");
       const supportButton = $("knowledge-arena-support");
@@ -169,6 +168,15 @@
         return;
       }
       showShell();
+      if (role === "Student") {
+        try {
+          const usageResult = await api("record_usage");
+          if (!usageResult?.recorded) throw new Error("The server did not confirm the visit event.");
+        } catch (usageError) {
+          console.error("Knowledge Arena visit tracking failed:", usageError);
+          note("Your Knowledge Arena visit could not be recorded. Please inform an administrator.", "warning");
+        }
+      }
       if (role === "Admin") {
         $("welcome-line").textContent = "Manage Knowledge Arena or enter player mode to play at a selected grade.";
         prepareAdminLayout();
