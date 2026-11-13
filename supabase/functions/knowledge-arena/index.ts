@@ -735,6 +735,119 @@ Deno.serve(async (req) => {
       })) });
     }
 
+    if (action === "record_client_error") {
+      if (!["Student", "Teacher", "Admin"].includes(profile.role)) return errorResponse(403, "Authenticated Knowledge Arena access required.");
+      const category = String(body.category || "");
+      if (!["javascript", "promise", "usage_tracking"].includes(category)) return errorResponse(400, "Invalid error category.");
+      const clean = (value: unknown, max: number) => String(value || "").slice(0, max)
+        .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, "Bearer [REDACTED]")
+        .replace(/(access_token|refresh_token|password|apikey|api_key)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]");
+      const message = clean(body.message, 1000);
+      if (!message) return errorResponse(400, "Error message is required.");
+      const line = typeof body.line === "number" && Number.isInteger(body.line) && body.line > 0 ? body.line : null;
+      const column = typeof body.column === "number" && Number.isInteger(body.column) && body.column > 0 ? body.column : null;
+      const { error } = await db.from("ka_client_error_logs").insert({
+        user_id: user.id, role: profile.role, category, message,
+        source: clean(body.source, 500) || null,
+        line_number: line,
+        column_number: column,
+        stack: clean(body.stack, 5000) || null
+      });
+      if (error) return errorResponse(503, "Could not record diagnostic event.");
+      return json(200, { recorded: true });
+    }
+
+    if (action === "get_admin_error_log") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const { data, error } = await db.from("ka_client_error_logs")
+        .select("id,user_id,role,category,message,source,line_number,column_number,stack,created_at")
+        .order("created_at", { ascending: false }).limit(200);
+      if (error) return errorResponse(503, "Could not load Knowledge Arena error log.");
+      return json(200, { errors: (data || []).map((item: any) => ({
+        id: item.id, user_id: item.user_id, role: item.role, category: item.category,
+        message: item.message, source: item.source, line: item.line_number,
+        column: item.column_number, stack: item.stack, created_at: item.created_at
+      })) });
+    }
+
+    if (action === "record_usage") {
+      if (profile.role !== "Student") return errorResponse(403, "Student usage tracking only.");
+      const { error } = await db.from("ka_usage_events").insert({ user_id: user.id, event_type: "arena_open" });
+      if (error) {
+        console.error("Knowledge Arena usage event insert failed", error);
+        return errorResponse(503, "Could not record Knowledge Arena usage.");
+      }
+      return json(200, { recorded: true });
+    }
+
+    if (action === "get_admin_usage") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const since30d = new Date(Date.now() - 30 * 86400000).toISOString();
+      const since7d = new Date(Date.now() - 7 * 86400000).toISOString();
+      const [visits, attempts, sessions, guestGames] = await Promise.all([
+        db.from("ka_usage_events").select("user_id,created_at").gte("created_at", since30d).order("created_at", { ascending: false }).limit(10000),
+        db.from("ka_attempts").select("user_id,game_type,grade_label,accuracy,completed_at").gte("completed_at", since30d).order("completed_at", { ascending: false }).limit(10000),
+        db.from("ka_guest_sessions").select("started_at").gte("started_at", since30d).order("started_at", { ascending: false }).limit(10000),
+        db.from("ka_guest_activity").select("game_type,accuracy,completed_at").gte("completed_at", since30d).order("completed_at", { ascending: false }).limit(10000)
+      ]);
+      if ([visits, attempts, sessions, guestGames].some((x) => x.error)) {
+        console.error("Knowledge Arena usage query failed", [visits.error, attempts.error, sessions.error, guestGames.error]);
+        return errorResponse(503, "Could not load Knowledge Arena usage.");
+      }
+      const dailyMap = new Map<string, { date: string; student_visits: number; guest_sessions: number; student_games: number; guest_games: number }>();
+      const dayKey = (value: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(value));
+      for (let i = 29; i >= 0; i--) {
+        const date = dayKey(new Date(Date.now() - i * 86400000).toISOString());
+        dailyMap.set(date, { date, student_visits: 0, guest_sessions: 0, student_games: 0, guest_games: 0 });
+      }
+      for (const row of visits.data || []) { const day = dailyMap.get(dayKey(row.created_at)); if (day) day.student_visits++; }
+      for (const row of sessions.data || []) { const day = dailyMap.get(dayKey(row.started_at)); if (day) day.guest_sessions++; }
+      for (const row of attempts.data || []) { const day = dailyMap.get(dayKey(row.completed_at)); if (day) day.student_games++; }
+      for (const row of guestGames.data || []) { const day = dailyMap.get(dayKey(row.completed_at)); if (day) day.guest_games++; }
+      const userIds = [...new Set([
+        ...(visits.data || []).map((x) => x.user_id),
+        ...(attempts.data || []).map((x) => x.user_id)
+      ])];
+      const { data: profiles, error: profilesError } = userIds.length
+        ? await db.from("profiles").select("id,linked_student_id").eq("role", "Student").in("id", userIds)
+        : { data: [], error: null };
+      if (profilesError) return errorResponse(503, "Could not load KA student accounts.");
+      const studentIds = [...new Set((profiles || []).map((x: any) => x.linked_student_id).filter(Boolean))];
+      const { data: students, error: studentsError } = studentIds.length
+        ? await db.from("students").select("id,name,student_code").in("id", studentIds)
+        : { data: [], error: null };
+      if (studentsError) return errorResponse(503, "Could not load KA student names.");
+      const profileByUser = new Map((profiles || []).map((x: any) => [x.id, x]));
+      const studentById = new Map((students || []).map((x: any) => [x.id, x]));
+      const studentUsage = new Map<string, { user_id: string; student_name: string; student_code: string; visits: number; games: number; last_active: string | null }>();
+      const ensureStudent = (userId: string) => {
+        const profile = profileByUser.get(userId);
+        const student = profile?.linked_student_id ? studentById.get(profile.linked_student_id) : null;
+        if (!student) return null;
+        if (!studentUsage.has(userId)) studentUsage.set(userId, { user_id: userId, student_name: student.name || "Unnamed student", student_code: student.student_code || "", visits: 0, games: 0, last_active: null });
+        return studentUsage.get(userId)!;
+      };
+      for (const row of visits.data || []) { const item = ensureStudent(row.user_id); if (item) { item.visits++; if (!item.last_active || row.created_at > item.last_active) item.last_active = row.created_at; } }
+      for (const row of attempts.data || []) { const item = ensureStudent(row.user_id); if (item) { item.games++; if (!item.last_active || row.completed_at > item.last_active) item.last_active = row.completed_at; } }
+      const studentRows = [...studentUsage.values()].sort((a, b) => (b.last_active || "").localeCompare(a.last_active || ""));
+      const uniqueStudents = new Set(studentRows.map((x) => x.user_id));
+      const activeStudents7d = new Set([
+        ...(visits.data || []).filter((x) => x.created_at >= since7d).map((x) => x.user_id),
+        ...(attempts.data || []).filter((x) => x.completed_at >= since7d).map((x) => x.user_id)
+      ]);
+      return json(200, {
+        summary: {
+          student_visits_30d: (visits.data || []).length,
+          unique_students_30d: uniqueStudents.size,
+          active_students_7d: activeStudents7d.size,
+          games_completed_30d: (attempts.data || []).length + (guestGames.data || []).length,
+          guest_sessions_30d: (sessions.data || []).length
+        },
+        daily: [...dailyMap.values()],
+        students: studentRows
+      });
+    }
+
     if (action === "get_admin_summary") {
       if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
       return json(200, { summary: await adminSummary(db) });
