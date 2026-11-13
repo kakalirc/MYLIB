@@ -1989,6 +1989,8 @@ let refundDraft = { subjectId: '', type: 'Group', date: todayStr };
 let transferDraft = { fromSubjectId: '', toSubjectId: '', type: 'Group', classes: '' };
 let transferConfirmModal = null; // set when the To subject is a different teacher, to warn before confirming
 let transferMsg = '';
+let transferRefreshing = false;
+let transferRefreshMsg = '';
 // Family transfer: move classes left from this student to another child of the same family (SQL 78).
 let familyTransferDraft = { studentId: '', fromSubjectId: '', type: 'Group', toStudentId: '', toSubjectId: '' };
 let familyTransferMsg = '';
@@ -13219,6 +13221,26 @@ async function addSubscriptionRefund() {
   render();
 }
 
+async function refreshTransferCredits() {
+  if (transferRefreshing) return;
+  transferRefreshing = true;
+  transferRefreshMsg = '';
+  render();
+  try {
+    const result = await loadStudentsAndSubscriptions();
+    if (!result || !result.ok) {
+      const detail = result && result.error && result.error.message ? ': ' + result.error.message : '';
+      throw new Error('One or more balance data sources could not be refreshed' + detail);
+    }
+    transferRefreshMsg = 'Balances refreshed from the latest records.';
+  } catch (e) {
+    transferRefreshMsg = 'Could not refresh balances: ' + (e && e.message ? e.message : String(e));
+  } finally {
+    transferRefreshing = false;
+    render();
+  }
+}
+
 function transferDraftSet(field, val) {
   transferDraft[field] = val;
   if (field === 'fromSubjectId') transferDraft.toSubjectId = ''; // target list depends on the source teacher, so reset it
@@ -15971,7 +15993,8 @@ function renderStudents() {
 
       </div>
       <div class="student-section" style="background:#e8f8ee">
-      <h3>Transfer class credits <button class="help-btn" onclick="openHelp('transfer-credits',event)">?</button></h3>
+      <h3>Transfer class credits <button class="help-btn" onclick="openHelp('transfer-credits',event)">?</button> <button type="button" class="btn-small" onclick="refreshTransferCredits()" ${transferRefreshing?'disabled':''}>${transferRefreshing?'Refreshing…':'↻ Refresh balance'}</button></h3>
+      ${transferRefreshMsg ? `<div class="hint" style="color:${transferRefreshMsg.startsWith('Could not')?'var(--brick)':'var(--forest)'}">${esc(transferRefreshMsg)}</div>` : ''}
       <div class="hint">Move already-purchased classes from one subject to another for this student — no new money involved. Must be the same class type (Group or Individual). Can cross to a different teacher if the student is enrolled with both — you'll be asked to confirm, since that changes who gets paid for those classes.</div>
       ${transferMsg ? `<div class="hint" style="color:${transferMsg.startsWith('Transferred')?'var(--forest)':'var(--brick)'}">${esc(transferMsg)}</div>` : ''}
       ${balanceSubjects.length < 2 ? '<div class="empty">Needs at least two subjects with a balance on record to transfer between.</div>' : `
