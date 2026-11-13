@@ -769,10 +769,33 @@ Deno.serve(async (req) => {
       for (const row of sessions.data || []) { const day = dailyMap.get(dayKey(row.started_at)); if (day) day.guest_sessions++; }
       for (const row of attempts.data || []) { const day = dailyMap.get(dayKey(row.completed_at)); if (day) day.student_games++; }
       for (const row of guestGames.data || []) { const day = dailyMap.get(dayKey(row.completed_at)); if (day) day.guest_games++; }
-      const uniqueStudents = new Set([
+      const userIds = [...new Set([
         ...(visits.data || []).map((x) => x.user_id),
         ...(attempts.data || []).map((x) => x.user_id)
-      ]);
+      ])];
+      const { data: profiles, error: profilesError } = userIds.length
+        ? await db.from("profiles").select("id,linked_student_id").eq("role", "Student").in("id", userIds)
+        : { data: [], error: null };
+      if (profilesError) return errorResponse(503, "Could not load KA student accounts.");
+      const studentIds = [...new Set((profiles || []).map((x: any) => x.linked_student_id).filter(Boolean))];
+      const { data: students, error: studentsError } = studentIds.length
+        ? await db.from("students").select("id,name,student_code").in("id", studentIds)
+        : { data: [], error: null };
+      if (studentsError) return errorResponse(503, "Could not load KA student names.");
+      const profileByUser = new Map((profiles || []).map((x: any) => [x.id, x]));
+      const studentById = new Map((students || []).map((x: any) => [x.id, x]));
+      const studentUsage = new Map<string, { user_id: string; student_name: string; student_code: string; visits: number; games: number; last_active: string | null }>();
+      const ensureStudent = (userId: string) => {
+        const profile = profileByUser.get(userId);
+        const student = profile?.linked_student_id ? studentById.get(profile.linked_student_id) : null;
+        if (!student) return null;
+        if (!studentUsage.has(userId)) studentUsage.set(userId, { user_id: userId, student_name: student.name || "Unnamed student", student_code: student.student_code || "", visits: 0, games: 0, last_active: null });
+        return studentUsage.get(userId)!;
+      };
+      for (const row of visits.data || []) { const item = ensureStudent(row.user_id); if (item) { item.visits++; if (!item.last_active || row.created_at > item.last_active) item.last_active = row.created_at; } }
+      for (const row of attempts.data || []) { const item = ensureStudent(row.user_id); if (item) { item.games++; if (!item.last_active || row.completed_at > item.last_active) item.last_active = row.completed_at; } }
+      const studentRows = [...studentUsage.values()].sort((a, b) => (b.last_active || "").localeCompare(a.last_active || ""));
+      const uniqueStudents = new Set(studentRows.map((x) => x.user_id));
       const activeStudents7d = new Set([
         ...(visits.data || []).filter((x) => x.created_at >= since7d).map((x) => x.user_id),
         ...(attempts.data || []).filter((x) => x.completed_at >= since7d).map((x) => x.user_id)
@@ -785,7 +808,8 @@ Deno.serve(async (req) => {
           games_completed_30d: (attempts.data || []).length + (guestGames.data || []).length,
           guest_sessions_30d: (sessions.data || []).length
         },
-        daily: [...dailyMap.values()]
+        daily: [...dailyMap.values()],
+        students: studentRows
       });
     }
 
