@@ -6000,7 +6000,8 @@ async function qbSaveEdit(id) {
   // Who edited it last (columns from SQL 29).
   const stamp = 'edited_by' in cur ? { edited_by: currentUserId || null, edited_at: new Date().toISOString() } : {};
   qbSaving = true; render();
-  const { error } = await sb.from('qb_questions').update({
+  const onPaper = qbSubTab === 'papers';   // the Practice Papers tab shows qbPaperMsg, not qbMsg
+  const { data: updatedRows, error } = await sb.from('qb_questions').update({
     ...(hasTopic ? { topic: qbEditDraft.topic || null } : {}),
     ...mcq, ...review, ...stamp,
     question_text: qbEditDraft.question_text,
@@ -6010,10 +6011,14 @@ async function qbSaveEdit(id) {
     answer_text: qbEditDraft.answer_text || null,
     chapter_id: qbEditDraft.chapter_id || null,
     question_image_url: qbEditDraft.question_image_url || null,
-  }).eq('id', id);
-  const onPaper = qbSubTab === 'papers';   // the Practice Papers tab shows qbPaperMsg, not qbMsg
+  }).eq('id', id).select('id');
   if (stamp.edited_by) qbApprovers[stamp.edited_by] = qbApprovers[stamp.edited_by] || currentUsername;
   if (error) { if (onPaper) qbPaperMsg = 'Error: ' + error.message; else qbMsg = 'Error: ' + error.message; qbSaving = false; render(); return; }
+  if (!updatedRows || !updatedRows.length) {
+    const message = 'No question record was updated. Please refresh the list and try again; your edits have been kept.';
+    if (onPaper) qbPaperMsg = message; else qbMsg = message;
+    qbSaving = false; render(); return;
+  }
   const { options: _o, correct_option: _c, ...draft } = qbEditDraft;
   qbQuestions = qbQuestions.map(q => q.id === id ? { ...q, ...draft, ...mcq, ...review, ...stamp, marks: Number(qbEditDraft.marks)||0, chapter_id: qbEditDraft.chapter_id || null, question_image_url: qbEditDraft.question_image_url || null, ...(hasTopic ? { topic: qbEditDraft.topic || null } : {}) } : q);
   qbEditId = null; qbEditDraft = {};
@@ -24531,8 +24536,8 @@ function qbEditFormHtml(q, fromPaper, lockMarks) {
       <datalist id="qbTopicList">${QB_TOPICS.map(t => `<option value="${escAttr(t)}">`).join('')}</datalist></div>` : ''}
     ${qbImageFieldHtml('edit', qbEditDraft.question_image_url, "qbEditDraft.question_image_url=''")}
     <div class="qb-actions" style="margin-top:8px">
-      <button class="btn-small btn-primary" onclick="qbSaveEdit('${q.id}')" ${qbSaving||qbImgUploading?'disabled':''}>Save</button>
-      <button class="btn-small" onclick="qbCancelEdit()">Cancel</button>
+      <button type="button" class="btn-small btn-primary" onclick="qbSaveEdit('${q.id}')" ${qbSaving||qbImgUploading?'disabled':''}>Save Changes</button>
+      <button type="button" class="btn-small" onclick="qbCancelEdit()">Cancel</button>
     </div>
   </div>`;
 }
@@ -26644,9 +26649,10 @@ async function qbSaveSourcePaperMetadata(id) {
   if (!subject || !Number.isInteger(year) || year < 1950 || year > new Date().getFullYear()+1) { qbMsg = 'Enter a subject and valid examination year.'; render(); return; }
   const update = { board_id: p.source_type === 'board' ? v('Board') : null, school_id: p.source_type === 'school' ? v('School') : null, grade_id: v('Grade') || null, subject_name: subject, year, exam_type: v('Exam'), medium: v('Medium') || null };
   if ((p.source_type === 'board' && !update.board_id) || (p.source_type === 'school' && !update.school_id) || !update.grade_id || !update.exam_type) { qbMsg = 'Complete the source, class and exam type fields.'; render(); return; }
-  const { error } = await sb.from('qb_source_papers').update(update).eq('id', id).eq('status', 'published');
+  const { data: updatedRows, error } = await sb.from('qb_source_papers').update(update).eq('id', id).eq('status', 'published').select('id');
   if (error) { qbMsg = 'Could not update paper metadata: ' + error.message; render(); return; }
-  qbSourceEditId = ''; qbMsg = 'Metadata updated. The PDF and publication status were left unchanged.'; await loadQbSourcePapers();
+  if (!updatedRows || !updatedRows.length) { qbMsg = 'No past-paper record was updated. Please refresh the list and try again; your changes have been kept in the editor.'; render(); return; }
+  qbSourceEditId = ''; qbMsg = 'Metadata updated and verified. The PDF and publication status were left unchanged.'; await loadQbSourcePapers();
 }
 function qbSourcePaperEditHtml(p) {
   if (currentRole !== 'Admin' || !p || p.id !== qbSourceEditId || p.status !== 'published') return '';
@@ -26661,7 +26667,7 @@ function qbSourcePaperEditHtml(p) {
     field('Examination year','<input id="qbPaperMetaYear" type="number" min="1950" max="'+(new Date().getFullYear()+1)+'" value="'+escAttr(String(p.year||''))+'" style="'+css+'">')+
     field('Exam type',choices('Exam',[['main','Main'],['compartment','Compartment'],['supplementary','Supplementary'],['sample','Sample Question Paper'],['other','Other']],p.exam_type||'main'))+
     field('Medium',choices('Medium',[['','Not specified'],['English','English'],['Hindi','Hindi'],['Kannada','Kannada'],['Sanskrit','Sanskrit'],['Other','Other']],p.medium||''))+'</div>'+
-    '<div style="display:flex;gap:8px;margin-top:12px"><button type="button" class="btn-small btn-primary" onclick="qbSaveSourcePaperMetadata(\''+escAttr(p.id)+'\')">Save metadata</button><button type="button" class="btn-small" onclick="qbCancelSourcePaperEdit()">Cancel</button></div><p class="hint">Only catalogue metadata changes; PDF and Published status are preserved.</p></section>';
+    '<div style="display:flex;gap:8px;margin-top:12px"><button type="button" class="btn-small btn-primary" onclick="qbSaveSourcePaperMetadata(\''+escAttr(p.id)+'\')">Save Changes</button><button type="button" class="btn-small" onclick="qbCancelSourcePaperEdit()">Cancel</button></div><p class="hint">Only catalogue metadata changes; PDF and Published status are preserved.</p></section>';
 }
 function qbSourcePapersHtml() {
   if (qbSourceLoading) return `<div class="empty">Loading past papers…</div>`;
