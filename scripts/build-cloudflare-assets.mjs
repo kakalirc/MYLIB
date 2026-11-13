@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 
@@ -45,6 +45,18 @@ for (const relative of tracked) {
   copied.push(normalized);
 }
 
+// Generate release metadata at build time so every login displays the actual
+// deployment build timestamp, not the visitor's login time.
+const releaseInfo = {
+  released_by: "Rishin",
+  released_at: new Date().toISOString()
+};
+writeFileSync(
+  path.join(output, "release-info.json"),
+  JSON.stringify(releaseInfo, null, 2) + "\n",
+  "utf8"
+);
+
 const required = [
   "index.html",
   "register.html",
@@ -53,7 +65,8 @@ const required = [
   "question-bank-host.js",
   "question-bank/question-bank.html",
   "question-bank/question-bank.css",
-  "question-bank/question-bank.js"
+  "question-bank/question-bank.js",
+  "release-info.json"
 ];
 const missing = required.filter((file) => !existsSync(path.join(output, file)));
 if (missing.length) {
@@ -76,4 +89,5 @@ if (forbidden.length) {
 
 console.log(`Prepared ${copied.length} tracked static assets in dist/.`);
 console.log(`Total bytes: ${copied.reduce((sum, file) => sum + statSync(path.join(output, file)).size, 0)}`);
+console.log(`Release metadata: ${releaseInfo.released_by} at ${releaseInfo.released_at}`);
 console.log("Required app entrypoints and Question Bank shell are present.");
