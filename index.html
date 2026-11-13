@@ -27317,7 +27317,7 @@ function render() {
   else if (currentTab === 'aiusage') body = renderAiUsageAdmin();
   else if (currentTab === 'studyplans') body = renderAdminStudyPlans();
   else if (currentTab === 'homework') body = renderAdminHomework();
-  else if (currentTab === 'questionbank') body = renderAdminQuestionBank();
+  else if (currentTab === 'questionbank') body = '<div style="display:flex;justify-content:flex-end;margin:0 0 12px"><button class="btn-small" type="button" onclick="openQuestionBankModulePreview()">Preview new Question Bank module</button></div>' + renderAdminQuestionBank();
   else if (currentTab === 'qbmonitoring') body = renderQuestionBankMonitoring();
   else if (currentTab === 'audit') body = renderAuditLog();
   else if (currentTab === 'ai') body = renderAiAdmin();
@@ -27500,5 +27500,6 @@ initApp();
 <script src="student-portal-tabs.js"></script>
 <script src="past-papers-portal.js"></script>
 <script src="past-paper-discovery.js?v=20261112-discovery1"></script>
+<script src="question-bank-host.js?v=20261113-qbhost1"></script>
 </body>
 </html>
