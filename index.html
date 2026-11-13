@@ -24623,7 +24623,7 @@ async function loadQbPapers() {
     if (ids.length) {
       const [pq, sa] = await Promise.all([
         sb.from('qb_paper_questions').select('paper_id, question_id, marks_override').in('paper_id', ids),
-        sb.from('qb_student_assignments').select('paper_id, status, total_score, submitted_at').in('paper_id', qbPapers.map(p => p.id)),
+        qbPapers.length ? sb.from('qb_student_assignments').select('paper_id, status, total_score, submitted_at').in('paper_id', qbPapers.map(p => p.id)) : Promise.resolve({ data: [], error: null }),
       ]);
       ids.forEach(id => { qbPaperCounts[id] = { questions: 0, assigned: 0, submitted: 0, reviewed: 0, scoreSum: 0, oldestSubmitted: null }; });
       (pq.data || []).forEach(r => { qbPaperCounts[r.paper_id].questions++; });
@@ -24746,8 +24746,9 @@ async function qbCloneSharedPaper(id) {
   }
   qbPaperSaving = false;
   qbPapers.unshift(copy);
-  qbPaperMsg = '✓ A draft copy has been added to your papers. You can edit it and assign it to your students.';
   await qbOpenPaper(copy.id);
+  qbPaperMsg = '✓ A draft copy has been added to your papers. You can edit it and assign it to your students.';
+  render();
 }
 
 async function qbRefillPaper() {
