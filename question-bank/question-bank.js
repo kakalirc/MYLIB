@@ -1,5 +1,7 @@
 (() => {
   "use strict";
+  // Keep this value aligned with HANDSHAKE_TIMEOUT_MS in question-bank-host.js.
+  const HANDSHAKE_TIMEOUT_MS = 5000;
   // The module is hosted by My LIB. Authentication and data access stay in the host.
   const status = document.getElementById("qb-status");
   const workspace = document.getElementById("qb-workspace");
@@ -54,7 +56,9 @@
 
   if (window.parent !== window) {
     window.parent.postMessage({ type: "LIB_QB_READY", version: 1 }, window.location.origin);
-    window.setTimeout(() => { if (!hostReady) showConnectionError("Waiting for My LIB", "The host integration is not installed yet. Existing Question Bank screens continue to work in My LIB."); }, 1800);
+    window.setTimeout(() => {
+      if (!hostReady) showConnectionError("Waiting for My LIB", "The host integration did not complete the handshake within 5 seconds. Existing Question Bank screens continue to work in My LIB.");
+    }, HANDSHAKE_TIMEOUT_MS);
   } else showConnectionError("Open from My LIB", "This module is not a standalone login page. Open it through the authenticated My LIB application.");
 
   // Narrow host bridge only. Feature-specific methods are added during migration.
