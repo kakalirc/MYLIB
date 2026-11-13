@@ -155,6 +155,7 @@
     try {
       const context = await api("get_context");
       role = context.role || "";
+      if (role === "Student") api("record_usage").catch((error) => console.warn("KA usage event was not recorded:", error));
       const isLearningRole = role === "Student" || role === "Teacher";
       const backToLearning = $("back-learning");
       const supportButton = $("knowledge-arena-support");
@@ -819,10 +820,11 @@
 
   let activeAdminSection = "overview";
   function showAdminSection(name) {
-    const allowed = new Set(["overview","setup","generation","question-bank","guests"]);
+    const allowed = new Set(["overview","setup","generation","question-bank","guests","usage"]);
     if (!allowed.has(name)) name = "overview";
     activeAdminSection = name;
     if (name === "question-bank") refreshQuestions();
+    if (name === "usage") refreshAdminUsage();
     document.querySelectorAll("[data-admin-section]").forEach((panel) => {
       panel.classList.toggle("hidden", panel.dataset.adminSection !== name);
     });
@@ -1315,6 +1317,38 @@
     renderGenerationStatus();
     if (activeAdminSection === "overview") await refreshLeadership();
   }
+  async function refreshAdminUsage() {
+    const feedback = $("ka-usage-feedback");
+    if (feedback) feedback.textContent = "Loading usage data…";
+    try {
+      const result = await api("get_admin_usage");
+      renderAdminUsage(result);
+      if (feedback) feedback.textContent = "Usage data updated. Visit tracking starts from this release; earlier game attempts remain included.";
+    } catch (error) {
+      if (feedback) feedback.textContent = "Could not load usage data: " + error.message;
+      $("ka-usage-metrics").innerHTML = '<p class="muted">Usage data is temporarily unavailable.</p>';
+      $("ka-usage-daily").innerHTML = "";
+    }
+  }
+  function renderAdminUsage(data) {
+    const summary = data.summary || {};
+    const metrics = [
+      ["Student visits · 30 days", summary.student_visits_30d || 0],
+      ["Unique students · 30 days", summary.unique_students_30d || 0],
+      ["Active students · 7 days", summary.active_students_7d || 0],
+      ["Games completed · 30 days", summary.games_completed_30d || 0],
+      ["Guest sessions · 30 days", summary.guest_sessions_30d || 0]
+    ];
+    $("ka-usage-metrics").innerHTML = metrics.map((m) =>
+      '<article class="metric"><small>' + m[0] + '</small><strong>' + Number(m[1]).toLocaleString("en-IN") + '</strong></article>'
+    ).join("");
+    const days = data.daily || [];
+    $("ka-usage-daily").innerHTML = days.length
+      ? '<div class="ka-usage-table"><div class="ka-usage-row ka-usage-header"><span>DATE</span><span>STUDENT VISITS</span><span>GUEST SESSIONS</span><span>STUDENT GAMES</span><span>GUEST GAMES</span></div>' +
+        days.slice().reverse().map((d) => '<div class="ka-usage-row"><span>' + escapeHtml(d.date) + '</span><span>' + d.student_visits + '</span><span>' + d.guest_sessions + '</span><span>' + d.student_games + '</span><span>' + d.guest_games + '</span></div>').join("") + '</div>'
+      : '<p class="muted">No usage has been recorded in the selected period.</p>';
+  }
+
   async function refreshLeadership() {
     const feedback = $("leadership-feedback");
     if (feedback) feedback.textContent = "Refreshing student leadership…";
@@ -1596,6 +1630,7 @@
   ["suitability-subject-list","suitability-game-grade-list","suitability-game-subject-list"].forEach((id) => $(id).addEventListener("change", saveSuitabilityToggle));
   $("player-grade-select").addEventListener("change", (event) => loadRolePlayerGrade(event.target.value));
   $("refresh-leadership").addEventListener("click", refreshLeadership);
+  $("refresh-ka-usage").addEventListener("click", refreshAdminUsage);
 
   initialise();
   // Refresh only the Admin dashboard data; never reload the full Knowledge Arena page.
