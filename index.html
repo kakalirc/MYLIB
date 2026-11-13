@@ -25566,7 +25566,7 @@ function qbPaperEditorHtml() {
         ? `${!locked ? `<button class="btn-small" onclick="qbUpdatePaper({status:'draft'})">Back to draft</button>` : ''}
            <button class="btn-small btn-primary" onclick="qbAssignOpen=!qbAssignOpen;qbAssignIds=new Set();render()">Assign to students</button>`
         : `<button class="btn-small btn-primary" onclick="qbUpdatePaper({status:'published'})" ${qbPaperQs.length ? '' : 'disabled'}>Mark ready</button>
-           ${g ? `<button class="btn-small" onclick="qbRefillPaper()" ${qbPaperSaving ? 'disabled' : ''}>Re-run auto-fill</button>` : ''}`}
+           ${g ? `<button class="btn-small" onclick="qbRefillPaper()" ${qbPaperSaving ? 'disabled' : ''}>Re-run auto-fill</button>` : ''}`)}
       ${!adminShared && !locked ? `<button class="btn-small btn-danger" onclick="qbDeletePaper()">Delete paper</button>` : ''}
     </div>
     ${adminShared ? '<div class="hint" style="margin-top:6px">Published shared papers are available for teachers to copy. Admin does not assign or mark student work here.</div>' : p.status !== 'published' ? '<div class="hint" style="margin-top:6px">Mark the paper ready to assign it to students.</div>' : ''}
