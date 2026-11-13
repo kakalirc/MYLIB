@@ -744,11 +744,13 @@ Deno.serve(async (req) => {
         .replace(/(access_token|refresh_token|password|apikey|api_key)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]");
       const message = clean(body.message, 1000);
       if (!message) return errorResponse(400, "Error message is required.");
+      const line = typeof body.line === "number" && Number.isInteger(body.line) && body.line > 0 ? body.line : null;
+      const column = typeof body.column === "number" && Number.isInteger(body.column) && body.column > 0 ? body.column : null;
       const { error } = await db.from("ka_client_error_logs").insert({
         user_id: user.id, role: profile.role, category, message,
         source: clean(body.source, 500) || null,
-        line_number: Number.isInteger(body.line) && body.line > 0 ? body.line : null,
-        column_number: Number.isInteger(body.column) && body.column > 0 ? body.column : null,
+        line_number: line,
+        column_number: column,
         stack: clean(body.stack, 5000) || null
       });
       if (error) return errorResponse(503, "Could not record diagnostic event.");
