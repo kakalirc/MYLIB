@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#101d3a">
+  <title>LIB Question Bank</title>
+  <link rel="stylesheet" href="./question-bank.css">
+</head>
+<body>
+  <main class="qb-shell" id="qb-shell">
+    <header class="qb-header">
+      <div><p class="eyebrow">LIB EDUCATION</p><h1>Question Bank</h1><p class="subhead">A dedicated workspace for question and paper management.</p></div>
+      <div class="header-actions"><span id="qb-role" class="role-pill">CONNECTING</span><button id="qb-close" type="button" class="secondary">Back to My LIB</button></div>
+    </header>
+    <section id="qb-status" class="status-card" role="status" aria-live="polite">
+      <h2>Connecting to My LIB</h2><p>The Question Bank module uses the existing My LIB login and permissions. It does not create a separate session.</p>
+    </section>
+    <section id="qb-workspace" class="workspace hidden" aria-label="Question Bank workspace">
+      <div class="workspace-heading"><div><p class="eyebrow">MODULE FOUNDATION</p><h2>Module shell ready</h2></div><span class="status-pill">Integration pending</span></div>
+      <p>This shell is intentionally not connected to live Question Bank workflows yet. Existing screens remain in My LIB until each workflow is migrated and regression-tested.</p>
+      <div class="module-grid">
+        <article><h3>Admin Question Bank</h3><p>Question management, review and publishing.</p><span>Not migrated</span></article>
+        <article><h3>Teacher Question Bank</h3><p>Teacher access, contributions and question creation.</p><span>Not migrated</span></article>
+        <article><h3>Past Papers</h3><p>Uploads, review queue and online discovery.</p><span>Not migrated</span></article>
+        <article><h3>Practice Papers</h3><p>Student and parent practice-paper journeys.</p><span>Not migrated</span></article>
+      </div>
+    </section>
+    <footer>LIB Education · Question Bank</footer>
+  </main>
+  <script src="./question-bank.js" defer></script>
+</body>
+</html>
