@@ -1,0 +1,68 @@
+name: Cloudflare static asset bundle
+
+on:
+  pull_request:
+    paths:
+      - "**"
+      - ".github/workflows/cloudflare-static-assets.yml"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-static-assets-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-audit:
+    name: Build and audit production asset bundle (no deployment)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build the complete static asset directory
+        run: node scripts/build-cloudflare-assets.mjs
+
+      - name: Check application JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            node --check "$file"
+          done < <(find dist -type f -name '*.js' -print0)
+
+      - name: Validate Cloudflare static-assets configuration without deploying
+        run: npx --yes wrangler@4.161.0 deploy --dry-run
+
+      - name: Verify published bundle excludes backend and authoring sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f dist/index.html
+          test -f dist/register.html
+          test -f dist/question-bank/question-bank.html
+          test ! -d dist/supabase
+          test ! -d dist/guides-src
+          if find dist -type f \( -name '*.sql' -o -name '*.ts' -o -name '*.py' -o -name '*.md' \) | grep -q .; then
+            echo "Unexpected backend or authoring source found in dist."
+            exit 1
+          fi
+
+      - name: Upload audited static asset bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: mylib-cloudflare-static-assets
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7

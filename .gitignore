@@ -1,0 +1,6 @@
+# Generated Cloudflare Workers Static Assets bundle
+/dist/
+
+# Local Wrangler state and dependencies
+/.wrangler/
+/node_modules/
