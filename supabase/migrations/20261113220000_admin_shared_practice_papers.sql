@@ -39,7 +39,8 @@ create policy qb_paper_questions_shared_read
   for select
   to authenticated
   using (
-    exists (
+    qb_my_role() = 'Teacher'
+    and exists (
       select 1
       from public.qb_practice_papers p
       where p.id = qb_paper_questions.paper_id
