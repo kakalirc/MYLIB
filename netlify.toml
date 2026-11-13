@@ -1,0 +1,3 @@
+[build]
+  command = "node scripts/build-cloudflare-assets.mjs"
+  publish = "dist"
