@@ -169,13 +169,10 @@
       }
       showShell();
       if (role === "Student") {
-        try {
-          const usageResult = await api("record_usage");
-          if (!usageResult?.recorded) throw new Error("The server did not confirm the visit event.");
-        } catch (usageError) {
-          console.error("Knowledge Arena visit tracking failed:", usageError);
-          note("Your Knowledge Arena visit could not be recorded. Please inform an administrator.", "warning");
-        }
+        // Analytics must never interrupt or display errors in the student experience.
+        api("record_usage").catch((usageError) => {
+          console.warn("Knowledge Arena visit tracking failed:", usageError);
+        });
       }
       if (role === "Admin") {
         $("welcome-line").textContent = "Manage Knowledge Arena or enter player mode to play at a selected grade.";
