@@ -3075,7 +3075,7 @@ function studentSpecialRatesHtml(student, enrolledSubjects) {
   // Applicable fee rates: what every fee sum uses today, and where it comes from.
   const cell = (subj, ty, md) => {
     const info = feeRateFor(student.id, subj, ty, md);
-    return `<td>${info.rate ? '₹' + info.rate.toFixed(2) : '<span style="color:var(--brick)">no rate</span>'}<div class="hint" style="font-size:11px">${info.special ? `Special${info.special.toDate ? ' until ' + info.special.toDate : ''}` : 'Fee setup'}</div></td>`;
+    return `<td>${(info.special || info.rate > 0) ? '₹' + info.rate.toFixed(2) : '<span style="color:var(--brick)">no rate</span>'}<div class="hint" style="font-size:11px">${info.special ? `Special${info.special.toDate ? ' until ' + info.special.toDate : ''}` : 'Fee setup'}</div></td>`;
   };
   const applicable = subjs.length ? `<div class="table-scroll"><table>
       <tr><th>Subject</th><th>Type</th>${RATE_MODES.map(md => `<th>${md}</th>`).join('')}</tr>
