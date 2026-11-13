@@ -42,6 +42,9 @@ jobs:
             node --check "$file"
           done < <(find dist -type f -name '*.js' -print0)
 
+      - name: Validate Cloudflare static-assets configuration without deploying
+        run: npx --yes wrangler@4.161.0 deploy --dry-run
+
       - name: Verify published bundle excludes backend and authoring sources
         shell: bash
         run: |
