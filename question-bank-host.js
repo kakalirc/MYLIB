@@ -8,6 +8,7 @@
   let activeFrame = null;
   let activeOverlay = null;
   let readyTimer = null;
+  let handshakeReady = false;
 
   function canOpenQuestionBankModulePreview() {
     return typeof isLoggedIn !== 'undefined' && isLoggedIn === true && typeof currentRole !== 'undefined' && currentRole === 'Admin';
@@ -20,6 +21,7 @@
     if (activeOverlay) activeOverlay.remove();
     activeOverlay = null;
     activeFrame = null;
+    handshakeReady = false;
     document.removeEventListener('keydown', onPreviewKeydown);
   }
 
@@ -48,6 +50,7 @@
         closeQuestionBankModulePreview();
         return;
       }
+      handshakeReady = true;
       if (readyTimer) window.clearTimeout(readyTimer);
       readyTimer = null;
       // Deliberately minimal: the preview needs only a display role. No IDs, tokens,
@@ -110,7 +113,7 @@
     frame.referrerPolicy = 'same-origin';
     frame.style.cssText = 'display:block;flex:1;width:100%;min-height:0;border:0;background:#f3f5f9;border-radius:0 0 12px 12px;';
     frame.addEventListener('load', () => {
-      if (!activeFrame || activeFrame !== frame) return;
+      if (!activeFrame || activeFrame !== frame || handshakeReady) return;
       // The child sends LIB_QB_READY after its script starts. This timer only reports a
       // connection failure; it does not grant access or bypass the origin/source checks.
       readyTimer = window.setTimeout(() => {
@@ -126,6 +129,7 @@
     overlay.append(toolbar, frame);
     activeOverlay = overlay;
     activeFrame = frame;
+    handshakeReady = false;
     window.addEventListener('message', handleModuleMessage);
     document.addEventListener('keydown', onPreviewKeydown);
     document.body.appendChild(overlay);
