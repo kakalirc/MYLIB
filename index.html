@@ -8236,7 +8236,7 @@ async function refreshAllData(silent) {
     if (currentRole === 'Admin' && currentTab === 'staradmin') { starAdminOpen = true; loadStarExtras(true); }
     else if (starOn && currentRole === 'Teacher') loadStarExtras(true);
     if (currentRole === 'Admin' && currentTab === 'researchmonitor') loadResearchMonitoring();
-    if (currentRole === 'Admin' && currentTab === 'appusage') { appUsageOpen = true; appUsageRole = 'Teacher'; loadAppUsage(); }
+    if (currentRole === 'Admin' && currentTab === 'appusage') { appUsageOpen = true; appUsageRole = ''; loadAppUsage(); }
     if (currentRole === 'Admin' && currentTab === 'aiusage') { aiUsageOpen = true; aiUsageRole = 'Teacher'; loadAiUsage(); }
     await Promise.all([
       loadMyPhoto(),
@@ -13973,7 +13973,7 @@ function setTab(t) { currentTab = t; if (t === 'setup' && setupSubTab === 'frequ
   if (t === 'qbmonitoring') loadQuestionBankMonitoring();
   if (t === 'staradmin') { starAdminOpen = true; loadStarExtras(true); }
   if (t === 'researchmonitor') loadResearchMonitoring();
-  if (t === 'appusage') { appUsageOpen = true; appUsageRole = 'Teacher'; loadAppUsage(); }
+  if (t === 'appusage') { appUsageOpen = true; appUsageRole = ''; loadAppUsage(); }
   if (t === 'aiusage') { aiUsageOpen = true; aiUsageRole = 'Teacher'; loadAiUsage(); }
   if (t === 'onboarding') loadStudentOnboardingData().then(() => render()); }
 function setPayrollMonth(v) { payrollMonth = v; render(); }
