@@ -10,10 +10,11 @@
   let readyTimer = null;
 
   function canOpenQuestionBankModulePreview() {
-    return window.isLoggedIn === true && window.currentRole === 'Admin';
+    return typeof isLoggedIn !== 'undefined' && isLoggedIn === true && typeof currentRole !== 'undefined' && currentRole === 'Admin';
   }
 
   function closeQuestionBankModulePreview() {
+    window.removeEventListener('message', handleModuleMessage);
     if (readyTimer) window.clearTimeout(readyTimer);
     readyTimer = null;
     if (activeOverlay) activeOverlay.remove();
@@ -134,9 +135,4 @@
   // Export only the preview launcher. The message listener is active only while the
   // preview iframe exists and is removed when the preview closes.
   window.openQuestionBankModulePreview = openQuestionBankModulePreview;
-  const originalClose = closeQuestionBankModulePreview;
-  closeQuestionBankModulePreview = function () {
-    window.removeEventListener('message', handleModuleMessage);
-    originalClose();
-  };
 })();
