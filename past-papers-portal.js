@@ -238,6 +238,7 @@
       }
       if (!href) throw new Error('No PDF is available for this paper yet.');
       popup.location.replace(href);
+      if (typeof trackUse === 'function') trackUse('paper.open', true);
     } catch (error) {
       popup.close();
       alert(error && error.message ? error.message : 'Could not open this question paper.');
@@ -275,6 +276,7 @@
   window.libSetStudentPastPapersTab = function () {
     if (currentRole !== 'Student') return;
     studentPaperTabs[currentLinkedId] = 'papers';
+    if (typeof trackUse === 'function') trackUse('tab:questionbank', true);
     addStyles();
     loadPublishedPapers(false);
     render();
@@ -282,6 +284,7 @@
   window.libSetParentPastPapersTab = function (tab) {
     if (currentRole !== 'Parent' || (tab !== 'overview' && tab !== 'papers')) return;
     parentPaperTabs[currentUserId] = tab;
+    if (tab === 'papers' && typeof trackUse === 'function') trackUse('tab:questionbank', true);
     addStyles();
     if (tab === 'papers') loadPublishedPapers(false);
     render();
