@@ -735,6 +735,39 @@ Deno.serve(async (req) => {
       })) });
     }
 
+    if (action === "record_client_error") {
+      if (!["Student", "Teacher", "Admin"].includes(profile.role)) return errorResponse(403, "Authenticated Knowledge Arena access required.");
+      const category = String(body.category || "");
+      if (!["javascript", "promise", "usage_tracking"].includes(category)) return errorResponse(400, "Invalid error category.");
+      const clean = (value: unknown, max: number) => String(value || "").slice(0, max)
+        .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, "Bearer [REDACTED]")
+        .replace(/(access_token|refresh_token|password|apikey|api_key)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]");
+      const message = clean(body.message, 1000);
+      if (!message) return errorResponse(400, "Error message is required.");
+      const { error } = await db.from("ka_client_error_logs").insert({
+        user_id: user.id, role: profile.role, category, message,
+        source: clean(body.source, 500) || null,
+        line_number: Number.isInteger(body.line) && body.line > 0 ? body.line : null,
+        column_number: Number.isInteger(body.column) && body.column > 0 ? body.column : null,
+        stack: clean(body.stack, 5000) || null
+      });
+      if (error) return errorResponse(503, "Could not record diagnostic event.");
+      return json(200, { recorded: true });
+    }
+
+    if (action === "get_admin_error_log") {
+      if (profile.role !== "Admin") return errorResponse(403, "Admin access required.");
+      const { data, error } = await db.from("ka_client_error_logs")
+        .select("id,user_id,role,category,message,source,line_number,column_number,stack,created_at")
+        .order("created_at", { ascending: false }).limit(200);
+      if (error) return errorResponse(503, "Could not load Knowledge Arena error log.");
+      return json(200, { errors: (data || []).map((item: any) => ({
+        id: item.id, user_id: item.user_id, role: item.role, category: item.category,
+        message: item.message, source: item.source, line: item.line_number,
+        column: item.column_number, stack: item.stack, created_at: item.created_at
+      })) });
+    }
+
     if (action === "record_usage") {
       if (profile.role !== "Student") return errorResponse(403, "Student usage tracking only.");
       const { error } = await db.from("ka_usage_events").insert({ user_id: user.id, event_type: "arena_open" });

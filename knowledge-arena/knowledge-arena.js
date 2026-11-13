@@ -74,6 +74,19 @@
     $("arena-shell").classList.remove("hidden");
   }
 
+  let kaErrorReportingInstalled = false;
+  function reportKaClientError(category, error, extra = {}) {
+    if (!session?.user?.id || lockedOut || previewMode) return;
+    const payload = { category, message: String(error?.message || error || "Unknown client error").slice(0,1000), source: String(extra.source || "").slice(0,500), line: Number.isFinite(extra.line) ? extra.line : null, column: Number.isFinite(extra.column) ? extra.column : null, stack: String(error?.stack || "").slice(0,5000) };
+    api("record_client_error", payload).catch(reportError => console.warn("Knowledge Arena diagnostic reporting failed:", reportError));
+  }
+  function installKaErrorReporting() {
+    if (kaErrorReportingInstalled) return;
+    kaErrorReportingInstalled = true;
+    window.addEventListener("error", event => reportKaClientError("javascript", event.message || event.error, {source:event.filename,line:event.lineno,column:event.colno}));
+    window.addEventListener("unhandledrejection", event => reportKaClientError("promise", event.reason));
+  }
+
   async function api(action, payload = {}) {
     const isGuestAction = String(action).startsWith("guest_");
     if (!isGuestAction && lockedOut) throw new Error("This tab has been signed out. Please sign in again through My LIB.");
@@ -168,10 +181,12 @@
         return;
       }
       showShell();
+      installKaErrorReporting();
       if (role === "Student") {
         // Analytics must never interrupt or display errors in the student experience.
         api("record_usage").catch((usageError) => {
           console.warn("Knowledge Arena visit tracking failed:", usageError);
+          reportKaClientError("usage_tracking", usageError);
         });
       }
       if (role === "Admin") {
@@ -825,11 +840,12 @@
 
   let activeAdminSection = "overview";
   function showAdminSection(name) {
-    const allowed = new Set(["overview","setup","generation","question-bank","guests","usage"]);
+    const allowed = new Set(["overview","setup","generation","question-bank","guests","usage","errors"]);
     if (!allowed.has(name)) name = "overview";
     activeAdminSection = name;
     if (name === "question-bank") refreshQuestions();
     if (name === "usage") refreshAdminUsage();
+    if (name === "errors") refreshAdminErrors();
     document.querySelectorAll("[data-admin-section]").forEach((panel) => {
       panel.classList.toggle("hidden", panel.dataset.adminSection !== name);
     });
@@ -1335,6 +1351,29 @@
       $("ka-usage-daily").innerHTML = "";
     }
   }
+  let adminErrorRows = [];
+  async function refreshAdminErrors() {
+    const feedback = $("ka-error-feedback");
+    if (feedback) feedback.textContent = "Loading recent errors…";
+    try {
+      const result = await api("get_admin_error_log");
+      adminErrorRows = result.errors || [];
+      renderAdminErrors();
+      if (feedback) feedback.textContent = "Showing the latest " + adminErrorRows.length + " recorded errors.";
+    } catch (error) {
+      if (feedback) feedback.textContent = "Could not load the error log: " + error.message;
+      $("ka-error-list").innerHTML = '<p class="muted">Error log is temporarily unavailable.</p>';
+    }
+  }
+  function renderAdminErrors() {
+    const search = ($("ka-error-search")?.value || "").trim().toLowerCase();
+    const type = $("ka-error-type")?.value || "";
+    const rows = adminErrorRows.filter(item => (!search || [item.category,item.message,item.user_id,item.role,item.source].join(" ").toLowerCase().includes(search)) && (!type || item.category === type));
+    $("ka-error-list").innerHTML = rows.length ? '<div class="ka-error-table"><div class="ka-error-row ka-error-header"><span>TIME (IST)</span><span>TYPE</span><span>ROLE / USER</span><span>ERROR DETAILS</span></div>' +
+      rows.map(item => '<details class="ka-error-detail"><summary class="ka-error-row"><span>' + escapeHtml(item.created_at ? new Date(item.created_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"}) : "—") + '</span><span>' + escapeHtml(item.category) + '</span><span>' + escapeHtml(item.role) + '<small>' + escapeHtml(item.user_id) + '</small></span><span>' + escapeHtml(item.message) + '</span></summary>' +
+      (item.source ? '<p><strong>Source:</strong> ' + escapeHtml(item.source) + '</p>' : "") + (item.stack ? '<pre>' + escapeHtml(item.stack) + '</pre>' : "") + '</details>').join("") + '</div>' : '<p class="muted">No errors match this filter.</p>';
+  }
+
   function renderAdminUsage(data) {
     const summary = data.summary || {};
     const metrics = [
@@ -1656,6 +1695,9 @@
   $("player-grade-select").addEventListener("change", (event) => loadRolePlayerGrade(event.target.value));
   $("refresh-leadership").addEventListener("click", refreshLeadership);
   $("refresh-ka-usage").addEventListener("click", refreshAdminUsage);
+  $("refresh-ka-errors").addEventListener("click", refreshAdminErrors);
+  $("ka-error-search").addEventListener("input", renderAdminErrors);
+  $("ka-error-type").addEventListener("change", renderAdminErrors);
   $("ka-usage-student-search").addEventListener("input", renderAdminUsageStudents);
   $("ka-usage-student-sort").addEventListener("change", renderAdminUsageStudents);
 

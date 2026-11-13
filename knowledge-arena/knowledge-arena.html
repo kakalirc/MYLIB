@@ -184,6 +184,7 @@
   <button type="button" class="admin-subnav-btn" data-admin-target="question-bank">Question Bank</button>
   <button type="button" class="admin-subnav-btn" data-admin-target="guests">Guest Management</button>
   <button type="button" class="admin-subnav-btn" data-admin-target="usage">Usage</button>
+  <button type="button" class="admin-subnav-btn" data-admin-target="errors">Error Log</button>
 </nav>
 
         <div class="panel admin-panel leadership-panel" data-admin-section="overview">
@@ -313,6 +314,11 @@
           </div>
           <div id="ka-usage-student-list" class="ka-usage-table-wrap"><p class="muted">Open this tab to load student activity.</p></div>
           <p id="ka-usage-feedback" class="admin-feedback" role="status"></p>
+        </div>
+        <div class="panel admin-panel" id="ka-error-log-panel" data-admin-section="errors">
+          <div class="admin-panel-head"><div><h3>Knowledge Arena Error Log</h3><p class="muted">Client-side errors reported by authenticated Knowledge Arena users. Diagnostic details are Admin-only.</p></div><button class="btn-secondary" id="refresh-ka-errors" type="button">Refresh errors</button></div>
+          <div class="ka-error-filters"><input id="ka-error-search" type="search" placeholder="Search message, user ID or category" aria-label="Search error log"><select id="ka-error-type" aria-label="Filter error category"><option value="">All categories</option><option value="javascript">JavaScript</option><option value="promise">Unhandled promise</option><option value="usage_tracking">Usage tracking</option></select></div>
+          <div id="ka-error-list" class="ka-usage-table-wrap"><p class="muted">Open this tab to load recent errors.</p></div><p id="ka-error-feedback" class="admin-feedback" role="status"></p>
         </div>
         <div class="panel admin-panel" id="guest-promotions-panel" data-admin-section="guests">
           <div class="admin-panel-head"><div><h3>Guest Marketing Promotions</h3><p class="muted">Create dismissible course promotions. Promotions never interrupt an active question.</p></div><button class="btn-secondary" id="refresh-guest-promotions">Refresh promotions</button></div>
