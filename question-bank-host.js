@@ -5,6 +5,7 @@
 (() => {
   'use strict';
 
+  const HANDSHAKE_TIMEOUT_MS = 5000;
   let activeFrame = null;
   let activeOverlay = null;
   let readyTimer = null;
@@ -72,6 +73,15 @@
         /^qb-[0-9]{1,12}$/.test(message.requestId) ? message.requestId : null;
       if (!requestId) return;
 
+      if (!handshakeReady) {
+        sendToModule({
+          type: 'LIB_QB_RESPONSE',
+          requestId,
+          error: 'The Question Bank host handshake is not complete.'
+        });
+        return;
+      }
+
       // No feature operations are enabled in the shell phase. In particular, never
       // proxy arbitrary table queries, RPC names, SQL, storage paths, or user-supplied methods.
       sendToModule({
@@ -114,16 +124,16 @@
     frame.style.cssText = 'display:block;flex:1;width:100%;min-height:0;border:0;background:#f3f5f9;border-radius:0 0 12px 12px;';
     frame.addEventListener('load', () => {
       if (!activeFrame || activeFrame !== frame || handshakeReady) return;
-      // The child sends LIB_QB_READY after its script starts. This timer only reports a
-      // connection failure; it does not grant access or bypass the origin/source checks.
+      // Same timeout as the child. This timer only reports a connection failure;
+      // it never grants access or bypasses the origin/source checks.
       readyTimer = window.setTimeout(() => {
-        if (activeFrame === frame) {
+        if (activeFrame === frame && !handshakeReady) {
           const note = document.createElement('div');
           note.textContent = 'The module did not complete its same-origin handshake. Close this preview and check the module files.';
           note.style.cssText = 'padding:10px 14px;background:#fff1ef;color:#8c2c20;font:13px system-ui,sans-serif;';
           overlay.insertBefore(note, frame);
         }
-      }, 5000);
+      }, HANDSHAKE_TIMEOUT_MS);
     });
 
     overlay.append(toolbar, frame);
