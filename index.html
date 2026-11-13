@@ -2115,7 +2115,8 @@ const QB_PAGE_SIZE = 40;          // cards drawn at a time; drawing the whole ba
 let qbShowLimit = QB_PAGE_SIZE, qbShowKey = '';  // how many cards are drawn, and for which tab + filters
 // Practice papers (teacher's "Practice Papers" sub-tab of the Question Bank)
 let qbBlueprints = [];          // qb_paper_blueprints rows, one per section
-let qbPapers = [];              // this teacher's qb_practice_papers
+let qbPapers = [];              // teacher-owned papers, or all papers for Admin
+let qbSharedPapers = [];        // published Admin practice papers visible to teachers
 let qbPaperCounts = {};         // paper id -> { questions, assigned, submitted }
 let qbPapersLoading = false;
 let qbPaperView = 'list';       // 'list' | 'new' | 'edit'
@@ -24605,21 +24606,24 @@ async function loadQbPapers() {
   if (!sb) return;
   qbPapersLoading = true; qbPaperMsg = ''; render();
   try {
-    const [bp, pp] = await Promise.all([
+    const [bp, pp, shared] = await Promise.all([
       sb.from('qb_paper_blueprints').select('*'),
-      // Admin sees every teacher's papers (read only); a teacher sees their own.
       currentRole === 'Admin'
         ? sb.from('qb_practice_papers').select('*').order('created_at', { ascending: false })
-        : sb.from('qb_practice_papers').select('*').eq('created_by_teacher_id', currentLinkedId).order('created_at', { ascending: false }),
+        : sb.from('qb_practice_papers').select('*').eq('created_by_teacher_id', currentLinkedId).eq('is_shared', false).order('created_at', { ascending: false }),
+      currentRole === 'Teacher'
+        ? sb.from('qb_practice_papers').select('*').eq('is_shared', true).eq('status', 'published').order('created_at', { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
     ]);
     if (bp.error) qbPaperMsg = 'Blueprint load error: ' + bp.error.message; else qbBlueprints = bp.data || [];
     if (pp.error) qbPaperMsg = 'Paper load error: ' + pp.error.message; else qbPapers = pp.data || [];
-    const ids = qbPapers.map(p => p.id);
+    if (shared.error) qbPaperMsg = 'Shared paper load error: ' + shared.error.message; else qbSharedPapers = shared.data || [];
+    const ids = [...qbPapers, ...qbSharedPapers].map(p => p.id);
     qbPaperCounts = {};
     if (ids.length) {
       const [pq, sa] = await Promise.all([
         sb.from('qb_paper_questions').select('paper_id, question_id, marks_override').in('paper_id', ids),
-        sb.from('qb_student_assignments').select('paper_id, status, total_score, submitted_at').in('paper_id', ids),
+        qbPapers.length ? sb.from('qb_student_assignments').select('paper_id, status, total_score, submitted_at').in('paper_id', qbPapers.map(p => p.id)) : Promise.resolve({ data: [], error: null }),
       ]);
       ids.forEach(id => { qbPaperCounts[id] = { questions: 0, assigned: 0, submitted: 0, reviewed: 0, scoreSum: 0, oldestSubmitted: null }; });
       (pq.data || []).forEach(r => { qbPaperCounts[r.paper_id].questions++; });
@@ -24637,9 +24641,10 @@ async function qbOpenPaper(id) {
   qbPaperView = 'edit'; qbPaperId = id; qbReviewId = null; qbEditId = null; qbPicker = null; qbNewQ = null; qbAssignOpen = false; qbPaperMsg = '';
   qbPaperTab = null; qbStudentFilter = null;
   qbPaperQs = []; qbPaperAssignments = []; render();
+  const openedPaper = qbPapers.find(x => x.id === id);
   const [pq, sa] = await Promise.all([
     sb.from('qb_paper_questions').select('*').eq('paper_id', id),
-    sb.from('qb_student_assignments').select('*').eq('paper_id', id),
+    openedPaper && openedPaper.is_shared ? Promise.resolve({ data: [], error: null }) : sb.from('qb_student_assignments').select('*').eq('paper_id', id),
   ]);
   if (pq.error) qbPaperMsg = 'Error: ' + pq.error.message;
   qbPaperQs = pq.data || [];
@@ -24696,7 +24701,8 @@ async function qbCreatePaper() {
   const row = {
     title, board_id: g.board_id || null, grade_id: g.grade_id || null, subject_name: g.subject_name || null,
     total_marks: chosen.reduce((t, s) => t + qbSectionTarget(s), 0), duration_minutes: parseInt(qbPaperDraft.duration) || null,
-    status: 'draft', created_by_teacher_id: currentLinkedId,
+    status: 'draft', created_by_teacher_id: currentRole === 'Admin' ? null : currentLinkedId,
+    is_shared: currentRole === 'Admin',
   };
   let { data: paper, error } = await sb.from('qb_practice_papers').insert(build_options ? { ...row, build_options } : row).select().single();
   // Before SQL 40 the column isn't there: make the paper anyway, it just won't remember the choice.
@@ -24716,6 +24722,33 @@ async function qbCreatePaper() {
   qbPaperWarnings = warnings;
   render();
   qbSyncPaperTotal();
+}
+
+
+async function qbCloneSharedPaper(id) {
+  if (currentRole !== 'Teacher' || !currentLinkedId) return;
+  const source = qbSharedPapers.find(p => p.id === id);
+  if (!source || !source.is_shared || source.status !== 'published') { qbPaperMsg = 'This shared paper is no longer available.'; render(); return; }
+  qbPaperSaving = true; qbPaperMsg = ''; render();
+  const { data: sourceQuestions, error: sourceError } = await sb.from('qb_paper_questions').select('question_id,section_name,question_order,marks_override,choice').eq('paper_id', id).order('question_order', { ascending: true });
+  if (sourceError) { qbPaperSaving = false; qbPaperMsg = 'Could not read shared paper questions: ' + sourceError.message; render(); return; }
+  const row = { title: source.title, board_id: source.board_id, grade_id: source.grade_id, subject_name: source.subject_name,
+    total_marks: source.total_marks, duration_minutes: source.duration_minutes, instructions: source.instructions,
+    status: 'draft', created_by_teacher_id: currentLinkedId, is_shared: false, build_options: source.build_options || null };
+  const { data: copy, error } = await sb.from('qb_practice_papers').insert(row).select().single();
+  if (error) { qbPaperSaving = false; qbPaperMsg = 'Could not copy shared paper: ' + error.message; render(); return; }
+  if (sourceQuestions && sourceQuestions.length) {
+    const { error: copyError } = await sb.from('qb_paper_questions').insert(sourceQuestions.map(q => ({ ...q, paper_id: copy.id })));
+    if (copyError) {
+      await sb.from('qb_practice_papers').delete().eq('id', copy.id);
+      qbPaperSaving = false; qbPaperMsg = 'Could not copy the questions; the incomplete copy was rolled back: ' + copyError.message; render(); return;
+    }
+  }
+  qbPaperSaving = false;
+  qbPapers.unshift(copy);
+  await qbOpenPaper(copy.id);
+  qbPaperMsg = '✓ A draft copy has been added to your papers. You can edit it and assign it to your students.';
+  render();
 }
 
 async function qbRefillPaper() {
@@ -25050,6 +25083,14 @@ function qbDueInput(ts) {
 // ── Rendering ────────────────────────────────────────────────
 function qbPapersListHtml() {
   if (qbPapersLoading) return `<div class="empty">Loading papers…</div>`;
+  const sharedRows = qbSharedPapers.map(p => {
+    const c = qbPaperCounts[p.id] || { questions: 0 };
+    const meta = [p.subject_name, qbByName(grades, p.grade_id), qbByName(boards, p.board_id)].filter(Boolean).join(' · ');
+    return `<div class="qb-card" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <div style="min-width:0;flex:1"><div class="qb-meta"><span class="tag">Shared by Admin</span><span>${esc(meta)}</span><span>· ${esc(String(p.total_marks || 0))} marks</span><span>· ${c.questions} questions</span></div><div style="font-weight:600">${esc(p.title || 'Untitled paper')}</div></div>
+      <button class="btn-primary btn-small" onclick="qbCloneSharedPaper('${p.id}')">Use this paper</button>
+    </div>`;
+  }).join('');
   const rows = qbPapers.map(p => {
     const c = qbPaperCounts[p.id] || { questions: 0, assigned: 0, submitted: 0 };
     const meta = [p.subject_name, qbByName(grades, p.grade_id), qbByName(boards, p.board_id)].filter(Boolean).join(' · ');
@@ -25064,6 +25105,8 @@ function qbPapersListHtml() {
       <p class="hint" style="margin:0">Build a practice paper from the approved bank, then assign it to your students.</p>
       <button class="btn-primary" onclick="qbStartNewPaper()">+ New paper</button>
     </div>
+    ${qbSharedPapers.length ? `<h3 style="margin:18px 0 8px">Shared by Admin</h3><p class="hint">Copy a shared paper to your own collection before assigning it. Your copy and student results remain yours.</p><div class="qb-list">${sharedRows}</div>` : ''}
+    <h3 style="margin:18px 0 8px">My practice papers</h3>
     ${qbPapers.length ? `<div class="qb-list">${rows}</div>` : '<div class="empty">No practice papers yet.</div>'}`;
 }
 
@@ -25101,7 +25144,7 @@ function qbAdminPapersListHtml() {
     const c = cOf(p);
     const avg = c.reviewed ? Math.round(c.scoreSum / c.reviewed) : null;
     return `<tr style="cursor:pointer" onclick="qbOpenPaper('${p.id}')">
-      <td>${esc(teacherName(p.created_by_teacher_id))}</td>
+      <td>${p.is_shared ? '<b>Admin · Shared</b>' : esc(teacherName(p.created_by_teacher_id))}</td>
       <td style="font-weight:600">${esc(p.title || 'Untitled paper')}</td>
       <td>${esc([p.subject_name, qbByName(grades, p.grade_id)].filter(Boolean).join(' · '))}</td>
       <td>${esc(qbFmtDate(p.created_at))}</td>
@@ -25112,10 +25155,10 @@ function qbAdminPapersListHtml() {
       <td>${avg != null ? `${avg} / ${esc(String(p.total_marks || ''))}` : '–'}</td>
     </tr>`;
   }).join('');
-  return `${statsHtml}${filtersHtml}
-    ${list.length ? `<div style="overflow-x:auto"><table><thead><tr><th>Teacher</th><th>Paper</th><th>Subject · Class</th><th>Created</th><th>Status</th><th>Assigned</th><th>To mark</th><th>Reviewed</th><th>Average</th></tr></thead><tbody>${rows}</tbody></table></div>`
+  return `<div class="row-form" style="justify-content:space-between;align-items:center;margin-bottom:12px"><div><h3 style="margin:0">Practice papers</h3><p class="hint" style="margin:4px 0 0">Build shared practice papers for all teachers, or inspect teacher-created papers.</p></div><button class="btn-primary" onclick="qbStartNewPaper()">+ Build shared paper</button></div>${statsHtml}${filtersHtml}
+    ${list.length ? `<div style="overflow-x:auto"><table><thead><tr><th>Created by</th><th>Paper</th><th>Subject · Class</th><th>Created</th><th>Status</th><th>Assigned</th><th>To mark</th><th>Reviewed</th><th>Average</th></tr></thead><tbody>${rows}</tbody></table></div>`
       : `<div class="empty">${qbPapers.length ? 'No papers match these filters.' : 'No teacher has made a practice paper yet.'}</div>`}
-    <p class="hint" style="margin-top:10px">View only. Teachers build, assign and mark their own papers.</p>`;
+    <p class="hint" style="margin-top:10px">Teacher-created papers remain view-only here. Admin shared papers can be built and published for teachers to copy.</p>`;
 }
 
 function qbNewPaperHtml() {
@@ -25424,7 +25467,8 @@ function qbPaperEditorHtml() {
   if (!p) return `<div class="empty">Paper not found.</div>`;
   if (qbReviewId) return qbReviewHtml();
   const g = qbBlueprintForPaper(p);
-  const ro = currentRole === 'Admin';              // admin looks at teachers' papers without changing them
+  const adminShared = currentRole === 'Admin' && p.is_shared === true;
+  const ro = currentRole === 'Admin' && !adminShared; // Admin can edit only papers explicitly owned as shared content
   const locked = ro || qbPaperAssignments.length > 0;   // once students have it, the questions stay fixed
   // Only sections with questions show, plus empty ones brought back with + Add a section (until the paper is assigned).
   const shownEmpty = name => !locked && qbEmptyShown.has(p.id + '|' + name);
@@ -25465,7 +25509,7 @@ function qbPaperEditorHtml() {
 
   const counts = { all: qbPaperAssignments.length };
   qbPaperAssignments.forEach(a => { counts[a.status] = (counts[a.status] || 0) + 1; });
-  const tab = qbPaperTab || (qbPaperAssignments.length ? 'students' : 'questions');
+  const tab = adminShared ? 'questions' : (qbPaperTab || (qbPaperAssignments.length ? 'students' : 'questions'));
   const filter = qbStudentFilter && (qbStudentFilter === 'all' || counts[qbStudentFilter]) ? qbStudentFilter : (counts.submitted ? 'submitted' : 'all');
   const chips = [['submitted', 'Needs marking'], ['in_progress', 'In progress'], ['assigned', 'Not started'], ['reviewed', 'Reviewed'], ['all', 'All']]
     .map(([k, label]) => `<button class="btn-small${filter === k ? ' btn-primary' : ''}" onclick="qbStudentFilter='${k}';render()" ${!counts[k] ? 'disabled' : ''}>${label} (${counts[k] || 0})</button>`).join('');
@@ -25490,7 +25534,7 @@ function qbPaperEditorHtml() {
     }).join('')}</div>` : `<div class="empty">No students in this list.</div>`}`;
   const tabBtn = (k, label) => `<button class="btn-small${tab === k ? ' btn-primary' : ''}" onclick="qbPaperTab='${k}';qbPicker=null;render()">${label}</button>`;
   const tabsHtml = `<div class="qb-actions" style="margin:14px 0 10px;border-bottom:2px solid var(--line);padding-bottom:8px">
-    ${tabBtn('students', `Students (${counts.all})${counts.submitted ? ` <span style="background:var(--gold);color:#fff;border-radius:10px;padding:0 6px;font-size:11px;margin-left:2px">${counts.submitted}</span>` : ''}`)}
+    ${adminShared ? '' : tabBtn('students', `Students (${counts.all})${counts.submitted ? ` <span style="background:var(--gold);color:#fff;border-radius:10px;padding:0 6px;font-size:11px;margin-left:2px">${counts.submitted}</span>` : ''}`)}
     ${tabBtn('questions', `Questions (${qbPaperQs.length})`)}
     ${qbPaperQs.length ? `<span style="flex:1"></span>
       <button class="btn-small" onclick="qbPrintPaper(false)">⬇ Question paper PDF</button>
@@ -25516,18 +25560,21 @@ function qbPaperEditorHtml() {
       return gaps.length || other.length ? `<div class="hint" style="color:var(--brick);margin-bottom:8px">${gaps.length ? `<b>Full marks ${total} instead of ${target}:</b><br>` : ''}${[...gaps, ...other].map(esc).join('<br>')}</div>` : '';
     })()}
     ${ro ? '' : `<div class="qb-actions">
-      ${p.status === 'published'
+      ${adminShared ? (p.status === 'published' ? `<button class="btn-small" onclick="qbUpdatePaper({status:'draft'})">Unpublish from teachers</button>` : `<button class="btn-small btn-primary" onclick="qbUpdatePaper({status:'published'})" ${qbPaperQs.length ? '' : 'disabled'}>Publish to teachers</button>`)}
+      ${adminShared && g && p.status !== 'published' ? `<button class="btn-small" onclick="qbRefillPaper()" ${qbPaperSaving ? 'disabled' : ''}>Re-run auto-fill</button>` : ''}
+      ${adminShared ? `<button class="btn-small btn-danger" onclick="qbDeletePaper()">Delete shared paper</button>` : ''}
+      ${adminShared ? '' : (p.status === 'published'
         ? `${!locked ? `<button class="btn-small" onclick="qbUpdatePaper({status:'draft'})">Back to draft</button>` : ''}
            <button class="btn-small btn-primary" onclick="qbAssignOpen=!qbAssignOpen;qbAssignIds=new Set();render()">Assign to students</button>`
         : `<button class="btn-small btn-primary" onclick="qbUpdatePaper({status:'published'})" ${qbPaperQs.length ? '' : 'disabled'}>Mark ready</button>
-           ${g ? `<button class="btn-small" onclick="qbRefillPaper()" ${qbPaperSaving ? 'disabled' : ''}>Re-run auto-fill</button>` : ''}`}
-      ${!locked ? `<button class="btn-small btn-danger" onclick="qbDeletePaper()">Delete paper</button>` : ''}
+           ${g ? `<button class="btn-small" onclick="qbRefillPaper()" ${qbPaperSaving ? 'disabled' : ''}>Re-run auto-fill</button>` : ''}`)}
+      ${!adminShared && !locked ? `<button class="btn-small btn-danger" onclick="qbDeletePaper()">Delete paper</button>` : ''}
     </div>
-    ${p.status !== 'published' ? '<div class="hint" style="margin-top:6px">Mark the paper ready to assign it to students.</div>' : ''}
+    ${adminShared ? '<div class="hint" style="margin-top:6px">Published shared papers are available for teachers to copy. Admin does not assign or mark student work here.</div>' : p.status !== 'published' ? '<div class="hint" style="margin-top:6px">Mark the paper ready to assign it to students.</div>' : ''}
     ${locked ? '<div class="hint" style="margin-top:6px">Questions are fixed now that the paper is assigned.</div>' : ''}
     ${qbAssignOpen && p.status === 'published' ? qbAssignHtml(p) : ''}`}
     ${tabsHtml}
-    ${tab === 'students' ? studentsHtml : (sectionsHtml || '<div class="empty">No questions on this paper yet.</div>') + addSectionHtml}`;
+    ${adminShared ? (sectionsHtml || '<div class="empty">No questions on this paper yet.</div>') + addSectionHtml : tab === 'students' ? studentsHtml : (sectionsHtml || '<div class="empty">No questions on this paper yet.</div>') + addSectionHtml}`;
 }
 
 // Bring a blueprint section onto the paper empty, to fill by hand. It also joins the paper's chosen sections for Re-run auto-fill.
