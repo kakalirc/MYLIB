@@ -5,7 +5,17 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument } from "npm:pdf-lib@1.17.1";
 
 const MODEL=Deno.env.get("QB_EXTRACTION_MODEL")||"claude-haiku-4-5";
+const PRICING:Record<string,{input:number;output:number;source:string}>={
+ "claude-haiku-4-5":{input:1,output:5,source:"Anthropic Claude API standard pricing; USD per million tokens"}
+};
+const PRICE=PRICING[MODEL];
+const DEFAULT_BUDGET_USD=2;
+const configuredBudget=Number(Deno.env.get("QB_EXTRACTION_BUDGET_USD")||DEFAULT_BUDGET_USD);
+const BUDGET_USD=Number.isFinite(configuredBudget)&&configuredBudget>0?configuredBudget:DEFAULT_BUDGET_USD;
+const MAX_BATCH_RESERVE_USD=(200000*(PRICE?.input||0)+8192*(PRICE?.output||0))/1_000_000;
 const BATCH=5,MAX_BYTES=20*1024*1024,MAX_PAGES=25;
+const usd=(n:number)=>Math.round((n+Number.EPSILON)*1e8)/1e8;
+const tokenCost=(input:number,output:number)=>usd(input*(PRICE?.input||0)/1_000_000+output*(PRICE?.output||0)/1_000_000);
 const CORS={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, x-client-info, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS"};
 const reply=(s:number,b:unknown)=>new Response(JSON.stringify(b),{status:s,headers:{...CORS,"Content-Type":"application/json"}});
 const hash=async(s:string)=>{const d=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s));return [...new Uint8Array(d)].map(x=>x.toString(16).padStart(2,"0")).join("");};
@@ -32,6 +42,12 @@ Deno.serve(async(req)=>{
   const {data:run,error:re}=await db.from("qb_paper_extraction_runs").select("id,source_paper_id,status,ai_request_state,pdf_sha256").eq("id",runId).maybeSingle();
   if(re||!run)throw new Error("Extraction run not found.");
   if(run.ai_request_state==="uncertain")throw new Error("Provider outcome is ambiguous. Admin reconciliation is required; no request will be resent.");
+  if(!PRICE)throw new Error("No USD pricing is configured for model "+MODEL+"; no provider request was made.");
+  const {error:priceSnapshotError}=await db.from("qb_paper_extraction_runs").update({
+   model_name:MODEL,input_price_usd_per_million:PRICE.input,output_price_usd_per_million:PRICE.output,
+   cost_currency:"USD",cost_budget_usd:BUDGET_USD,pricing_source:PRICE.source,pricing_checked_at:new Date().toISOString()
+  }).eq("id",runId);
+  if(priceSnapshotError)throw new Error("Could not persist USD pricing and budget before provider use.");
   const {data:paper,error:pe}=await db.from("qb_source_papers").select("id,status,stored_pdf_url").eq("id",run.source_paper_id).maybeSingle();
   if(pe||!paper||paper.status!=="published")throw new Error("Source paper is unavailable or no longer published.");
   const {data:ai,error:ae}=await db.from("ai_settings").select("api_key,master_enabled").eq("id",1).maybeSingle();
@@ -54,22 +70,28 @@ Deno.serve(async(req)=>{
   if(total<1||total>MAX_PAGES)throw new Error(`PDF has ${total} pages; this worker supports 1-${MAX_PAGES} pages per paper.`);
   const seed=await db.from("qb_paper_extraction_pages").upsert(Array.from({length:total},(_,i)=>({run_id:runId,page_number:i+1,page_state:"pending",page_kind:"unknown"})),{onConflict:"run_id,page_number",ignoreDuplicates:true});
   if(seed.error)throw new Error("Could not initialise page checkpoints.");
-  const {data:requests,error:qe}=await db.from("qb_paper_extraction_requests").select("id,chunk_key,request_state,response_payload,input_tokens,output_tokens").eq("run_id",runId);
+  const {data:requests,error:qe}=await db.from("qb_paper_extraction_requests").select("id,chunk_key,request_state,response_payload,input_tokens,output_tokens,input_cost_usd,output_cost_usd,total_cost_usd").eq("run_id",runId);
   if(qe)throw new Error("Could not inspect provider checkpoints.");
   const byChunk=new Map((requests||[]).map((x:any)=>[x.chunk_key,x]));
-  let staged=0,input=0,output=0;
+  let staged=0,input=0,output=0,totalCost=0;
   for(let first=1;first<=total;first+=BATCH){
    const last=Math.min(total,first+BATCH-1),chunk=`pages:${first}-${last}:v1`;
    const old:any=byChunk.get(chunk);
    let parsed:any;
    if(old?.request_state==="responded"){
     parsed=old.response_payload;input+=Number(old.input_tokens||0);output+=Number(old.output_tokens||0);
+    const {error:resumeCostError}=await db.from("qb_paper_extraction_runs").update({input_tokens:input,output_tokens:output,actual_cost_usd:totalCost,estimated_cost_usd:totalCost,cost_budget_reserved_usd:totalCost}).eq("id",runId).eq("lease_owner",owner);
+    if(resumeCostError)throw new Error("Could not reconcile saved USD usage before continuing.");
+    const savedCost=old.total_cost_usd==null?tokenCost(Number(old.input_tokens||0),Number(old.output_tokens||0)):Number(old.total_cost_usd);
+    totalCost=usd(totalCost+savedCost);
    }else{
     if(old&&["sent","uncertain"].includes(old.request_state)){
      await db.rpc("qb_set_paper_extraction_run_state",{p_run_id:runId,p_status:"uncertain",p_ai_request_state:"uncertain",p_error_message:`Ambiguous provider request ${chunk}; blocked from retry.`});
      throw new Error(`Pages ${first}-${last} have an ambiguous provider request. No retry was made.`);
     }
     if(old?.request_state==="failed_before_send")throw new Error(`Pages ${first}-${last} failed before send; inspect and create an explicit retry.`);
+    if(usd(totalCost+MAX_BATCH_RESERVE_USD)>BUDGET_USD)
+     throw new Error(`USD spend guard stopped before pages ${first}-${last}. Actual accrued: ${totalCost.toFixed(6)}; conservative next-batch reserve: ${MAX_BATCH_RESERVE_USD.toFixed(6)}; per-paper budget: ${BUDGET_USD.toFixed(2)}.`);
     let requestId=old?.id;
     if(!requestId){
      const {data:newReq,error:ne}=await db.from("qb_paper_extraction_requests").insert({run_id:runId,chunk_key:chunk,provider:"anthropic",model_name:MODEL,idempotency_key:`${runId}:${chunk}`,request_state:"prepared",request_payload:{page_start:first,page_end:last,prompt_version:"qb-extract-v1"}}).select("id").single();
@@ -88,9 +110,13 @@ Deno.serve(async(req)=>{
      if(!response.ok||data.error)throw new Error(data.error?.message||`Anthropic HTTP ${response.status}`);
      const text=(data.content||[]).filter((x:any)=>x.type==="text").map((x:any)=>x.text).join("\n");
      parsed=parseJson(text);if(!Array.isArray(parsed?.items))throw new Error("AI response schema invalid.");
-     const {error:save}=await db.from("qb_paper_extraction_requests").update({request_state:"responded",response_payload:{items:parsed.items},provider_request_id:data.id||null,input_tokens:data.usage?.input_tokens||0,output_tokens:data.usage?.output_tokens||0,responded_at:new Date().toISOString()}).eq("id",requestId).eq("request_state","sent");
+     const usedInput=Number(data.usage?.input_tokens||0),usedOutput=Number(data.usage?.output_tokens||0);
+     const inputCost=usd(usedInput*PRICE.input/1_000_000),outputCost=usd(usedOutput*PRICE.output/1_000_000),batchCost=usd(inputCost+outputCost);
+     const {error:save}=await db.from("qb_paper_extraction_requests").update({request_state:"responded",response_payload:{items:parsed.items},provider_request_id:data.id||null,input_tokens:usedInput,output_tokens:usedOutput,input_cost_usd:inputCost,output_cost_usd:outputCost,total_cost_usd:batchCost,responded_at:new Date().toISOString()}).eq("id",requestId).eq("request_state","sent");
      if(save)throw new Error("Provider answered but response persistence failed; request requires reconciliation.");
-     input+=Number(data.usage?.input_tokens||0);output+=Number(data.usage?.output_tokens||0);
+     input+=usedInput;output+=usedOutput;totalCost=usd(totalCost+batchCost);
+     const {error:costSave}=await db.from("qb_paper_extraction_runs").update({input_tokens:input,output_tokens:output,actual_cost_usd:totalCost,estimated_cost_usd:totalCost,cost_budget_reserved_usd:totalCost}).eq("id",runId).eq("lease_owner",owner);
+     if(costSave)throw new Error("USD usage was saved per request but run-level cost update failed; resume to reconcile.");
     }catch(e){
      const msg=String((e as Error).message||e);
      await db.from("qb_paper_extraction_requests").update({request_state:"uncertain",error_message:msg.slice(0,1500)}).eq("id",requestId).eq("request_state","sent");
@@ -114,7 +140,7 @@ Deno.serve(async(req)=>{
   const {error:done}=await db.rpc("qb_set_paper_extraction_run_state",{p_run_id:runId,p_status:"completed",p_ai_request_state:"responded",p_error_message:null});
   if(done)throw new Error("All page responses are saved but run finalisation failed; resume to reconcile.");
   await db.from("qb_paper_extraction_runs").update({current_stage:"review",input_tokens:input,output_tokens:output,lease_owner:null,lease_expires_at:null,heartbeat_at:new Date().toISOString(),last_checkpoint_at:new Date().toISOString()}).eq("id",runId).eq("lease_owner",owner);
-  return reply(200,{ok:true,run_id:runId,status:"completed",stage:"review",pages_total:total,staged_items:staged,input_tokens:input,output_tokens:output,model:MODEL,requires_admin_review:true,questions_published:0});
+  return reply(200,{ok:true,run_id:runId,status:"completed",stage:"review",pages_total:total,staged_items:staged,input_tokens:input,output_tokens:output,model:MODEL,cost_currency:"USD",actual_cost_usd:totalCost,cost_budget_usd:BUDGET_USD,requires_admin_review:true,questions_published:0});
  }catch(e){
   const msg=String((e as Error).message||e);
   const {data:r}=await db.from("qb_paper_extraction_runs").select("status,ai_request_state").eq("id",runId).maybeSingle();
