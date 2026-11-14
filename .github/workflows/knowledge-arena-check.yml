@@ -87,6 +87,7 @@ jobs:
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261114162631_qb_extraction_atomic_publish.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261114162634_qb_extraction_usd_cost_guard.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261114162637_qb_extraction_app_settings.sql
+          psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261114230000_qb_extraction_worker_lease_renewal.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/qb-paper-extraction-safety-gate-smoke.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/qb-extraction-restartability-smoke.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/qb-extraction-worker-lease-smoke.sql
@@ -141,6 +142,8 @@ jobs:
         run: deno check supabase/functions/past-paper-discovery/index.ts
       - name: Type check Question Bank extraction worker
         run: deno check supabase/functions/qb-paper-extraction-worker/index.ts
+      - name: Type check Question Bank extraction preflight API
+        run: deno check supabase/functions/qb-paper-extraction-preflight/index.ts
       - name: Type check Question Bank review API
         run: deno check supabase/functions/qb-paper-extraction-review/index.ts
       - name: Test game catalogue and subject routing
