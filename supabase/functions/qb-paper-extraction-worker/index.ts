@@ -14,7 +14,7 @@ let BUDGET_USD=2;
 let MAX_PDF_MB=20, MAX_PAGES=25, MAX_BYTES=20*1024*1024;
 const MAX_OUTPUT_TOKENS=32000;
 const MAX_BATCH_RESERVE_USD=(200000*(PRICE?.input||0)+MAX_OUTPUT_TOKENS*(PRICE?.output||0))/1_000_000;
-const BATCH=8;
+const BATCH=2;
 const usd=(n:number)=>Math.round((n+Number.EPSILON)*1e8)/1e8;
 const tokenCost=(input:number,output:number)=>usd(input*(PRICE?.input||0)/1_000_000+output*(PRICE?.output||0)/1_000_000);
 const CORS={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, x-client-info, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS"};
@@ -100,16 +100,18 @@ Deno.serve(async(req)=>{
   if(qe)throw new Error("Could not inspect provider checkpoints.");
   const byChunk=new Map((requests||[]).map((x:any)=>[x.chunk_key,x]));
   let staged=0,input=0,output=0,totalCost=0;
-  for(let first=1;first<=total;first+=BATCH){
+  for(const r of (requests||[]).filter((x:any)=>x.request_state==="responded")){input+=Number(r.input_tokens||0);output+=Number(r.output_tokens||0);totalCost=usd(totalCost+(r.total_cost_usd==null?tokenCost(Number(r.input_tokens||0),Number(r.output_tokens||0)):Number(r.total_cost_usd)));}
+  const {data:pageStates,error:pageStatesError}=await db.from("qb_paper_extraction_pages").select("page_number,page_state").eq("run_id",runId).order("page_number");
+  if(pageStatesError)throw new Error("Could not inspect page checkpoints.");
+  const nextPage=(pageStates||[]).find((p:any)=>p.page_state!=="completed")?.page_number;
+  for(let first=nextPage||total+1;first<=total;first+=BATCH){
    const {data:batchLease,error:batchLeaseError}=await db.rpc("qb_renew_extraction_worker",{p_run_id:runId,p_lease_owner:owner,p_lease_seconds:900});
    if(batchLeaseError||batchLease!==true)throw new Error("Worker lease was lost before the next batch; this worker stopped without sending another provider request.");
-   const last=Math.min(total,first+BATCH-1),chunk=`pages:${first}-${last}:v3`;
+   const last=Math.min(total,first+BATCH-1),chunk=`pages:${first}-${last}:v4`;
    const old:any=byChunk.get(chunk);
    let parsed:any;
    if(old?.request_state==="responded"){
-    parsed=parseSavedResponse(old.response_payload);input+=Number(old.input_tokens||0);output+=Number(old.output_tokens||0);
-    const savedCost=old.total_cost_usd==null?tokenCost(Number(old.input_tokens||0),Number(old.output_tokens||0)):Number(old.total_cost_usd);
-    totalCost=usd(totalCost+savedCost);
+    parsed=parseSavedResponse(old.response_payload);
     const {error:resumeCostError}=await db.from("qb_paper_extraction_runs").update({input_tokens:input,output_tokens:output,actual_cost_usd:totalCost,estimated_cost_usd:totalCost,cost_budget_reserved_usd:totalCost}).eq("id",runId).eq("lease_owner",owner);
     if(resumeCostError)throw new Error("Could not reconcile saved USD usage before continuing.");
    }else{
@@ -137,7 +139,7 @@ Deno.serve(async(req)=>{
     let response:Response;
     let rawBody:string;
     try{
-     response=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":ai.api_key,"anthropic-version":"2023-06-01"},body:JSON.stringify({model:MODEL,max_tokens:MAX_OUTPUT_TOKENS,system:"Transcribe faithfully. Accuracy is more important than completeness. Never infer unclear text.",messages:[{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:b64(await part.save({useObjectStreams:false}))}},{type:"text",text:prompt(first,last)}]}]}),signal:AbortSignal.timeout(240000)});
+     response=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":ai.api_key,"anthropic-version":"2023-06-01"},body:JSON.stringify({model:MODEL,max_tokens:MAX_OUTPUT_TOKENS,system:"Transcribe faithfully. Accuracy is more important than completeness. Never infer unclear text.",messages:[{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:b64(await part.save({useObjectStreams:false}))}},{type:"text",text:prompt(first,last)}]}]}),signal:AbortSignal.timeout(105000)});
      rawBody=await response.text();
     }catch(e){
      const msg=String((e as Error).message||e);
@@ -183,8 +185,12 @@ Deno.serve(async(req)=>{
    if(pu)throw new Error("Could not save page checkpoints; saved response will be reused on resume.");
    const {data:checkpointLease,error:checkpointLeaseError}=await db.rpc("qb_renew_extraction_worker",{p_run_id:runId,p_lease_owner:owner,p_lease_seconds:900});
    if(checkpointLeaseError||checkpointLease!==true)throw new Error("Worker lease was lost after saving this batch; the saved provider response and page checkpoints will be reused on resume.");
-   await db.from("qb_paper_extraction_runs").update({last_checkpoint_at:new Date().toISOString(),input_tokens:input,output_tokens:output}).eq("id",runId).eq("lease_owner",owner);
+   await db.from("qb_paper_extraction_runs").update({last_checkpoint_at:new Date().toISOString(),input_tokens:input,output_tokens:output,actual_cost_usd:totalCost,estimated_cost_usd:totalCost,cost_budget_reserved_usd:totalCost}).eq("id",runId).eq("lease_owner",owner);
+   const completedCount=(pageStates||[]).filter((p:any)=>p.page_state==="completed").length+(last-first+1);
+   if(last<total)return reply(200,{ok:true,run_id:runId,status:"processing",stage:"page_extraction",pages_total:total,pages_completed:completedCount,next_page:last+1,staged_items:staged,input_tokens:input,output_tokens:output,model:MODEL,cost_currency:"USD",actual_cost_usd:totalCost,cost_budget_usd:BUDGET_USD,requires_admin_review:false,questions_published:0});
+   break;
   }
+  if((pageStates||[]).some((p:any)=>p.page_state!=="completed") && (pageStates||[]).filter((p:any)=>p.page_state==="completed").length<total)throw new Error("A page batch remains incomplete; no completion state was written.");
   const {data:doneState,error:done}=await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"completed",p_ai_request_state:"responded",p_error_message:null});
   if(done||!doneState?.ok)throw new Error("All page responses are saved but run finalisation failed because the worker lease is no longer valid; resume to reconcile.");
   await db.from("qb_paper_extraction_runs").update({current_stage:"review",input_tokens:input,output_tokens:output,lease_owner:null,lease_expires_at:null,heartbeat_at:new Date().toISOString(),last_checkpoint_at:new Date().toISOString()}).eq("id",runId).eq("lease_owner",owner);
