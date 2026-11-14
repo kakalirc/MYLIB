@@ -1,6 +1,6 @@
 -- Integration smoke tests for the extraction ledger, leases and request-state safety.
 do $$
-declare v_user uuid:=gen_random_uuid(); v_grade uuid; v_board uuid; v_paper uuid; v_run uuid; v_claim jsonb; v_req uuid; v_renewed boolean; v_expiry timestamptz;
+declare v_user uuid:=gen_random_uuid(); v_grade uuid; v_board uuid; v_paper uuid; v_run uuid; v_claim jsonb; v_req uuid; v_renewed boolean; v_expiry timestamptz; v_failed boolean;
 begin
  insert into auth.users(id) values(v_user);
  insert into public.profiles(id,role,archived) values(v_user,'Admin',false);
@@ -28,6 +28,11 @@ begin
  if coalesce((v_claim->>'ok')::boolean,false) is not true then raise exception 'Second worker could not claim an expired lease: %',v_claim; end if;
  v_renewed:=public.qb_renew_extraction_worker(v_run,'worker-one',900);
  if v_renewed is not false then raise exception 'Former worker renewed a lease after ownership changed'; end if;
+ v_failed:=public.qb_fail_extraction_worker_if_owner(v_run,'worker-one','stale worker failure');
+ if v_failed is not false then raise exception 'Stale worker must not fail a run owned by another worker'; end if;
+ if not exists(select 1 from public.qb_paper_extraction_runs where id=v_run and status='processing' and lease_owner='worker-two') then
+   raise exception 'Stale worker changed the active worker run state';
+ end if;
  insert into public.qb_paper_extraction_requests(run_id,chunk_key,provider,model_name,idempotency_key,request_state,request_payload)
  values(v_run,'pages:1-1:v1','anthropic','test-model',v_run::text||':pages:1-1:v1','prepared','{}'::jsonb)
  returning id into v_req;
