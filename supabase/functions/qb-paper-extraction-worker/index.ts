@@ -9,14 +9,9 @@ const PRICING:Record<string,{input:number;output:number;source:string}>={
  "claude-haiku-4-5":{input:1,output:5,source:"Anthropic Claude API standard pricing; USD per million tokens"}
 };
 const PRICE=PRICING[MODEL];
-const DEFAULT_BUDGET_USD=2;
-const configuredBudget=Number(Deno.env.get("QB_EXTRACTION_BUDGET_USD")||DEFAULT_BUDGET_USD);
-const BUDGET_USD=Number.isFinite(configuredBudget)&&configuredBudget>0?configuredBudget:DEFAULT_BUDGET_USD;
+let BUDGET_USD=2;
+let MAX_PDF_MB=20, MAX_PAGES=25, MAX_BYTES=20*1024*1024;
 const MAX_BATCH_RESERVE_USD=(200000*(PRICE?.input||0)+8192*(PRICE?.output||0))/1_000_000;
-const positiveIntSetting=(name:string,fallback:number,hardMax:number)=>{const raw=Deno.env.get(name);if(raw==null||raw.trim()==="")return fallback;const n=Number(raw);if(!Number.isSafeInteger(n)||n<1||n>hardMax)throw new Error(name+" must be a whole number from 1 to "+hardMax+".");return n;};
-const MAX_PDF_MB=positiveIntSetting("QB_EXTRACTION_MAX_PDF_MB",20,100);
-const MAX_PAGES=positiveIntSetting("QB_EXTRACTION_MAX_PAGES",25,200);
-const MAX_BYTES=MAX_PDF_MB*1024*1024;
 const BATCH=5;
 const usd=(n:number)=>Math.round((n+Number.EPSILON)*1e8)/1e8;
 const tokenCost=(input:number,output:number)=>usd(input*(PRICE?.input||0)/1_000_000+output*(PRICE?.output||0)/1_000_000);
@@ -36,6 +31,11 @@ Deno.serve(async(req)=>{
  let user:any,body:any;
  try{user=await adminUser(db,(req.headers.get("Authorization")||"").replace(/^Bearer\s+/i,""));body=await req.json();}
  catch(e){return reply(401,{error:(e as Error).message});}
+ const {data:extractionSettings,error:settingsError}=await db.from("qb_paper_extraction_settings").select("max_pdf_mb,max_pages,budget_usd").eq("id",1).maybeSingle();
+ if(settingsError||!extractionSettings)return reply(500,{error:"Question Bank extraction settings are unavailable. Apply the extraction settings migration first."});
+ MAX_PDF_MB=Number(extractionSettings.max_pdf_mb);MAX_PAGES=Number(extractionSettings.max_pages);BUDGET_USD=Number(extractionSettings.budget_usd);
+ if(!Number.isInteger(MAX_PDF_MB)||MAX_PDF_MB<1||MAX_PDF_MB>100||!Number.isInteger(MAX_PAGES)||MAX_PAGES<1||MAX_PAGES>200||!Number.isFinite(BUDGET_USD)||BUDGET_USD<=0||BUDGET_USD>1000)return reply(500,{error:"Question Bank extraction settings are invalid."});
+ MAX_BYTES=MAX_PDF_MB*1024*1024;
  const runId=String(body.run_id||"");
  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(runId))return reply(400,{error:"Valid run_id required."});
  const owner=crypto.randomUUID();
