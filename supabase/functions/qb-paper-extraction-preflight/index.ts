@@ -111,7 +111,7 @@ Deno.serve(async (req) => {
   }
   const { data: pdf, error: downloadError } = await admin.storage.from(object.bucket).download(object.path);
   if (downloadError || !pdf) return reply(422, { ok: false, code: "pdf_unavailable", message: "The stored PDF could not be retrieved. No AI request was made." });
-  if (pdf.size > MAX_PDF_BYTES) return reply(413, { ok: false, code: "pdf_too_large", message: "This PDF exceeds the configured ${MAX_PDF_MB} MB extraction limit. No AI request was made." });
+  if (pdf.size > MAX_PDF_BYTES) return reply(413, { ok: false, code: "pdf_too_large", message: "This PDF exceeds the configured "+MAX_PDF_MB+" MB extraction limit. No AI request was made." });
   const bytes = await pdf.arrayBuffer();
   if (bytes.byteLength < 8 || new TextDecoder().decode(bytes.slice(0, 5)) !== "%PDF-") {
     return reply(422, { ok: false, code: "invalid_pdf", message: "The stored file is not a valid PDF. No AI request was made." });
