@@ -161,9 +161,8 @@ begin
      lower(trim(p_pdf_sha256)), v_linked_count)
   returning id into v_run_id;
 
-  update public.qb_source_papers
-     set extraction_status = 'processing'
-   where id = p_source_paper_id;
+  -- Keep extraction lifecycle in the private run ledger. The existing source-paper
+  -- audit trigger intentionally restricts direct status updates to Admin sessions.
 
   return jsonb_build_object('ok', true, 'code', 'claimed',
     'message', 'Paper passed the extraction safety checks and has been atomically claimed. The AI provider has not yet been called.',
@@ -229,14 +228,8 @@ begin
          updated_at = now()
    where id = p_run_id;
 
-  update public.qb_source_papers
-     set extraction_status = case
-       when p_status = 'completed' then 'extracted'
-       when p_status = 'failed' and p_ai_request_state = 'not_sent' then 'failed'
-       when p_status = 'uncertain' or p_ai_request_state in ('sent', 'uncertain') then 'uncertain'
-       else 'processing'
-     end
-   where id = v_run.source_paper_id;
+  -- Do not mutate qb_source_papers here: its existing audit trigger requires an
+  -- authenticated Admin for updates. The run ledger is the authoritative status.
 
   return jsonb_build_object('ok', true, 'run_id', p_run_id,
     'status', p_status, 'ai_request_state', p_ai_request_state);
