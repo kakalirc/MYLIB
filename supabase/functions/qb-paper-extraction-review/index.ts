@@ -30,7 +30,7 @@ Deno.serve(async(req)=>{
  if(action==="latest"){
   const sourceId=String(body.source_paper_id||"");
   if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sourceId))return reply(400,{error:"Valid source_paper_id required."});
-  const {data:latest,error}=await db.from("qb_paper_extraction_runs").select("id,source_paper_id,status,ai_request_state,current_stage,input_tokens,output_tokens,model_name,started_at,completed_at,lease_expires_at,actual_cost_usd,estimated_cost_usd,cost_currency,cost_budget_usd,input_price_usd_per_million,output_price_usd_per_million").eq("source_paper_id",sourceId).order("started_at",{ascending:false}).limit(1).maybeSingle();
+  const {data:latest,error}=await db.from("qb_paper_extraction_runs").select("id,source_paper_id,status,ai_request_state,current_stage,input_tokens,output_tokens,model_name,started_at,completed_at,lease_expires_at,actual_cost_usd,estimated_cost_usd,cost_currency,cost_budget_usd,input_price_usd_per_million,output_price_usd_per_million,admin_reconciled_at,admin_reconciliation_note").eq("source_paper_id",sourceId).order("started_at",{ascending:false}).limit(1).maybeSingle();
   if(error)return reply(500,{error:"Could not load extraction history."});
   return reply(200,{ok:true,found:!!latest,run:latest||null});
  }
@@ -38,11 +38,12 @@ Deno.serve(async(req)=>{
  const {data:run,error:runError}=await db.from("qb_paper_extraction_runs").select("id,source_paper_id,status,ai_request_state,current_stage,input_tokens,output_tokens,model_name,started_at,completed_at,actual_cost_usd,estimated_cost_usd,cost_currency,cost_budget_usd,input_price_usd_per_million,output_price_usd_per_million").eq("id",runId).maybeSingle();
  if(runError||!run)return reply(404,{error:"Extraction run not found."});
  if(action==="inspect_reconciliation"){
-  const {data:requests,error:requestError}=await db.from("qb_paper_extraction_requests")
-   .select("id,chunk_key,provider,model_name,request_state,provider_request_id,sent_at,responded_at,input_tokens,output_tokens,total_cost_usd,error_message,response_payload")
-   .eq("run_id",runId).order("created_at");
-  if(requestError)return reply(500,{error:"Could not inspect provider request history."});
-  return reply(200,{ok:true,run,reconciliation_required:run.ai_request_state==="uncertain"|| (requests||[]).some((x:any)=>["sent","uncertain"].includes(x.request_state)),requests:requests||[]});
+  const [{data:requests,error:requestError},{data:pages,error:pageError}]=await Promise.all([
+   db.from("qb_paper_extraction_requests").select("id,chunk_key,provider,model_name,request_state,provider_request_id,sent_at,responded_at,input_tokens,output_tokens,total_cost_usd,error_message").eq("run_id",runId).order("created_at"),
+   db.from("qb_paper_extraction_pages").select("page_number,page_state,page_kind,error_message,completed_at").eq("run_id",runId).order("page_number")
+  ]);
+  if(requestError||pageError)return reply(500,{error:"Could not inspect provider request and page checkpoint history."});
+  return reply(200,{ok:true,run,reconciliation_required:run.ai_request_state==="uncertain"|| (requests||[]).some((x:any)=>["sent","uncertain"].includes(x.request_state)),requests:requests||[],pages:pages||[]});
  }
  if(action==="reconcile_uncertain"){
   if(body.confirm_provider_outcome_unknown!==true)return reply(400,{error:"Explicit confirmation that the provider outcome remains unknown is required."});
