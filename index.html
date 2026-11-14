@@ -25826,18 +25826,28 @@ function qbSourceReviewHistoryHtml() {
 }
 function qbBeginSourcePaperEdit(id) { if (currentRole !== 'Admin') return; const p = qbSourcePapers.find(x => x.id === id && x.status === 'published'); if (!p) return; qbSourceEditId = id; qbSourceMetaMsg = ''; render(); }
 function qbCancelSourcePaperEdit() { qbSourceEditId = ''; qbSourceMetaMsg = ''; render(); }
+function qbRestoreSourcePaperScroll(left, top) {
+  const restore = () => window.scrollTo({ left, top, behavior: 'instant' });
+  requestAnimationFrame(() => { restore(); requestAnimationFrame(restore); });
+}
+function qbRenderSourceMetaPreservingScroll() {
+  const left = window.scrollX, top = window.scrollY;
+  render();
+  qbRestoreSourcePaperScroll(left, top);
+}
 async function qbSaveSourcePaperMetadata(id) {
   if (currentRole !== 'Admin' || !sb || qbSourceEditId !== id) return;
+  const savedScrollLeft = window.scrollX, savedScrollTop = window.scrollY;
   const v = key => (document.getElementById('qbPaperMeta' + key)?.value || '').trim();
   const p = qbSourcePapers.find(x => x.id === id && x.status === 'published'); if (!p) return;
   const year = Number(v('Year')), subject = v('Subject');
-  if (!subject || !Number.isInteger(year) || year < 1950 || year > new Date().getFullYear()+1) { qbSourceMetaMsg = 'Enter a subject and valid examination year.'; render(); return; }
+  if (!subject || !Number.isInteger(year) || year < 1950 || year > new Date().getFullYear()+1) { qbSourceMetaMsg = 'Enter a subject and valid examination year.'; qbRenderSourceMetaPreservingScroll(); return; }
   const update = { board_id: p.source_type === 'board' ? v('Board') : null, school_id: p.source_type === 'school' ? v('School') : null, grade_id: v('Grade') || null, subject_name: subject, year, exam_type: v('Exam'), medium: v('Medium') || null };
-  if ((p.source_type === 'board' && !update.board_id) || (p.source_type === 'school' && !update.school_id) || !update.grade_id || !update.exam_type) { qbSourceMetaMsg = 'Complete the source, class and exam type fields.'; render(); return; }
+  if ((p.source_type === 'board' && !update.board_id) || (p.source_type === 'school' && !update.school_id) || !update.grade_id || !update.exam_type) { qbSourceMetaMsg = 'Complete the source, class and exam type fields.'; qbRenderSourceMetaPreservingScroll(); return; }
   const { data: updatedRows, error } = await sb.from('qb_source_papers').update(update).eq('id', id).eq('status', 'published').select('id');
-  if (error) { qbSourceMetaMsg = 'Could not update paper metadata: ' + error.message; render(); return; }
-  if (!updatedRows || !updatedRows.length) { qbSourceMetaMsg = 'No past-paper record was updated. Please refresh the list and try again; your changes have been kept in the editor.'; render(); return; }
-  qbSourceMetaMsg = 'Metadata updated and verified. The PDF and publication status were left unchanged.'; await loadQbSourcePapers();
+  if (error) { qbSourceMetaMsg = 'Could not update paper metadata: ' + error.message; qbRenderSourceMetaPreservingScroll(); return; }
+  if (!updatedRows || !updatedRows.length) { qbSourceMetaMsg = 'No past-paper record was updated. Please refresh the list and try again; your changes have been kept in the editor.'; qbRenderSourceMetaPreservingScroll(); return; }
+  qbSourceMetaMsg = 'Metadata updated and verified. The PDF and publication status were left unchanged.'; await loadQbSourcePapers(); qbRestoreSourcePaperScroll(savedScrollLeft, savedScrollTop);
 }
 function qbSourcePaperEditHtml(p) {
   if (currentRole !== 'Admin' || !p || p.id !== qbSourceEditId || p.status !== 'published') return '';
