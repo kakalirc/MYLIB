@@ -25702,7 +25702,6 @@ async function qbCheckSourcePaperExtraction(id) {
     } else {
       const run = result.run;
       qbExtractionResults[id] = { ok: true, runId: run.id, stage: run.current_stage, runStatus: run.status, aiRequestState: run.ai_request_state, message: 'Saved extraction run: ' + run.status + ' · ' + run.current_stage + (run.actual_cost_usd != null ? ' · Cost ' + Number(run.actual_cost_usd).toFixed(6) + ' USD' : '') + (run.cost_budget_usd != null ? ' / ' + Number(run.cost_budget_usd).toFixed(2) + ' budget' : '') + '.' };
- };
       if (run.status === 'completed' && ['review','finished'].includes(run.current_stage)) review = true;
       else if (['queued','processing'].includes(run.status)) resume = true;
       else if (run.status === 'uncertain' || run.ai_request_state === 'uncertain') qbExtractionResults[id].message += ' Provider outcome needs Admin reconciliation; it will not be resent.';
