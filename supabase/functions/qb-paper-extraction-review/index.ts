@@ -39,7 +39,7 @@ Deno.serve(async(req)=>{
  if(runError||!run)return reply(404,{error:"Extraction run not found."});
  if(action==="inspect_reconciliation"){
   const [{data:requests,error:requestError},{data:pages,error:pageError}]=await Promise.all([
-   db.from("qb_paper_extraction_requests").select("id,chunk_key,provider,model_name,request_state,provider_request_id,sent_at,responded_at,input_tokens,output_tokens,total_cost_usd,error_message").eq("run_id",runId).order("created_at"),
+   db.from("qb_paper_extraction_requests").select("id,chunk_key,provider,model_name,request_state,provider_request_id,sent_at,responded_at,input_tokens,output_tokens,total_cost_usd,error_message").eq("run_id",runId).order("prepared_at",{ascending:true,nullsFirst:true}).order("id"),
    db.from("qb_paper_extraction_pages").select("page_number,page_state,page_kind,error_message,completed_at").eq("run_id",runId).order("page_number")
   ]);
   if(requestError||pageError)return reply(500,{error:"Could not inspect provider request and page checkpoint history."});
