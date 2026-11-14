@@ -6608,6 +6608,16 @@ async function loadJSZip() {
     document.head.appendChild(s);
   });
 }
+async function loadTesseract() {
+  if (window.Tesseract) return window.Tesseract;
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js';
+    s.onload = () => window.Tesseract ? resolve(window.Tesseract) : reject(new Error('OCR library did not initialize'));
+    s.onerror = () => reject(new Error('Could not load OCR library'));
+    document.head.appendChild(s);
+  });
+}
 async function loadPdfJs() {
   if (window.pdfjsLib) return window.pdfjsLib;
   return new Promise((resolve, reject) => {
@@ -25643,6 +25653,29 @@ function qbRenderSourcePreviewPreservingScroll() {
   render();
   qbRestoreSourcePaperScroll(left, top);
 }
+function qbPreviewLooksCorrupted(text, subject) {
+  const s = String(text || '');
+  const subjectName = String(subject || '').toLowerCase();
+  const devanagariExpected = /sanskrit|hindi/.test(subjectName);
+  const hasDevanagari = /[\u0900-\u097F]/.test(s);
+  const suspicious = (s.match(/[à-ÿ]{2,}|\$[A-Za-z]{2,}|�|Ã.|Â./g) || []).length;
+  const letters = (s.match(/[A-Za-z\u0900-\u097F]/g) || []).length;
+  return suspicious >= 2 || (devanagariExpected && letters > 12 && !hasDevanagari);
+}
+async function qbOcrFirstPage(pdf, subject) {
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 2 });
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  const context = canvas.getContext('2d');
+  await page.render({ canvasContext: context, viewport }).promise;
+  const Tesseract = await loadTesseract();
+  const name = String(subject || '').toLowerCase();
+  const langs = /kannada/.test(name) ? 'kan+eng' : /hindi|sanskrit/.test(name) ? 'hin+eng' : 'eng';
+  const result = await Tesseract.recognize(canvas, langs);
+  return String(result && result.data && result.data.text || '').trim();
+}
 async function qbToggleSourcePaperPreview(id) {
   if (currentRole !== 'Admin' || !sb) return;
   if (qbSourcePreviewId === id) {
@@ -25656,7 +25689,7 @@ async function qbToggleSourcePaperPreview(id) {
   qbSourcePreviewLoading = true; qbSourcePreviewError = '';
   qbRenderSourcePreviewPreservingScroll();
   try {
-    let href = sp.stored_pdf_url && /^https?:/i.test(sp.stored_pdf_url) && !/\/object\/sign\//.test(sp.stored_pdf_url) ? sp.stored_pdf_url : null;
+    let href = sp.stored_pdf_url && /^https?:/i.test(sp.stored_pdf_url) && String(sp.stored_pdf_url).indexOf('/object/sign/') < 0 ? sp.stored_pdf_url : null;
     const storage = qbStorageRef(sp.stored_pdf_url);
     if (storage) {
       const { data, error } = await sb.storage.from(storage.bucket).createSignedUrl(storage.path, 900);
@@ -25664,7 +25697,7 @@ async function qbToggleSourcePaperPreview(id) {
       if (data && data.signedUrl) href = data.signedUrl;
     }
     href = href || sp.source_url;
-    if (!href || !/^https?:\/\//i.test(href)) throw new Error('No accessible PDF is available for preview.');
+    if (!href || !(String(href).startsWith('https://') || String(href).startsWith('http://'))) throw new Error('No accessible PDF is available for preview.');
     if (qbSourcePreviewId !== id) return;
     qbSourcePreviewUrl = href;
     const resp = await fetch(href);
@@ -25683,12 +25716,23 @@ async function qbToggleSourcePaperPreview(id) {
     const lines = Object.keys(byY).map(Number).sort((a,b)=>b-a)
       .map(y => byY[y].sort((a,b)=>a.x-b.x).map(item=>item.text).join(' ').replace(/\s+/g,' ').trim())
       .filter(Boolean);
+    let extracted = lines.slice(0, 12).join('\n').slice(0, 1800);
+    if (qbPreviewLooksCorrupted(extracted, sp.subject_name)) {
+      qbSourcePreviewText = 'Text encoding issue detected. Trying language-aware OCR…';
+      qbRenderSourcePreviewPreservingScroll();
+      extracted = await qbOcrFirstPage(pdf, sp.subject_name);
+    }
     if (qbSourcePreviewId !== id) return;
-    qbSourcePreviewText = lines.length ? lines.slice(0,8).join('\n').slice(0,1400)
-      : 'No selectable text was found on the first page. This may be a scanned or image-based PDF.';
+    if (!extracted || !extracted.trim()) {
+      qbSourcePreviewText = 'No readable text could be extracted from the first page. The PDF may be scanned or use an unsupported font encoding.';
+    } else if (qbPreviewLooksCorrupted(extracted, sp.subject_name)) {
+      qbSourcePreviewText = 'The PDF text encoding is not readable. OCR was attempted, but could not recover reliable text. Please use Open PDF to inspect the paper.';
+    } else {
+      qbSourcePreviewText = extracted.split(/[\r\n]+/).map(x=>x.trim()).filter(Boolean).slice(0,8).join('\n').slice(0,1400);
+    }
   } catch (error) {
     if (qbSourcePreviewId !== id) return;
-    qbSourcePreviewError = 'Could not load paper preview: ' + (error && error.message ? error.message : String(error));
+    qbSourcePreviewError = 'Could not load readable preview: ' + (error && error.message ? error.message : String(error));
   } finally {
     if (qbSourcePreviewId === id) { qbSourcePreviewLoading = false; qbRenderSourcePreviewPreservingScroll(); }
   }
