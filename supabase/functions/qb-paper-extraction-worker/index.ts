@@ -116,6 +116,7 @@ Deno.serve(async(req)=>{
     if(resumeCostError)throw new Error("Could not reconcile saved USD usage before continuing.");
    }else{
     if(old&&["sent","uncertain"].includes(old.request_state)){
+     if(old.request_state==="sent")await db.from("qb_paper_extraction_requests").update({request_state:"uncertain",error_message:"A prior provider send has no durably saved response; automatic retry is blocked."}).eq("id",old.id).eq("request_state","sent");
      await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"uncertain",p_ai_request_state:"uncertain",p_error_message:`Ambiguous provider request ${chunk}; blocked from retry.`});
      throw new Error(`Pages ${first}-${last} have an ambiguous provider request. No retry was made.`);
     }
