@@ -13,7 +13,11 @@ const DEFAULT_BUDGET_USD=2;
 const configuredBudget=Number(Deno.env.get("QB_EXTRACTION_BUDGET_USD")||DEFAULT_BUDGET_USD);
 const BUDGET_USD=Number.isFinite(configuredBudget)&&configuredBudget>0?configuredBudget:DEFAULT_BUDGET_USD;
 const MAX_BATCH_RESERVE_USD=(200000*(PRICE?.input||0)+8192*(PRICE?.output||0))/1_000_000;
-const BATCH=5,MAX_BYTES=20*1024*1024,MAX_PAGES=25;
+const positiveIntSetting=(name:string,fallback:number,hardMax:number)=>{const raw=Deno.env.get(name);if(raw==null||raw.trim()==="")return fallback;const n=Number(raw);if(!Number.isSafeInteger(n)||n<1||n>hardMax)throw new Error(name+" must be a whole number from 1 to "+hardMax+".");return n;};
+const MAX_PDF_MB=positiveIntSetting("QB_EXTRACTION_MAX_PDF_MB",20,100);
+const MAX_PAGES=positiveIntSetting("QB_EXTRACTION_MAX_PAGES",25,200);
+const MAX_BYTES=MAX_PDF_MB*1024*1024;
+const BATCH=5;
 const usd=(n:number)=>Math.round((n+Number.EPSILON)*1e8)/1e8;
 const tokenCost=(input:number,output:number)=>usd(input*(PRICE?.input||0)/1_000_000+output*(PRICE?.output||0)/1_000_000);
 const CORS={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, x-client-info, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS"};
@@ -57,7 +61,7 @@ Deno.serve(async(req)=>{
   if(!path||path.includes(".."))throw new Error("PDF must be stored in the private qb-papers bucket.");
   const {data:file,error:de}=await db.storage.from("qb-papers").download(path);
   if(de||!file)throw new Error("Could not download source PDF.");
-  if(file.size>MAX_BYTES)throw new Error("PDF exceeds the 20 MB extraction limit; no provider request was made.");
+  if(file.size>MAX_BYTES)throw new Error("PDF exceeds the configured ${MAX_PDF_MB} MB extraction limit; no provider request was made.");
   const bytes=new Uint8Array(await file.arrayBuffer());
   if(new TextDecoder().decode(bytes.slice(0,5))!=="%PDF-")throw new Error("Stored file is not a valid PDF.");
   if(run.pdf_sha256) {
@@ -67,7 +71,7 @@ Deno.serve(async(req)=>{
   }
   const pdf=await PDFDocument.load(bytes,{ignoreEncryption:false,updateMetadata:false});
   const total=pdf.getPageCount();
-  if(total<1||total>MAX_PAGES)throw new Error(`PDF has ${total} pages; this worker supports 1-${MAX_PAGES} pages per paper.`);
+  if(total<1||total>MAX_PAGES)throw new Error(`PDF has ${total} pages; the configured limit is ${MAX_PAGES} pages per paper.`);
   const seed=await db.from("qb_paper_extraction_pages").upsert(Array.from({length:total},(_,i)=>({run_id:runId,page_number:i+1,page_state:"pending",page_kind:"unknown"})),{onConflict:"run_id,page_number",ignoreDuplicates:true});
   if(seed.error)throw new Error("Could not initialise page checkpoints.");
   const {data:requests,error:qe}=await db.from("qb_paper_extraction_requests").select("id,chunk_key,request_state,response_payload,input_tokens,output_tokens,input_cost_usd,output_cost_usd,total_cost_usd").eq("run_id",runId);
