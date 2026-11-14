@@ -44,8 +44,7 @@ Deno.serve(async(req)=>{
   if(file.size>MAX_BYTES)throw new Error("PDF exceeds the 20 MB extraction limit; no provider request was made.");
   const bytes=new Uint8Array(await file.arrayBuffer());
   if(new TextDecoder().decode(bytes.slice(0,5))!=="%PDF-")throw new Error("Stored file is not a valid PDF.");
-  if(run.pdf_sha256&&run.pdf_sha256!==await hash([...bytes].map(x=>String.fromCharCode(x)).join(""))) {
-    // Recompute over raw bytes; do not compare a text encoding of binary bytes.
+  if(run.pdf_sha256) {
     const digest=await crypto.subtle.digest("SHA-256",bytes);
     const actual=[...new Uint8Array(digest)].map(x=>x.toString(16).padStart(2,"0")).join("");
     if(run.pdf_sha256!==actual)throw new Error("PDF checksum changed after preflight.");
