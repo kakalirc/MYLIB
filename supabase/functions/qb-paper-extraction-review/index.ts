@@ -15,6 +15,18 @@ Deno.serve(async(req)=>{
  if(profileError||profile?.role!=="Admin"||profile.archived===true)return reply(403,{error:"Only an active Admin can review extracted papers."});
  let body:any;try{body=await req.json();}catch{return reply(400,{error:"Invalid request JSON."});}
  const action=String(body.action||""),runId=String(body.run_id||"");
+ if(action==="get_settings"||action==="save_settings"){
+  const {data:existing,error:settingsError}=await db.from("qb_paper_extraction_settings").select("max_pdf_mb,max_pages,budget_usd").eq("id",1).maybeSingle();
+  if(settingsError||!existing)return reply(500,{error:"Question Bank extraction settings are unavailable. Apply the extraction settings migration first."});
+  if(action==="get_settings")return reply(200,{ok:true,settings:{max_pdf_mb:existing.max_pdf_mb,max_pages:existing.max_pages,budget_usd:Number(existing.budget_usd)}});
+  const next=body.settings||{},maxPdfMb=Number(next.max_pdf_mb),maxPages=Number(next.max_pages),budgetUsd=Number(next.budget_usd);
+  if(!Number.isInteger(maxPdfMb)||maxPdfMb<1||maxPdfMb>100)return reply(400,{error:"PDF size must be a whole number from 1 to 100 MB."});
+  if(!Number.isInteger(maxPages)||maxPages<1||maxPages>200)return reply(400,{error:"Page limit must be a whole number from 1 to 200."});
+  if(!Number.isFinite(budgetUsd)||budgetUsd<=0||budgetUsd>1000)return reply(400,{error:"Budget must be greater than $0 and no more than $1,000 USD."});
+  const {data:saved,error:saveError}=await db.from("qb_paper_extraction_settings").update({max_pdf_mb:maxPdfMb,max_pages:maxPages,budget_usd:budgetUsd,updated_at:new Date().toISOString(),updated_by:auth.user.id}).eq("id",1).select("max_pdf_mb,max_pages,budget_usd").single();
+  if(saveError||!saved)return reply(500,{error:"Could not save extraction settings."});
+  return reply(200,{ok:true,settings:{max_pdf_mb:saved.max_pdf_mb,max_pages:saved.max_pages,budget_usd:Number(saved.budget_usd)}});
+ }
  if(action==="latest"){
   const sourceId=String(body.source_paper_id||"");
   if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sourceId))return reply(400,{error:"Valid source_paper_id required."});
