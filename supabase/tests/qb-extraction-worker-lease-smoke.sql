@@ -14,6 +14,16 @@ begin
  if not has_function_privilege('service_role','public.qb_renew_extraction_worker(uuid,text,integer)','EXECUTE') then
    raise exception 'service_role must be able to renew extraction leases';
  end if;
+ if to_regprocedure('public.qb_fail_extraction_worker_if_owner(uuid,text,text)') is null then
+   raise exception 'Missing qb_fail_extraction_worker_if_owner';
+ end if;
+ if has_function_privilege('anon','public.qb_fail_extraction_worker_if_owner(uuid,text,text)','EXECUTE')
+    or has_function_privilege('authenticated','public.qb_fail_extraction_worker_if_owner(uuid,text,text)','EXECUTE') then
+   raise exception 'Browser roles must not fail extraction runs through the worker guard';
+ end if;
+ if not has_function_privilege('service_role','public.qb_fail_extraction_worker_if_owner(uuid,text,text)','EXECUTE') then
+   raise exception 'service_role must be able to use the worker failure guard';
+ end if;
  if to_regprocedure('public.qb_release_extraction_worker(uuid,text)') is null then
    raise exception 'Missing qb_release_extraction_worker';
  end if;
