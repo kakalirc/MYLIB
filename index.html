@@ -25660,14 +25660,45 @@ async function qbRunSourcePaperExtraction(id) {
   const state = qbExtractionResults[id];
   if (currentRole !== 'Admin' || !state?.runId || qbExtractionBusyIds.has(id)) return;
   qbExtractionBusyIds.add(id);
-  state.loading = true; state.message = 'Extracting the PDF in checkpointed page batches…';
+  state.loading = true; state.message = 'Extracting the PDF in checkpointed two-page batches…';
   qbRenderSourcePreviewPreservingScroll();
   try {
-    const result = await qbExtractionPost('qb-paper-extraction-worker', { run_id: state.runId });
-    qbExtractionResults[id] = { ...state, ok: true, loading: false, stage: 'review', message: 'Extraction complete. ' + result.pages_total + ' pages processed and ' + result.staged_items + ' items staged. Estimated API cost: ' + Number(result.actual_cost_usd || 0).toFixed(6) + ' USD. Nothing has been published yet.', pages: result.pages_total, staged: result.staged_items, inputTokens: result.input_tokens, outputTokens: result.output_tokens, actualCostUsd: result.actual_cost_usd, costBudgetUsd: result.cost_budget_usd, costCurrency: 'USD' };
+    let result = null;
+    let batches = 0;
+    do {
+      result = await qbExtractionPost('qb-paper-extraction-worker', { run_id: state.runId });
+      batches++;
+      if (result.status === 'processing') {
+        qbExtractionResults[id] = {
+          ...state, ok: true, loading: true, stage: 'page_extraction',
+          pages: result.pages_total, pagesCompleted: result.pages_completed,
+          staged: result.staged_items, inputTokens: result.input_tokens,
+          outputTokens: result.output_tokens, actualCostUsd: result.actual_cost_usd,
+          costBudgetUsd: result.cost_budget_usd, costCurrency: 'USD',
+          message: 'Batch ' + batches + ' saved · ' + result.pages_completed + ' of ' + result.pages_total
+            + ' pages completed · ' + Number(result.actual_cost_usd || 0).toFixed(6) + ' USD. Continuing safely…'
+        };
+        qbRenderSourcePreviewPreservingScroll();
+      }
+      if (batches > 100) throw new Error('Safety stop: extraction exceeded the maximum 100 two-page batches. Check the saved run before resuming.');
+    } while (result.status === 'processing');
+
+    if (result.status !== 'completed') throw new Error('Worker returned an unexpected state. Check the saved extraction run before retrying.');
+    qbExtractionResults[id] = {
+      ...state, ok: true, loading: false, stage: 'review',
+      message: 'Extraction complete. ' + result.pages_total + ' pages processed and ' + result.staged_items
+        + ' items staged. Actual API cost: ' + Number(result.actual_cost_usd || 0).toFixed(6)
+        + ' USD. Nothing has been published yet.',
+      pages: result.pages_total, pagesCompleted: result.pages_total, staged: result.staged_items,
+      inputTokens: result.input_tokens, outputTokens: result.output_tokens,
+      actualCostUsd: result.actual_cost_usd, costBudgetUsd: result.cost_budget_usd, costCurrency: 'USD'
+    };
     await qbLoadExtractionReview(id, true);
   } catch (error) {
-    qbExtractionResults[id] = { ...state, ok: false, loading: false, message: error.message || 'Extraction failed. Check the run before attempting any retry.' };
+    qbExtractionResults[id] = {
+      ...state, ok: false, loading: false,
+      message: error.message || 'Extraction stopped. Check the saved run and provider request history before any retry.'
+    };
   } finally {
     qbExtractionBusyIds.delete(id);
     qbRenderSourcePreviewPreservingScroll();
