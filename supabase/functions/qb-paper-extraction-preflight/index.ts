@@ -20,9 +20,6 @@ function positiveIntSetting(name: string, fallback: number, hardMax: number): nu
   }
   return value;
 }
-const MAX_PDF_MB = positiveIntSetting("QB_EXTRACTION_MAX_PDF_MB", 20, 100);
-const MAX_PAGES = positiveIntSetting("QB_EXTRACTION_MAX_PAGES", 25, 200);
-const MAX_PDF_BYTES = MAX_PDF_MB * 1024 * 1024;
 
 function storageObject(stored: string): { bucket: string; path: string } | null {
   const value = String(stored || "").trim();
@@ -64,6 +61,11 @@ Deno.serve(async (req) => {
   if (profileError || profile?.role !== "Admin" || profile?.archived === true) {
     return reply(403, { error: "Only an active Admin can prepare a paper for extraction." });
   }
+  const { data: extractionSettings, error: settingsError } = await admin.from("qb_paper_extraction_settings").select("max_pdf_mb,max_pages").eq("id", 1).maybeSingle();
+  if (settingsError || !extractionSettings) return reply(500, { error: "Question Bank extraction settings are unavailable. Apply the extraction settings migration first." });
+  const MAX_PDF_MB = Number(extractionSettings.max_pdf_mb), MAX_PAGES = Number(extractionSettings.max_pages);
+  if (!Number.isInteger(MAX_PDF_MB) || MAX_PDF_MB < 1 || MAX_PDF_MB > 100 || !Number.isInteger(MAX_PAGES) || MAX_PAGES < 1 || MAX_PAGES > 200) return reply(500, { error: "Question Bank extraction settings are invalid. No AI request was made." });
+  const MAX_PDF_BYTES = MAX_PDF_MB * 1024 * 1024;
 
   let body: Record<string, unknown>;
   try { body = await req.json(); } catch { return reply(400, { error: "Invalid request." }); }
