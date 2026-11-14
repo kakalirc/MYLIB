@@ -255,6 +255,13 @@ begin
     raise exception 'Terminal extraction runs are immutable; reconcile them through a separate Admin workflow';
   end if;
 
+  if v_run.status = 'processing' and p_status = 'queued' then
+    raise exception 'An extraction run cannot move backwards from processing to queued';
+  end if;
+  if v_run.status = 'queued' and p_status = 'completed' then
+    raise exception 'A queued extraction run cannot complete without entering processing';
+  end if;
+
   if v_run.ai_request_state = 'not_sent' and p_ai_request_state = 'responded' then
     raise exception 'A provider response cannot be recorded before the request is marked sent';
   end if;
