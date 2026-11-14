@@ -39,7 +39,7 @@ begin
  update public.qb_paper_extraction_requests set request_state='sent',sent_at=now() where id=v_req;
  v_claim:=public.qb_set_extraction_worker_state(v_run,'worker-two','processing','sent',null);
  if coalesce((v_claim->>'ok')::boolean,false) is not true then raise exception 'Initial sent transition failed: %',v_claim; end if;
- update public.qb_paper_extraction_requests set request_state='responded',response_payload='{\"items\":[]}'::jsonb,responded_at=now() where id=v_req;
+ update public.qb_paper_extraction_requests set request_state='responded',response_payload='{"items":[]}'::jsonb,responded_at=now() where id=v_req;
  v_claim:=public.qb_set_extraction_worker_state(v_run,'worker-two','processing','responded',null);
  if coalesce((v_claim->>'ok')::boolean,false) is not true then raise exception 'Durable response transition failed: %',v_claim; end if;
  insert into public.qb_paper_extraction_requests(run_id,chunk_key,provider,model_name,idempotency_key,request_state,request_payload,sent_at)
