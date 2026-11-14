@@ -12,8 +12,9 @@ const PRICING:Record<string,{input:number;output:number;source:string}>={
 const PRICE=PRICING[MODEL];
 let BUDGET_USD=2;
 let MAX_PDF_MB=20, MAX_PAGES=25, MAX_BYTES=20*1024*1024;
-const MAX_BATCH_RESERVE_USD=(200000*(PRICE?.input||0)+8192*(PRICE?.output||0))/1_000_000;
-const BATCH=5;
+const MAX_OUTPUT_TOKENS=16000;
+const MAX_BATCH_RESERVE_USD=(200000*(PRICE?.input||0)+MAX_OUTPUT_TOKENS*(PRICE?.output||0))/1_000_000;
+const BATCH=2;
 const usd=(n:number)=>Math.round((n+Number.EPSILON)*1e8)/1e8;
 const tokenCost=(input:number,output:number)=>usd(input*(PRICE?.input||0)/1_000_000+output*(PRICE?.output||0)/1_000_000);
 const CORS={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, x-client-info, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS"};
@@ -102,7 +103,7 @@ Deno.serve(async(req)=>{
   for(let first=1;first<=total;first+=BATCH){
    const {data:batchLease,error:batchLeaseError}=await db.rpc("qb_renew_extraction_worker",{p_run_id:runId,p_lease_owner:owner,p_lease_seconds:900});
    if(batchLeaseError||batchLease!==true)throw new Error("Worker lease was lost before the next batch; this worker stopped without sending another provider request.");
-   const last=Math.min(total,first+BATCH-1),chunk=`pages:${first}-${last}:v1`;
+   const last=Math.min(total,first+BATCH-1),chunk=`pages:${first}-${last}:v2`;
    const old:any=byChunk.get(chunk);
    let parsed:any;
    if(old?.request_state==="responded"){
@@ -136,7 +137,7 @@ Deno.serve(async(req)=>{
     let response:Response;
     let rawBody:string;
     try{
-     response=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":ai.api_key,"anthropic-version":"2023-06-01"},body:JSON.stringify({model:MODEL,max_tokens:8192,system:"Transcribe faithfully. Accuracy is more important than completeness. Never infer unclear text.",messages:[{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:b64(await part.save({useObjectStreams:false}))}},{type:"text",text:prompt(first,last)}]}]}),signal:AbortSignal.timeout(240000)});
+     response=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":ai.api_key,"anthropic-version":"2023-06-01"},body:JSON.stringify({model:MODEL,max_tokens:MAX_OUTPUT_TOKENS,system:"Transcribe faithfully. Accuracy is more important than completeness. Never infer unclear text.",messages:[{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:b64(await part.save({useObjectStreams:false}))}},{type:"text",text:prompt(first,last)}]}]}),signal:AbortSignal.timeout(240000)});
      rawBody=await response.text();
     }catch(e){
      const msg=String((e as Error).message||e);
