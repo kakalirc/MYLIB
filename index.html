@@ -1782,7 +1782,20 @@ function aiAccessCardHtml() {
       </h2>${body}
     </div>`;
 }
-let aiKeyMsg = '';     // result of the last AI Settings save, shown under the key box
+let qbExtractionSettings = { max_pdf_mb: 20, max_pages: 25, budget_usd: 2 };
+let qbExtractionSettingsMsg = '';
+async function loadQbExtractionSettings() { try { const r = await qbExtractionPost('qb-paper-extraction-review', { action: 'get_settings' }); if (r.settings) qbExtractionSettings = r.settings; } catch (e) { qbExtractionSettingsMsg = e.message || 'Could not load extraction settings.'; } }
+async function saveQbExtractionSettings() {
+ const maxPdfMb=Number(document.getElementById('qbExtractionMaxPdfMb')?.value), maxPages=Number(document.getElementById('qbExtractionMaxPages')?.value), budgetUsd=Number(document.getElementById('qbExtractionBudgetUsd')?.value);
+ if(!Number.isInteger(maxPdfMb)||maxPdfMb<1||maxPdfMb>100){qbExtractionSettingsMsg='PDF size must be a whole number from 1 to 100 MB.';render();return;}
+ if(!Number.isInteger(maxPages)||maxPages<1||maxPages>200){qbExtractionSettingsMsg='Page limit must be a whole number from 1 to 200.';render();return;}
+ if(!Number.isFinite(budgetUsd)||budgetUsd<0.01||budgetUsd>1000){qbExtractionSettingsMsg='Budget must be at least $0.01 and no more than $1,000.';render();return;}
+ qbExtractionSettingsMsg='Saving…';render();
+ try{const r=await qbExtractionPost('qb-paper-extraction-review',{action:'save_settings',settings:{max_pdf_mb:maxPdfMb,max_pages:maxPages,budget_usd:budgetUsd}});qbExtractionSettings=r.settings;qbExtractionSettingsMsg='Saved ✓';}catch(e){qbExtractionSettingsMsg=e.message||'Could not save extraction settings.';}
+ render();
+}
+function qbExtractionSettingsHtml(){const s=qbExtractionSettings||{max_pdf_mb:20,max_pages:25,budget_usd:2};return '<div style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px"><b>Question Bank PDF extraction limits</b><div class="hint">These settings apply to every new extraction and are enforced by the server before any AI request. Costs are tracked in USD.</div><div class="row-form" style="align-items:flex-end;gap:12px;flex-wrap:wrap"><label>Maximum PDF size (MB)<input id="qbExtractionMaxPdfMb" type="number" min="1" max="100" step="1" value="'+(Number(s.max_pdf_mb)||20)+'" style="width:110px;display:block"></label><label>Maximum PDF pages<input id="qbExtractionMaxPages" type="number" min="1" max="200" step="1" value="'+(Number(s.max_pages)||25)+'" style="width:110px;display:block"></label><label>Maximum spend per paper (USD)<input id="qbExtractionBudgetUsd" type="number" min="0.01" max="1000" step="0.01" value="'+(Number(s.budget_usd)||2)+'" style="width:150px;display:block"></label><button class="btn-small btn-primary" onclick="saveQbExtractionSettings()">Save extraction limits</button></div><div class="hint">Allowed ranges: 1–100 MB, 1–200 pages, and $0.01–$1,000 per paper. Defaults: 20 MB, 25 pages and $2.00.</div>'+(qbExtractionSettingsMsg?'<div class="hint" style="color:var(--brick)">'+esc(qbExtractionSettingsMsg)+'</div>':'')+'</div>';}
+let aiKeyMsg = '';    // result of the last AI Settings save, shown under the key box
 let aiApiKey = '';    // the key itself: loaded for admins only (AI Settings card)
 let aiKeySet = false;  // whether a key is saved; AI calls go through the ai-proxy Edge Function, which holds it
 let aiMasterEnabled = false;
@@ -2144,6 +2157,9 @@ let qbSourceEditId = '';
 let qbSourceMetaMsg = '';
 let qbSourceReviews = [];       // Admin-visible status history across all submissions
 let qbSourceLoading = false;
+let qbExtractionBusyIds = new Set();
+let qbExtractionResults = {};
+let qbExtractionReviewRows = {};
 let qbSourceFilter = { boardId: '', schoolId: '', gradeId: '', subject: '', year: '' };
 let qbSchools = [];
 let qbSourceType = 'board';
@@ -11931,6 +11947,7 @@ async function loadAiSettings() {
       const {data,error}=await sb.from('ai_settings').select('api_key,master_enabled').maybeSingle();
       if(!error&&data){ if (currentRole === 'Admin') aiApiKey=data.api_key||''; aiKeySet=!!data.api_key; aiMasterEnabled=data.master_enabled!==false; }
     }
+    if (currentRole === 'Admin') await loadQbExtractionSettings();
     if (currentRole === 'Admin') {
       // Separate reads (run together): before SQL 50 / 51 these columns don't exist and the read just fails quietly.
       const [c, ra] = await Promise.all([
@@ -17248,7 +17265,7 @@ function renderWixBookings() {
 // Admin → AI: AI on/off, key and cost prices; AI usage with estimated cost.
 function renderAiAdmin() {
   return `
-    <div class="card"><h2>AI Settings ${helpBtn('ai-settings')}</h2><div class="hint" style="margin-bottom:12px">AI features use Claude to improve messages, generate summaries and answer student questions.</div><label style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><input type="checkbox" id="aiMasterToggle" ${aiMasterEnabled?'checked':''} onchange="(async()=>{const k=document.getElementById('aiKeyInput').value.trim()||aiApiKey;await saveAiSettings(k,this.checked);render();})()"> <b>AI enabled (master switch)</b></label><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="password" autocomplete="new-password" id="aiKeyInput" placeholder="sk-ant-..." value="${esc(aiApiKey)}" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:monospace"><button class="btn-small btn-primary" onclick="(async()=>{const k=document.getElementById('aiKeyInput').value.trim();const en=document.getElementById('aiMasterToggle').checked;await saveAiSettings(k,en);render();})()">Save</button></div>${aiKeyMsg?`<div class="hint" style="margin-top:8px;color:${aiKeyMsg==='Saved.'?'var(--forest)':'var(--brick)'}">${esc(aiKeyMsg)}</div>`:''}<div class="hint" style="margin-top:8px">Get key at <b>console.anthropic.com</b>. See real spend there under Usage / Cost.</div>${aiCostSettingsHtml()}</div>
+    <div class="card"><h2>AI Settings ${helpBtn('ai-settings')}</h2><div class="hint" style="margin-bottom:12px">AI features use Claude to improve messages, generate summaries and answer student questions.</div><label style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><input type="checkbox" id="aiMasterToggle" ${aiMasterEnabled?'checked':''} onchange="(async()=>{const k=document.getElementById('aiKeyInput').value.trim()||aiApiKey;await saveAiSettings(k,this.checked);render();})()"> <b>AI enabled (master switch)</b></label><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="password" autocomplete="new-password" id="aiKeyInput" placeholder="sk-ant-..." value="${esc(aiApiKey)}" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:monospace"><button class="btn-small btn-primary" onclick="(async()=>{const k=document.getElementById('aiKeyInput').value.trim();const en=document.getElementById('aiMasterToggle').checked;await saveAiSettings(k,en);render();})()">Save</button></div>${aiKeyMsg?`<div class="hint" style="margin-top:8px;color:${aiKeyMsg==='Saved.'?'var(--forest)':'var(--brick)'}">${esc(aiKeyMsg)}</div>`:''}<div class="hint" style="margin-top:8px">Get key at <b>console.anthropic.com</b>. See real spend there under Usage / Cost.</div>${aiCostSettingsHtml()}${qbExtractionSettingsHtml()}</div>
     ${aiAccessCardHtml()}
 
 
@@ -25605,6 +25622,261 @@ async function qbAddSection(i) {
 function qbTeacherTeaches(subject, gradeId) {
   return data.subjects.some(s => s.teacherId === currentLinkedId && qbSameSubject(s.name, subject) && gradesForCategory(s.category).includes(gradeId));
 }
+async function qbExtractionPost(functionName, payload) {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) throw new Error('Your session has expired. Please sign in again.');
+  const response = await fetch(SUPABASE_URL + '/functions/v1/' + functionName, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + session.access_token },
+    body: JSON.stringify(payload)
+  });
+  let result = {};
+  try { result = await response.json(); } catch (_) {}
+  if (!response.ok || result.ok !== true) throw new Error(result.message || result.error || 'The extraction service could not complete this action.');
+  return result;
+}
+async function qbPrepareSourcePaperExtraction(id) {
+  if (currentRole !== 'Admin' || qbExtractionBusyIds.has(id)) return;
+  const paper = qbSourcePapers.find(row => row.id === id && row.status === 'published');
+  if (!paper) return;
+  if (!paper.stored_pdf_url) {
+    qbExtractionResults[id] = { ok: false, message: 'No PDF is stored in the approved private bucket. Upload or repair the stored PDF before extraction.' };
+    qbRenderSourcePreviewPreservingScroll(); return;
+  }
+  qbExtractionBusyIds.add(id);
+  qbExtractionResults[id] = { loading: true, message: 'Checking extraction eligibility…' };
+  qbRenderSourcePreviewPreservingScroll();
+  try {
+    const result = await qbExtractionPost('qb-paper-extraction-preflight', { source_paper_id: id });
+    qbExtractionResults[id] = { ok: true, stage: 'prepared', message: 'Safety checks passed. Ready to start AI extraction.', runId: result.run_id || '', linkedCount: result.linked_question_count || 0, metadataMatches: Array.isArray(result.possible_metadata_matches) ? result.possible_metadata_matches.length : 0 };
+  } catch (error) {
+    qbExtractionResults[id] = { ok: false, message: error.message || 'Could not verify extraction eligibility.' };
+  } finally {
+    qbExtractionBusyIds.delete(id);
+    qbRenderSourcePreviewPreservingScroll();
+  }
+}
+async function qbRunSourcePaperExtraction(id) {
+  const state = qbExtractionResults[id];
+  if (currentRole !== 'Admin' || !state?.runId || qbExtractionBusyIds.has(id)) return;
+  qbExtractionBusyIds.add(id);
+  state.loading = true; state.message = 'Extracting the PDF in checkpointed two-page batches…';
+  qbRenderSourcePreviewPreservingScroll();
+  try {
+    let result = null;
+    let batches = 0;
+    do {
+      result = await qbExtractionPost('qb-paper-extraction-worker', { run_id: state.runId });
+      batches++;
+      if (result.status === 'processing') {
+        qbExtractionResults[id] = {
+          ...state, ok: true, loading: true, stage: 'page_extraction',
+          pages: result.pages_total, pagesCompleted: result.pages_completed,
+          staged: result.staged_items, inputTokens: result.input_tokens,
+          outputTokens: result.output_tokens, actualCostUsd: result.actual_cost_usd,
+          costBudgetUsd: result.cost_budget_usd, costCurrency: 'USD',
+          message: 'Batch ' + batches + ' saved · ' + result.pages_completed + ' of ' + result.pages_total
+            + ' pages completed · ' + Number(result.actual_cost_usd || 0).toFixed(6) + ' USD. Continuing safely…'
+        };
+        qbRenderSourcePreviewPreservingScroll();
+      }
+      if (batches > 100) throw new Error('Safety stop: extraction exceeded the maximum 100 two-page batches. Check the saved run before resuming.');
+    } while (result.status === 'processing');
+
+    if (result.status !== 'completed') throw new Error('Worker returned an unexpected state. Check the saved extraction run before retrying.');
+    qbExtractionResults[id] = {
+      ...state, ok: true, loading: false, stage: 'review',
+      message: 'Extraction complete. ' + result.pages_total + ' pages processed and ' + result.staged_items
+        + ' items staged. Actual API cost: ' + Number(result.actual_cost_usd || 0).toFixed(6)
+        + ' USD. Nothing has been published yet.',
+      pages: result.pages_total, pagesCompleted: result.pages_total, staged: result.staged_items,
+      inputTokens: result.input_tokens, outputTokens: result.output_tokens,
+      actualCostUsd: result.actual_cost_usd, costBudgetUsd: result.cost_budget_usd, costCurrency: 'USD'
+    };
+  } catch (error) {
+    qbExtractionResults[id] = {
+      ...state, ok: false, loading: false,
+      message: error.message || 'Extraction stopped. Check the saved run and provider request history before any retry.'
+    };
+  } finally {
+    qbExtractionBusyIds.delete(id);
+    qbRenderSourcePreviewPreservingScroll();
+    if (qbExtractionResults[id]?.stage === 'review' && qbExtractionResults[id]?.ok) {
+      await qbLoadExtractionReview(id, true);
+    }
+  }
+}
+async function qbLoadExtractionReview(id, quiet) {
+  const state = qbExtractionResults[id];
+  if (!state?.runId || qbExtractionBusyIds.has(id)) return;
+  qbExtractionBusyIds.add(id);
+  if (!quiet) { state.loading = true; state.message = 'Loading staged questions for review…'; qbRenderSourcePreviewPreservingScroll(); }
+  try {
+    const result = await qbExtractionPost('qb-paper-extraction-review', { action: 'list', run_id: state.runId });
+    qbExtractionReviewRows[id] = result.items || [];
+    qbExtractionResults[id] = { ...state, loading: false, stage: result.run.current_stage, reviewSummary: result.summary, reviewOpen: true, message: 'Review each extracted item. Only approved questions and passages can be published.' };
+  } catch (error) {
+    qbExtractionResults[id] = { ...state, loading: false, ok: false, message: error.message || 'Could not load review records.' };
+  } finally {
+    qbExtractionBusyIds.delete(id);
+    qbRenderSourcePreviewPreservingScroll();
+  }
+}
+async function qbCheckSourcePaperExtraction(id) {
+  if (currentRole !== 'Admin' || qbExtractionBusyIds.has(id)) return;
+  qbExtractionBusyIds.add(id);
+  qbExtractionResults[id] = { loading: true, ok: true, message: 'Checking saved extraction history…' };
+  qbRenderSourcePreviewPreservingScroll();
+  let resume = false, review = false;
+  try {
+    const result = await qbExtractionPost('qb-paper-extraction-review', { action: 'latest', source_paper_id: id });
+    if (!result.found || !result.run) {
+      qbExtractionResults[id] = { ok: true, stage: 'none', message: 'No previous extraction run exists for this paper.' };
+    } else {
+      const run = result.run;
+      const isUncertain = run.status === 'uncertain' || run.ai_request_state === 'uncertain';
+      const alreadyReconciled = !!run.admin_reconciled_at;
+      qbExtractionResults[id] = { ok: true, runId: run.id, stage: run.current_stage, runStatus: run.status, aiRequestState: run.ai_request_state, reconciled: alreadyReconciled, reconciliationRequired: isUncertain && !alreadyReconciled, message: 'Saved extraction run: ' + run.status + ' · ' + run.current_stage + (run.actual_cost_usd != null ? ' · Cost ' + Number(run.actual_cost_usd).toFixed(6) + ' USD' : '') + (run.cost_budget_usd != null ? ' / ' + Number(run.cost_budget_usd).toFixed(2) + ' budget' : '') + '.' };
+      if (isUncertain && alreadyReconciled) qbExtractionResults[id].message += ' This uncertain attempt was explicitly reconciled; a new run may be prepared.';
+      else if (isUncertain) qbExtractionResults[id].message += ' Provider outcome needs Admin reconciliation; it will not be resent.';
+      else if (run.status === 'completed' && ['review','finished'].includes(run.current_stage)) review = true;
+      else if (['queued','processing'].includes(run.status)) resume = true;
+      else if (run.status === 'failed' && run.ai_request_state === 'not_sent') qbExtractionResults[id].message += ' No provider request was sent; a new preflight attempt is safe.';
+    }
+  } catch (error) {
+    qbExtractionResults[id] = { ok: false, message: error.message || 'Could not load extraction history.' };
+  } finally {
+    qbExtractionBusyIds.delete(id);
+    qbRenderSourcePreviewPreservingScroll();
+  }
+  if (review) await qbLoadExtractionReview(id, true);
+  else if (resume) await qbRunSourcePaperExtraction(id);
+}
+async function qbInspectExtractionReconciliation(id) {
+  const state = qbExtractionResults[id];
+  if (!state?.runId || qbExtractionBusyIds.has(id)) return;
+  qbExtractionBusyIds.add(id); state.loading = true; state.message = 'Inspecting saved provider requests and page checkpoints…';
+  qbRenderSourcePreviewPreservingScroll();
+  try {
+    const result = await qbExtractionPost('qb-paper-extraction-review', { action: 'inspect_reconciliation', run_id: state.runId });
+    qbExtractionResults[id] = { ...state, loading: false, reconciliationRequired: !!result.reconciliation_required, reconciliationRequests: result.requests || [], reconciliationPages: result.pages || [], reconciliationOpen: true,
+      message: 'Inspection complete · ' + (result.requests || []).length + ' provider request(s) · ' + (result.pages || []).length + ' page checkpoint(s). ' + (result.reconciliation_required ? 'At least one provider request has an ambiguous outcome.' : 'No ambiguous provider request was found.') };
+  } catch (error) { qbExtractionResults[id] = { ...state, loading: false, ok: false, message: error.message || 'Could not inspect provider reconciliation details.' }; }
+  finally { qbExtractionBusyIds.delete(id); qbRenderSourcePreviewPreservingScroll(); }
+}
+async function qbReconcileUncertainExtraction(id) {
+  const state = qbExtractionResults[id];
+  if (!state?.runId || !state.reconciliationRequired || qbExtractionBusyIds.has(id)) return;
+  const note = window.prompt('Audit note (at least 15 characters): explain why the previous provider outcome cannot be established and why you are authorising a fresh extraction.');
+  if (note === null) return;
+  if (note.trim().length < 15) { alert('Please enter an audit note of at least 15 characters.'); return; }
+  if (!window.confirm('The provider outcome remains UNKNOWN. A new extraction may cause a duplicate AI charge if the earlier request actually completed. The original run and request history will be preserved. Authorise reconciliation and release this paper for a NEW run?')) return;
+  qbExtractionBusyIds.add(id); state.loading = true; state.message = 'Saving Admin reconciliation…'; qbRenderSourcePreviewPreservingScroll();
+  try {
+    const result = await qbExtractionPost('qb-paper-extraction-review', { action: 'reconcile_uncertain', run_id: state.runId, confirm_provider_outcome_unknown: true, reconciliation_note: note.trim() });
+    qbExtractionResults[id] = { ...state, loading: false, ok: true, reconciled: true, reconciliationRequired: false, message: 'Previous run explicitly reconciled. Its uncertain request and audit history are preserved. You may now prepare a NEW extraction run. ' + result.warning };
+  } catch (error) { qbExtractionResults[id] = { ...state, loading: false, ok: false, message: error.message || 'Admin reconciliation failed. No new extraction was started.' }; }
+  finally { qbExtractionBusyIds.delete(id); qbRenderSourcePreviewPreservingScroll(); }
+}
+function qbExtractionReconciliationHtml(id) {
+  const state = qbExtractionResults[id];
+  if (!state?.reconciliationOpen) return '';
+  const pages = state.reconciliationPages || [];
+  const requests = state.reconciliationRequests || [];
+  const pageHtml = pages.map(p => {
+    return '<span style="display:inline-block;margin:2px 5px 2px 0;padding:3px 7px;border:1px solid var(--line);border-radius:6px;font-size:11px">Page '
+      + esc(p.page_number) + ': ' + esc(p.page_state) + '</span>';
+  }).join('');
+  const requestHtml = requests.map(r => {
+    const cost = r.total_cost_usd == null ? 'unknown' : Number(r.total_cost_usd).toFixed(6);
+    return '<div style="border:1px solid var(--line);border-radius:7px;padding:8px;margin:6px 0">'
+      + '<b>' + esc(r.chunk_key) + '</b> · ' + esc(r.provider) + ' · ' + esc(r.request_state)
+      + '<div class="hint">Request ID: ' + esc(r.provider_request_id || 'not returned')
+      + ' · Sent: ' + esc(r.sent_at || 'unknown')
+      + ' · Response saved: ' + (r.responded_at ? 'yes' : 'no')
+      + ' · Tokens: ' + esc(r.input_tokens || 0) + ' in / ' + esc(r.output_tokens || 0)
+      + ' out · Cost: $' + esc(cost) + '</div>'
+      + (r.error_message ? '<div class="hint" style="color:var(--brick)">' + esc(r.error_message) + '</div>' : '')
+      + '</div>';
+  }).join('');
+  const action = state.reconciliationRequired
+    ? '<div class="hint" style="margin:8px 0;color:var(--brick)">The outcome is unknown. Authorising reconciliation accepts the possibility of a duplicate provider charge; it does not claim the earlier request was never sent.</div>'
+      + '<button type="button" class="btn-small btn-primary" onclick="qbReconcileUncertainExtraction(\'' + id + '\')" '
+      + (state.loading ? 'disabled' : '') + '>I understand — reconcile and allow a new run</button>'
+    : '<div class="hint" style="margin-top:8px">No ambiguous provider request is currently flagged.</div>';
+  return '<div style="margin:8px 0;padding:10px;border:1px solid var(--line);border-radius:9px">'
+    + '<b>Provider reconciliation details</b>'
+    + '<div class="hint" style="margin:5px 0">Page checkpoints</div>'
+    + (pageHtml || '<span class="hint">No page checkpoints recorded.</span>')
+    + '<div class="hint" style="margin:8px 0 4px">Provider requests</div>'
+    + (requestHtml || '<span class="hint">No provider requests recorded.</span>')
+    + action + '</div>';
+}
+async function qbSetExtractionReview(id, itemId, reviewState) {
+  const state = qbExtractionResults[id];
+  if (!state?.runId || !['approved', 'rejected'].includes(reviewState)) return;
+  try {
+    await qbExtractionPost('qb-paper-extraction-review', { action: 'review', run_id: state.runId, item_id: itemId, review_state: reviewState });
+    await qbLoadExtractionReview(id, true);
+  } catch (error) {
+    qbExtractionResults[id] = { ...state, ok: false, message: error.message || 'Could not save the review decision.' };
+    qbRenderSourcePreviewPreservingScroll();
+  }
+}
+async function qbEditExtractionItem(id, itemId) {
+  const rows = qbExtractionReviewRows[id] || [];
+  const item = rows.find(x => x.id === itemId);
+  if (!item) return;
+  const field = item.item_kind === 'question' ? 'question_text' : item.item_kind === 'passage' ? 'passage_text' : 'text';
+  const current = String(item.payload?.[field] || '');
+  const updated = window.prompt('Edit ' + field.replace(/_/g, ' ') + ':', current);
+  if (updated === null || updated === current) return;
+  const payload = { ...(item.payload || {}), [field]: updated };
+  try {
+    await qbExtractionPost('qb-paper-extraction-review', { action: 'review', run_id: qbExtractionResults[id].runId, item_id: itemId, review_state: 'edited', payload, review_note: 'Edited by Admin' });
+    await qbLoadExtractionReview(id, true);
+  } catch (error) {
+    qbExtractionResults[id] = { ...qbExtractionResults[id], ok: false, message: error.message || 'Could not save the edited item.' };
+    qbRenderSourcePreviewPreservingScroll();
+  }
+}
+async function qbPublishExtractionRun(id) {
+  const state = qbExtractionResults[id];
+  if (!state?.runId || state.loading) return;
+  if (!window.confirm('Publish all approved questions and passages into the Question Bank? Rejected items will be excluded.')) return;
+  qbExtractionBusyIds.add(id); state.loading = true; state.message = 'Publishing approved items…'; qbRenderSourcePreviewPreservingScroll();
+  try {
+    const result = await qbExtractionPost('qb-paper-extraction-review', { action: 'publish', run_id: state.runId });
+    qbExtractionResults[id] = { ...state, ok: true, loading: false, stage: 'finished', message: 'Published ' + result.questions_published + ' questions and ' + result.passages_published + ' passages. Publication is complete.', published: result.questions_published };
+    await loadQbSourcePapers();
+  } catch (error) {
+    qbExtractionResults[id] = { ...state, ok: false, loading: false, message: error.message || 'Publication failed. No partial publication was committed.' };
+  } finally {
+    qbExtractionBusyIds.delete(id);
+    qbRenderSourcePreviewPreservingScroll();
+  }
+}
+function qbExtractionReviewHtml(id) {
+  const state = qbExtractionResults[id], rows = qbExtractionReviewRows[id];
+  if (!state?.reviewOpen || !Array.isArray(rows)) return '';
+  const pending = rows.filter(x => ['pending','edited'].includes(x.review_state)).length;
+  const content = rows.map(item => {
+    const p = item.payload || {};
+    const main = item.item_kind === 'question' ? p.question_text : item.item_kind === 'passage' ? p.passage_text : p.text || p.image_description || JSON.stringify(p);
+    const extra = item.item_kind === 'question' ? [p.options && Array.isArray(p.options) ? 'Options: ' + p.options.join(' | ') : '', p.answer_text ? 'Answer: ' + p.answer_text : '', p.marks ? 'Marks: ' + p.marks : ''].filter(Boolean).join(' · ') : p.passage_type || p.image_description || '';
+    return '<div style="border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0">'
+      + '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>' + esc(item.item_kind) + ' · Page ' + esc(item.page_number || '—') + (item.original_number ? ' · No. ' + esc(item.original_number) : '') + '</b><span class="hint">' + esc(item.review_state) + '</span></div>'
+      + '<div style="white-space:pre-wrap;margin:7px 0">' + esc(main || '[No extracted text]') + '</div>'
+      + (extra ? '<div class="hint" style="margin-bottom:7px">' + esc(extra) + '</div>' : '')
+      + (item.review_state === 'pending' || item.review_state === 'edited' ? '<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn-small" onclick="qbEditExtractionItem(\'' + id + '\',\'' + item.id + '\')">Edit</button><button class="btn-small btn-primary" onclick="qbSetExtractionReview(\'' + id + '\',\'' + item.id + '\',\'approved\')">Approve</button><button class="btn-small" onclick="qbSetExtractionReview(\'' + id + '\',\'' + item.id + '\',\'rejected\')">Reject</button></div>' : '')
+      + '</div>';
+  }).join('');
+  return '<div style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface)">'
+    + '<b>Extraction review</b><div class="hint" style="margin:4px 0 8px">' + rows.length + ' items · ' + pending + ' awaiting decision</div>'
+    + (content || '<div class="hint">No items were extracted.</div>')
+    + (state.stage === 'finished' ? '<div class="hint">This run has already been published.</div>' : '<button class="btn-small btn-primary" ' + (pending ? 'disabled' : '') + ' onclick="qbPublishExtractionRun(\'' + id + '\')">Publish approved items</button>')
+    + '</div>';
+}
 async function loadQbSourcePapers() {
   if (!sb) return;
   qbSourceLoading = true; render();
@@ -26078,9 +26350,9 @@ function qbSourcePapersHtml() {
         ${currentRole === 'Admin' && (duplicateIds.has(sp.id) || sp.duplicate_override) ? `<button class="btn-small" onclick="qbSetSourcePaperDuplicateOverride('${sp.id}',${sp.duplicate_override ? 'false' : 'true'})">${sp.duplicate_override ? 'Restore duplicate check' : 'Not a Duplicate'}</button>` : ''}
         ${qbDuplicateActionMsg[sp.id] ? `<span role="status" aria-live="polite" style="font-size:12px;color:${qbDuplicateActionMsg[sp.id].error ? 'var(--brick)' : 'var(--forest)'};font-weight:600">${esc(qbDuplicateActionMsg[sp.id].text)}</span>` : ''}
         ${sp.status === 'pending_review' && currentRole === 'Admin' ? `<button class="btn-small btn-primary" onclick="qbSetSourcePaperStatus('${sp.id}','published')">Publish</button><button class="btn-small" onclick="qbSetSourcePaperStatus('${sp.id}','rejected')">Reject</button>` : ''}
-        ${currentRole === 'Admin' && sp.status === 'published' ? `<button type="button" class="btn-small" onclick="qbBeginSourcePaperEdit('${sp.id}')">Edit metadata</button>` : ''}${currentRole === 'Admin' ? `<button class="btn-small" onclick="qbDeleteSourcePaper('${sp.id}')">Delete</button>` : ''}
+        ${currentRole === 'Admin' && sp.status === 'published' ? `<button type="button" class="btn-small btn-primary" onclick="qbPrepareSourcePaperExtraction('${sp.id}')" ${(qbExtractionBusyIds.has(sp.id) || (qbExtractionResults[sp.id]?.reconciliationRequired && !qbExtractionResults[sp.id]?.reconciled)) ? 'disabled' : ''}>${qbExtractionBusyIds.has(sp.id) ? 'Checking…' : 'Prepare extraction'}</button><button type="button" class="btn-small" onclick="qbCheckSourcePaperExtraction('${sp.id}')" ${qbExtractionBusyIds.has(sp.id) ? 'disabled' : ''}>Check / resume extraction</button><button type="button" class="btn-small" onclick="qbBeginSourcePaperEdit('${sp.id}')">Edit metadata</button>` : ''}${currentRole === 'Admin' ? `<button class="btn-small" onclick="qbDeleteSourcePaper('${sp.id}')">Delete</button>` : ''}
         </span>
-      </div>${qbSourcePreviewOpenIds.has(sp.id) ? qbSourcePaperPreviewHtml(sp) : ''}${qbSourceEditId === sp.id ? qbSourcePaperEditHtml(sp) : ''}`;
+      </div>${qbExtractionResults[sp.id] ? `<div role="status" aria-live="polite" style="margin:6px 0 10px;padding:9px 11px;border:1px solid ${qbExtractionResults[sp.id].ok ? '#4b9b70' : 'var(--line)'};border-radius:8px;background:${qbExtractionResults[sp.id].ok ? 'rgba(75,155,112,.10)' : 'var(--surface)'};color:${qbExtractionResults[sp.id].ok ? 'var(--forest)' : 'var(--ink)'};font-size:12px">${esc(qbExtractionResults[sp.id].message)}${qbExtractionResults[sp.id].metadataMatches ? `<div class="hint" style="margin-top:4px">Metadata matches to review: ${qbExtractionResults[sp.id].metadataMatches}. These are warnings only, not confirmed duplicates.</div>` : ''}${qbExtractionResults[sp.id].runId && qbExtractionResults[sp.id].stage === 'prepared' ? `<div style="margin-top:8px"><button class="btn-small btn-primary" onclick="qbRunSourcePaperExtraction('${sp.id}')" ${qbExtractionBusyIds.has(sp.id) ? 'disabled' : ''}>Start extraction</button></div>` : ''}${qbExtractionResults[sp.id].stage === 'review' ? `<div style="margin-top:8px"><button class="btn-small btn-primary" onclick="qbLoadExtractionReview('${sp.id}')" ${qbExtractionBusyIds.has(sp.id) ? 'disabled' : ''}>Review extracted items</button></div>` : ''}</div>` : ''}${qbExtractionResults[sp.id]?.runId && qbExtractionResults[sp.id]?.reconciliationRequired ? `<div style="margin:8px 0"><button type="button" class="btn-small" onclick="qbInspectExtractionReconciliation('${sp.id}')" ${qbExtractionBusyIds.has(sp.id) ? 'disabled' : ''}>Inspect provider requests &amp; checkpoints</button></div>` : ''}${qbExtractionReconciliationHtml(sp.id)}${qbExtractionReviewHtml(sp.id)}${qbSourcePreviewOpenIds.has(sp.id) ? qbSourcePaperPreviewHtml(sp) : ''}${qbSourceEditId === sp.id ? qbSourcePaperEditHtml(sp) : ''}`;
       }).join('')}</div>`).join('')}`;
 }
 
