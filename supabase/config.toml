@@ -6,6 +6,8 @@ verify_jwt = false
 [functions.knowledge-arena-worker]
 verify_jwt = false
 
-
 [functions.qb-paper-extraction-preflight]
+verify_jwt = false
+
+[functions.qb-paper-extraction-worker]
 verify_jwt = false
