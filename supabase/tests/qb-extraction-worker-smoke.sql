@@ -1,6 +1,6 @@
 -- Integration smoke tests for the extraction ledger, leases and request-state safety.
 do $$
-declare v_user uuid:=gen_random_uuid(); v_grade uuid; v_board uuid; v_paper uuid; v_run uuid; v_claim jsonb; v_req uuid;
+declare v_user uuid:=gen_random_uuid(); v_grade uuid; v_board uuid; v_paper uuid; v_run uuid; v_claim jsonb; v_req uuid; v_renewed boolean; v_expiry timestamptz;
 begin
  insert into auth.users(id) values(v_user);
  insert into public.profiles(id,role,archived) values(v_user,'Admin',false);
@@ -15,6 +15,19 @@ begin
  if coalesce((v_claim->>'ok')::boolean,false) is not true then raise exception 'First worker could not claim run: %',v_claim; end if;
  v_claim:=public.qb_claim_extraction_worker(v_run,'worker-two',600);
  if v_claim->>'code'<>'worker_busy' then raise exception 'Concurrent worker was not rejected: %',v_claim; end if;
+ select lease_expires_at into v_expiry from public.qb_paper_extraction_runs where id=v_run;
+ v_renewed:=public.qb_renew_extraction_worker(v_run,'worker-one',900);
+ if v_renewed is not true then raise exception 'Current worker could not renew its active lease'; end if;
+ if not exists(select 1 from public.qb_paper_extraction_runs where id=v_run and lease_expires_at>v_expiry and heartbeat_at is not null) then
+   raise exception 'Lease expiry/heartbeat was not extended';
+ end if;
+ update public.qb_paper_extraction_runs set lease_expires_at=now()-interval '1 second' where id=v_run;
+ v_renewed:=public.qb_renew_extraction_worker(v_run,'worker-one',900);
+ if v_renewed is not false then raise exception 'Expired worker must not resurrect its lease'; end if;
+ v_claim:=public.qb_claim_extraction_worker(v_run,'worker-two',900);
+ if coalesce((v_claim->>'ok')::boolean,false) is not true then raise exception 'Second worker could not claim an expired lease: %',v_claim; end if;
+ v_renewed:=public.qb_renew_extraction_worker(v_run,'worker-one',900);
+ if v_renewed is not false then raise exception 'Former worker renewed a lease after ownership changed'; end if;
  insert into public.qb_paper_extraction_requests(run_id,chunk_key,provider,model_name,idempotency_key,request_state,request_payload)
  values(v_run,'pages:1-1:v1','anthropic','test-model',v_run::text||':pages:1-1:v1','prepared','{}'::jsonb)
  returning id into v_req;
@@ -25,5 +38,5 @@ begin
  exception when raise_exception then
    if sqlerrm='Expected sent request reset to be rejected' then raise; end if;
  end;
- perform public.qb_release_extraction_worker(v_run,'worker-one');
+ perform public.qb_release_extraction_worker(v_run,'worker-two');
 end $$;
