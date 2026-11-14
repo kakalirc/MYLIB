@@ -2106,6 +2106,7 @@ let qbEditId = null;            // question id being edited inline
 let qbEditDraft = {};           // { question_text, question_type, marks, difficulty, answer_text, chapter_id, topic }
 let qbSaving = false;
 let qbMsg = '';
+let qbDuplicateActionMsg = {}; // Per-paper inline feedback; never move the page to a global status banner.
 let qbChapters = [];            // cached from qb_chapters
 let qbTextbooks = [];           // cached from qb_textbooks (board / grade / subject of each chapter)
 let qbSelectedIds = new Set();  // question ids ticked for "Set chapter"
@@ -25798,10 +25799,25 @@ async function qbSetSourcePaperDuplicateOverride(id, notDuplicate) {
   if (!window.confirm('Are you sure you want to ' + action + '?')) return;
   const update = { duplicate_override: !!notDuplicate, duplicate_override_by: notDuplicate ? (currentUserId || null) : null, duplicate_override_at: notDuplicate ? new Date().toISOString() : null };
   const { data: rows, error } = await sb.from('qb_source_papers').update(update).eq('id', id).select('id');
-  if (error) { qbMsg = 'Could not update duplicate decision: ' + error.message; render(); return; }
-  if (!rows || !rows.length) { qbMsg = 'No paper record was updated. Refresh and try again.'; render(); return; }
-  qbMsg = notDuplicate ? 'Paper marked as not a duplicate. This decision is saved.' : 'Duplicate checking restored for this paper.';
-  await loadQbSourcePapers();
+  if (error) {
+    qbDuplicateActionMsg[id] = { text: 'Could not update duplicate decision: ' + error.message, error: true };
+    render();
+    return;
+  }
+  if (!rows || !rows.length) {
+    qbDuplicateActionMsg[id] = { text: 'No paper record was updated. Refresh and try again.', error: true };
+    render();
+    return;
+  }
+  // Update the cached row in place. Avoid a full list reload and its extra loading renders.
+  paper.duplicate_override = !!notDuplicate;
+  paper.duplicate_override_by = notDuplicate ? (currentUserId || null) : null;
+  paper.duplicate_override_at = notDuplicate ? update.duplicate_override_at : null;
+  qbDuplicateActionMsg[id] = {
+    text: notDuplicate ? 'Marked as not a duplicate. Saved.' : 'Duplicate check restored.',
+    error: false
+  };
+  render();
 }
 function qbSourcePendingReviewHtml() {
   const pending = qbSourcePapers.filter(sp => sp.status === 'pending_review'
@@ -25945,6 +25961,7 @@ function qbSourcePapersHtml() {
         <span><b>${esc(String(sp.year || ''))}</b> ${esc(sp.exam_type || '')}${sp.duplicate_override ? ' <span class="badge" style="background:rgba(75,155,112,.12);color:var(--forest)">Not a duplicate</span>' : duplicateIds.has(sp.id) ? ' <span class="badge" style="background:rgba(214,163,74,.16);color:#805b16">Possible duplicate</span>' : ''}${sp.medium ? ` <span style="color:var(--muted);font-size:12px">· ${esc(sp.medium)}</span>` : ''}${sp.question_count ? ` <span style="color:var(--muted);font-size:12px">· ${esc(String(sp.question_count))} questions</span>` : ''}<br><span class="hint">${esc(sp.source_type === 'school' ? 'School: ' + (qbByName(qbSchools, sp.school_id) || 'Unknown school') : 'Board: ' + (qbByName(boards, sp.board_id) || 'Unknown board'))} · ${esc(sp.subject_name || '')} · ${esc(sp.uploader_name || 'Legacy upload')} · ${esc(sp.status || 'published')}</span></span>
         <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${sp.stored_pdf_url || sp.source_url ? `<button class="btn-small" onclick="qbOpenSourcePdf('${sp.id}')">⬇ Open PDF</button>` : '<span class="hint">No PDF</span>'}
         ${currentRole === 'Admin' && (duplicateIds.has(sp.id) || sp.duplicate_override) ? `<button class="btn-small" onclick="qbSetSourcePaperDuplicateOverride('${sp.id}',${sp.duplicate_override ? 'false' : 'true'})">${sp.duplicate_override ? 'Restore duplicate check' : 'Not a Duplicate'}</button>` : ''}
+        ${qbDuplicateActionMsg[sp.id] ? `<span role="status" aria-live="polite" style="font-size:12px;color:${qbDuplicateActionMsg[sp.id].error ? 'var(--brick)' : 'var(--forest)'};font-weight:600">${esc(qbDuplicateActionMsg[sp.id].text)}</span>` : ''}
         ${sp.status === 'pending_review' && currentRole === 'Admin' ? `<button class="btn-small btn-primary" onclick="qbSetSourcePaperStatus('${sp.id}','published')">Publish</button><button class="btn-small" onclick="qbSetSourcePaperStatus('${sp.id}','rejected')">Reject</button>` : ''}
         ${currentRole === 'Admin' && sp.status === 'published' ? `<button type="button" class="btn-small" onclick="qbBeginSourcePaperEdit('${sp.id}')">Edit metadata</button>` : ''}${currentRole === 'Admin' ? `<button class="btn-small" onclick="qbDeleteSourcePaper('${sp.id}')">Delete</button>` : ''}
         </span>
