@@ -37,6 +37,18 @@ begin
  values(v_run,'pages:1-1:v1','anthropic','test-model',v_run::text||':pages:1-1:v1','prepared','{}'::jsonb)
  returning id into v_req;
  update public.qb_paper_extraction_requests set request_state='sent',sent_at=now() where id=v_req;
+ v_claim:=public.qb_set_extraction_worker_state(v_run,'worker-two','processing','sent',null);
+ if coalesce((v_claim->>'ok')::boolean,false) is not true then raise exception 'Initial sent transition failed: %',v_claim; end if;
+ update public.qb_paper_extraction_requests set request_state='responded',responded_at=now() where id=v_req;
+ v_claim:=public.qb_set_extraction_worker_state(v_run,'worker-two','processing','responded',null);
+ if coalesce((v_claim->>'ok')::boolean,false) is not true then raise exception 'Durable response transition failed: %',v_claim; end if;
+ insert into public.qb_paper_extraction_requests(run_id,chunk_key,provider,model_name,idempotency_key,request_state,request_payload,sent_at)
+ values(v_run,'pages:2-3:v4','anthropic','test-model',v_run::text||':pages:2-3:v4','sent','{}'::jsonb,now());
+ v_claim:=public.qb_set_extraction_worker_state(v_run,'worker-two','processing','sent',null);
+ if coalesce((v_claim->>'ok')::boolean,false) is not true then raise exception 'Sequential next-batch transition was rejected: %',v_claim; end if;
+ update public.qb_paper_extraction_requests set request_state='uncertain',error_message='test ambiguous outcome' where run_id=v_run and chunk_key='pages:2-3:v4';
+ v_claim:=public.qb_set_extraction_worker_state(v_run,'worker-two','uncertain','uncertain','test ambiguous outcome');
+ if coalesce((v_claim->>'ok')::boolean,false) is not true then raise exception 'Ledger-backed uncertain transition failed: %',v_claim; end if;
  begin
    update public.qb_paper_extraction_requests set request_state='failed_before_send' where id=v_req;
    raise exception 'Expected sent request reset to be rejected';
