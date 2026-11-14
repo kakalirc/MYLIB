@@ -25632,7 +25632,7 @@ function qbSourcePaperPreviewHtml(sp) {
   if (qbSourcePreviewLoading) return '<div class="qb-source-pdf-preview"><div class="hint" role="status">Preparing PDF preview…</div></div>';
   if (qbSourcePreviewError) return '<div class="qb-source-pdf-preview"><div class="hint" role="alert" style="color:var(--brick)">' + esc(qbSourcePreviewError) + '</div></div>';
   if (!qbSourcePreviewUrl) return '';
-  return '<div class="qb-source-pdf-preview" role="region" aria-label="PDF preview for ' + esc(heading) + '">'
+  return '<div class="qb-source-pdf-preview" style="margin:8px 0 14px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface)" role="region" aria-label="PDF preview for ' + esc(heading) + '">'
     + '<div class="hint" style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px"><b>PDF preview · First page</b><span>Scroll inside the preview to inspect the document</span></div>'
     + '<iframe title="PDF preview: ' + esc(heading) + '" src="' + escAttr(qbSourcePreviewUrl + '#page=1&toolbar=0&navpanes=0') + '" loading="lazy" referrerpolicy="no-referrer" style="display:block;width:100%;height:520px;border:1px solid var(--line);border-radius:8px;background:var(--surface)"></iframe>'
     + '</div>';
@@ -25987,7 +25987,6 @@ function qbSourcePapersHtml() {
     && (!a.year || String(sp.year) === a.year);
   const list = qbSourcePapers.filter(match);
   if (!list.length) return filtersHtml + '<div class="empty">No past papers match these filters.</div>';
-  const previewStyle = '<style>.qb-source-pdf-preview{margin:8px 0 14px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}.qb-source-pdf-preview iframe{max-width:100%}@media(max-width:600px){.qb-source-pdf-preview iframe{height:420px}}</style>';
   const duplicateKey = sp => [sp.source_type, sp.source_type === 'school' ? sp.school_id : sp.board_id, sp.grade_id,
     String(sp.subject_name || '').trim().toLocaleLowerCase(), sp.year, String(sp.exam_type || '').trim().toLocaleLowerCase(),
     String(sp.medium || '').trim().toLocaleLowerCase()].join('|');
@@ -26015,7 +26014,7 @@ function qbSourcePapersHtml() {
   });
   return `<p class="hint" style="margin-bottom:12px">Published papers across all subjects, plus your own submissions awaiting review or rejected.</p>
     ${filtersHtml}${duplicateWarning}<div style="font-size:12px;color:var(--muted);margin-bottom:8px">${list.length} paper${list.length === 1 ? '' : 's'}</div>
-    ${previewStyle}${[...groups.entries()].map(([k, list]) => `<div style="margin-bottom:16px"><div style="font-weight:700;border-bottom:2px solid var(--line);padding-bottom:4px;margin-bottom:6px">${esc(k)}</div>
+    ${[...groups.entries()].map(([k, list]) => `<div style="margin-bottom:16px"><div style="font-weight:700;border-bottom:2px solid var(--line);padding-bottom:4px;margin-bottom:6px">${esc(k)}</div>
       ${list.map(sp => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px">
         <span><b>${esc(String(sp.year || ''))}</b> ${esc(sp.exam_type || '')}${sp.duplicate_override ? ' <span class="badge" style="background:rgba(75,155,112,.12);color:var(--forest)">Not a duplicate</span>' : duplicateIds.has(sp.id) ? ' <span class="badge" style="background:rgba(214,163,74,.16);color:#805b16">Possible duplicate</span>' : ''}${sp.medium ? ` <span style="color:var(--muted);font-size:12px">· ${esc(sp.medium)}</span>` : ''}${sp.question_count ? ` <span style="color:var(--muted);font-size:12px">· ${esc(String(sp.question_count))} questions</span>` : ''}<br><span class="hint">${esc(sp.source_type === 'school' ? 'School: ' + (qbByName(qbSchools, sp.school_id) || 'Unknown school') : 'Board: ' + (qbByName(boards, sp.board_id) || 'Unknown board'))} · ${esc(sp.subject_name || '')} · ${esc(sp.uploader_name || 'Legacy upload')} · ${esc(sp.status || 'published')}</span></span>
         <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${sp.stored_pdf_url || sp.source_url ? `<button type="button" class="btn-small" onclick="qbToggleSourcePaperPreview('${sp.id}')">${qbSourcePreviewId === sp.id ? 'Hide preview' : 'Preview first page'}</button><button class="btn-small" onclick="qbOpenSourcePdf('${sp.id}')">⬇ Open PDF</button>` : '<span class="hint">No PDF</span>'}
