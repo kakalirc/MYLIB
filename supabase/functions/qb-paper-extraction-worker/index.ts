@@ -164,6 +164,10 @@ Deno.serve(async(req)=>{
      provider_request_id:providerRequestId,responded_at:new Date().toISOString()
     }).eq("id",requestId).eq("request_state","sent");
     if(rawSave)throw new Error("Provider response received but raw response persistence failed; reconcile before any retry.");
+    // The request ledger now contains a durable response. Advance run-level state
+    // before parsing so the next two-page invocation can safely claim the next batch.
+    const respondedState=await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"processing",p_ai_request_state:"responded",p_error_message:null});
+    if(respondedState.error||!respondedState.data?.ok)throw new Error("Provider response is saved, but run state could not be advanced; resume to reconcile without resending.");
     if(!response.ok)throw new Error(`Anthropic HTTP ${response.status}: ${rawBody.slice(0,1000)}`);
     const {data,text}=parseProviderBody(rawBody);
     const usedInput=Number(data.usage?.input_tokens||0),usedOutput=Number(data.usage?.output_tokens||0);
@@ -202,7 +206,9 @@ Deno.serve(async(req)=>{
    if(last<total)return reply(200,{ok:true,run_id:runId,status:"processing",stage:"page_extraction",pages_total:total,pages_completed:completedCount,next_page:last+1,staged_items:stagedTotal||0,input_tokens:input,output_tokens:output,model:MODEL,cost_currency:"USD",actual_cost_usd:totalCost,cost_budget_usd:BUDGET_USD,requires_admin_review:false,questions_published:0});
    break;
   }
-  if((pageStates||[]).some((p:any)=>p.page_state!=="completed") && (pageStates||[]).filter((p:any)=>p.page_state==="completed").length<total)throw new Error("A page batch remains incomplete; no completion state was written.");
+  const {data:finalPageStates,error:finalPageStatesError}=await db.from("qb_paper_extraction_pages").select("page_number,page_state").eq("run_id",runId).order("page_number");
+  if(finalPageStatesError)throw new Error("Could not verify final page checkpoints.");
+  if((finalPageStates||[]).length!==total || (finalPageStates||[]).some((p:any)=>p.page_state!=="completed"))throw new Error("A page batch remains incomplete; no completion state was written.");
   const {count:finalStagedTotal,error:finalStagedCountError}=await db.from("qb_paper_extraction_staging").select("id",{count:"exact",head:true}).eq("run_id",runId);
   if(finalStagedCountError)throw new Error("Could not count the final durable staged items.");
   const {data:doneState,error:done}=await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"completed",p_ai_request_state:"responded",p_error_message:null});
