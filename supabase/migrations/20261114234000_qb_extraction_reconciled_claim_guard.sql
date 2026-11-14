@@ -174,3 +174,10 @@ $function$;
 
 comment on function public.qb_begin_paper_extraction(uuid,uuid,text) is
   'Atomically claims a source paper; prior provider attempts block retries unless an Admin explicitly reconciled that specific run.';
+
+-- A reconciled uncertain run must no longer occupy the one-active-run slot.
+drop index if exists public.qb_paper_extraction_runs_one_active_per_paper;
+create unique index qb_paper_extraction_runs_one_active_per_paper
+  on public.qb_paper_extraction_runs (source_paper_id)
+  where status in ('queued', 'processing', 'uncertain')
+    and admin_reconciled_at is null;
