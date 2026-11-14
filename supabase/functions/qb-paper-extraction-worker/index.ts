@@ -153,8 +153,8 @@ Deno.serve(async(req)=>{
   return reply(200,{ok:true,run_id:runId,status:"completed",stage:"review",pages_total:total,staged_items:staged,input_tokens:input,output_tokens:output,model:MODEL,cost_currency:"USD",actual_cost_usd:totalCost,cost_budget_usd:BUDGET_USD,requires_admin_review:true,questions_published:0});
  }catch(e){
   const msg=String((e as Error).message||e);
-  const {data:r}=await db.from("qb_paper_extraction_runs").select("status,ai_request_state").eq("id",runId).maybeSingle();
-  if(r?.status==="processing"&&r?.ai_request_state==="not_sent")await db.rpc("qb_set_paper_extraction_run_state",{p_run_id:runId,p_status:"failed",p_ai_request_state:"not_sent",p_error_message:msg.slice(0,1800)});
+  // A stale worker must never change the state after its lease was replaced.
+  await db.rpc("qb_fail_extraction_worker_if_owner",{p_run_id:runId,p_lease_owner:owner,p_error_message:msg.slice(0,1800)});
   return reply(422,{ok:false,run_id:runId,error:msg,automatic_retry:false});
  }finally{await db.rpc("qb_release_extraction_worker",{p_run_id:runId,p_lease_owner:owner});}
 });
