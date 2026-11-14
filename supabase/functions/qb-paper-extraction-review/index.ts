@@ -37,6 +37,32 @@ Deno.serve(async(req)=>{
  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(runId))return reply(400,{error:"Valid run_id required."});
  const {data:run,error:runError}=await db.from("qb_paper_extraction_runs").select("id,source_paper_id,status,ai_request_state,current_stage,input_tokens,output_tokens,model_name,started_at,completed_at,actual_cost_usd,estimated_cost_usd,cost_currency,cost_budget_usd,input_price_usd_per_million,output_price_usd_per_million").eq("id",runId).maybeSingle();
  if(runError||!run)return reply(404,{error:"Extraction run not found."});
+ if(action==="inspect_reconciliation"){
+  const {data:requests,error:requestError}=await db.from("qb_paper_extraction_requests")
+   .select("id,chunk_key,provider,model_name,request_state,provider_request_id,sent_at,responded_at,input_tokens,output_tokens,total_cost_usd,error_message,response_payload")
+   .eq("run_id",runId).order("created_at");
+  if(requestError)return reply(500,{error:"Could not inspect provider request history."});
+  return reply(200,{ok:true,run,reconciliation_required:run.ai_request_state==="uncertain"|| (requests||[]).some((x:any)=>["sent","uncertain"].includes(x.request_state)),requests:requests||[]});
+ }
+ if(action==="reconcile_uncertain"){
+  if(body.confirm_provider_outcome_unknown!==true)return reply(400,{error:"Explicit confirmation that the provider outcome remains unknown is required."});
+  const note=String(body.reconciliation_note||"").trim();
+  if(note.length<15)return reply(400,{error:"Provide an audit note of at least 15 characters explaining why this attempt is being reconciled."});
+  if(!["uncertain","failed"].includes(run.status)||run.ai_request_state!=="uncertain")
+   return reply(409,{error:"Only an uncertain provider attempt can be reconciled through this action."});
+  const {data:requests,error:requestError}=await db.from("qb_paper_extraction_requests")
+   .select("id,request_state,response_payload").eq("run_id",runId);
+  if(requestError)return reply(500,{error:"Could not verify provider request history."});
+  if(!(requests||[]).some((x:any)=>["sent","uncertain"].includes(x.request_state)))
+   return reply(409,{error:"No ambiguous provider request was found; reconciliation is not applicable."});
+  const {data:updated,error:updateError}=await db.from("qb_paper_extraction_runs")
+   .update({admin_reconciled_at:new Date().toISOString(),admin_reconciled_by:auth.user.id,admin_reconciliation_note:note.slice(0,1200)})
+   .eq("id",runId).is("admin_reconciled_at",null).eq("status",run.status).eq("ai_request_state","uncertain")
+   .select("id,admin_reconciled_at,admin_reconciled_by,admin_reconciliation_note").maybeSingle();
+  if(updateError||!updated)return reply(409,{error:"The run changed while reconciliation was being saved. Refresh and inspect it again."});
+  return reply(200,{ok:true,reconciled:true,run_id:runId,reconciliation:updated,
+   warning:"The original provider outcome remains unknown. A future extraction may incur a duplicate provider charge. The original request and run records have not been deleted or rewritten."});
+ }
  if(action==="list"){
   const [{data:items,error:itemError},{data:pages,error:pageError},{data:paper}] = await Promise.all([
    db.from("qb_paper_extraction_staging").select("id,item_key,item_kind,page_number,original_number,parent_item_key,payload,review_state,review_note,published_question_id,published_passage_id").eq("run_id",runId).order("page_number").order("created_at"),
