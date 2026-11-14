@@ -170,7 +170,7 @@ begin
 
     -- Older extraction runs may have a checksum even when the source-paper
     -- upload record does not. Treat a prior provider attempt as a duplicate too.
-    select r.id, p.*
+    select r.id, p
       into v_duplicate_run_id, v_duplicate_paper
       from public.qb_paper_extraction_runs r
       join public.qb_source_papers p on p.id = r.source_paper_id
