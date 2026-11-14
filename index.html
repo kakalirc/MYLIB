@@ -2139,6 +2139,7 @@ let qbAssignUntil = '';         // due date (yyyy-mm-dd) for new assignments
 let qbAssignAllGrades = false;  // also list the teacher's students who don't match the paper's board / grade / subject
 let qbSourcePapers = [];        // qb_source_papers rows (published papers + own submissions)
 let qbSourceEditId = '';
+let qbSourceMetaMsg = '';
 let qbSourceReviews = [];       // Admin-visible status history across all submissions
 let qbSourceLoading = false;
 let qbSourceFilter = { boardId: '', schoolId: '', gradeId: '', subject: '', year: '' };
@@ -25823,20 +25824,20 @@ function qbSourceReviewHistoryHtml() {
     qbSourceReviews.map(r => { const p = qbSourcePapers.find(x => x.id === r.source_paper_id); return '<tr><td>' + esc(p ? [p.subject_name, p.year, p.exam_type].filter(Boolean).join(' · ') : 'Past paper (deleted)') + '</td><td>' + esc(r.from_status || 'New') + ' → ' + esc(r.to_status) + '</td><td>' + esc(r.reviewer_name || 'Unknown reviewer') + '</td><td>' + esc(r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : '') + '</td></tr>'; }).join('') +
     '</tbody></table></div>' : '<div class="empty" style="margin-top:10px">No past-paper review actions recorded yet.</div>') + '</details>';
 }
-function qbBeginSourcePaperEdit(id) { if (currentRole !== 'Admin') return; const p = qbSourcePapers.find(x => x.id === id && x.status === 'published'); if (!p) return; qbSourceEditId = id; render(); }
-function qbCancelSourcePaperEdit() { qbSourceEditId = ''; render(); }
+function qbBeginSourcePaperEdit(id) { if (currentRole !== 'Admin') return; const p = qbSourcePapers.find(x => x.id === id && x.status === 'published'); if (!p) return; qbSourceEditId = id; qbSourceMetaMsg = ''; render(); }
+function qbCancelSourcePaperEdit() { qbSourceEditId = ''; qbSourceMetaMsg = ''; render(); }
 async function qbSaveSourcePaperMetadata(id) {
   if (currentRole !== 'Admin' || !sb || qbSourceEditId !== id) return;
   const v = key => (document.getElementById('qbPaperMeta' + key)?.value || '').trim();
   const p = qbSourcePapers.find(x => x.id === id && x.status === 'published'); if (!p) return;
   const year = Number(v('Year')), subject = v('Subject');
-  if (!subject || !Number.isInteger(year) || year < 1950 || year > new Date().getFullYear()+1) { qbMsg = 'Enter a subject and valid examination year.'; render(); return; }
+  if (!subject || !Number.isInteger(year) || year < 1950 || year > new Date().getFullYear()+1) { qbSourceMetaMsg = 'Enter a subject and valid examination year.'; render(); return; }
   const update = { board_id: p.source_type === 'board' ? v('Board') : null, school_id: p.source_type === 'school' ? v('School') : null, grade_id: v('Grade') || null, subject_name: subject, year, exam_type: v('Exam'), medium: v('Medium') || null };
-  if ((p.source_type === 'board' && !update.board_id) || (p.source_type === 'school' && !update.school_id) || !update.grade_id || !update.exam_type) { qbMsg = 'Complete the source, class and exam type fields.'; render(); return; }
+  if ((p.source_type === 'board' && !update.board_id) || (p.source_type === 'school' && !update.school_id) || !update.grade_id || !update.exam_type) { qbSourceMetaMsg = 'Complete the source, class and exam type fields.'; render(); return; }
   const { data: updatedRows, error } = await sb.from('qb_source_papers').update(update).eq('id', id).eq('status', 'published').select('id');
-  if (error) { qbMsg = 'Could not update paper metadata: ' + error.message; render(); return; }
-  if (!updatedRows || !updatedRows.length) { qbMsg = 'No past-paper record was updated. Please refresh the list and try again; your changes have been kept in the editor.'; render(); return; }
-  qbSourceEditId = ''; qbMsg = 'Metadata updated and verified. The PDF and publication status were left unchanged.'; await loadQbSourcePapers();
+  if (error) { qbSourceMetaMsg = 'Could not update paper metadata: ' + error.message; render(); return; }
+  if (!updatedRows || !updatedRows.length) { qbSourceMetaMsg = 'No past-paper record was updated. Please refresh the list and try again; your changes have been kept in the editor.'; render(); return; }
+  qbSourceMetaMsg = 'Metadata updated and verified. The PDF and publication status were left unchanged.'; await loadQbSourcePapers();
 }
 function qbSourcePaperEditHtml(p) {
   if (currentRole !== 'Admin' || !p || p.id !== qbSourceEditId || p.status !== 'published') return '';
@@ -25851,7 +25852,7 @@ function qbSourcePaperEditHtml(p) {
     field('Examination year','<input id="qbPaperMetaYear" type="number" min="1950" max="'+(new Date().getFullYear()+1)+'" value="'+escAttr(String(p.year||''))+'" style="'+css+'">')+
     field('Exam type',choices('Exam',[['main','Main'],['compartment','Compartment'],['supplementary','Supplementary'],['sample','Sample Question Paper'],['other','Other']],p.exam_type||'main'))+
     field('Medium',choices('Medium',[['','Not specified'],['English','English'],['Hindi','Hindi'],['Kannada','Kannada'],['Sanskrit','Sanskrit'],['Other','Other']],p.medium||''))+'</div>'+
-    '<div style="display:flex;gap:8px;margin-top:12px"><button type="button" class="btn-small btn-primary" onclick="qbSaveSourcePaperMetadata(\''+escAttr(p.id)+'\')">Save Changes</button><button type="button" class="btn-small" onclick="qbCancelSourcePaperEdit()">Cancel</button></div><p class="hint">Only catalogue metadata changes; PDF and Published status are preserved.</p></section>';
+    '<div style="display:flex;gap:8px;margin-top:12px"><button type="button" class="btn-small btn-primary" onclick="qbSaveSourcePaperMetadata(\''+escAttr(p.id)+'\')">Save Changes</button><button type="button" class="btn-small" onclick="qbCancelSourcePaperEdit()">Cancel</button></div>'+(qbSourceMetaMsg ? '<div role="status" aria-live="polite" style="margin-top:10px;padding:9px 11px;border-radius:8px;border:1px solid '+(qbSourceMetaMsg.startsWith('Metadata updated')?'#4b9b70':'var(--line)')+';background:'+(qbSourceMetaMsg.startsWith('Metadata updated')?'rgba(75,155,112,.10)':'var(--surface)')+';color:'+(qbSourceMetaMsg.startsWith('Metadata updated')?'var(--forest)':'var(--brick)')+'">'+esc(qbSourceMetaMsg)+'</div>' : '')+'<p class="hint">Only catalogue metadata changes; PDF and Published status are preserved.</p></section>';
 }
 function qbSourcePapersHtml() {
   if (qbSourceLoading) return `<div class="empty">Loading past papers…</div>`;
