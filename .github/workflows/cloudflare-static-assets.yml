@@ -42,6 +42,26 @@ jobs:
             node --check "$file"
           done < <(find dist -type f -name '*.js' -print0)
 
+      - name: Check inline application scripts in index.html
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync, rmSync } from "node:fs";
+          import { execFileSync } from "node:child_process";
+          const html = readFileSync("dist/index.html", "utf8");
+          const scripts = [...html.matchAll(/<script\\b([^>]*)>([\\s\\S]*?)<\\/script>/gi)]
+            .filter((match) => !/\\bsrc\\s*=/i.test(match[1]) &&
+              (!/\\btype\\s*=/i.test(match[1]) || /\\btype\\s*=\\s*["']?(?:text\\/javascript|module)/i.test(match[1])));
+          if (!scripts.length) throw new Error("No inline application scripts found in index.html");
+          scripts.forEach((match, index) => {
+            const file = `/tmp/mylib-inline-${index}.js`;
+            writeFileSync(file, match[2]);
+            try { execFileSync(process.execPath, ["--check", file], { stdio: "inherit" }); }
+            finally { rmSync(file, { force: true }); }
+          });
+          console.log(`Syntax-checked ${scripts.length} inline script(s) in index.html.`);
+          NODE
+
       - name: Validate Cloudflare static-assets configuration without deploying
         run: npx --yes wrangler@4.161.0 deploy --dry-run
 
