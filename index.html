@@ -2146,6 +2146,7 @@ let qbSourceReviews = [];       // Admin-visible status history across all submi
 let qbSourceLoading = false;
 let qbExtractionBusyIds = new Set();
 let qbExtractionResults = {};
+let qbExtractionReviewRows = {};
 let qbSourceFilter = { boardId: '', schoolId: '', gradeId: '', subject: '', year: '' };
 let qbSchools = [];
 let qbSourceType = 'board';
@@ -25607,6 +25608,19 @@ async function qbAddSection(i) {
 function qbTeacherTeaches(subject, gradeId) {
   return data.subjects.some(s => s.teacherId === currentLinkedId && qbSameSubject(s.name, subject) && gradesForCategory(s.category).includes(gradeId));
 }
+async function qbExtractionPost(functionName, payload) {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) throw new Error('Your session has expired. Please sign in again.');
+  const response = await fetch(SUPABASE_URL + '/functions/v1/' + functionName, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + session.access_token },
+    body: JSON.stringify(payload)
+  });
+  let result = {};
+  try { result = await response.json(); } catch (_) {}
+  if (!response.ok || result.ok !== true) throw new Error(result.message || result.error || 'The extraction service could not complete this action.');
+  return result;
+}
 async function qbPrepareSourcePaperExtraction(id) {
   if (currentRole !== 'Admin' || qbExtractionBusyIds.has(id)) return;
   const paper = qbSourcePapers.find(row => row.id === id && row.status === 'published');
@@ -25619,26 +25633,112 @@ async function qbPrepareSourcePaperExtraction(id) {
   qbExtractionResults[id] = { loading: true, message: 'Checking extraction eligibility…' };
   qbRenderSourcePreviewPreservingScroll();
   try {
-    const { data: { session } } = await sb.auth.getSession();
-    if (!session) throw new Error('Your session has expired. Please sign in again.');
-    const response = await fetch(SUPABASE_URL + '/functions/v1/qb-paper-extraction-preflight', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + session.access_token },
-      body: JSON.stringify({ source_paper_id: id })
-    });
-    let result = {};
-    try { result = await response.json(); } catch (_) {}
-    if (!response.ok || result.ok !== true) {
-      qbExtractionResults[id] = { ok: false, code: result.code || 'preflight_failed', message: result.message || result.error || (response.status === 404 ? 'The extraction safety service is not deployed yet. No AI request was made.' : 'Could not verify extraction eligibility. No AI request was made.') };
-    } else {
-      qbExtractionResults[id] = { ok: true, message: 'Safety checks passed. Paper is prepared for the next extraction workflow; no AI call was made and no questions were created.', runId: result.run_id || '', linkedCount: result.linked_question_count || 0, metadataMatches: Array.isArray(result.possible_metadata_matches) ? result.possible_metadata_matches.length : 0 };
-    }
+    const result = await qbExtractionPost('qb-paper-extraction-preflight', { source_paper_id: id });
+    qbExtractionResults[id] = { ok: true, stage: 'prepared', message: 'Safety checks passed. Ready to start AI extraction.', runId: result.run_id || '', linkedCount: result.linked_question_count || 0, metadataMatches: Array.isArray(result.possible_metadata_matches) ? result.possible_metadata_matches.length : 0 };
   } catch (error) {
-    qbExtractionResults[id] = { ok: false, message: error.message || 'Could not contact the extraction safety service. No AI request was made.' };
+    qbExtractionResults[id] = { ok: false, message: error.message || 'Could not verify extraction eligibility.' };
   } finally {
     qbExtractionBusyIds.delete(id);
     qbRenderSourcePreviewPreservingScroll();
   }
+}
+async function qbRunSourcePaperExtraction(id) {
+  const state = qbExtractionResults[id];
+  if (currentRole !== 'Admin' || !state?.runId || qbExtractionBusyIds.has(id)) return;
+  qbExtractionBusyIds.add(id);
+  state.loading = true; state.message = 'Extracting the PDF in checkpointed page batches…';
+  qbRenderSourcePreviewPreservingScroll();
+  try {
+    const result = await qbExtractionPost('qb-paper-extraction-worker', { run_id: state.runId });
+    qbExtractionResults[id] = { ...state, ok: true, loading: false, stage: 'review', message: 'Extraction complete. ' + result.pages_completed + ' pages processed and ' + result.staged_items + ' items staged. Nothing has been published yet.', pages: result.pages_total, staged: result.staged_items, inputTokens: result.input_tokens, outputTokens: result.output_tokens };
+    await qbLoadExtractionReview(id, true);
+  } catch (error) {
+    qbExtractionResults[id] = { ...state, ok: false, loading: false, message: error.message || 'Extraction failed. Check the run before attempting any retry.' };
+  } finally {
+    qbExtractionBusyIds.delete(id);
+    qbRenderSourcePreviewPreservingScroll();
+  }
+}
+async function qbLoadExtractionReview(id, quiet) {
+  const state = qbExtractionResults[id];
+  if (!state?.runId || qbExtractionBusyIds.has(id)) return;
+  qbExtractionBusyIds.add(id);
+  if (!quiet) { state.loading = true; state.message = 'Loading staged questions for review…'; qbRenderSourcePreviewPreservingScroll(); }
+  try {
+    const result = await qbExtractionPost('qb-paper-extraction-review', { action: 'list', run_id: state.runId });
+    qbExtractionReviewRows[id] = result.items || [];
+    qbExtractionResults[id] = { ...state, loading: false, stage: result.run.current_stage, reviewSummary: result.summary, reviewOpen: true, message: 'Review each extracted item. Only approved questions and passages can be published.' };
+  } catch (error) {
+    qbExtractionResults[id] = { ...state, loading: false, ok: false, message: error.message || 'Could not load review records.' };
+  } finally {
+    qbExtractionBusyIds.delete(id);
+    qbRenderSourcePreviewPreservingScroll();
+  }
+}
+async function qbSetExtractionReview(id, itemId, reviewState) {
+  const state = qbExtractionResults[id];
+  if (!state?.runId || !['approved', 'rejected'].includes(reviewState)) return;
+  try {
+    await qbExtractionPost('qb-paper-extraction-review', { action: 'review', run_id: state.runId, item_id: itemId, review_state: reviewState });
+    await qbLoadExtractionReview(id, true);
+  } catch (error) {
+    qbExtractionResults[id] = { ...state, ok: false, message: error.message || 'Could not save the review decision.' };
+    qbRenderSourcePreviewPreservingScroll();
+  }
+}
+async function qbEditExtractionItem(id, itemId) {
+  const rows = qbExtractionReviewRows[id] || [];
+  const item = rows.find(x => x.id === itemId);
+  if (!item) return;
+  const field = item.item_kind === 'question' ? 'question_text' : item.item_kind === 'passage' ? 'passage_text' : 'text';
+  const current = String(item.payload?.[field] || '');
+  const updated = window.prompt('Edit ' + field.replace(/_/g, ' ') + ':', current);
+  if (updated === null || updated === current) return;
+  const payload = { ...(item.payload || {}), [field]: updated };
+  try {
+    await qbExtractionPost('qb-paper-extraction-review', { action: 'review', run_id: qbExtractionResults[id].runId, item_id: itemId, review_state: 'edited', payload, review_note: 'Edited by Admin' });
+    await qbLoadExtractionReview(id, true);
+  } catch (error) {
+    qbExtractionResults[id] = { ...qbExtractionResults[id], ok: false, message: error.message || 'Could not save the edited item.' };
+    qbRenderSourcePreviewPreservingScroll();
+  }
+}
+async function qbPublishExtractionRun(id) {
+  const state = qbExtractionResults[id];
+  if (!state?.runId || state.loading) return;
+  if (!window.confirm('Publish all approved questions and passages into the Question Bank? Rejected items will be excluded.')) return;
+  qbExtractionBusyIds.add(id); state.loading = true; state.message = 'Publishing approved items…'; qbRenderSourcePreviewPreservingScroll();
+  try {
+    const result = await qbExtractionPost('qb-paper-extraction-review', { action: 'publish', run_id: state.runId });
+    qbExtractionResults[id] = { ...state, ok: true, loading: false, stage: 'finished', message: 'Published ' + result.questions_published + ' questions and ' + result.passages_published + ' passages. Publication is complete.', published: result.questions_published };
+    await loadQbSourcePapers();
+  } catch (error) {
+    qbExtractionResults[id] = { ...state, ok: false, loading: false, message: error.message || 'Publication failed. No partial publication was committed.' };
+  } finally {
+    qbExtractionBusyIds.delete(id);
+    qbRenderSourcePreviewPreservingScroll();
+  }
+}
+function qbExtractionReviewHtml(id) {
+  const state = qbExtractionResults[id], rows = qbExtractionReviewRows[id];
+  if (!state?.reviewOpen || !Array.isArray(rows)) return '';
+  const pending = rows.filter(x => ['pending','edited'].includes(x.review_state)).length;
+  const content = rows.map(item => {
+    const p = item.payload || {};
+    const main = item.item_kind === 'question' ? p.question_text : item.item_kind === 'passage' ? p.passage_text : p.text || p.image_description || JSON.stringify(p);
+    const extra = item.item_kind === 'question' ? [p.options && Array.isArray(p.options) ? 'Options: ' + p.options.join(' | ') : '', p.answer_text ? 'Answer: ' + p.answer_text : '', p.marks ? 'Marks: ' + p.marks : ''].filter(Boolean).join(' · ') : p.passage_type || p.image_description || '';
+    return '<div style="border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0">'
+      + '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>' + esc(item.item_kind) + ' · Page ' + esc(item.page_number || '—') + (item.original_number ? ' · No. ' + esc(item.original_number) : '') + '</b><span class="hint">' + esc(item.review_state) + '</span></div>'
+      + '<div style="white-space:pre-wrap;margin:7px 0">' + esc(main || '[No extracted text]') + '</div>'
+      + (extra ? '<div class="hint" style="margin-bottom:7px">' + esc(extra) + '</div>' : '')
+      + (item.review_state === 'pending' || item.review_state === 'edited' ? '<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn-small" onclick="qbEditExtractionItem(\'' + id + '\',\'' + item.id + '\')">Edit</button><button class="btn-small btn-primary" onclick="qbSetExtractionReview(\'' + id + '\',\'' + item.id + '\',\'approved\')">Approve</button><button class="btn-small" onclick="qbSetExtractionReview(\'' + id + '\',\'' + item.id + '\',\'rejected\')">Reject</button></div>' : '')
+      + '</div>';
+  }).join('');
+  return '<div style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface)">'
+    + '<b>Extraction review</b><div class="hint" style="margin:4px 0 8px">' + rows.length + ' items · ' + pending + ' awaiting decision</div>'
+    + (content || '<div class="hint">No items were extracted.</div>')
+    + '<button class="btn-small btn-primary" ' + (pending ? 'disabled' : '') + ' onclick="qbPublishExtractionRun(\'' + id + '\')">Publish approved items</button>'
+    + '</div>';
 }
 async function loadQbSourcePapers() {
   if (!sb) return;
@@ -26115,7 +26215,7 @@ function qbSourcePapersHtml() {
         ${sp.status === 'pending_review' && currentRole === 'Admin' ? `<button class="btn-small btn-primary" onclick="qbSetSourcePaperStatus('${sp.id}','published')">Publish</button><button class="btn-small" onclick="qbSetSourcePaperStatus('${sp.id}','rejected')">Reject</button>` : ''}
         ${currentRole === 'Admin' && sp.status === 'published' ? `<button type="button" class="btn-small btn-primary" onclick="qbPrepareSourcePaperExtraction('${sp.id}')" ${qbExtractionBusyIds.has(sp.id) ? 'disabled' : ''}>${qbExtractionBusyIds.has(sp.id) ? 'Checking…' : 'Prepare extraction'}</button><button type="button" class="btn-small" onclick="qbBeginSourcePaperEdit('${sp.id}')">Edit metadata</button>` : ''}${currentRole === 'Admin' ? `<button class="btn-small" onclick="qbDeleteSourcePaper('${sp.id}')">Delete</button>` : ''}
         </span>
-      </div>${qbExtractionResults[sp.id] ? `<div role="status" aria-live="polite" style="margin:6px 0 10px;padding:9px 11px;border:1px solid ${qbExtractionResults[sp.id].ok ? '#4b9b70' : 'var(--line)'};border-radius:8px;background:${qbExtractionResults[sp.id].ok ? 'rgba(75,155,112,.10)' : 'var(--surface)'};color:${qbExtractionResults[sp.id].ok ? 'var(--forest)' : 'var(--ink)'};font-size:12px">${esc(qbExtractionResults[sp.id].message)}${qbExtractionResults[sp.id].metadataMatches ? `<div class="hint" style="margin-top:4px">Metadata matches to review: ${qbExtractionResults[sp.id].metadataMatches}. These are warnings only, not confirmed duplicates.</div>` : ''}</div>` : ''}${qbSourcePreviewOpenIds.has(sp.id) ? qbSourcePaperPreviewHtml(sp) : ''}${qbSourceEditId === sp.id ? qbSourcePaperEditHtml(sp) : ''}`;
+      </div>${qbExtractionResults[sp.id] ? `<div role="status" aria-live="polite" style="margin:6px 0 10px;padding:9px 11px;border:1px solid ${qbExtractionResults[sp.id].ok ? '#4b9b70' : 'var(--line)'};border-radius:8px;background:${qbExtractionResults[sp.id].ok ? 'rgba(75,155,112,.10)' : 'var(--surface)'};color:${qbExtractionResults[sp.id].ok ? 'var(--forest)' : 'var(--ink)'};font-size:12px">${esc(qbExtractionResults[sp.id].message)}${qbExtractionResults[sp.id].metadataMatches ? `<div class="hint" style="margin-top:4px">Metadata matches to review: ${qbExtractionResults[sp.id].metadataMatches}. These are warnings only, not confirmed duplicates.</div>` : ''}${qbExtractionResults[sp.id].runId && qbExtractionResults[sp.id].stage === 'prepared' ? `<div style="margin-top:8px"><button class="btn-small btn-primary" onclick="qbRunSourcePaperExtraction('${sp.id}')" ${qbExtractionBusyIds.has(sp.id) ? 'disabled' : ''}>Start extraction</button></div>` : ''}${qbExtractionResults[sp.id].stage === 'review' ? `<div style="margin-top:8px"><button class="btn-small btn-primary" onclick="qbLoadExtractionReview('${sp.id}')" ${qbExtractionBusyIds.has(sp.id) ? 'disabled' : ''}>Review extracted items</button></div>` : ''}</div>` : ''}${qbExtractionReviewHtml(sp.id)}${qbSourcePreviewOpenIds.has(sp.id) ? qbSourcePaperPreviewHtml(sp) : ''}${qbSourceEditId === sp.id ? qbSourcePaperEditHtml(sp) : ''}`;
       }).join('')}</div>`).join('')}`;
 }
 
