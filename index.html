@@ -1782,7 +1782,20 @@ function aiAccessCardHtml() {
       </h2>${body}
     </div>`;
 }
-let aiKeyMsg = '';     // result of the last AI Settings save, shown under the key box
+let qbExtractionSettings = { max_pdf_mb: 20, max_pages: 25, budget_usd: 2 };
+let qbExtractionSettingsMsg = '';
+async function loadQbExtractionSettings() { try { const r = await qbExtractionPost('qb-paper-extraction-review', { action: 'get_settings' }); if (r.settings) qbExtractionSettings = r.settings; } catch (e) { qbExtractionSettingsMsg = e.message || 'Could not load extraction settings.'; } }
+async function saveQbExtractionSettings() {
+ const maxPdfMb=Number(document.getElementById('qbExtractionMaxPdfMb')?.value), maxPages=Number(document.getElementById('qbExtractionMaxPages')?.value), budgetUsd=Number(document.getElementById('qbExtractionBudgetUsd')?.value);
+ if(!Number.isInteger(maxPdfMb)||maxPdfMb<1||maxPdfMb>100){qbExtractionSettingsMsg='PDF size must be a whole number from 1 to 100 MB.';render();return;}
+ if(!Number.isInteger(maxPages)||maxPages<1||maxPages>200){qbExtractionSettingsMsg='Page limit must be a whole number from 1 to 200.';render();return;}
+ if(!Number.isFinite(budgetUsd)||budgetUsd<=0||budgetUsd>1000){qbExtractionSettingsMsg='Budget must be greater than $0 and no more than $1,000.';render();return;}
+ qbExtractionSettingsMsg='Saving…';render();
+ try{const r=await qbExtractionPost('qb-paper-extraction-review',{action:'save_settings',settings:{max_pdf_mb:maxPdfMb,max_pages:maxPages,budget_usd:budgetUsd}});qbExtractionSettings=r.settings;qbExtractionSettingsMsg='Saved ✓';}catch(e){qbExtractionSettingsMsg=e.message||'Could not save extraction settings.';}
+ render();
+}
+function qbExtractionSettingsHtml(){const s=qbExtractionSettings||{max_pdf_mb:20,max_pages:25,budget_usd:2};return '<div style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px"><b>Question Bank PDF extraction limits</b><div class="hint">These settings apply to every new extraction and are enforced by the server before any AI request. Costs are tracked in USD.</div><div class="row-form" style="align-items:flex-end;gap:12px;flex-wrap:wrap"><label>Maximum PDF size (MB)<input id="qbExtractionMaxPdfMb" type="number" min="1" max="100" step="1" value="'+(Number(s.max_pdf_mb)||20)+'" style="width:110px;display:block"></label><label>Maximum PDF pages<input id="qbExtractionMaxPages" type="number" min="1" max="200" step="1" value="'+(Number(s.max_pages)||25)+'" style="width:110px;display:block"></label><label>Maximum spend per paper (USD)<input id="qbExtractionBudgetUsd" type="number" min="0.01" max="1000" step="0.01" value="'+(Number(s.budget_usd)||2)+'" style="width:150px;display:block"></label><button class="btn-small btn-primary" onclick="saveQbExtractionSettings()">Save extraction limits</button></div><div class="hint">Allowed ranges: 1–100 MB, 1–200 pages, and $0.01–$1,000 per paper. Defaults: 20 MB, 25 pages and $2.00.</div>'+(qbExtractionSettingsMsg?'<div class="hint" style="color:var(--brick)">'+esc(qbExtractionSettingsMsg)+'</div>':'')+'</div>';}
+let aiKeyMsg = '';    // result of the last AI Settings save, shown under the key box
 let aiApiKey = '';    // the key itself: loaded for admins only (AI Settings card)
 let aiKeySet = false;  // whether a key is saved; AI calls go through the ai-proxy Edge Function, which holds it
 let aiMasterEnabled = false;
@@ -11934,6 +11947,7 @@ async function loadAiSettings() {
       const {data,error}=await sb.from('ai_settings').select('api_key,master_enabled').maybeSingle();
       if(!error&&data){ if (currentRole === 'Admin') aiApiKey=data.api_key||''; aiKeySet=!!data.api_key; aiMasterEnabled=data.master_enabled!==false; }
     }
+    if (currentRole === 'Admin') await loadQbExtractionSettings();
     if (currentRole === 'Admin') {
       // Separate reads (run together): before SQL 50 / 51 these columns don't exist and the read just fails quietly.
       const [c, ra] = await Promise.all([
@@ -17251,7 +17265,7 @@ function renderWixBookings() {
 // Admin → AI: AI on/off, key and cost prices; AI usage with estimated cost.
 function renderAiAdmin() {
   return `
-    <div class="card"><h2>AI Settings ${helpBtn('ai-settings')}</h2><div class="hint" style="margin-bottom:12px">AI features use Claude to improve messages, generate summaries and answer student questions.</div><label style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><input type="checkbox" id="aiMasterToggle" ${aiMasterEnabled?'checked':''} onchange="(async()=>{const k=document.getElementById('aiKeyInput').value.trim()||aiApiKey;await saveAiSettings(k,this.checked);render();})()"> <b>AI enabled (master switch)</b></label><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="password" autocomplete="new-password" id="aiKeyInput" placeholder="sk-ant-..." value="${esc(aiApiKey)}" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:monospace"><button class="btn-small btn-primary" onclick="(async()=>{const k=document.getElementById('aiKeyInput').value.trim();const en=document.getElementById('aiMasterToggle').checked;await saveAiSettings(k,en);render();})()">Save</button></div>${aiKeyMsg?`<div class="hint" style="margin-top:8px;color:${aiKeyMsg==='Saved.'?'var(--forest)':'var(--brick)'}">${esc(aiKeyMsg)}</div>`:''}<div class="hint" style="margin-top:8px">Get key at <b>console.anthropic.com</b>. See real spend there under Usage / Cost.</div>${aiCostSettingsHtml()}</div>
+    <div class="card"><h2>AI Settings ${helpBtn('ai-settings')}</h2><div class="hint" style="margin-bottom:12px">AI features use Claude to improve messages, generate summaries and answer student questions.</div><label style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><input type="checkbox" id="aiMasterToggle" ${aiMasterEnabled?'checked':''} onchange="(async()=>{const k=document.getElementById('aiKeyInput').value.trim()||aiApiKey;await saveAiSettings(k,this.checked);render();})()"> <b>AI enabled (master switch)</b></label><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="password" autocomplete="new-password" id="aiKeyInput" placeholder="sk-ant-..." value="${esc(aiApiKey)}" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:monospace"><button class="btn-small btn-primary" onclick="(async()=>{const k=document.getElementById('aiKeyInput').value.trim();const en=document.getElementById('aiMasterToggle').checked;await saveAiSettings(k,en);render();})()">Save</button></div>${aiKeyMsg?`<div class="hint" style="margin-top:8px;color:${aiKeyMsg==='Saved.'?'var(--forest)':'var(--brick)'}">${esc(aiKeyMsg)}</div>`:''}<div class="hint" style="margin-top:8px">Get key at <b>console.anthropic.com</b>. See real spend there under Usage / Cost.</div>${aiCostSettingsHtml()}${qbExtractionSettingsHtml()}</div>
     ${aiAccessCardHtml()}
 
 
