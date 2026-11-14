@@ -92,7 +92,7 @@ Deno.serve(async(req)=>{
     if(resumeCostError)throw new Error("Could not reconcile saved USD usage before continuing.");
    }else{
     if(old&&["sent","uncertain"].includes(old.request_state)){
-     await db.rpc("qb_set_paper_extraction_run_state",{p_run_id:runId,p_status:"uncertain",p_ai_request_state:"uncertain",p_error_message:`Ambiguous provider request ${chunk}; blocked from retry.`});
+     await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"uncertain",p_ai_request_state:"uncertain",p_error_message:`Ambiguous provider request ${chunk}; blocked from retry.`});
      throw new Error(`Pages ${first}-${last} have an ambiguous provider request. No retry was made.`);
     }
     if(old?.request_state==="failed_before_send")throw new Error(`Pages ${first}-${last} failed before send; inspect and create an explicit retry.`);
@@ -108,7 +108,7 @@ Deno.serve(async(req)=>{
     if(sendLeaseError||sendLease!==true)throw new Error("Worker lease was lost before provider send; no provider request was sent.");
     const {data:claim,error:ce}=await db.from("qb_paper_extraction_requests").update({request_state:"sent",sent_at:new Date().toISOString()}).eq("id",requestId).eq("request_state","prepared").select("id").maybeSingle();
     if(ce||!claim)throw new Error("Provider request is already owned or its state changed; no duplicate call was sent.");
-    const state=await db.rpc("qb_set_paper_extraction_run_state",{p_run_id:runId,p_status:"processing",p_ai_request_state:"sent",p_error_message:null});
+    const state=await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"processing",p_ai_request_state:"sent",p_error_message:null});
     if(state.error)throw new Error("Could not persist provider-send state; this request must be reconciled.");
     const part=await PDFDocument.create();
     const pages=await part.copyPages(pdf,Array.from({length:last-first+1},(_,i)=>first-1+i));pages.forEach(p=>part.addPage(p));
@@ -128,7 +128,7 @@ Deno.serve(async(req)=>{
     }catch(e){
      const msg=String((e as Error).message||e);
      await db.from("qb_paper_extraction_requests").update({request_state:"uncertain",error_message:msg.slice(0,1500)}).eq("id",requestId).eq("request_state","sent");
-     await db.rpc("qb_set_paper_extraction_run_state",{p_run_id:runId,p_status:"uncertain",p_ai_request_state:"uncertain",p_error_message:msg.slice(0,1500)});
+     await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"uncertain",p_ai_request_state:"uncertain",p_error_message:msg.slice(0,1500)});
      throw new Error("Provider outcome uncertain; automatic retry blocked: "+msg);
     }
    }
@@ -147,7 +147,7 @@ Deno.serve(async(req)=>{
    if(checkpointLeaseError||checkpointLease!==true)throw new Error("Worker lease was lost after saving this batch; the saved provider response and page checkpoints will be reused on resume.");
    await db.from("qb_paper_extraction_runs").update({last_checkpoint_at:new Date().toISOString(),input_tokens:input,output_tokens:output}).eq("id",runId).eq("lease_owner",owner);
   }
-  const {error:done}=await db.rpc("qb_set_paper_extraction_run_state",{p_run_id:runId,p_status:"completed",p_ai_request_state:"responded",p_error_message:null});
+  const {error:done}=await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"completed",p_ai_request_state:"responded",p_error_message:null});
   if(done)throw new Error("All page responses are saved but run finalisation failed; resume to reconcile.");
   await db.from("qb_paper_extraction_runs").update({current_stage:"review",input_tokens:input,output_tokens:output,lease_owner:null,lease_expires_at:null,heartbeat_at:new Date().toISOString(),last_checkpoint_at:new Date().toISOString()}).eq("id",runId).eq("lease_owner",owner);
   return reply(200,{ok:true,run_id:runId,status:"completed",stage:"review",pages_total:total,staged_items:staged,input_tokens:input,output_tokens:output,model:MODEL,cost_currency:"USD",actual_cost_usd:totalCost,cost_budget_usd:BUDGET_USD,requires_admin_review:true,questions_published:0});
