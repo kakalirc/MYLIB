@@ -92,6 +92,7 @@ jobs:
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261114232000_qb_extraction_worker_state_owner_guard.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261114233000_qb_extraction_admin_reconciliation.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261114234000_qb_extraction_reconciled_claim_guard.sql
+          psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261115003000_qb_extraction_two_page_batch_state.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/qb-paper-extraction-safety-gate-smoke.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/qb-extraction-restartability-smoke.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/qb-extraction-worker-lease-smoke.sql
