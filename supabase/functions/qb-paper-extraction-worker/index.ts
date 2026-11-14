@@ -1,5 +1,5 @@
 // Admin-only resumable Question Bank paper extraction worker.
-// Each 5-page provider request is persisted before transmission. A sent/uncertain
+// Each two-page provider request is persisted before transmission. A sent/uncertain
 // request is never resent; saved responses are reused to rebuild staging.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument } from "npm:pdf-lib@1.17.1";
@@ -197,14 +197,18 @@ Deno.serve(async(req)=>{
    if(checkpointLeaseError||checkpointLease!==true)throw new Error("Worker lease was lost after saving this batch; the saved provider response and page checkpoints will be reused on resume.");
    await db.from("qb_paper_extraction_runs").update({last_checkpoint_at:new Date().toISOString(),input_tokens:input,output_tokens:output,actual_cost_usd:totalCost,estimated_cost_usd:totalCost,cost_budget_reserved_usd:totalCost}).eq("id",runId).eq("lease_owner",owner);
    const completedCount=(pageStates||[]).filter((p:any)=>p.page_state==="completed").length+(last-first+1);
-   if(last<total)return reply(200,{ok:true,run_id:runId,status:"processing",stage:"page_extraction",pages_total:total,pages_completed:completedCount,next_page:last+1,staged_items:staged,input_tokens:input,output_tokens:output,model:MODEL,cost_currency:"USD",actual_cost_usd:totalCost,cost_budget_usd:BUDGET_USD,requires_admin_review:false,questions_published:0});
+   const {count:stagedTotal,error:stagedCountError}=await db.from("qb_paper_extraction_staging").select("id",{count:"exact",head:true}).eq("run_id",runId);
+   if(stagedCountError)throw new Error("Could not count the durable staged items.");
+   if(last<total)return reply(200,{ok:true,run_id:runId,status:"processing",stage:"page_extraction",pages_total:total,pages_completed:completedCount,next_page:last+1,staged_items:stagedTotal||0,input_tokens:input,output_tokens:output,model:MODEL,cost_currency:"USD",actual_cost_usd:totalCost,cost_budget_usd:BUDGET_USD,requires_admin_review:false,questions_published:0});
    break;
   }
   if((pageStates||[]).some((p:any)=>p.page_state!=="completed") && (pageStates||[]).filter((p:any)=>p.page_state==="completed").length<total)throw new Error("A page batch remains incomplete; no completion state was written.");
+  const {count:finalStagedTotal,error:finalStagedCountError}=await db.from("qb_paper_extraction_staging").select("id",{count:"exact",head:true}).eq("run_id",runId);
+  if(finalStagedCountError)throw new Error("Could not count the final durable staged items.");
   const {data:doneState,error:done}=await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"completed",p_ai_request_state:"responded",p_error_message:null});
   if(done||!doneState?.ok)throw new Error("All page responses are saved but run finalisation failed because the worker lease is no longer valid; resume to reconcile.");
   await db.from("qb_paper_extraction_runs").update({current_stage:"review",input_tokens:input,output_tokens:output,lease_owner:null,lease_expires_at:null,heartbeat_at:new Date().toISOString(),last_checkpoint_at:new Date().toISOString()}).eq("id",runId).eq("lease_owner",owner);
-  return reply(200,{ok:true,run_id:runId,status:"completed",stage:"review",pages_total:total,staged_items:staged,input_tokens:input,output_tokens:output,model:MODEL,cost_currency:"USD",actual_cost_usd:totalCost,cost_budget_usd:BUDGET_USD,requires_admin_review:true,questions_published:0});
+  return reply(200,{ok:true,run_id:runId,status:"completed",stage:"review",pages_total:total,staged_items:finalStagedTotal||0,input_tokens:input,output_tokens:output,model:MODEL,cost_currency:"USD",actual_cost_usd:totalCost,cost_budget_usd:BUDGET_USD,requires_admin_review:true,questions_published:0});
  }catch(e){
   const msg=String((e as Error).message||e);
   // A stale worker must never change the state after its lease was replaced.
