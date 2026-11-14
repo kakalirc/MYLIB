@@ -26008,19 +26008,26 @@ function qbSourcePapersHtml() {
     String(sp.subject_name || '').trim().toLocaleLowerCase(), sp.year, String(sp.exam_type || '').trim().toLocaleLowerCase(),
     String(sp.medium || '').trim().toLocaleLowerCase()].join('|');
   const duplicateGroups = new Map();
-  list.forEach(sp => { const key = duplicateKey(sp); if (!duplicateGroups.has(key)) duplicateGroups.set(key, []); duplicateGroups.get(key).push(sp); });
-  const duplicateIds = new Set();
-  const duplicateNotices = [];
-  duplicateGroups.forEach(rows => {
+  list.forEach(sp => {
+    const key = duplicateKey(sp);
+    if (!duplicateGroups.has(key)) duplicateGroups.set(key, []);
+    duplicateGroups.get(key).push(sp);
+  });
+  const duplicateIds = new Set(), duplicateReferenceById = new Map(), duplicateNotices = [];
+  duplicateGroups.forEach((rows, key) => {
     const unresolved = rows.filter(sp => !sp.duplicate_override);
     if (unresolved.length > 1) {
       unresolved.forEach(sp => duplicateIds.add(sp.id));
-      const first = unresolved[0];
-      duplicateNotices.push(unresolved.length + ' records: ' + [qbByName(grades, first.grade_id) ? 'Class ' + qbByName(grades, first.grade_id) : '', first.subject_name, first.year, first.exam_type].filter(Boolean).join(' · '));
+      const reference = unresolved[0];
+      unresolved.slice(1).forEach(sp => duplicateReferenceById.set(sp.id, reference));
+      duplicateNotices.push(unresolved.length + ' papers grouped for comparison: ' + [
+        qbByName(grades, reference.grade_id) ? 'Class ' + qbByName(grades, reference.grade_id) : '',
+        reference.subject_name, reference.year, reference.exam_type
+      ].filter(Boolean).join(' · '));
     }
   });
   const duplicateWarning = duplicateNotices.length
-    ? '<div style="padding:10px 12px;margin:0 0 12px;border:1px solid #d6a34a;border-radius:9px;background:rgba(214,163,74,.10)"><b>Possible duplicate papers detected</b><div class="hint" style="margin-top:4px">' + duplicateNotices.map(esc).join('<br>') + '</div><div class="hint" style="margin-top:4px">Compare the PDFs before deleting a copy. Matching details do not guarantee identical file contents.</div></div>'
+    ? '<div style="padding:10px 12px;margin:0 0 12px;border:1px solid #d6a34a;border-radius:9px;background:rgba(214,163,74,.10)"><b>Possible duplicate papers grouped together</b><div class="hint" style="margin-top:4px">' + duplicateNotices.map(esc).join('<br>') + '</div><div class="hint" style="margin-top:4px">Papers with matching details are candidates for comparison, not confirmed duplicates. Matching file checksums identify exact file copies. Review the PDFs before deleting anything.</div></div>'
     : '';
   const groups = new Map();
   list.forEach(sp => {
@@ -26029,18 +26036,52 @@ function qbSourcePapersHtml() {
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(sp);
   });
-  return `<p class="hint" style="margin-bottom:12px">Published papers across all subjects, plus your own submissions awaiting review or rejected.</p>
+  const orderedGroups = [...groups.entries()].map(([key, rows]) => {
+    const originalOrder = new Map(rows.map((sp, index) => [sp.id, index]));
+    rows.sort((left, right) => {
+      const leftRef = duplicateReferenceById.get(left.id), rightRef = duplicateReferenceById.get(right.id);
+      const leftCluster = leftRef ? duplicateKey(left) : duplicateIds.has(left.id) ? duplicateKey(left) : '';
+      const rightCluster = rightRef ? duplicateKey(right) : duplicateIds.has(right.id) ? duplicateKey(right) : '';
+      if (leftCluster && leftCluster === rightCluster) {
+        if (leftRef && rightRef && leftRef.id !== rightRef.id) return originalOrder.get(leftRef.id) - originalOrder.get(rightRef.id);
+        if (leftRef && !rightRef) return 1;
+        if (!leftRef && rightRef) return -1;
+        return originalOrder.get(left.id) - originalOrder.get(right.id);
+      }
+      const yearDiff = String(right.year || '').localeCompare(String(left.year || ''), undefined, { numeric: true });
+      if (yearDiff) return yearDiff;
+      const examDiff = String(left.exam_type || '').localeCompare(String(right.exam_type || ''), undefined, { numeric: true });
+      if (examDiff) return examDiff;
+      if (leftCluster && !rightCluster) return -1;
+      if (!leftCluster && rightCluster) return 1;
+      return originalOrder.get(left.id) - originalOrder.get(right.id);
+    });
+    return [key, rows];
+  });
+  return `<p class="hint" style="margin-bottom:12px">Published papers across all subjects, plus your own submissions awaiting review or rejected. Papers with matching board/school, class, subject, year, exam and medium are kept together for comparison.</p>
     ${filtersHtml}${duplicateWarning}<div style="font-size:12px;color:var(--muted);margin-bottom:8px">${list.length} paper${list.length === 1 ? '' : 's'}</div>
-    ${[...groups.entries()].map(([k, list]) => `<div style="margin-bottom:16px"><div style="font-weight:700;border-bottom:2px solid var(--line);padding-bottom:4px;margin-bottom:6px">${esc(k)}</div>
-      ${list.map(sp => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px">
-        <span><b>${esc(String(sp.year || ''))}</b> ${esc(sp.exam_type || '')}${sp.duplicate_override ? ' <span class="badge" style="background:rgba(75,155,112,.12);color:var(--forest)">Not a duplicate</span>' : duplicateIds.has(sp.id) ? ' <span class="badge" style="background:rgba(214,163,74,.16);color:#805b16">Possible duplicate</span>' : ''}${sp.medium ? ` <span style="color:var(--muted);font-size:12px">· ${esc(sp.medium)}</span>` : ''}${sp.question_count ? ` <span style="color:var(--muted);font-size:12px">· ${esc(String(sp.question_count))} questions</span>` : ''}<br><span class="hint">${esc(sp.source_type === 'school' ? 'School: ' + (qbByName(qbSchools, sp.school_id) || 'Unknown school') : 'Board: ' + (qbByName(boards, sp.board_id) || 'Unknown board'))} · ${esc(sp.subject_name || '')} · ${esc(sp.uploader_name || 'Legacy upload')} · ${esc(sp.status || 'published')}</span></span>
+    ${orderedGroups.map(([k, rows]) => `<div style="margin-bottom:16px"><div style="font-weight:700;border-bottom:2px solid var(--line);padding-bottom:4px;margin-bottom:6px">${esc(k)}</div>
+      ${rows.map((sp, index) => {
+        const reference = duplicateReferenceById.get(sp.id);
+        const referenceNumber = reference ? rows.findIndex(item => item.id === reference.id) + 1 : 0;
+        const checksumMatch = !!(reference && sp.checksum && reference.checksum && String(sp.checksum) === String(reference.checksum));
+        const relationBadge = sp.duplicate_override
+          ? ' <span class="badge" style="background:rgba(75,155,112,.12);color:var(--forest)">Not a Duplicate</span>'
+          : reference
+            ? ' <span class="badge" style="background:rgba(214,163,74,.16);color:#805b16">' + (checksumMatch ? 'Exact file duplicate of Paper ' : 'Possible duplicate of Paper ') + referenceNumber + '</span>'
+            : duplicateIds.has(sp.id)
+              ? ' <span class="badge" style="background:rgba(75,155,112,.12);color:var(--forest)">Comparison reference · Paper ' + (index + 1) + '</span>'
+              : '';
+        return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px">
+        <span><b>Paper ${index + 1} · ${esc(String(sp.year || ''))}</b> ${esc(sp.exam_type || '')}${relationBadge}${sp.medium ? ` <span style="color:var(--muted);font-size:12px">· ${esc(sp.medium)}</span>` : ''}${sp.question_count ? ` <span style="color:var(--muted);font-size:12px">· ${esc(String(sp.question_count))} questions</span>` : ''}<br><span class="hint">${esc(sp.source_type === 'school' ? 'School: ' + (qbByName(qbSchools, sp.school_id) || 'Unknown school') : 'Board: ' + (qbByName(boards, sp.board_id) || 'Unknown board'))} · ${esc(sp.subject_name || '')} · ${esc(sp.uploader_name || 'Legacy upload')} · ${esc(sp.status || 'published')}</span></span>
         <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${sp.stored_pdf_url || sp.source_url ? `${currentRole === 'Admin' ? `<button type="button" class="btn-small" onclick="qbToggleSourcePaperPreview('${sp.id}')">${qbSourcePreviewOpenIds.has(sp.id) ? 'Hide preview' : 'Preview first page'}</button>` : ''}<button class="btn-small" onclick="qbOpenSourcePdf('${sp.id}')">⬇ Open PDF</button>` : '<span class="hint">No PDF</span>'}
         ${currentRole === 'Admin' && (duplicateIds.has(sp.id) || sp.duplicate_override) ? `<button class="btn-small" onclick="qbSetSourcePaperDuplicateOverride('${sp.id}',${sp.duplicate_override ? 'false' : 'true'})">${sp.duplicate_override ? 'Restore duplicate check' : 'Not a Duplicate'}</button>` : ''}
         ${qbDuplicateActionMsg[sp.id] ? `<span role="status" aria-live="polite" style="font-size:12px;color:${qbDuplicateActionMsg[sp.id].error ? 'var(--brick)' : 'var(--forest)'};font-weight:600">${esc(qbDuplicateActionMsg[sp.id].text)}</span>` : ''}
         ${sp.status === 'pending_review' && currentRole === 'Admin' ? `<button class="btn-small btn-primary" onclick="qbSetSourcePaperStatus('${sp.id}','published')">Publish</button><button class="btn-small" onclick="qbSetSourcePaperStatus('${sp.id}','rejected')">Reject</button>` : ''}
         ${currentRole === 'Admin' && sp.status === 'published' ? `<button type="button" class="btn-small" onclick="qbBeginSourcePaperEdit('${sp.id}')">Edit metadata</button>` : ''}${currentRole === 'Admin' ? `<button class="btn-small" onclick="qbDeleteSourcePaper('${sp.id}')">Delete</button>` : ''}
         </span>
-      </div>${qbSourcePreviewOpenIds.has(sp.id) ? qbSourcePaperPreviewHtml(sp) : ''}${qbSourceEditId === sp.id ? qbSourcePaperEditHtml(sp) : ''}`).join('')}</div>`).join('')}`;
+      </div>${qbSourcePreviewOpenIds.has(sp.id) ? qbSourcePaperPreviewHtml(sp) : ''}${qbSourceEditId === sp.id ? qbSourcePaperEditHtml(sp) : ''}`;
+      }).join('')}</div>`).join('')}`;
 }
 
 // Printable question paper (and optional answer key) in a new window; the browser's Print → Save as PDF makes the file.
