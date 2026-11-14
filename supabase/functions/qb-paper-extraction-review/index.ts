@@ -15,8 +15,15 @@ Deno.serve(async(req)=>{
  if(profileError||profile?.role!=="Admin"||profile.archived===true)return reply(403,{error:"Only an active Admin can review extracted papers."});
  let body:any;try{body=await req.json();}catch{return reply(400,{error:"Invalid request JSON."});}
  const action=String(body.action||""),runId=String(body.run_id||"");
+ if(action==="latest"){
+  const sourceId=String(body.source_paper_id||"");
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sourceId))return reply(400,{error:"Valid source_paper_id required."});
+  const {data:latest,error}=await db.from("qb_paper_extraction_runs").select("id,source_paper_id,status,ai_request_state,current_stage,input_tokens,output_tokens,model_name,started_at,completed_at,lease_expires_at").eq("source_paper_id",sourceId).order("started_at",{ascending:false}).limit(1).maybeSingle();
+  if(error)return reply(500,{error:"Could not load extraction history."});
+  return reply(200,{ok:true,found:!!latest,run:latest||null});
+ }
  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(runId))return reply(400,{error:"Valid run_id required."});
- const {data:run,error:runError}=await db.from("qb_paper_extraction_runs").select("id,source_paper_id,status,current_stage,input_tokens,output_tokens,model_name,started_at,completed_at").eq("id",runId).maybeSingle();
+ const {data:run,error:runError}=await db.from("qb_paper_extraction_runs").select("id,source_paper_id,status,ai_request_state,current_stage,input_tokens,output_tokens,model_name,started_at,completed_at").eq("id",runId).maybeSingle();
  if(runError||!run)return reply(404,{error:"Extraction run not found."});
  if(action==="list"){
   const [{data:items,error:itemError},{data:pages,error:pageError},{data:paper}] = await Promise.all([
