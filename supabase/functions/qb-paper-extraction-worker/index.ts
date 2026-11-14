@@ -80,10 +80,10 @@ Deno.serve(async(req)=>{
    let parsed:any;
    if(old?.request_state==="responded"){
     parsed=old.response_payload;input+=Number(old.input_tokens||0);output+=Number(old.output_tokens||0);
-    const {error:resumeCostError}=await db.from("qb_paper_extraction_runs").update({input_tokens:input,output_tokens:output,actual_cost_usd:totalCost,estimated_cost_usd:totalCost,cost_budget_reserved_usd:totalCost}).eq("id",runId).eq("lease_owner",owner);
-    if(resumeCostError)throw new Error("Could not reconcile saved USD usage before continuing.");
     const savedCost=old.total_cost_usd==null?tokenCost(Number(old.input_tokens||0),Number(old.output_tokens||0)):Number(old.total_cost_usd);
     totalCost=usd(totalCost+savedCost);
+    const {error:resumeCostError}=await db.from("qb_paper_extraction_runs").update({input_tokens:input,output_tokens:output,actual_cost_usd:totalCost,estimated_cost_usd:totalCost,cost_budget_reserved_usd:totalCost}).eq("id",runId).eq("lease_owner",owner);
+    if(resumeCostError)throw new Error("Could not reconcile saved USD usage before continuing.");
    }else{
     if(old&&["sent","uncertain"].includes(old.request_state)){
      await db.rpc("qb_set_paper_extraction_run_state",{p_run_id:runId,p_status:"uncertain",p_ai_request_state:"uncertain",p_error_message:`Ambiguous provider request ${chunk}; blocked from retry.`});
