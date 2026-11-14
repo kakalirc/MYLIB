@@ -12,7 +12,7 @@ const PRICING:Record<string,{input:number;output:number;source:string}>={
 const PRICE=PRICING[MODEL];
 let BUDGET_USD=2;
 let MAX_PDF_MB=20, MAX_PAGES=25, MAX_BYTES=20*1024*1024;
-const MAX_OUTPUT_TOKENS=16000;
+const MAX_OUTPUT_TOKENS=32000;
 const MAX_BATCH_RESERVE_USD=(200000*(PRICE?.input||0)+MAX_OUTPUT_TOKENS*(PRICE?.output||0))/1_000_000;
 const BATCH=2;
 const usd=(n:number)=>Math.round((n+Number.EPSILON)*1e8)/1e8;
