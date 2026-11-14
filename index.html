@@ -2139,7 +2139,7 @@ let qbAssignIds = new Set();    // students ticked in the assign panel
 let qbAssignUntil = '';         // due date (yyyy-mm-dd) for new assignments
 let qbAssignAllGrades = false;  // also list the teacher's students who don't match the paper's board / grade / subject
 let qbSourcePapers = [];        // qb_source_papers rows (published papers + own submissions)
-let qbSourcePreviewId = '', qbSourcePreviewUrl = '', qbSourcePreviewLoading = false, qbSourcePreviewError = '';
+let qbSourcePreviewId = '', qbSourcePreviewUrl = '', qbSourcePreviewLoading = false, qbSourcePreviewError = '', qbSourcePreviewText = '';
 let qbSourceEditId = '';
 let qbSourceMetaMsg = '';
 let qbSourceReviews = [];       // Admin-visible status history across all submissions
@@ -25629,12 +25629,13 @@ function qbStorageRef(url) {
 function qbSourcePaperPreviewHtml(sp) {
   if (!sp || currentRole !== 'Admin' || qbSourcePreviewId !== sp.id) return '';
   const heading = [sp.subject_name, qbByName(grades, sp.grade_id) ? 'Class ' + qbByName(grades, sp.grade_id) : '', sp.year, sp.exam_type].filter(Boolean).join(' · ') || 'Past paper';
-  if (qbSourcePreviewLoading) return '<div class="qb-source-pdf-preview" style="margin:8px 0 14px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface)"><div class="hint" role="status">Preparing PDF preview…</div></div>';
-  if (qbSourcePreviewError) return '<div class="qb-source-pdf-preview" style="margin:8px 0 14px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface)"><div class="hint" role="alert" style="color:var(--brick)">' + esc(qbSourcePreviewError) + '</div></div>';
-  if (!qbSourcePreviewUrl) return '';
-  return '<div class="qb-source-pdf-preview" style="margin:8px 0 14px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface)" role="region" aria-label="PDF preview for ' + esc(heading) + '">'
-    + '<div class="hint" style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px"><b>PDF preview · First page</b><span>Scroll inside the preview to inspect the document</span></div>'
-    + '<iframe title="PDF preview: ' + esc(heading) + '" src="' + escAttr(qbSourcePreviewUrl + '#page=1&toolbar=0&navpanes=0') + '" loading="lazy" referrerpolicy="no-referrer" style="display:block;width:100%;height:520px;border:1px solid var(--line);border-radius:8px;background:var(--surface)"></iframe>'
+  const shell = 'margin:8px 0 14px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface)';
+  if (qbSourcePreviewLoading) return '<div class="qb-source-pdf-preview" style="' + shell + '"><div class="hint" role="status">Loading paper preview…</div></div>';
+  if (qbSourcePreviewError) return '<div class="qb-source-pdf-preview" style="' + shell + '"><div class="hint" role="alert" style="color:var(--brick)">' + esc(qbSourcePreviewError) + '</div></div>';
+  if (!qbSourcePreviewText) return '';
+  return '<div class="qb-source-pdf-preview" style="' + shell + '" role="region" aria-label="Text preview for ' + esc(heading) + '">'
+    + '<div class="hint" style="margin-bottom:7px"><b>Paper preview</b> · First few lines</div>'
+    + '<pre style="margin:0;white-space:pre-wrap;overflow-wrap:anywhere;max-height:190px;overflow:auto;font:13px/1.55 inherit;color:var(--text)">' + esc(qbSourcePreviewText) + '</pre>'
     + '</div>';
 }
 function qbRenderSourcePreviewPreservingScroll() {
@@ -25645,19 +25646,14 @@ function qbRenderSourcePreviewPreservingScroll() {
 async function qbToggleSourcePaperPreview(id) {
   if (currentRole !== 'Admin' || !sb) return;
   if (qbSourcePreviewId === id) {
-    qbSourcePreviewId = '';
-    qbSourcePreviewUrl = '';
-    qbSourcePreviewLoading = false;
-    qbSourcePreviewError = '';
-    qbRenderSourcePreviewPreservingScroll();
-    return;
+    qbSourcePreviewId = ''; qbSourcePreviewUrl = ''; qbSourcePreviewText = '';
+    qbSourcePreviewLoading = false; qbSourcePreviewError = '';
+    qbRenderSourcePreviewPreservingScroll(); return;
   }
   const sp = qbSourcePapers.find(x => x.id === id);
   if (!sp) return;
-  qbSourcePreviewId = id;
-  qbSourcePreviewUrl = '';
-  qbSourcePreviewLoading = true;
-  qbSourcePreviewError = '';
+  qbSourcePreviewId = id; qbSourcePreviewUrl = ''; qbSourcePreviewText = '';
+  qbSourcePreviewLoading = true; qbSourcePreviewError = '';
   qbRenderSourcePreviewPreservingScroll();
   try {
     let href = sp.stored_pdf_url && /^https?:/i.test(sp.stored_pdf_url) && !/\/object\/sign\//.test(sp.stored_pdf_url) ? sp.stored_pdf_url : null;
@@ -25671,14 +25667,30 @@ async function qbToggleSourcePaperPreview(id) {
     if (!href || !/^https?:\/\//i.test(href)) throw new Error('No accessible PDF is available for preview.');
     if (qbSourcePreviewId !== id) return;
     qbSourcePreviewUrl = href;
+    const resp = await fetch(href);
+    if (!resp.ok) throw new Error('Could not download PDF (' + resp.status + ').');
+    const pdfjsLib = await loadPdfJs();
+    const pdf = await pdfjsLib.getDocument({ data: await resp.arrayBuffer() }).promise;
+    const page = await pdf.getPage(1);
+    const pageText = await page.getTextContent();
+    const byY = {};
+    for (const item of pageText.items) {
+      if (!item.str || !item.str.trim()) continue;
+      const y = Math.round(item.transform[5]);
+      if (!byY[y]) byY[y] = [];
+      byY[y].push({ x: item.transform[4], text: item.str });
+    }
+    const lines = Object.keys(byY).map(Number).sort((a,b)=>b-a)
+      .map(y => byY[y].sort((a,b)=>a.x-b.x).map(item=>item.text).join(' ').replace(/\s+/g,' ').trim())
+      .filter(Boolean);
+    if (qbSourcePreviewId !== id) return;
+    qbSourcePreviewText = lines.length ? lines.slice(0,8).join('\n').slice(0,1400)
+      : 'No selectable text was found on the first page. This may be a scanned or image-based PDF.';
   } catch (error) {
     if (qbSourcePreviewId !== id) return;
-    qbSourcePreviewError = 'Could not load PDF preview: ' + (error && error.message ? error.message : String(error));
+    qbSourcePreviewError = 'Could not load paper preview: ' + (error && error.message ? error.message : String(error));
   } finally {
-    if (qbSourcePreviewId === id) {
-      qbSourcePreviewLoading = false;
-      qbRenderSourcePreviewPreservingScroll();
-    }
+    if (qbSourcePreviewId === id) { qbSourcePreviewLoading = false; qbRenderSourcePreviewPreservingScroll(); }
   }
 }
 
