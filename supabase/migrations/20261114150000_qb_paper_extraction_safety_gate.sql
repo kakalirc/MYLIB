@@ -60,6 +60,7 @@ declare
   v_linked_count integer := 0;
   v_existing_run public.qb_paper_extraction_runs%rowtype;
   v_duplicate_paper public.qb_source_papers%rowtype;
+  v_duplicate_run_id uuid;
   v_run_id uuid;
 begin
   if coalesce(auth.role(), '') <> 'service_role' then
@@ -138,6 +139,20 @@ begin
   end if;
 
   if p_pdf_sha256 is not null then
+    -- Serialize claims for identical bytes across different source-paper rows.
+    -- The per-paper row lock alone cannot prevent two papers with the same PDF
+    -- from being claimed concurrently.
+    perform pg_advisory_xact_lock(hashtextextended(lower(trim(p_pdf_sha256)), 0));
+
+    -- If this paper already has a stored checksum, it must agree with the
+    -- checksum computed from the actual PDF bytes by the trusted Edge Function.
+    if coalesce(v_paper.checksum, '') <> ''
+       and lower(trim(v_paper.checksum)) <> lower(trim(p_pdf_sha256)) then
+      return jsonb_build_object('ok', false, 'code', 'paper_checksum_mismatch',
+        'message', 'The stored checksum does not match the PDF bytes. Verify the source file before extraction; no AI request was made.');
+    end if;
+
+    -- Check registered source-paper checksums, regardless of extraction status.
     select * into v_duplicate_paper
       from public.qb_source_papers
      where id <> p_source_paper_id
@@ -148,6 +163,31 @@ begin
       return jsonb_build_object('ok', false, 'code', 'exact_pdf_duplicate',
         'message', 'This PDF is an exact byte-for-byte match for another registered source paper. Extraction is blocked to prevent a duplicate AI charge.',
         'duplicate_source_paper_id', v_duplicate_paper.id,
+        'duplicate_extraction_status', v_duplicate_paper.extraction_status,
+        'duplicate_year', v_duplicate_paper.year,
+        'duplicate_subject', v_duplicate_paper.subject_name);
+    end if;
+
+    -- Older extraction runs may have a checksum even when the source-paper
+    -- upload record does not. Treat a prior provider attempt as a duplicate too.
+    select r.id, p.*
+      into v_duplicate_run_id, v_duplicate_paper
+      from public.qb_paper_extraction_runs r
+      join public.qb_source_papers p on p.id = r.source_paper_id
+     where r.source_paper_id <> p_source_paper_id
+       and lower(r.pdf_sha256) = lower(trim(p_pdf_sha256))
+       and (
+         r.status in ('queued', 'processing', 'completed', 'uncertain')
+         or r.ai_request_state in ('sent', 'responded', 'uncertain')
+       )
+     order by r.started_at desc
+     limit 1;
+
+    if found then
+      return jsonb_build_object('ok', false, 'code', 'exact_pdf_duplicate',
+        'message', 'This PDF matches a previous extraction run for another source paper. Extraction is blocked to prevent a duplicate AI charge.',
+        'duplicate_source_paper_id', v_duplicate_paper.id,
+        'duplicate_run_id', v_duplicate_run_id,
         'duplicate_extraction_status', v_duplicate_paper.extraction_status,
         'duplicate_year', v_duplicate_paper.year,
         'duplicate_subject', v_duplicate_paper.subject_name);
