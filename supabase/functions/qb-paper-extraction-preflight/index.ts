@@ -91,13 +91,15 @@ Deno.serve(async (req) => {
   }
 
   const { data: previousRuns, error: runError } = await admin.from("qb_paper_extraction_runs")
-    .select("id,status,ai_request_state,started_at")
+    .select("id,status,ai_request_state,started_at,admin_reconciled_at")
     .eq("source_paper_id", paperId).order("started_at", { ascending: false });
   if (runError) return reply(500, { error: "Could not verify extraction history: " + runError.message });
   // Inspect all history: a newer safe failure must not hide an older provider attempt.
   const previous = (previousRuns || []).find((run) =>
-    ["queued", "processing", "completed", "uncertain"].includes(run.status)
-    || ["sent", "responded", "uncertain"].includes(run.ai_request_state)
+    !run.admin_reconciled_at && (
+      ["queued", "processing", "completed", "uncertain"].includes(run.status)
+      || ["sent", "responded", "uncertain"].includes(run.ai_request_state)
+    )
   );
   if (previous) {
     return reply(409, {
