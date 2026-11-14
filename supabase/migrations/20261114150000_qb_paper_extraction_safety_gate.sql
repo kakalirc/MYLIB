@@ -66,6 +66,16 @@ begin
     raise exception 'This extraction gate may only be called by the trusted server';
   end if;
 
+  if p_requested_by is null or not exists (
+    select 1 from public.profiles p
+     where p.id = p_requested_by
+       and p.role = 'Admin'
+       and coalesce(p.archived, false) = false
+  ) then
+    return jsonb_build_object('ok', false, 'code', 'admin_required',
+      'message', 'An active Admin must initiate extraction. No AI request was made.');
+  end if;
+
   if p_source_paper_id is null then
     return jsonb_build_object('ok', false, 'code', 'missing_paper_id',
       'message', 'Select a source paper first. No AI request was made.');
@@ -184,7 +194,8 @@ begin
     raise exception 'This extraction state update may only be called by the trusted server';
   end if;
 
-  if p_status not in ('queued', 'processing', 'completed', 'failed', 'uncertain')
+  if p_status is null or p_ai_request_state is null
+     or p_status not in ('queued', 'processing', 'completed', 'failed', 'uncertain')
      or p_ai_request_state not in ('not_sent', 'sent', 'responded', 'uncertain') then
     raise exception 'Unsupported extraction state';
   end if;
@@ -196,6 +207,13 @@ begin
 
   if not found then
     return jsonb_build_object('ok', false, 'code', 'run_not_found');
+  end if;
+
+  if p_status = 'completed' and p_ai_request_state <> 'responded' then
+    raise exception 'A run cannot complete until the provider response has been durably received';
+  end if;
+  if p_status = 'failed' and p_ai_request_state in ('sent', 'uncertain') then
+    raise exception 'A run with an ambiguous provider request must be marked uncertain, not failed';
   end if;
 
   if v_run.ai_request_state in ('sent', 'responded', 'uncertain')
