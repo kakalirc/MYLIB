@@ -25613,11 +25613,11 @@ async function qbPrepareSourcePaperExtraction(id) {
   if (!paper) return;
   if (!paper.stored_pdf_url) {
     qbExtractionResults[id] = { ok: false, message: 'No PDF is stored in the approved private bucket. Upload or repair the stored PDF before extraction.' };
-    render(); return;
+    qbRenderSourcePreviewPreservingScroll(); return;
   }
   qbExtractionBusyIds.add(id);
   qbExtractionResults[id] = { loading: true, message: 'Checking extraction eligibility…' };
-  render();
+  qbRenderSourcePreviewPreservingScroll();
   try {
     const { data: { session } } = await sb.auth.getSession();
     if (!session) throw new Error('Your session has expired. Please sign in again.');
