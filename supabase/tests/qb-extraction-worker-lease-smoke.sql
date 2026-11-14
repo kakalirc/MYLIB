@@ -4,6 +4,16 @@ begin
  if to_regprocedure('public.qb_claim_extraction_worker(uuid,text,integer)') is null then
    raise exception 'Missing qb_claim_extraction_worker';
  end if;
+ if to_regprocedure('public.qb_renew_extraction_worker(uuid,text,integer)') is null then
+   raise exception 'Missing qb_renew_extraction_worker';
+ end if;
+ if has_function_privilege('anon','public.qb_renew_extraction_worker(uuid,text,integer)','EXECUTE')
+    or has_function_privilege('authenticated','public.qb_renew_extraction_worker(uuid,text,integer)','EXECUTE') then
+   raise exception 'Browser roles must not renew extraction leases';
+ end if;
+ if not has_function_privilege('service_role','public.qb_renew_extraction_worker(uuid,text,integer)','EXECUTE') then
+   raise exception 'service_role must be able to renew extraction leases';
+ end if;
  if to_regprocedure('public.qb_release_extraction_worker(uuid,text)') is null then
    raise exception 'Missing qb_release_extraction_worker';
  end if;
