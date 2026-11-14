@@ -98,6 +98,15 @@ Deno.serve(async(req)=>{
   if(seed.error)throw new Error("Could not initialise page checkpoints.");
   const {data:requests,error:qe}=await db.from("qb_paper_extraction_requests").select("id,chunk_key,request_state,response_payload,input_tokens,output_tokens,input_cost_usd,output_cost_usd,total_cost_usd").eq("run_id",runId);
   if(qe)throw new Error("Could not inspect provider checkpoints.");
+  const ambiguousRequests=(requests||[]).filter((x:any)=>["sent","uncertain"].includes(x.request_state));
+  if(ambiguousRequests.length){
+   for(const request of ambiguousRequests){
+    if(request.request_state==="sent")await db.from("qb_paper_extraction_requests").update({request_state:"uncertain",error_message:"Prior provider send has no durably saved response; blocked globally before any new batch."}).eq("id",request.id).eq("request_state","sent");
+   }
+   const state=await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"uncertain",p_ai_request_state:"uncertain",p_error_message:"An earlier provider request has an ambiguous outcome. No new batch was sent."});
+   if(state.error||!state.data?.ok)throw new Error("An earlier provider request is ambiguous. No new request was sent; Admin reconciliation is required.");
+   throw new Error("An earlier provider request is ambiguous. No new request was sent; Admin reconciliation is required.");
+  }
   const byChunk=new Map((requests||[]).map((x:any)=>[x.chunk_key,x]));
   let staged=0,input=0,output=0,totalCost=0;
   for(const r of (requests||[]).filter((x:any)=>x.request_state==="responded")){input+=Number(r.input_tokens||0);output+=Number(r.output_tokens||0);totalCost=usd(totalCost+(r.total_cost_usd==null?tokenCost(Number(r.input_tokens||0),Number(r.output_tokens||0)):Number(r.total_cost_usd)));}
