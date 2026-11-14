@@ -61,7 +61,7 @@ Deno.serve(async(req)=>{
   if(!path||path.includes(".."))throw new Error("PDF must be stored in the private qb-papers bucket.");
   const {data:file,error:de}=await db.storage.from("qb-papers").download(path);
   if(de||!file)throw new Error("Could not download source PDF.");
-  if(file.size>MAX_BYTES)throw new Error("PDF exceeds the configured ${MAX_PDF_MB} MB extraction limit; no provider request was made.");
+  if(file.size>MAX_BYTES)throw new Error("PDF exceeds the configured "+MAX_PDF_MB+" MB extraction limit; no provider request was made.");
   const bytes=new Uint8Array(await file.arrayBuffer());
   if(new TextDecoder().decode(bytes.slice(0,5))!=="%PDF-")throw new Error("Stored file is not a valid PDF.");
   if(run.pdf_sha256) {
