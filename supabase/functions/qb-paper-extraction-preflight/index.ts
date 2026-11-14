@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
   if (!uuid(paperId)) return reply(400, { error: "A valid source paper ID is required." });
 
   const { data: paper, error: paperError } = await admin.from("qb_source_papers")
-    .select("id,status,extraction_status,stored_pdf_url,board_id,grade_id,subject_name,year,exam_type,medium")
+    .select("id,status,extraction_status,stored_pdf_url,source_type,school_id,board_id,grade_id,subject_name,year,exam_type,medium")
     .eq("id", paperId).maybeSingle();
   if (paperError) return reply(500, { error: "Could not inspect the selected paper: " + paperError.message });
   if (!paper) return reply(404, { ok: false, code: "paper_not_found", message: "The selected source paper no longer exists. No AI request was made." });
@@ -112,7 +112,8 @@ Deno.serve(async (req) => {
     .eq("subject_name", paper.subject_name).eq("year", paper.year)
     .eq("exam_type", paper.exam_type).eq("medium", paper.medium)
     .eq("extraction_status", "extracted").limit(10);
-  if (paper.board_id) duplicateQuery = duplicateQuery.eq("board_id", paper.board_id);
+  if (paper.source_type === "school" && paper.school_id) duplicateQuery = duplicateQuery.eq("school_id", paper.school_id);
+  else if (paper.board_id) duplicateQuery = duplicateQuery.eq("board_id", paper.board_id);
   const { data: possibleDuplicates } = await duplicateQuery;
 
   const { data: claim, error: claimError } = await admin.rpc("qb_begin_paper_extraction", {
