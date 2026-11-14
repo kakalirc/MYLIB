@@ -3,6 +3,7 @@
 // request is never resent; saved responses are reused to rebuild staging.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument } from "npm:pdf-lib@1.17.1";
+import { parseQuestionItems } from "./response_parser.ts";
 
 const MODEL=Deno.env.get("QB_EXTRACTION_MODEL")||"claude-haiku-4-5";
 const PRICING:Record<string,{input:number;output:number;source:string}>={
@@ -19,7 +20,7 @@ const CORS={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"au
 const reply=(s:number,b:unknown)=>new Response(JSON.stringify(b),{status:s,headers:{...CORS,"Content-Type":"application/json"}});
 const hash=async(s:string)=>{const d=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s));return [...new Uint8Array(d)].map(x=>x.toString(16).padStart(2,"0")).join("");};
 const b64=(a:Uint8Array)=>{let s="";for(let i=0;i<a.length;i+=0x8000)s+=String.fromCharCode(...a.subarray(i,i+0x8000));return btoa(s);};
-function parseJson(s:string){const t=s.trim().replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,"");const a=t.indexOf("{"),z=t.lastIndexOf("}");if(a<0||z<a)throw new Error("AI response did not contain JSON.");return JSON.parse(t.slice(a,z+1));}
+function parseJson(s:string){return parseQuestionItems(s);}
 function parseProviderBody(raw:string){
  const data=JSON.parse(raw);
  if(data.error)throw new Error(data.error.message||"Anthropic returned an error.");
@@ -31,13 +32,11 @@ function parseSavedResponse(payload:any){
  if(payload?.items&&Array.isArray(payload.items))return payload;
  if(typeof payload?.raw_text==="string"){
   const parsed=parseJson(payload.raw_text);
-  if(!Array.isArray(parsed?.items))throw new Error("Saved AI response schema invalid.");
   return {items:parsed.items};
  }
  if(typeof payload?.raw_body==="string"){
   const {text}=parseProviderBody(payload.raw_body);
   const parsed=parseJson(text);
-  if(!Array.isArray(parsed?.items))throw new Error("Saved AI response schema invalid.");
   return {items:parsed.items};
  }
  throw new Error("Saved provider response is not recoverable; do not resend automatically.");
@@ -166,8 +165,7 @@ Deno.serve(async(req)=>{
     const {error:costSave}=await db.from("qb_paper_extraction_runs").update({input_tokens:input,output_tokens:output,actual_cost_usd:totalCost,estimated_cost_usd:totalCost,cost_budget_reserved_usd:totalCost}).eq("id",runId).eq("lease_owner",owner);
     if(costSave)throw new Error("Provider response and usage are saved; run-level cost update failed and can be reconciled on resume.");
     parsed=parseJson(text);
-    if(!Array.isArray(parsed?.items))throw new Error("AI response schema invalid.");
-    const {error:parsedSave}=await db.from("qb_paper_extraction_requests").update({response_payload:{raw_body:rawBody,raw_text:text,items:parsed.items}}).eq("id",requestId).eq("request_state","responded");
+    const {error:parsedSave}=await db.from("qb_paper_extraction_requests").update({response_payload:{raw_body:rawBody,raw_text:text,items:parsed.items,json_repaired:parsed.repaired}}).eq("id",requestId).eq("request_state","responded");
     if(parsedSave)throw new Error("Parsed response could not be cached; raw response remains saved for recovery.");
     parsed={items:parsed.items};
    }
