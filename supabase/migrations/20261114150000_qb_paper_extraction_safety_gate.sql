@@ -119,23 +119,25 @@ begin
       'extraction_status', v_paper.extraction_status);
   end if;
 
+  -- Any earlier provider attempt blocks a new run, even if a newer safe
+  -- failed-before-send run happens to be the most recent row.
   select * into v_existing_run
     from public.qb_paper_extraction_runs
    where source_paper_id = p_source_paper_id
+     and (
+       status in ('queued', 'processing', 'completed', 'uncertain')
+       or ai_request_state in ('sent', 'responded', 'uncertain')
+     )
    order by started_at desc
    limit 1;
 
   if found then
-    if v_existing_run.status in ('queued', 'processing', 'uncertain')
-       or v_existing_run.status = 'completed'
-       or v_existing_run.ai_request_state in ('sent', 'responded', 'uncertain') then
-      return jsonb_build_object('ok', false, 'code', 'prior_extraction_run',
-        'message', 'A previous extraction attempt exists. It must be inspected or reconciled before another AI request. No AI request was made.',
-        'run_id', v_existing_run.id,
-        'run_status', v_existing_run.status,
-        'ai_request_state', v_existing_run.ai_request_state,
-        'linked_question_count', v_linked_count);
-    end if;
+    return jsonb_build_object('ok', false, 'code', 'prior_extraction_run',
+      'message', 'A previous extraction attempt exists. It must be inspected or reconciled before another AI request. No AI request was made.',
+      'run_id', v_existing_run.id,
+      'run_status', v_existing_run.status,
+      'ai_request_state', v_existing_run.ai_request_state,
+      'linked_question_count', v_linked_count);
   end if;
 
   if p_pdf_sha256 is not null then
