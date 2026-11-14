@@ -1,6 +1,7 @@
 // Trusted preflight/claim endpoint for Admin Question Bank paper extraction.
 // This endpoint deliberately does not call Anthropic or any other AI provider.
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { PDFDocument } from "npm:pdf-lib@1.17.1";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -10,7 +11,18 @@ const CORS = {
 const reply = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 const uuid = (v: unknown) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v ?? ""));
-const MAX_PDF_BYTES = 50 * 1024 * 1024;
+function positiveIntSetting(name: string, fallback: number, hardMax: number): number {
+  const raw = Deno.env.get(name);
+  if (raw == null || raw.trim() === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1 || value > hardMax) {
+    throw new Error(name + " must be a whole number from 1 to " + hardMax + ".");
+  }
+  return value;
+}
+const MAX_PDF_MB = positiveIntSetting("QB_EXTRACTION_MAX_PDF_MB", 20, 100);
+const MAX_PAGES = positiveIntSetting("QB_EXTRACTION_MAX_PAGES", 25, 200);
+const MAX_PDF_BYTES = MAX_PDF_MB * 1024 * 1024;
 
 function storageObject(stored: string): { bucket: string; path: string } | null {
   const value = String(stored || "").trim();
@@ -99,10 +111,20 @@ Deno.serve(async (req) => {
   }
   const { data: pdf, error: downloadError } = await admin.storage.from(object.bucket).download(object.path);
   if (downloadError || !pdf) return reply(422, { ok: false, code: "pdf_unavailable", message: "The stored PDF could not be retrieved. No AI request was made." });
-  if (pdf.size > MAX_PDF_BYTES) return reply(413, { ok: false, code: "pdf_too_large", message: "This PDF exceeds the 50 MB extraction limit. No AI request was made." });
+  if (pdf.size > MAX_PDF_BYTES) return reply(413, { ok: false, code: "pdf_too_large", message: "This PDF exceeds the configured ${MAX_PDF_MB} MB extraction limit. No AI request was made." });
   const bytes = await pdf.arrayBuffer();
   if (bytes.byteLength < 8 || new TextDecoder().decode(bytes.slice(0, 5)) !== "%PDF-") {
     return reply(422, { ok: false, code: "invalid_pdf", message: "The stored file is not a valid PDF. No AI request was made." });
+  }
+  let pageCount: number;
+  try {
+    const parsedPdf = await PDFDocument.load(new Uint8Array(bytes), { ignoreEncryption: false, updateMetadata: false });
+    pageCount = parsedPdf.getPageCount();
+  } catch {
+    return reply(422, { ok: false, code: "invalid_pdf", message: "The PDF could not be parsed or is encrypted. No AI request was made." });
+  }
+  if (pageCount < 1 || pageCount > MAX_PAGES) {
+    return reply(413, { ok: false, code: "pdf_page_limit", message: `This PDF has ${pageCount} pages; the configured limit is ${MAX_PAGES} pages. No AI request was made.`, page_count: pageCount, max_pages: MAX_PAGES });
   }
   const checksum = await sha256Hex(bytes);
 
