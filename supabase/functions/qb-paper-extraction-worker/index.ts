@@ -14,7 +14,7 @@ let BUDGET_USD=2;
 let MAX_PDF_MB=20, MAX_PAGES=25, MAX_BYTES=20*1024*1024;
 const MAX_OUTPUT_TOKENS=32000;
 const MAX_BATCH_RESERVE_USD=(200000*(PRICE?.input||0)+MAX_OUTPUT_TOKENS*(PRICE?.output||0))/1_000_000;
-const BATCH=2;
+const BATCH=8;
 const usd=(n:number)=>Math.round((n+Number.EPSILON)*1e8)/1e8;
 const tokenCost=(input:number,output:number)=>usd(input*(PRICE?.input||0)/1_000_000+output*(PRICE?.output||0)/1_000_000);
 const CORS={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, x-client-info, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS"};
@@ -103,7 +103,7 @@ Deno.serve(async(req)=>{
   for(let first=1;first<=total;first+=BATCH){
    const {data:batchLease,error:batchLeaseError}=await db.rpc("qb_renew_extraction_worker",{p_run_id:runId,p_lease_owner:owner,p_lease_seconds:900});
    if(batchLeaseError||batchLease!==true)throw new Error("Worker lease was lost before the next batch; this worker stopped without sending another provider request.");
-   const last=Math.min(total,first+BATCH-1),chunk=`pages:${first}-${last}:v2`;
+   const last=Math.min(total,first+BATCH-1),chunk=`pages:${first}-${last}:v3`;
    const old:any=byChunk.get(chunk);
    let parsed:any;
    if(old?.request_state==="responded"){
