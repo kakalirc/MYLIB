@@ -78,13 +78,14 @@ Deno.serve(async (req) => {
 
   const { data: previousRuns, error: runError } = await admin.from("qb_paper_extraction_runs")
     .select("id,status,ai_request_state,started_at")
-    .eq("source_paper_id", paperId).order("started_at", { ascending: false }).limit(1);
+    .eq("source_paper_id", paperId).order("started_at", { ascending: false });
   if (runError) return reply(500, { error: "Could not verify extraction history: " + runError.message });
-  const previous = previousRuns?.[0];
-  if (previous && (
-    ["queued", "processing", "completed", "uncertain"].includes(previous.status)
-    || ["sent", "responded", "uncertain"].includes(previous.ai_request_state)
-  )) {
+  // Inspect all history: a newer safe failure must not hide an older provider attempt.
+  const previous = (previousRuns || []).find((run) =>
+    ["queued", "processing", "completed", "uncertain"].includes(run.status)
+    || ["sent", "responded", "uncertain"].includes(run.ai_request_state)
+  );
+  if (previous) {
     return reply(409, {
       ok: false, code: "prior_extraction_run",
       message: "A previous extraction attempt exists. It must be inspected or reconciled before another AI request. No AI request was made.",
