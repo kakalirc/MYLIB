@@ -6608,16 +6608,6 @@ async function loadJSZip() {
     document.head.appendChild(s);
   });
 }
-async function loadTesseract() {
-  if (window.Tesseract) return window.Tesseract;
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js';
-    s.onload = () => window.Tesseract ? resolve(window.Tesseract) : reject(new Error('OCR library did not initialize'));
-    s.onerror = () => reject(new Error('Could not load OCR library'));
-    document.head.appendChild(s);
-  });
-}
 async function loadPdfJs() {
   if (window.pdfjsLib) return window.pdfjsLib;
   return new Promise((resolve, reject) => {
