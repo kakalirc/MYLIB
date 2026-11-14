@@ -61,6 +61,7 @@ declare
   v_existing_run public.qb_paper_extraction_runs%rowtype;
   v_duplicate_paper public.qb_source_papers%rowtype;
   v_duplicate_run_id uuid;
+  v_duplicate_source_paper_id uuid;
   v_run_id uuid;
 begin
   if coalesce(auth.role(), '') <> 'service_role' then
@@ -172,8 +173,8 @@ begin
 
     -- Older extraction runs may have a checksum even when the source-paper
     -- upload record does not. Treat a prior provider attempt as a duplicate too.
-    select r.id, p
-      into v_duplicate_run_id, v_duplicate_paper
+    select r.id, p.id
+      into v_duplicate_run_id, v_duplicate_source_paper_id
       from public.qb_paper_extraction_runs r
       join public.qb_source_papers p on p.id = r.source_paper_id
      where r.source_paper_id <> p_source_paper_id
@@ -186,6 +187,7 @@ begin
      limit 1;
 
     if found then
+      select * into v_duplicate_paper from public.qb_source_papers where id = v_duplicate_source_paper_id;
       return jsonb_build_object('ok', false, 'code', 'exact_pdf_duplicate',
         'message', 'This PDF matches a previous extraction run for another source paper. Extraction is blocked to prevent a duplicate AI charge.',
         'duplicate_source_paper_id', v_duplicate_paper.id,
