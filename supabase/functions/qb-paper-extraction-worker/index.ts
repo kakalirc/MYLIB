@@ -39,7 +39,7 @@ Deno.serve(async(req)=>{
  const runId=String(body.run_id||"");
  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(runId))return reply(400,{error:"Valid run_id required."});
  const owner=crypto.randomUUID();
- const {data:lease,error:le}=await db.rpc("qb_claim_extraction_worker",{p_run_id:runId,p_lease_owner:owner,p_lease_seconds:600});
+ const {data:lease,error:le}=await db.rpc("qb_claim_extraction_worker",{p_run_id:runId,p_lease_owner:owner,p_lease_seconds:900});
  if(le)return reply(500,{error:"Could not claim extraction worker lease."});
  if(!lease?.ok)return reply(409,{ok:false,...lease});
  try{
@@ -79,6 +79,8 @@ Deno.serve(async(req)=>{
   const byChunk=new Map((requests||[]).map((x:any)=>[x.chunk_key,x]));
   let staged=0,input=0,output=0,totalCost=0;
   for(let first=1;first<=total;first+=BATCH){
+   const {data:batchLease,error:batchLeaseError}=await db.rpc("qb_renew_extraction_worker",{p_run_id:runId,p_lease_owner:owner,p_lease_seconds:900});
+   if(batchLeaseError||batchLease!==true)throw new Error("Worker lease was lost before the next batch; this worker stopped without sending another provider request.");
    const last=Math.min(total,first+BATCH-1),chunk=`pages:${first}-${last}:v1`;
    const old:any=byChunk.get(chunk);
    let parsed:any;
@@ -102,6 +104,8 @@ Deno.serve(async(req)=>{
      if(ne||!newReq)throw new Error("Could not save provider request checkpoint.");
      requestId=newReq.id;
     }
+    const {data:sendLease,error:sendLeaseError}=await db.rpc("qb_renew_extraction_worker",{p_run_id:runId,p_lease_owner:owner,p_lease_seconds:900});
+    if(sendLeaseError||sendLease!==true)throw new Error("Worker lease was lost before provider send; no provider request was sent.");
     const {data:claim,error:ce}=await db.from("qb_paper_extraction_requests").update({request_state:"sent",sent_at:new Date().toISOString()}).eq("id",requestId).eq("request_state","prepared").select("id").maybeSingle();
     if(ce||!claim)throw new Error("Provider request is already owned or its state changed; no duplicate call was sent.");
     const state=await db.rpc("qb_set_paper_extraction_run_state",{p_run_id:runId,p_status:"processing",p_ai_request_state:"sent",p_error_message:null});
@@ -139,7 +143,9 @@ Deno.serve(async(req)=>{
    }
    const {error:pu}=await db.from("qb_paper_extraction_pages").update({page_state:"completed",page_kind:"mixed",completed_at:new Date().toISOString(),page_metadata:{chunk_key:chunk,staged_items:(parsed.items||[]).length}}).eq("run_id",runId).gte("page_number",first).lte("page_number",last);
    if(pu)throw new Error("Could not save page checkpoints; saved response will be reused on resume.");
-   await db.from("qb_paper_extraction_runs").update({heartbeat_at:new Date().toISOString(),last_checkpoint_at:new Date().toISOString(),input_tokens:input,output_tokens:output}).eq("id",runId).eq("lease_owner",owner);
+   const {data:checkpointLease,error:checkpointLeaseError}=await db.rpc("qb_renew_extraction_worker",{p_run_id:runId,p_lease_owner:owner,p_lease_seconds:900});
+   if(checkpointLeaseError||checkpointLease!==true)throw new Error("Worker lease was lost after saving this batch; the saved provider response and page checkpoints will be reused on resume.");
+   await db.from("qb_paper_extraction_runs").update({last_checkpoint_at:new Date().toISOString(),input_tokens:input,output_tokens:output}).eq("id",runId).eq("lease_owner",owner);
   }
   const {error:done}=await db.rpc("qb_set_paper_extraction_run_state",{p_run_id:runId,p_status:"completed",p_ai_request_state:"responded",p_error_message:null});
   if(done)throw new Error("All page responses are saved but run finalisation failed; resume to reconcile.");
