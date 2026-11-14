@@ -208,6 +208,18 @@ begin
     return jsonb_build_object('ok', false, 'code', 'run_not_found');
   end if;
 
+  if v_run.status in ('completed', 'failed', 'uncertain')
+     and (p_status <> v_run.status or p_ai_request_state <> v_run.ai_request_state) then
+    raise exception 'Terminal extraction runs are immutable; reconcile them through a separate Admin workflow';
+  end if;
+
+  if v_run.ai_request_state = 'not_sent' and p_ai_request_state = 'responded' then
+    raise exception 'A provider response cannot be recorded before the request is marked sent';
+  end if;
+  if v_run.ai_request_state = 'responded' and p_ai_request_state <> 'responded' then
+    raise exception 'A durably received provider response cannot be downgraded';
+  end if;
+
   if p_status = 'completed' and p_ai_request_state <> 'responded' then
     raise exception 'A run cannot complete until the provider response has been durably received';
   end if;
