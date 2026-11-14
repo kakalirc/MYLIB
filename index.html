@@ -25693,7 +25693,6 @@ async function qbRunSourcePaperExtraction(id) {
       inputTokens: result.input_tokens, outputTokens: result.output_tokens,
       actualCostUsd: result.actual_cost_usd, costBudgetUsd: result.cost_budget_usd, costCurrency: 'USD'
     };
-    await qbLoadExtractionReview(id, true);
   } catch (error) {
     qbExtractionResults[id] = {
       ...state, ok: false, loading: false,
@@ -25702,6 +25701,9 @@ async function qbRunSourcePaperExtraction(id) {
   } finally {
     qbExtractionBusyIds.delete(id);
     qbRenderSourcePreviewPreservingScroll();
+    if (qbExtractionResults[id]?.stage === 'review' && qbExtractionResults[id]?.ok) {
+      await qbLoadExtractionReview(id, true);
+    }
   }
 }
 async function qbLoadExtractionReview(id, quiet) {
