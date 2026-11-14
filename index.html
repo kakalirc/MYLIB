@@ -25637,7 +25637,7 @@ async function qbPrepareSourcePaperExtraction(id) {
     qbExtractionResults[id] = { ok: false, message: error.message || 'Could not contact the extraction safety service. No AI request was made.' };
   } finally {
     qbExtractionBusyIds.delete(id);
-    qbRenderSourcePaperPreservingScroll();
+    qbRenderSourcePreviewPreservingScroll();
   }
 }
 async function loadQbSourcePapers() {
