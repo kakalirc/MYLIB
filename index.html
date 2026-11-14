@@ -1789,7 +1789,7 @@ async function saveQbExtractionSettings() {
  const maxPdfMb=Number(document.getElementById('qbExtractionMaxPdfMb')?.value), maxPages=Number(document.getElementById('qbExtractionMaxPages')?.value), budgetUsd=Number(document.getElementById('qbExtractionBudgetUsd')?.value);
  if(!Number.isInteger(maxPdfMb)||maxPdfMb<1||maxPdfMb>100){qbExtractionSettingsMsg='PDF size must be a whole number from 1 to 100 MB.';render();return;}
  if(!Number.isInteger(maxPages)||maxPages<1||maxPages>200){qbExtractionSettingsMsg='Page limit must be a whole number from 1 to 200.';render();return;}
- if(!Number.isFinite(budgetUsd)||budgetUsd<=0||budgetUsd>1000){qbExtractionSettingsMsg='Budget must be greater than $0 and no more than $1,000.';render();return;}
+ if(!Number.isFinite(budgetUsd)||budgetUsd<0.01||budgetUsd>1000){qbExtractionSettingsMsg='Budget must be at least $0.01 and no more than $1,000.';render();return;}
  qbExtractionSettingsMsg='Saving…';render();
  try{const r=await qbExtractionPost('qb-paper-extraction-review',{action:'save_settings',settings:{max_pdf_mb:maxPdfMb,max_pages:maxPages,budget_usd:budgetUsd}});qbExtractionSettings=r.settings;qbExtractionSettingsMsg='Saved ✓';}catch(e){qbExtractionSettingsMsg=e.message||'Could not save extraction settings.';}
  render();
