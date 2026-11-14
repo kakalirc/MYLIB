@@ -26077,7 +26077,7 @@ function qbSourcePapersHtml() {
         ${sp.status === 'pending_review' && currentRole === 'Admin' ? `<button class="btn-small btn-primary" onclick="qbSetSourcePaperStatus('${sp.id}','published')">Publish</button><button class="btn-small" onclick="qbSetSourcePaperStatus('${sp.id}','rejected')">Reject</button>` : ''}
         ${currentRole === 'Admin' && sp.status === 'published' ? `<button type="button" class="btn-small" onclick="qbBeginSourcePaperEdit('${sp.id}')">Edit metadata</button>` : ''}${currentRole === 'Admin' ? `<button class="btn-small" onclick="qbDeleteSourcePaper('${sp.id}')">Delete</button>` : ''}
         </span>
-      </div>${qbSourcePreviewId === sp.id ? qbSourcePaperPreviewHtml(sp) : ''}${qbSourceEditId === sp.id ? qbSourcePaperEditHtml(sp) : ''}`).join('')}</div>`).join('')}`;
+      </div>${qbSourcePreviewOpenIds.has(sp.id) ? qbSourcePaperPreviewHtml(sp) : ''}${qbSourceEditId === sp.id ? qbSourcePaperEditHtml(sp) : ''}`).join('')}</div>`).join('')}`;
 }
 
 // Printable question paper (and optional answer key) in a new window; the browser's Print → Save as PDF makes the file.
