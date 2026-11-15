@@ -25723,6 +25723,45 @@ async function qbLoadExtractionReview(id, quiet) {
   }
   if (qbExtractionResults[id]?.reviewOpen && !qbSourcePreviewOpenIds.has(id)) await qbToggleSourcePaperPreview(id);
 }
+async function qbResetSourcePaperExtraction(id) {
+  if (currentRole !== 'Admin' || qbExtractionBusyIds.has(id)) return;
+  const paper = qbSourcePapers.find(row => row.id === id && row.status === 'published');
+  if (!paper || !paper.stored_pdf_url) { alert('A published source paper with a stored PDF is required.'); return; }
+  qbExtractionBusyIds.add(id);
+  qbExtractionResults[id] = { loading: true, ok: true, message: 'Checking the previous run before creating a fresh run…' };
+  qbRenderSourcePreviewPreservingScroll();
+  try {
+    const history = await qbExtractionPost('qb-paper-extraction-review', { action: 'latest', source_paper_id: id });
+    if (!history.found || !history.run) throw new Error('No previous extraction run exists. Use Prepare extraction for the first run.');
+    const previous = history.run;
+    if (['queued', 'processing'].includes(previous.status)) throw new Error('The previous run is still active. Use Resume extraction or wait until it stops before resetting.');
+    const confirmed = window.confirm(
+      'RESET & EXTRACT AGAIN\n\nThis creates a brand-new run from page 1, with fresh Anthropic requests, fresh page checkpoints and a separate budget/cost ledger.\n\nThe previous run, its provider responses, staging and audit history will remain unchanged.\n\nIf the previous provider outcome was uncertain, the new run may incur a duplicate charge. Continue?'
+    );
+    if (!confirmed) {
+      qbExtractionResults[id] = { ok: true, runId: previous.id, stage: previous.current_stage, runStatus: previous.status, message: 'Reset cancelled. The previous extraction run is unchanged.' };
+      return;
+    }
+    qbExtractionResults[id] = { loading: true, ok: true, message: 'Creating a fresh extraction run and validating its independent budget…' };
+    qbRenderSourcePreviewPreservingScroll();
+    const fresh = await qbExtractionPost('qb-paper-extraction-preflight', {
+      source_paper_id: id, reset_and_extract: true, previous_run_id: previous.id
+    });
+    qbExtractionResults[id] = {
+      ok: true, loading: false, stage: 'prepared', runId: fresh.run_id || '',
+      previousRunId: previous.id,
+      message: 'Fresh run created from page 1. Previous run ' + previous.id + ' is retained in history. New provider requests and a separate cost ledger will be used.',
+      metadataMatches: Array.isArray(fresh.possible_metadata_matches) ? fresh.possible_metadata_matches.length : 0
+    };
+    qbRenderSourcePreviewPreservingScroll();
+    await qbRunSourcePaperExtraction(id);
+  } catch (error) {
+    qbExtractionResults[id] = { ok: false, loading: false, message: error.message || 'Could not create a fresh extraction run.' };
+  } finally {
+    qbExtractionBusyIds.delete(id);
+    qbRenderSourcePreviewPreservingScroll();
+  }
+}
 async function qbCheckSourcePaperExtraction(id) {
   if (currentRole !== 'Admin' || qbExtractionBusyIds.has(id)) return;
   qbExtractionBusyIds.add(id);
@@ -26380,7 +26419,7 @@ function qbSourcePapersHtml() {
         ${currentRole === 'Admin' && (duplicateIds.has(sp.id) || sp.duplicate_override) ? `<button class="btn-small" onclick="qbSetSourcePaperDuplicateOverride('${sp.id}',${sp.duplicate_override ? 'false' : 'true'})">${sp.duplicate_override ? 'Restore duplicate check' : 'Not a Duplicate'}</button>` : ''}
         ${qbDuplicateActionMsg[sp.id] ? `<span role="status" aria-live="polite" style="font-size:12px;color:${qbDuplicateActionMsg[sp.id].error ? 'var(--brick)' : 'var(--forest)'};font-weight:600">${esc(qbDuplicateActionMsg[sp.id].text)}</span>` : ''}
         ${sp.status === 'pending_review' && currentRole === 'Admin' ? `<button class="btn-small btn-primary" onclick="qbSetSourcePaperStatus('${sp.id}','published')">Publish</button><button class="btn-small" onclick="qbSetSourcePaperStatus('${sp.id}','rejected')">Reject</button>` : ''}
-        ${currentRole === 'Admin' && sp.status === 'published' ? `<button type="button" class="btn-small btn-primary" onclick="qbPrepareSourcePaperExtraction('${sp.id}')" ${(qbExtractionBusyIds.has(sp.id) || (qbExtractionResults[sp.id]?.reconciliationRequired && !qbExtractionResults[sp.id]?.reconciled)) ? 'disabled' : ''}>${qbExtractionBusyIds.has(sp.id) ? 'Checking…' : 'Prepare extraction'}</button><button type="button" class="btn-small" onclick="qbCheckSourcePaperExtraction('${sp.id}')" ${qbExtractionBusyIds.has(sp.id) ? 'disabled' : ''}>Check / resume extraction</button><button type="button" class="btn-small" onclick="qbBeginSourcePaperEdit('${sp.id}')">Edit metadata</button>` : ''}${currentRole === 'Admin' ? `<button class="btn-small" onclick="qbDeleteSourcePaper('${sp.id}')">Delete</button>` : ''}
+        ${currentRole === 'Admin' && sp.status === 'published' ? `<button type="button" class="btn-small btn-primary" onclick="qbPrepareSourcePaperExtraction('${sp.id}')" ${(qbExtractionBusyIds.has(sp.id) || (qbExtractionResults[sp.id]?.reconciliationRequired && !qbExtractionResults[sp.id]?.reconciled)) ? 'disabled' : ''}>${qbExtractionBusyIds.has(sp.id) ? 'Checking…' : 'Prepare extraction'}</button><button type="button" class="btn-small" onclick="qbCheckSourcePaperExtraction('${sp.id}')" ${qbExtractionBusyIds.has(sp.id) ? 'disabled' : ''}>Resume extraction / history</button><button type="button" class="btn-small" onclick="qbResetSourcePaperExtraction('${sp.id}')" ${qbExtractionBusyIds.has(sp.id) ? 'disabled' : ''}>Reset &amp; extract again</button><button type="button" class="btn-small" onclick="qbBeginSourcePaperEdit('${sp.id}')">Edit metadata</button>` : ''}${currentRole === 'Admin' ? `<button class="btn-small" onclick="qbDeleteSourcePaper('${sp.id}')">Delete</button>` : ''}
         </span>
       </div>${qbExtractionResults[sp.id] ? `<div role="status" aria-live="polite" style="margin:6px 0 10px;padding:9px 11px;border:1px solid ${qbExtractionResults[sp.id].ok ? '#4b9b70' : 'var(--line)'};border-radius:8px;background:${qbExtractionResults[sp.id].ok ? 'rgba(75,155,112,.10)' : 'var(--surface)'};color:${qbExtractionResults[sp.id].ok ? 'var(--forest)' : 'var(--ink)'};font-size:12px">${esc(qbExtractionResults[sp.id].message)}${qbExtractionResults[sp.id].metadataMatches ? `<div class="hint" style="margin-top:4px">Metadata matches to review: ${qbExtractionResults[sp.id].metadataMatches}. These are warnings only, not confirmed duplicates.</div>` : ''}${qbExtractionResults[sp.id].runId && qbExtractionResults[sp.id].stage === 'prepared' ? `<div style="margin-top:8px"><button class="btn-small btn-primary" onclick="qbRunSourcePaperExtraction('${sp.id}')" ${qbExtractionBusyIds.has(sp.id) ? 'disabled' : ''}>Start extraction</button></div>` : ''}${qbExtractionResults[sp.id].stage === 'review' ? `<div style="margin-top:8px"><button class="btn-small btn-primary" onclick="qbLoadExtractionReview('${sp.id}')" ${qbExtractionBusyIds.has(sp.id) ? 'disabled' : ''}>Review extracted items</button></div>` : ''}</div>` : ''}${qbExtractionResults[sp.id]?.runId && qbExtractionResults[sp.id]?.reconciliationRequired ? `<div style="margin:8px 0"><button type="button" class="btn-small" onclick="qbInspectExtractionReconciliation('${sp.id}')" ${qbExtractionBusyIds.has(sp.id) ? 'disabled' : ''}>Inspect provider requests &amp; checkpoints</button></div>` : ''}${qbExtractionReconciliationHtml(sp.id)}${qbExtractionReviewHtml(sp.id)}${qbSourcePreviewOpenIds.has(sp.id) ? qbSourcePaperPreviewHtml(sp) : ''}${qbSourceEditId === sp.id ? qbSourcePaperEditHtml(sp) : ''}`;
       }).join('')}</div>`).join('')}`;
