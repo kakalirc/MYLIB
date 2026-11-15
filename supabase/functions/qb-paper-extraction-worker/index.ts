@@ -5,6 +5,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument } from "npm:pdf-lib@1.17.1";
 import { parseQuestionItems } from "./response_parser.ts";
 import { readAnthropicUsage } from "./usage_reconciliation.ts";
+import { assessExtractionQuality, formatOption } from "./quality_validation.ts";
 
 const MODEL=Deno.env.get("QB_EXTRACTION_MODEL")||"claude-haiku-4-5";
 const PRICING:Record<string,{input:number;output:number;source:string}>={
@@ -49,7 +50,7 @@ Return ONLY JSON using this exact outer structure: {"items":[{"item_kind":"quest
 
 PASSAGES: Emit each complete unseen/comprehension/source passage once as one passage item with passage_text, passage_type, original_number and page_number. Preserve paragraph breaks. Questions that refer to it must set parent_item_key to that passage original_number exactly.
 
-QUESTIONS: Emit one item per main numbered question. Keep ALL subquestions/subparts together inside payload.subquestions as an ordered array; do not emit subparts as separate top-level items. Each subquestion includes original_number (e.g. a, b, i, ii), question_text, options (array or null), marks (number or null), question_type and visual_stimulus_description. Parent payload includes question_text, question_type, options, marks, section, section_label, shared_instructions, topic, difficulty, answer_text=null, explanation_text=null, subquestions, extraction_notes. If no subparts, use an empty subquestions array. Preserve exact numbering and order; do not combine separate main questions.
+QUESTIONS: Emit one item per main numbered question. Keep ALL subquestions/subparts together inside payload.subquestions as an ordered array; do not emit subparts as separate top-level items. Each subquestion includes original_number (e.g. a, b, i, ii), question_text, options (array or null), marks (number or null), question_type and visual_stimulus_description. Parent payload includes question_text, question_type, options, marks, section, section_label, shared_instructions, topic, difficulty, answer_text=null, explanation_text=null, subquestions, extraction_notes. If no subparts, use an empty subquestions array. Preserve exact numbering and order; do not combine separate main questions. MCQ OPTIONS: Every visible answer choice belongs in the options array of its question/subquestion, never as its own question. Preserve each option as {\"option_number\":\"A\",\"option_text\":\"...\"} (or the exact printed label such as 1, (ಅ), etc.). Do not flatten option objects into text. Capture all options in printed order. If any option is illegible or absent from the supplied page, include the legible options only and add an explicit extraction_notes warning; never guess the missing choice. For statement-based MCQs, keep the statements in question_text and the answer-combination choices in options. A–D/A–E sets must not be represented as separate question records.
 
 PICTURE COMPOSITION / DIAGRAMS / MAPS / GRAPHS / CARTOONS: Keep the complete prompt as a question. Set visual_stimulus_required=true and provide a detailed objective visual_stimulus_description covering relevant visible elements, labels, relationships and layout. Include visual_stimulus_page_numbers. Do not claim an image file was extracted; the original PDF page remains the source image. If the question cannot be answered without the picture, flag it in extraction_notes.
 
@@ -75,9 +76,12 @@ function normalizePayload(item:any,page:number){
  const rendered=parts.map((part:any)=>[
   part.original_number?String(part.original_number)+") ":"",
   String(part.question_text||""),
-  Array.isArray(part.options)&&part.options.length?"Options: "+part.options.join(" | "):"",
+  Array.isArray(part.options)&&part.options.length?"Options: "+part.options.map(formatOption).join(" | "):"",
   part.marks!=null?"("+part.marks+" marks)":""
  ].filter(Boolean).join(" ")).join("\n");
+ const quality=assessExtractionQuality(payload);
+ payload.extraction_quality_flags=quality.flags;
+ payload.extraction_quality_status=quality.status;
  const visual=payload.visual_stimulus_description?"[Visual stimulus: "+payload.visual_stimulus_description+"]":"";
  const shared=payload.shared_instructions?"[Shared instructions: "+payload.shared_instructions+"]":"";
  payload.question_text=[payload.question_text||"",rendered,visual,shared].filter(Boolean).join("\n");
