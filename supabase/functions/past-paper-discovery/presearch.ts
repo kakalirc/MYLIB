@@ -48,8 +48,7 @@ export function isQuestionPaperPdf(row: any, query: string): boolean {
   const evidence = [row.title, row.snippet, row.url].join(" ").toLowerCase();
   const paperSignals = [
     "question paper", "question-paper", "question_paper", "sample paper", "sample-paper",
-    "specimen paper", "specimen-paper", "past paper", "previous year", "annual exam",
-    "annual examination", "exam paper", "board paper",
+    "specimen paper", "specimen-paper", "past paper", "exam paper", "board paper",
   ];
   return paperSignals.some((signal) => evidence.includes(signal)) &&
     matchesQuery(evidence, queryTerms(query));
