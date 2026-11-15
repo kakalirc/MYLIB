@@ -447,7 +447,11 @@ function isQuestionPaperPdf(row: any, query: string): boolean {
   if (row.archive_member) return true;
   if (!String(row.url || "").toLowerCase().includes(".pdf")) return false;
   const evidence = [row.title, row.snippet, row.url].join(" ").toLowerCase();
-  const paperSignal = /(question|sample|specimen|past paper|previous year|annual|examination|exam paper|board paper|\\bqp\\b)/i.test(evidence);
+  const paperSignal = [
+    "question paper", "question-paper", "question_paper", "sample paper", "sample-paper",
+    "specimen paper", "specimen-paper", "past paper", "previous year", "annual exam",
+    "annual examination", "exam paper", "board paper",
+  ].some((signal) => evidence.includes(signal));
   return paperSignal && matchesQuery(evidence, queryTerms(query));
 }
 async function resolvePdf(candidate: any, domains: string[]) {
@@ -837,12 +841,20 @@ Deno.serve(async (req) => {
       }
       const checksum = await sha256(bytes);
       const { data: duplicate } = await admin.from("qb_source_papers").select("id").eq("checksum", checksum).maybeSingle();
-      const status = duplicate ? "duplicate" : "verified";
+      const { data: duplicateCandidate } = await admin.from("qb_paper_discovery_candidates")
+        .select("id").eq("checksum", checksum).neq("id", candidateId).limit(1).maybeSingle();
+      const isDuplicate = !!duplicate || !!duplicateCandidate;
+      const status = isDuplicate ? "duplicate" : "verified";
       await admin.from("qb_paper_discovery_candidates").update({
-        pdf_url: pdf.url, verification_status: status, status: duplicate ? "duplicate" : "needs_review",
-        checksum, file_size_bytes: bytes.length, duplicate_of_paper_id: duplicate?.id || null, updated_at: new Date().toISOString(),
+        pdf_url: pdf.url, verification_status: status, status: isDuplicate ? "duplicate" : "needs_review",
+        checksum, file_size_bytes: bytes.length, duplicate_of_paper_id: duplicate?.id || null,
+        discovery_metadata: { ...candidate.discovery_metadata,
+          exact_duplicate_candidate_id: duplicateCandidate?.id || null },
+        updated_at: new Date().toISOString(),
       }).eq("id", candidateId);
-      return reply(200, { verified: !duplicate, duplicate: !!duplicate, pdf_url: pdf.url, checksum, file_size_bytes: bytes.length });
+      return reply(200, { verified: !isDuplicate, duplicate: isDuplicate,
+        duplicate_paper_id: duplicate?.id || null, duplicate_candidate_id: duplicateCandidate?.id || null,
+        pdf_url: pdf.url, checksum, file_size_bytes: bytes.length });
     } catch (e) {
       const message = clip((e as Error)?.message || e, 500);
       const status = /outside|invalid url|redirect/i.test(message) ? "unsafe_url" : "inaccessible";
