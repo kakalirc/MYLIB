@@ -443,6 +443,13 @@ function isPdf(bytes: Uint8Array): boolean {
   const head = new TextDecoder().decode(bytes.slice(0, Math.min(1024, bytes.length)));
   return head.includes("%PDF-");
 }
+function isQuestionPaperPdf(row: any, query: string): boolean {
+  if (row.archive_member) return true;
+  if (!String(row.url || "").toLowerCase().includes(".pdf")) return false;
+  const evidence = [row.title, row.snippet, row.url].join(" ").toLowerCase();
+  const paperSignal = /(question|sample|specimen|past paper|previous year|annual|examination|exam paper|board paper|\\bqp\\b)/i.test(evidence);
+  return paperSignal && matchesQuery(evidence, queryTerms(query));
+}
 async function resolvePdf(candidate: any, domains: string[]) {
   const choices = [candidate.pdf_url, candidate.source_url].filter(Boolean) as string[];
   for (const candidateUrl of choices) {
@@ -643,10 +650,7 @@ Deno.serve(async (req) => {
     for (const row of rows) if (!unique.has(String(row.url).toLowerCase())) unique.set(String(row.url).toLowerCase(), row);
     // Search providers may ignore filetype operators. Never create a paper candidate
     // from an ordinary HTML result: only direct PDF URLs and verified PDF members qualify.
-    const flattened = [...unique.values()].filter((r) =>
-      !!r.archive_member || /\.pdf(?:$|[?#])/i.test(String(r.url || ""))
-    );
-
+    const flattened = [...unique.values()].filter((r) => isQuestionPaperPdf(r, query));
     const inserts = flattened.slice(0, 80).map((r) => ({
       discovery_run_id: runId, source_id: r.source?.id || null, source_type: scope,
       source_domain: r.domain, title: r.title, source_url: r.url,
