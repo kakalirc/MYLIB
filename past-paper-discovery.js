@@ -129,7 +129,7 @@
       + '</div>';
     var actions = '<div class="lib-ppd-actions"><a class="btn-small" href="' + esc(previewUrl) + '" target="_blank" rel="noopener noreferrer">Open source / PDF</a>'
       + '<button class="btn-small" type="button" onclick="libPPDSaveMetadata(\'' + esc(c.id) + '\')">Save Metadata</button>'
-      + '<button class="btn-small" onclick="libPPDVerify(\'' + esc(c.id) + '\')" ' + (['verified','duplicate'].indexOf(c.verification_status) >= 0 ? 'disabled' : '') + '>Verify PDF</button>'
+      + '<button class="btn-small" onclick="libPPDVerify(\'' + esc(c.id) + '\')" ' + (state.bulkVerifyBusy || ['verified','duplicate'].indexOf(c.verification_status) >= 0 ? 'disabled' : '') + '>Verify PDF</button>'
       + (c.verification_status === 'verified' && c.status !== 'imported' && c.status !== 'rejected' && c.status !== 'duplicate'
         ? '<button class="btn-small btn-primary" onclick="libPPDImport(\'' + esc(c.id) + '\')">Import to Past Papers</button>'
         : '')
@@ -212,7 +212,7 @@
         return '<div class="lib-ppd-source"><div><b>' + esc(a.display_name || a.domain) + '</b><div class="hint">' + esc(a.domain) + ' · ' + esc(a.source_classification) + ' · ' + esc(outcomeLabel) + ' · ' + esc(a.pdf_count) + ' potential PDFs · ' + esc(new Date(a.checked_at).toLocaleString()) + '</div><div class="hint">Search: ' + esc(runLabel) + '</div>' + pdfLinks + '</div>' + promote + '</div>';
       }).join('') : '<p class="hint">Source audit records will appear after Search.</p>')
       + (state.auditRows.length >= state.auditLimit ? '<button class="btn-small" type="button" onclick="libPPDLoadMoreAudit()">Load older source history</button>' : '')) + '</details>';
-    var dashboard = '<div class="lib-ppd-section"><h3>Discovery overview</h3><div class="lib-ppd-metrics">' + [['discovered','Awaiting review'],['verified','PDF verified'],['duplicates','Duplicates'],['imported','Imported'],['rejected','Rejected'],['failed','Verification failures']].map(function (item) { return '<div class="lib-ppd-metric"><b>' + esc(state.metrics[item[0]]) + '</b><span>' + esc(item[1]) + '</span></div>'; }).join('') + '</div>' + (state.loadErrors['candidate metrics'] ? '<p class="hint" style="color:var(--brick)">Metrics unavailable: ' + esc(state.loadErrors['candidate metrics']) + '</p>' : '<p class="hint">Live database counts across all discovery candidates.</p>') + '</div>';
+    var dashboard = '<div class="lib-ppd-section"><h3>Discovery overview</h3><div class="lib-ppd-metrics">' + [['discovered','New candidates'],['verified','PDF verified'],['duplicates','Duplicates'],['imported','Imported'],['rejected','Rejected'],['failed','Verification failures']].map(function (item) { return '<div class="lib-ppd-metric"><b>' + esc(state.metrics[item[0]]) + '</b><span>' + esc(item[1]) + '</span></div>'; }).join('') + '</div>' + (state.loadErrors['candidate metrics'] ? '<p class="hint" style="color:var(--brick)">Metrics unavailable: ' + esc(state.loadErrors['candidate metrics']) + '</p>' : '<p class="hint">Live database counts across all discovery candidates.</p>') + '</div>';
     var runs = '<details class="lib-ppd-section lib-ppd-recent-searches"><summary>Recent searches</summary>' + (state.runs.length ? state.runs.map(function (r) {
       var progress = r.filters && r.filters.discovery_progress ? r.filters.discovery_progress : {};
       var progressText = r.status === 'running' ? ' · ' + Number(progress.next_offset || 0) + ' sources processed' : '';
