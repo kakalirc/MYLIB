@@ -54,8 +54,11 @@ begin
   if not found then
     return jsonb_build_object('ok',false,'code','previous_run_mismatch','message','The selected previous run does not belong to this source paper. No AI request was made.');
   end if;
-  if v_previous.status in ('queued','processing') then
-    return jsonb_build_object('ok',false,'code','run_still_active','message','The previous extraction is still active. Resume or wait for it to stop before starting a fresh run. No AI request was made.');
+  if exists (
+    select 1 from public.qb_paper_extraction_runs
+     where source_paper_id=p_source_paper_id and status in ('queued','processing')
+  ) then
+    return jsonb_build_object('ok',false,'code','run_still_active','message','An extraction run for this paper is still active. Resume or wait for it to stop before starting a fresh run. No AI request was made.');
   end if;
 
   select count(*)::integer into v_linked from public.qb_questions where source_paper_id=p_source_paper_id;
