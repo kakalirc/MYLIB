@@ -27,7 +27,7 @@
         sb.from('qb_schools').select('id,name,archived').eq('archived', false).order('name'),
         sb.from('qb_paper_discovery_runs').select('*').order('started_at', {ascending:false}).limit(8),
         sb.from('qb_paper_discovery_run_sources').select('*').order('checked_at', {ascending:false}).limit(state.auditLimit),
-        sb.from('qb_paper_discovery_candidates').select('*').neq('status', 'rejected').order('discovered_at', {ascending:false}).limit(100),
+        sb.from('qb_paper_discovery_candidates').select('*').neq('status', 'rejected').neq('status', 'imported').neq('status', 'duplicate').order('discovered_at', {ascending:false}).limit(100),
         sb.from('qb_paper_discovery_candidates').select('*').eq('status', 'rejected').order('reviewed_at', {ascending:false}).limit(100)
       ];
       var results = await Promise.all(queries.map(function (query) {
