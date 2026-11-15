@@ -114,6 +114,38 @@ async function searchBingRss(query: string, limit = 20, domain?: string, offset 
   }
   return rows;
 }
+async function searchGoogleSerper(query: string, limit = 20, domain?: string, offset = 0) {
+  const apiKey = Deno.env.get("SERPER_API_KEY")?.trim();
+  if (!apiKey) throw new Error("SERPER_API_KEY is not configured in Supabase Edge Function secrets.");
+  const targeted = domain ? query + " site:" + domain : query;
+  const page = Math.floor(offset / 10) + 1;
+  const res = await fetch("https://google.serper.dev/search", {
+    method: "POST",
+    headers: { "X-API-KEY": apiKey, "Content-Type": "application/json", "Accept": "application/json" },
+    body: JSON.stringify({ q: targeted, num: Math.min(10, Math.max(1, limit)), page }),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) throw new Error("Google Search (Serper) returned HTTP " + res.status + ".");
+  const payload = await res.json().catch(() => null);
+  if (!payload || typeof payload !== "object" ||
+      (!Array.isArray((payload as any).organic) && !(payload as any).searchParameters)) {
+    throw new Error("Google Search (Serper) returned an unrecognized response; zero results cannot be trusted.");
+  }
+  const organic = Array.isArray((payload as any).organic) ? (payload as any).organic : [];
+  return organic.slice(0, limit).flatMap((item: any) => {
+    let target: URL;
+    try { target = new URL(String(item.link || "")); } catch { return []; }
+    if (target.protocol !== "https:" || !target.hostname) return [];
+    const host = target.hostname.toLowerCase().replace(/^www\./, "");
+    if (domain && host !== domain && !host.endsWith("." + domain)) return [];
+    return [{
+      title: clip(item.title || target.pathname.split("/").pop() || host, 500),
+      url: target.href,
+      snippet: clip(item.snippet || "", 1200),
+      domain: host,
+    }];
+  });
+}
 type SearchWebResult = {
   rows: Array<{ title: string; url: string; snippet: string; domain: string }>;
   providersSucceeded: string[];
@@ -140,6 +172,8 @@ async function searchWeb(query: string, limit = 20, domain?: string, offset = 0)
       .catch((error) => ({ provider: "DuckDuckGo HTML", rows: [] as any[], error: clip((error as Error)?.message || error, 220) })),
     Promise.resolve().then(async () => ({ provider: "Bing RSS", rows: await searchBingRss(query, limit, domain, offset), error: "" }))
       .catch((error) => ({ provider: "Bing RSS", rows: [] as any[], error: clip((error as Error)?.message || error, 220) })),
+    Promise.resolve().then(async () => ({ provider: "Google Search (Serper)", rows: await searchGoogleSerper(query, limit, domain, offset), error: "" }))
+      .catch((error) => ({ provider: "Google Search (Serper)", rows: [] as any[], error: clip((error as Error)?.message || error, 220) })),
   ]);
   const providersSucceeded = attempts.filter((item) => !item.error).map((item) => item.provider);
   const providerErrors = attempts.filter((item) => !!item.error).map((item) => item.provider + ": " + item.error);
@@ -744,7 +778,7 @@ Deno.serve(async (req) => {
           ? (/Source returned HTTP|Too many redirects|timed out|Source returned an invalid redirect|Source hostname/i.test(sourceError) ? "inaccessible" : "provider_error")
           : "no_matching_pdf"),
         pdf_count: matching.length,
-        provider: "DuckDuckGo HTML + Bing RSS (independent parallel searches) + source-specific crawler",
+        provider: "Google Search (Serper) + Google Search (Serper) + DuckDuckGo HTML + Bing RSS (independent parallel searches) + source-specific crawler",
         evidence: {
           query_variants: [
             ...buildPdfQueryVariants(query),
@@ -846,7 +880,7 @@ Deno.serve(async (req) => {
       unprocessed_pdf_links: unprocessedPdfLinksTotal,
       approved_source_results: flattened.filter((r) => r.source).length,
       discovered_source_count: discoveredSourceTotal,
-      provider: "Official board archive + DuckDuckGo fallback",
+      provider: "Official board archive + Google Search (Serper), DuckDuckGo HTML and Bing RSS",
       provider_successful_queries: successfulQueries, provider_errors: providerErrors.slice(-8),
       message: complete
         ? (providerErrors.length ? "Search completed with partial provider failures. Review provider diagnostics before concluding no papers exist." : "Search completed. Review candidates before importing.")
