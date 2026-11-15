@@ -42,19 +42,6 @@
         if (result && result.error) state.loadErrors[labels[index]] = result.error.message || String(result.error);
         else setters[index](result && result.data);
       });
-      if (!state.latestPreSearch && state.runs.length) {
-        var latestRun = state.runs.find(function (r) { return r.status === 'completed' || r.status === 'failed'; });
-        if (latestRun) {
-          var progress = latestRun.filters && latestRun.filters.discovery_progress ? latestRun.filters.discovery_progress : {};
-          state.latestPreSearch = { run_id:latestRun.id, complete:latestRun.status === 'completed',
-            pdfs_found:Number(progress.results_found || latestRun.results_found || 0),
-            estimated_new_candidates:Number(progress.new_candidates || 0),
-            previously_seen_pdf_urls:Number(progress.previously_seen_pdf_urls || 0),
-            unprocessed_pdf_links:Number(progress.unprocessed_pdf_links || 0),
-            discovered_source_count:Number(progress.discovered_source_count || 0),
-            provider_errors:progress.provider_errors || [] };
-        }
-      }
       state.loaded = true;
       state.error = '';
     } catch (e) {
@@ -187,7 +174,7 @@
       preSearchSummary = '<div class="lib-ppd-section lib-ppd-estimate"><h3>Pre-Search estimate</h3><div class="lib-ppd-estimate-grid">'
         + '<div><b>' + esc(estimate.pdfs_found || 0) + '</b><span>Potential PDFs found</span></div>'
         + '<div><b>' + esc(state.previewRows.length || 0) + '</b><span>Preview records shown</span></div>'
-        + '<div><b>' + esc(estimate.previously_seen_pdf_urls || 0) + '</b><span>Saved to review queue</span></div>'
+        + '<div><b>0</b><span>Records created in review queue</span></div>'
         + '<div><b>' + esc(estimate.discovered_source_count || 0) + '</b><span>New domains surfaced</span></div></div>'
         + '<p class="hint">This is a search estimate, not a count of confirmed papers. No PDF is downloaded and no review-queue record is created.</p>'
         + warnings
@@ -268,7 +255,7 @@
         discovered_source_count:Number(result.discovered_source_count || 0),
         provider_errors:result.provider_errors || [] };
       state.message = 'Pre-Search complete: ' + state.latestPreSearch.pdfs_found + ' potential PDFs found; '
-        + state.latestPreSearch.estimated_new_candidates + ' new candidates saved; '
+        + state.previewRows.length + ' temporary preview records shown; no review-queue records created; '
         + state.latestPreSearch.discovered_source_count + ' new source domains identified.'
         + (result.provider_errors && result.provider_errors.length ? ' Some sources/providers need retry; see Source Intelligence.' : '');
       state.loaded = false; await loadData(true);
