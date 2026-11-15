@@ -25882,6 +25882,23 @@ async function qbEditExtractionItem(id, itemId) {
     qbRenderSourcePreviewPreservingScroll();
   }
 }
+async function qbResolveExtractionPageAudit(id, pageNumber) {
+  const state = qbExtractionResults[id];
+  if (!state?.runId || state.loading || qbExtractionBusyIds.has(id)) return;
+  const note = window.prompt('Visually compare page ' + pageNumber + ' with the original PDF. Record what you checked (at least 15 characters):');
+  if (note === null) return;
+  if (note.trim().length < 15) { alert('Please enter a meaningful review note of at least 15 characters.'); return; }
+  qbExtractionBusyIds.add(id); state.loading = true; state.message = 'Saving the page-level visual review…'; qbRenderSourcePreviewPreservingScroll();
+  try {
+    await qbExtractionPost('qb-paper-extraction-review', { action: 'resolve_page_audit', run_id: state.runId, page_number: Number(pageNumber), review_note: note.trim() });
+    state.message = 'Page ' + pageNumber + ' visual review recorded. The original extraction flags remain in the audit history.';
+  } catch (error) {
+    state.message = error.message || 'Could not record the page visual review.'; state.ok = false;
+  } finally {
+    state.loading = false; qbExtractionBusyIds.delete(id); qbRenderSourcePreviewPreservingScroll();
+  }
+  await qbLoadExtractionReview(id, true);
+}
 async function qbPublishExtractionRun(id) {
   const state = qbExtractionResults[id];
   if (!state?.runId || state.loading) return;
@@ -25903,7 +25920,7 @@ function qbExtractionReviewHtml(id) {
   if (!state?.reviewOpen || !Array.isArray(rows)) return '';
   const pending = rows.filter(x => ['pending','edited'].includes(x.review_state)).length;
   const pageRows = Array.isArray(state.pages) ? state.pages : [];
-  const pageAuditHtml = pageRows.length ? '<div style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:8px"><b>Page completeness audit</b><div class="hint" style="margin:4px 0 8px">Structural screening only; a clear result does not prove that every visible item was captured.</div>' + pageRows.map(page => { const audit = page.page_metadata?.extraction_audit; const flags = Array.isArray(audit?.flags) ? audit.flags : []; const hasAudit = audit && Number(audit.version) === 1; const status = hasAudit ? audit.status : 'not available'; return '<div style="padding:7px 0;border-top:1px solid var(--line)"><div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap"><b>Page ' + esc(page.page_number) + '</b><span class="hint">' + esc(page.page_state || 'unknown') + ' · ' + (hasAudit ? esc(status === 'clear' ? '✓ Clear' : '⚠ Review required') + ' · ' + esc(audit.question_count || 0) + ' question(s) · ' + esc(audit.passage_count || 0) + ' passage(s)' : 'Audit not available for this page') + '</span></div>' + (flags.length ? '<ul style="margin:5px 0 0;padding-left:18px;color:var(--brick)">' + flags.map(flag => '<li>' + esc(flag) + '</li>').join('') + '</ul>' : (hasAudit ? '<div class="hint">No structural issues detected. Compare the original PDF page before approval.</div>' : (page.error_message ? '<div class="hint" role="alert">' + esc(page.error_message) + '</div>' : ''))) + '</div>'; }).join('') + '</div>' : '';
+  const pageAuditHtml = pageRows.length ? '<div style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:8px"><b>Page completeness audit</b><div class="hint" style="margin:4px 0 8px">Structural screening only; a clear result does not prove that every visible item was captured. Flagged pages require an Admin visual check before publication.</div>' + pageRows.map(page => { const audit = page.page_metadata?.extraction_audit; const flags = Array.isArray(audit?.flags) ? audit.flags : []; const hasAudit = audit && Number(audit.version) === 1; const status = hasAudit ? audit.status : 'not available'; const resolution = page.page_metadata?.admin_audit_review; const needsReview = !hasAudit || status !== 'clear'; const resolved = resolution?.decision === 'visually_verified'; const reviewState = resolved ? '<div class="hint" style="color:var(--forest)">✓ Visually checked by Admin · ' + esc(resolution.reviewed_at ? new Date(resolution.reviewed_at).toLocaleString() : 'recorded') + '<br>' + esc(resolution.note || '') + '</div>' : (needsReview && page.page_state === 'completed' ? '<button class="btn-small" style="margin-top:7px" onclick="qbResolveExtractionPageAudit(\'' + id + '\',' + Number(page.page_number) + ')">Mark page visually reviewed</button>' : ''); return '<div style="padding:7px 0;border-top:1px solid var(--line)"><div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap"><b>Page ' + esc(page.page_number) + '</b><span class="hint">' + esc(page.page_state || 'unknown') + ' · ' + (hasAudit ? esc(status === 'clear' ? '✓ Clear' : '⚠ Review required') + ' · ' + esc(audit.question_count || 0) + ' question(s) · ' + esc(audit.passage_count || 0) + ' passage(s)' : 'Audit not available for this page') + '</span></div>' + (flags.length ? '<ul style="margin:5px 0 0;padding-left:18px;color:var(--brick)">' + flags.map(flag => '<li>' + esc(flag) + '</li>').join('') + '</ul>' : (hasAudit ? '<div class="hint">No structural issues detected. Compare the original PDF page before approval.</div>' : (page.error_message ? '<div class="hint" role="alert">' + esc(page.error_message) + '</div>' : ''))) + reviewState + '</div>'; }).join('') + '</div>' : '';
   const normalize = value => String(value || '').toLocaleLowerCase().normalize('NFKC').replace(/\\s+/g, ' ').trim();
   const passageRows = rows.filter(x => x.item_kind === 'passage');
   const passageAliases = new Map();
