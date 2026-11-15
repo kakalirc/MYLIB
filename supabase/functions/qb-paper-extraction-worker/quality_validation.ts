@@ -43,7 +43,7 @@ function optionFlags(options: unknown, path: string): string[] {
     const normalized = labels.map((label) => label.toUpperCase().replace(/[().]/g, ""));
     if (new Set(normalized).size !== normalized.length) flags.push(`${path}: duplicate option labels were detected.`);
     const alpha = normalized.every((label) => /^[A-Z]$/.test(label));
-    const numeric = normalized.every((label) => /^\\d+$/.test(label));
+    const numeric = normalized.every((label) => /^\d+$/.test(label));
     if (alpha || numeric) {
       const values = normalized.map((label) => alpha ? label.charCodeAt(0) : Number(label));
       if (values.some((value, index) => index > 0 && value !== values[index - 1] + 1)) {
@@ -51,7 +51,7 @@ function optionFlags(options: unknown, path: string): string[] {
       }
     }
   }
-  const normalizedTexts = texts.filter(Boolean).map((text) => text.toLocaleLowerCase().replace(/\\s+/g, " "));
+  const normalizedTexts = texts.filter(Boolean).map((text) => text.toLocaleLowerCase().replace(/\s+/g, " "));
   if (new Set(normalizedTexts).size !== normalizedTexts.length) flags.push(`${path}: duplicate option text was detected.`);
   return flags;
 }
@@ -69,7 +69,7 @@ export function assessExtractionQuality(payload: Record<string, unknown>): Extra
   } else if (!questionText) {
     flags.push("Question stem is empty.");
   }
-  if (/\\[(?:unclear|illegible|question text not clearly legible|subquestion text not clearly legible)[^\\]]*\\]/i.test(questionText)) {
+  if (/\[(?:unclear|illegible|question text not clearly legible|subquestion text not clearly legible)[^\\]]*\]/i.test(questionText)) {
     flags.push("Question stem contains an OCR placeholder or unresolved text.");
   }
   if (isMcq(payload)) flags.push(...optionFlags(payload.options, "Main question"));
@@ -82,7 +82,7 @@ export function assessExtractionQuality(payload: Record<string, unknown>): Extra
       const sub = part as Record<string, unknown>;
       const label = clean(sub.original_number) || String(index + 1);
       if (!clean(sub.question_text)) flags.push(`Subquestion ${label} has an empty question stem.`);
-      if (/\\[(?:unclear|illegible|question text not clearly legible|subquestion text not clearly legible)[^\\]]*\\]/i.test(clean(sub.question_text))) {
+      if (/\[(?:unclear|illegible|question text not clearly legible|subquestion text not clearly legible)[^\\]]*\]/i.test(clean(sub.question_text))) {
         flags.push(`Subquestion ${label} contains an OCR placeholder or unresolved text.`);
       }
       if (isMcq(sub)) flags.push(...optionFlags(sub.options, `Subquestion ${label}`));
