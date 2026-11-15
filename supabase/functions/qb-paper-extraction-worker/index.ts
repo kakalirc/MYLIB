@@ -97,7 +97,7 @@ Deno.serve(async(req)=>{
   if(total<1||total>MAX_PAGES)throw new Error(`PDF has ${total} pages; the configured limit is ${MAX_PAGES} pages per paper.`);
   const seed=await db.from("qb_paper_extraction_pages").upsert(Array.from({length:total},(_,i)=>({run_id:runId,page_number:i+1,page_state:"pending",page_kind:"unknown"})),{onConflict:"run_id,page_number",ignoreDuplicates:true});
   if(seed.error)throw new Error("Could not initialise page checkpoints.");
-  const {data:requests,error:qe}=await db.from("qb_paper_extraction_requests").select("id,chunk_key,request_state,response_payload,provider_request_id,input_tokens,output_tokens,input_cost_usd,output_cost_usd,total_cost_usd").eq("run_id",runId);
+  const {data:requests,error:qe}=await db.from("qb_paper_extraction_requests").select("id,chunk_key,request_state,response_payload,provider_request_id,sent_at,input_tokens,output_tokens,input_cost_usd,output_cost_usd,total_cost_usd").eq("run_id",runId);
   if(qe)throw new Error("Could not inspect provider checkpoints.");
   const accountingWarnings:string[]=Array.isArray(run.accounting_warnings)?run.accounting_warnings.map((x:any)=>String(x)):[];
   const accountingWarning=async(stage:string,message:string,chunk:string)=>{
