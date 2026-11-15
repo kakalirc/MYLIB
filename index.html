@@ -25862,7 +25862,7 @@ function qbExtractionReviewHtml(id) {
   const state = qbExtractionResults[id], rows = qbExtractionReviewRows[id];
   if (!state?.reviewOpen || !Array.isArray(rows)) return '';
   const pending = rows.filter(x => ['pending','edited'].includes(x.review_state)).length;
-  const normalize = value => String(value || '').toLocaleLowerCase().normalize('NFKC').replace(/[^\\p{L}\\p{N}]+/gu, ' ').trim();
+  const normalize = value => String(value || '').toLocaleLowerCase().normalize('NFKC').replace(/\\s+/g, ' ').trim();
   const passageRows = rows.filter(x => x.item_kind === 'passage');
   const passageAliases = new Map();
   passageRows.forEach(x => { [x.original_number, x.item_key].filter(Boolean).forEach(k => passageAliases.set(String(k), x)); });
