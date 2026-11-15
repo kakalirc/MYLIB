@@ -97,7 +97,7 @@ Deno.serve(async(req)=>{
   if(total<1||total>MAX_PAGES)throw new Error(`PDF has ${total} pages; the configured limit is ${MAX_PAGES} pages per paper.`);
   const seed=await db.from("qb_paper_extraction_pages").upsert(Array.from({length:total},(_,i)=>({run_id:runId,page_number:i+1,page_state:"pending",page_kind:"unknown"})),{onConflict:"run_id,page_number",ignoreDuplicates:true});
   if(seed.error)throw new Error("Could not initialise page checkpoints.");
-  const {data:requests,error:qe}=await db.from("qb_paper_extraction_requests").select("id,chunk_key,request_state,response_payload,provider_request_id,input_tokens,output_tokens,input_cost_usd,output_cost_usd,total_cost_usd").eq("run_id",runId);
+  const {data:requests,error:qe}=await db.from("qb_paper_extraction_requests").select("id,chunk_key,request_state,response_payload,provider_request_id,sent_at,input_tokens,output_tokens,input_cost_usd,output_cost_usd,total_cost_usd").eq("run_id",runId);
   if(qe)throw new Error("Could not inspect provider checkpoints.");
   const accountingWarnings:string[]=Array.isArray(run.accounting_warnings)?run.accounting_warnings.map((x:any)=>String(x)):[];
   const accountingWarning=async(stage:string,message:string,chunk:string)=>{
@@ -129,6 +129,47 @@ Deno.serve(async(req)=>{
    }else if(request.input_tokens==null||request.output_tokens==null||request.total_cost_usd==null){
     await accountingWarning("usage_reconstruction","Saved response has no recoverable usage fields; extraction will continue without verified cost.",request.chunk_key);
    }
+  }
+  // Rebuild staging from every durable provider response before deciding which pages need work.
+  // Anthropic sees a two-page PDF fragment and commonly numbers its pages locally (1, 2),
+  // so normalize those local numbers to the original PDF page range.
+  const respondedByChunk=new Map<string,any>();
+  for(const request of (requests||[]).filter((x:any)=>x.request_state==="responded")){
+   const match=String(request.chunk_key||"").match(/^pages:(\d+)-(\d+):/);
+   if(!match)continue;
+   const first=Number(match[1]),last=Number(match[2]),canonicalChunk=`pages:${first}-${last}:v4`;
+   const prior=respondedByChunk.get(canonicalChunk);
+   if(!prior||String(request.sent_at||"")>String(prior.sent_at||""))respondedByChunk.set(canonicalChunk,request);
+  }
+  for(const [chunk,request] of [...respondedByChunk.entries()].sort((a,b)=>a[0].localeCompare(b[0],undefined,{numeric:true}))){
+   const match=chunk.match(/^pages:(\d+)-(\d+):/);
+   if(!match)continue;
+   const first=Number(match[1]),last=Number(match[2]);
+   const parsed=parseSavedResponse(request.response_payload);
+   let savedCount=0;
+   for(let i=0;i<(parsed.items||[]).length;i++){
+    const item=parsed.items[i];if(!item||!["question","passage","section","instruction","image"].includes(item.item_kind))continue;
+    const reportedPage=Number(item.page_number);
+    const page=Number.isInteger(reportedPage)&&reportedPage>=1&&reportedPage<=(last-first+1)
+      ?first+reportedPage-1
+      :(Number.isInteger(reportedPage)&&reportedPage>=first&&reportedPage<=last?reportedPage:NaN);
+    if(!Number.isInteger(page))continue;
+    const payload=item.payload&&typeof item.payload==="object"?item.payload:{raw:item};
+    const fingerprint=await hash(JSON.stringify(item));
+    const {error:se}=await db.from("qb_paper_extraction_staging").upsert({
+     run_id:runId,item_key:`${chunk}:item:${i+1}`,item_kind:item.item_kind,page_number:page,
+     original_number:item.original_number==null?null:String(item.original_number),
+     parent_item_key:item.parent_item_key==null?null:String(item.parent_item_key),
+     payload,content_fingerprint:fingerprint,review_state:"pending"
+    },{onConflict:"run_id,item_key"});
+    if(se)throw new Error("Could not rebuild staging from a saved provider response; no provider request was sent.");
+    savedCount++;
+   }
+   const {error:pageRepairError}=await db.from("qb_paper_extraction_pages").update({
+    page_state:"completed",page_kind:"mixed",completed_at:request.responded_at||new Date().toISOString(),
+    error_message:null,page_metadata:{chunk_key:chunk,staged_items:savedCount,recovered_from_saved_response:true}
+   }).eq("run_id",runId).gte("page_number",first).lte("page_number",last);
+   if(pageRepairError)throw new Error("Could not repair page checkpoints from the saved provider response.");
   }
   const ambiguousRequests=(requests||[]).filter((x:any)=>["sent","uncertain"].includes(x.request_state));
   for(const request of ambiguousRequests){
@@ -237,7 +278,11 @@ Deno.serve(async(req)=>{
    }
    for(let i=0;i<(parsed.items||[]).length;i++){
     const item=parsed.items[i];if(!item||!["question","passage","section","instruction","image"].includes(item.item_kind))continue;
-    const page=Number(item.page_number);if(!Number.isInteger(page)||page<first||page>last)continue;
+    const reportedPage=Number(item.page_number);
+    const page=Number.isInteger(reportedPage)&&reportedPage>=1&&reportedPage<=(last-first+1)
+      ?first+reportedPage-1
+      :(Number.isInteger(reportedPage)&&reportedPage>=first&&reportedPage<=last?reportedPage:NaN);
+    if(!Number.isInteger(page))continue;
     const payload=item.payload&&typeof item.payload==="object"?item.payload:{raw:item};
     const fingerprint=await hash(JSON.stringify(item));
     const {error:se}=await db.from("qb_paper_extraction_staging").upsert({run_id:runId,item_key:`${chunk}:item:${i+1}`,item_kind:item.item_kind,page_number:page,original_number:item.original_number==null?null:String(item.original_number),parent_item_key:item.parent_item_key==null?null:String(item.parent_item_key),payload,content_fingerprint:fingerprint,review_state:"pending"},{onConflict:"run_id,item_key"});
