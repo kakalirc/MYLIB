@@ -186,7 +186,7 @@
     }
     var sourceAudit = '<details class="lib-ppd-section lib-ppd-recent-searches"><summary>Source Intelligence · Search history (' + state.auditRows.length + ' records)</summary>'
       + (state.auditRows.length ? state.auditRows.map(function (a) {
-        var outcomeLabel = ({pdf_found:'Relevant PDFs found',no_matching_pdf:'No matching PDF',provider_error:'Search provider error',inaccessible:'Website inaccessible'})[a.outcome] || a.outcome;
+        var outcomeLabel = ({pdf_found:'Relevant PDFs found',no_matching_pdf:'No matching PDF',provider_error:'Search provider error',inaccessible:'Website inaccessible',disabled_registry:'Disabled in registry · excluded'})[a.outcome] || a.outcome;
         var promote = a.source_classification === 'discovered' && a.domain && !state.sources.some(function (source) { return a.domain === source.domain || a.domain.endsWith('.' + source.domain); })
           ? '<button class="btn-small" onclick="libPPDPromoteDomain(\'' + esc(a.domain) + '\',\'' + (a.source_type === 'school' ? 'school' : 'education_portal') + '\')">Add to approved registry</button>' : '';
         return '<div class="lib-ppd-source"><div><b>' + esc(a.display_name || a.domain) + '</b><div class="hint">' + esc(a.domain) + ' · ' + esc(a.source_classification) + ' · ' + esc(outcomeLabel) + ' · ' + esc(a.pdf_count) + ' PDFs · ' + esc(new Date(a.checked_at).toLocaleString()) + '</div></div>' + promote + '</div>';
