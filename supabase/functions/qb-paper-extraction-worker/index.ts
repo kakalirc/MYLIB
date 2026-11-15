@@ -4,6 +4,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument } from "npm:pdf-lib@1.17.1";
 import { parseQuestionItems } from "./response_parser.ts";
+import { readAnthropicUsage } from "./usage_reconciliation.ts";
 
 const MODEL=Deno.env.get("QB_EXTRACTION_MODEL")||"claude-haiku-4-5";
 const PRICING:Record<string,{input:number;output:number;source:string}>={
@@ -65,9 +66,9 @@ Deno.serve(async(req)=>{
  if(le)return reply(500,{error:"Could not claim extraction worker lease."});
  if(!lease?.ok)return reply(409,{ok:false,...lease});
  try{
-  const {data:run,error:re}=await db.from("qb_paper_extraction_runs").select("id,source_paper_id,status,ai_request_state,pdf_sha256").eq("id",runId).maybeSingle();
+  const {data:run,error:re}=await db.from("qb_paper_extraction_runs").select("id,source_paper_id,status,ai_request_state,pdf_sha256,accounting_warnings").eq("id",runId).maybeSingle();
   if(re||!run)throw new Error("Extraction run not found.");
-  if(run.ai_request_state==="uncertain")throw new Error("Provider outcome is ambiguous. Admin reconciliation is required; no request will be resent.");
+  // Ambiguous chunks remain immutable and are skipped; later independent page batches may continue.
   if(!PRICE)throw new Error("No USD pricing is configured for model "+MODEL+"; no provider request was made.");
   const {error:priceSnapshotError}=await db.from("qb_paper_extraction_runs").update({
    model_name:MODEL,input_price_usd_per_million:PRICE.input,output_price_usd_per_million:PRICE.output,
@@ -96,23 +97,58 @@ Deno.serve(async(req)=>{
   if(total<1||total>MAX_PAGES)throw new Error(`PDF has ${total} pages; the configured limit is ${MAX_PAGES} pages per paper.`);
   const seed=await db.from("qb_paper_extraction_pages").upsert(Array.from({length:total},(_,i)=>({run_id:runId,page_number:i+1,page_state:"pending",page_kind:"unknown"})),{onConflict:"run_id,page_number",ignoreDuplicates:true});
   if(seed.error)throw new Error("Could not initialise page checkpoints.");
-  const {data:requests,error:qe}=await db.from("qb_paper_extraction_requests").select("id,chunk_key,request_state,response_payload,input_tokens,output_tokens,input_cost_usd,output_cost_usd,total_cost_usd").eq("run_id",runId);
+  const {data:requests,error:qe}=await db.from("qb_paper_extraction_requests").select("id,chunk_key,request_state,response_payload,provider_request_id,input_tokens,output_tokens,input_cost_usd,output_cost_usd,total_cost_usd").eq("run_id",runId);
   if(qe)throw new Error("Could not inspect provider checkpoints.");
-  const ambiguousRequests=(requests||[]).filter((x:any)=>["sent","uncertain"].includes(x.request_state));
-  if(ambiguousRequests.length){
-   for(const request of ambiguousRequests){
-    if(request.request_state==="sent")await db.from("qb_paper_extraction_requests").update({request_state:"uncertain",error_message:"Prior provider send has no durably saved response; blocked globally before any new batch."}).eq("id",request.id).eq("request_state","sent");
+  const accountingWarnings:string[]=Array.isArray(run.accounting_warnings)?run.accounting_warnings.map((x:any)=>String(x)):[];
+  const accountingWarning=async(stage:string,message:string,chunk:string)=>{
+   const warning={run_id:runId,chunk_key:chunk,stage,message,at:new Date().toISOString()};
+   accountingWarnings.push(`${stage} (${chunk}): ${message}`);
+   console.error("[QB_EXTRACTION_ACCOUNTING_WARNING]",JSON.stringify(warning));
+   const {error}=await db.from("qb_paper_extraction_runs").update({accounting_warnings:accountingWarnings}).eq("id",runId).eq("lease_owner",owner);
+   if(error)console.error("[QB_EXTRACTION_ACCOUNTING_WARNING_PERSIST_FAILED]",JSON.stringify({run_id:runId,chunk_key:chunk,message:error.message}));
+  };
+  // A responded request is immutable at the payload level. Rebuild usage metadata
+  // from its durable raw Anthropic body, then update only the dedicated ledger columns.
+  // This makes the repair repeatable and never requires another provider call.
+  for(const request of (requests||[]).filter((x:any)=>x.request_state==="responded")){
+   const rawBody=request.response_payload?.raw_body;
+   if(typeof rawBody==="string"){
+    let usage:any=null;
+    try{usage=readAnthropicUsage(rawBody,PRICE.input,PRICE.output);}
+    catch(e){await accountingWarning("usage_reconstruction",String((e as Error).message||e),request.chunk_key);continue;}
+    const {error:reconcileError}=await db.from("qb_paper_extraction_requests").update({
+     provider_request_id:usage.providerRequestId||request.provider_request_id,
+     input_tokens:usage.inputTokens,output_tokens:usage.outputTokens,
+     input_cost_usd:usage.inputCostUsd,output_cost_usd:usage.outputCostUsd,
+     total_cost_usd:usage.totalCostUsd
+    }).eq("id",request.id).eq("request_state","responded");
+    if(reconcileError){await accountingWarning("request_usage_update",reconcileError.message,request.chunk_key);}
+    else Object.assign(request,{provider_request_id:usage.providerRequestId||request.provider_request_id,
+     input_tokens:usage.inputTokens,output_tokens:usage.outputTokens,
+     input_cost_usd:usage.inputCostUsd,output_cost_usd:usage.outputCostUsd,total_cost_usd:usage.totalCostUsd});
+   }else if(request.input_tokens==null||request.output_tokens==null||request.total_cost_usd==null){
+    await accountingWarning("usage_reconstruction","Saved response has no recoverable usage fields; extraction will continue without verified cost.",request.chunk_key);
    }
-   const state=await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"uncertain",p_ai_request_state:"uncertain",p_error_message:"An earlier provider request has an ambiguous outcome. No new batch was sent."});
-   if(state.error||!state.data?.ok)throw new Error("An earlier provider request is ambiguous. No new request was sent; Admin reconciliation is required.");
-   throw new Error("An earlier provider request is ambiguous. No new request was sent; Admin reconciliation is required.");
+  }
+  const ambiguousRequests=(requests||[]).filter((x:any)=>["sent","uncertain"].includes(x.request_state));
+  for(const request of ambiguousRequests){
+   const match=String(request.chunk_key||"").match(/^pages:(\d+)-(\d+):/);
+   if(!match)continue;
+   const first=Number(match[1]),last=Number(match[2]);
+   const {error:skipError}=await db.from("qb_paper_extraction_pages").update({page_state:"skipped",error_message:"Provider outcome is ambiguous; this chunk was not resent.",page_metadata:{chunk_key:request.chunk_key,reason:"ambiguous_provider_outcome"}}).eq("run_id",runId).gte("page_number",first).lte("page_number",last).neq("page_state","completed");
+   if(skipError)throw new Error("Could not checkpoint pages belonging to an ambiguous provider request.");
+   if(request.request_state==="sent")await db.from("qb_paper_extraction_requests").update({request_state:"uncertain",error_message:"Provider outcome is ambiguous; request was not resent and its pages were skipped so independent later batches can continue."}).eq("id",request.id).eq("request_state","sent");
+  }
+  if(ambiguousRequests.length){
+   const {data:state,error:stateError}=await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"processing",p_ai_request_state:"responded",p_error_message:"One or more provider chunks remain ambiguous and were skipped; later independent batches may continue."});
+   if(stateError||!state?.ok)throw new Error("Could not advance run state while preserving ambiguous provider requests.");
   }
   const byChunk=new Map((requests||[]).map((x:any)=>[x.chunk_key,x]));
   let staged=0,input=0,output=0,totalCost=0;
   for(const r of (requests||[]).filter((x:any)=>x.request_state==="responded")){input+=Number(r.input_tokens||0);output+=Number(r.output_tokens||0);totalCost=usd(totalCost+(r.total_cost_usd==null?tokenCost(Number(r.input_tokens||0),Number(r.output_tokens||0)):Number(r.total_cost_usd)));}
   const {data:pageStates,error:pageStatesError}=await db.from("qb_paper_extraction_pages").select("page_number,page_state").eq("run_id",runId).order("page_number");
   if(pageStatesError)throw new Error("Could not inspect page checkpoints.");
-  const nextPage=(pageStates||[]).find((p:any)=>p.page_state!=="completed")?.page_number;
+  const nextPage=(pageStates||[]).find((p:any)=>!["completed","skipped"].includes(p.page_state))?.page_number;
   for(let first=nextPage||total+1;first<=total;first+=BATCH){
    const {data:batchLease,error:batchLeaseError}=await db.rpc("qb_renew_extraction_worker",{p_run_id:runId,p_lease_owner:owner,p_lease_seconds:900});
    if(batchLeaseError||batchLease!==true)throw new Error("Worker lease was lost before the next batch; this worker stopped without sending another provider request.");
@@ -154,8 +190,8 @@ Deno.serve(async(req)=>{
     }catch(e){
      const msg=String((e as Error).message||e);
      await db.from("qb_paper_extraction_requests").update({request_state:"uncertain",error_message:msg.slice(0,1500)}).eq("id",requestId).eq("request_state","sent");
-     await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"uncertain",p_ai_request_state:"uncertain",p_error_message:msg.slice(0,1500)});
-     throw new Error("Provider outcome uncertain; automatic retry blocked: "+msg);
+     await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"processing",p_ai_request_state:"uncertain",p_error_message:msg.slice(0,1500)});
+     throw new Error("Provider outcome uncertain; this chunk will not be resent. Resume may continue with later independent pages: "+msg);
     }
     // Persist the complete HTTP body before parsing the provider envelope or model JSON.
     const providerRequestId=response.headers.get("request-id")||response.headers.get("x-request-id");
@@ -169,21 +205,23 @@ Deno.serve(async(req)=>{
     const respondedState=await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"processing",p_ai_request_state:"responded",p_error_message:null});
     if(respondedState.error||!respondedState.data?.ok)throw new Error("Provider response is saved, but run state could not be advanced; resume to reconcile without resending.");
     if(!response.ok)throw new Error(`Anthropic HTTP ${response.status}: ${rawBody.slice(0,1000)}`);
-    const {data,text}=parseProviderBody(rawBody);
-    const usedInput=Number(data.usage?.input_tokens||0),usedOutput=Number(data.usage?.output_tokens||0);
-    const inputCost=usd(usedInput*PRICE.input/1_000_000),outputCost=usd(usedOutput*PRICE.output/1_000_000),batchCost=usd(inputCost+outputCost);
-    const {error:usageSave}=await db.from("qb_paper_extraction_requests").update({
-     response_payload:{raw_body:rawBody,raw_text:text},provider_request_id:data.id||providerRequestId,
-     input_tokens:usedInput,output_tokens:usedOutput,input_cost_usd:inputCost,
-     output_cost_usd:outputCost,total_cost_usd:batchCost
-    }).eq("id",requestId).eq("request_state","responded");
-    if(usageSave)throw new Error("Raw provider response is saved, but usage metadata could not be updated; resume to reconcile without resending.");
-    input+=usedInput;output+=usedOutput;totalCost=usd(totalCost+batchCost);
-    const {error:costSave}=await db.from("qb_paper_extraction_runs").update({input_tokens:input,output_tokens:output,actual_cost_usd:totalCost,estimated_cost_usd:totalCost,cost_budget_reserved_usd:totalCost}).eq("id",runId).eq("lease_owner",owner);
-    if(costSave)throw new Error("Provider response and usage are saved; run-level cost update failed and can be reconciled on resume.");
+    const {text}=parseProviderBody(rawBody);
+    let usage:any=null;
+    try{usage=readAnthropicUsage(rawBody,PRICE.input,PRICE.output);}
+    catch(e){await accountingWarning("usage_reconstruction",String((e as Error).message||e),chunk);}
+    const usedInput=usage?.inputTokens??0,usedOutput=usage?.outputTokens??0,batchCost=usage?.totalCostUsd??0;
+    const {error:usageSave}=usage?await db.from("qb_paper_extraction_requests").update({
+     provider_request_id:usage.providerRequestId||providerRequestId,
+     input_tokens:usedInput,output_tokens:usedOutput,input_cost_usd:usage.inputCostUsd,
+     output_cost_usd:usage.outputCostUsd,total_cost_usd:batchCost
+    }).eq("id",requestId).eq("request_state","responded"): {error:null};
+    if(usageSave)await accountingWarning("request_usage_update",usageSave.message,chunk);
+    if(usage){input+=usedInput;output+=usedOutput;totalCost=usd(totalCost+batchCost);}
+    const {error:costSave}=await db.from("qb_paper_extraction_runs").update({input_tokens:input,output_tokens:output,actual_cost_usd:totalCost,estimated_cost_usd:totalCost,cost_budget_reserved_usd:totalCost,accounting_warnings:accountingWarnings}).eq("id",runId).eq("lease_owner",owner);
+    if(costSave)await accountingWarning("run_usage_update",costSave.message,chunk);
     parsed=parseJson(text);
-    const {error:parsedSave}=await db.from("qb_paper_extraction_requests").update({response_payload:{raw_body:rawBody,raw_text:text,items:parsed.items,json_repaired:parsed.repaired}}).eq("id",requestId).eq("request_state","responded");
-    if(parsedSave)throw new Error("Parsed response could not be cached; raw response remains saved for recovery.");
+    // Keep response_payload immutable after the first durable save. Resume reparses
+    // raw_body, while token/cost metadata lives in dedicated mutable columns.
     parsed={items:parsed.items};
    }
    for(let i=0;i<(parsed.items||[]).length;i++){
@@ -203,18 +241,19 @@ Deno.serve(async(req)=>{
    const completedCount=(pageStates||[]).filter((p:any)=>p.page_state==="completed").length+(last-first+1);
    const {count:stagedTotal,error:stagedCountError}=await db.from("qb_paper_extraction_staging").select("id",{count:"exact",head:true}).eq("run_id",runId);
    if(stagedCountError)throw new Error("Could not count the durable staged items.");
-   if(last<total)return reply(200,{ok:true,run_id:runId,status:"processing",stage:"page_extraction",pages_total:total,pages_completed:completedCount,next_page:last+1,staged_items:stagedTotal||0,input_tokens:input,output_tokens:output,model:MODEL,cost_currency:"USD",actual_cost_usd:totalCost,cost_budget_usd:BUDGET_USD,requires_admin_review:false,questions_published:0});
+   if(last<total)return reply(200,{ok:true,run_id:runId,status:"processing",stage:"page_extraction",pages_total:total,pages_completed:completedCount,pages_skipped:(pageStates||[]).filter((p:any)=>p.page_state==="skipped").length,next_page:last+1,staged_items:stagedTotal||0,input_tokens:input,output_tokens:output,model:MODEL,cost_currency:"USD",actual_cost_usd:totalCost,cost_budget_usd:BUDGET_USD,accounting_warnings:accountingWarnings,requires_admin_review:false,questions_published:0});
    break;
   }
   const {data:finalPageStates,error:finalPageStatesError}=await db.from("qb_paper_extraction_pages").select("page_number,page_state").eq("run_id",runId).order("page_number");
   if(finalPageStatesError)throw new Error("Could not verify final page checkpoints.");
-  if((finalPageStates||[]).length!==total || (finalPageStates||[]).some((p:any)=>p.page_state!=="completed"))throw new Error("A page batch remains incomplete; no completion state was written.");
+  if((finalPageStates||[]).length!==total || (finalPageStates||[]).some((p:any)=>!["completed","skipped"].includes(p.page_state)))throw new Error("A page batch remains incomplete; no completion state was written.");
+  const skippedPages=(finalPageStates||[]).filter((p:any)=>p.page_state==="skipped").map((p:any)=>p.page_number);
   const {count:finalStagedTotal,error:finalStagedCountError}=await db.from("qb_paper_extraction_staging").select("id",{count:"exact",head:true}).eq("run_id",runId);
   if(finalStagedCountError)throw new Error("Could not count the final durable staged items.");
   const {data:doneState,error:done}=await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"completed",p_ai_request_state:"responded",p_error_message:null});
   if(done||!doneState?.ok)throw new Error("All page responses are saved but run finalisation failed because the worker lease is no longer valid; resume to reconcile.");
-  await db.from("qb_paper_extraction_runs").update({current_stage:"review",input_tokens:input,output_tokens:output,lease_owner:null,lease_expires_at:null,heartbeat_at:new Date().toISOString(),last_checkpoint_at:new Date().toISOString()}).eq("id",runId).eq("lease_owner",owner);
-  return reply(200,{ok:true,run_id:runId,status:"completed",stage:"review",pages_total:total,staged_items:finalStagedTotal||0,input_tokens:input,output_tokens:output,model:MODEL,cost_currency:"USD",actual_cost_usd:totalCost,cost_budget_usd:BUDGET_USD,requires_admin_review:true,questions_published:0});
+  await db.from("qb_paper_extraction_runs").update({current_stage:"review",input_tokens:input,output_tokens:output,accounting_warnings:accountingWarnings, error_message:skippedPages.length?`Unresolved provider outcome; pages skipped: ${skippedPages.join(", ")}.`:null,lease_owner:null,lease_expires_at:null,heartbeat_at:new Date().toISOString(),last_checkpoint_at:new Date().toISOString()}).eq("id",runId).eq("lease_owner",owner);
+  return reply(200,{ok:true,run_id:runId,status:"completed",stage:"review",pages_total:total,pages_completed:total-skippedPages.length,pages_skipped:skippedPages,staged_items:finalStagedTotal||0,input_tokens:input,output_tokens:output,model:MODEL,cost_currency:"USD",actual_cost_usd:totalCost,cost_budget_usd:BUDGET_USD,accounting_warnings:accountingWarnings,accounting_warning:accountingWarnings.length>0,provider_outcome_warning:skippedPages.length>0,warning_message:skippedPages.length?`Pages ${skippedPages.join(", ")} were skipped because their provider outcome remains unknown. No duplicate request was sent.`:null,requires_admin_review:true,questions_published:0});
  }catch(e){
   const msg=String((e as Error).message||e);
   // A stale worker must never change the state after its lease was replaced.

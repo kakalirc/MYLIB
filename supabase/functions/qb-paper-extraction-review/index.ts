@@ -87,6 +87,9 @@ Deno.serve(async(req)=>{
   return reply(200,{ok:true,item});
  }
  if(action==="publish"){
+  const {data:skippedPages,error:skippedError}=await db.from("qb_paper_extraction_pages").select("page_number").eq("run_id",runId).eq("page_state","skipped").order("page_number");
+  if(skippedError)return reply(500,{error:"Could not verify page completeness before publication."});
+  if((skippedPages||[]).length)return reply(409,{error:"Publication is blocked because provider outcomes remain unresolved for pages: "+skippedPages.map((x:any)=>x.page_number).join(", ")+". Reconcile the source gaps before publishing."});
   const {data:result,error}=await db.rpc("qb_publish_extraction_run",{p_run_id:runId,p_admin_id:auth.user.id});
   if(error)return reply(500,{error:"Atomic publication failed: "+error.message});
   if(!result?.ok)return reply(409,result);

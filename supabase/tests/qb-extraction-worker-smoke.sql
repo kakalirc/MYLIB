@@ -40,6 +40,25 @@ begin
  v_claim:=public.qb_set_extraction_worker_state(v_run,'worker-two','processing','sent',null);
  if coalesce((v_claim->>'ok')::boolean,false) is not true then raise exception 'Initial sent transition failed: %',v_claim; end if;
  update public.qb_paper_extraction_requests set request_state='responded',response_payload='{"items":[]}'::jsonb,responded_at=now() where id=v_req;
+ -- Response payload becomes immutable after persistence, but usage columns remain repairable.
+ update public.qb_paper_extraction_requests
+    set input_tokens=1000000,output_tokens=200000,
+        input_cost_usd=1.00000000,output_cost_usd=1.00000000,total_cost_usd=2.00000000
+  where id=v_req and request_state='responded';
+ if not exists(select 1 from public.qb_paper_extraction_requests
+                where id=v_req and input_tokens=1000000 and output_tokens=200000
+                  and total_cost_usd=2.00000000 and response_payload='{"items":[]}'::jsonb) then
+   raise exception 'Usage metadata update must not rewrite the immutable provider response';
+ end if;
+ begin
+   update public.qb_paper_extraction_requests set response_payload='{"items":[{"changed":true}]}'::jsonb where id=v_req;
+   raise exception 'Expected immutable provider response update to be rejected';
+ exception when raise_exception then
+   if sqlerrm='Expected immutable provider response update to be rejected' then raise; end if;
+ end;
+ if not exists(select 1 from public.qb_paper_extraction_requests where id=v_req and response_payload='{"items":[]}'::jsonb) then
+   raise exception 'Immutable provider response payload was changed';
+ end if;
  v_claim:=public.qb_set_extraction_worker_state(v_run,'worker-two','processing','responded',null);
  if coalesce((v_claim->>'ok')::boolean,false) is not true then raise exception 'Durable response transition failed: %',v_claim; end if;
  insert into public.qb_paper_extraction_requests(run_id,chunk_key,provider,model_name,idempotency_key,request_state,request_payload,sent_at)
@@ -47,8 +66,15 @@ begin
  v_claim:=public.qb_set_extraction_worker_state(v_run,'worker-two','processing','sent',null);
  if coalesce((v_claim->>'ok')::boolean,false) is not true then raise exception 'Sequential next-batch transition was rejected: %',v_claim; end if;
  update public.qb_paper_extraction_requests set request_state='uncertain',error_message='test ambiguous outcome' where run_id=v_run and chunk_key='pages:2-3:v4';
- v_claim:=public.qb_set_extraction_worker_state(v_run,'worker-two','uncertain','uncertain','test ambiguous outcome');
- if coalesce((v_claim->>'ok')::boolean,false) is not true then raise exception 'Ledger-backed uncertain transition failed: %',v_claim; end if;
+ v_claim:=public.qb_set_extraction_worker_state(v_run,'worker-two','processing','uncertain','test ambiguous outcome');
+ if coalesce((v_claim->>'ok')::boolean,false) is not true then raise exception 'Non-terminal ambiguous transition failed: %',v_claim; end if;
+ -- The ambiguous chunk remains in the ledger, but later independent batches may proceed.
+ v_claim:=public.qb_set_extraction_worker_state(v_run,'worker-two','processing','responded','skip ambiguous chunk and continue');
+ if coalesce((v_claim->>'ok')::boolean,false) is not true then raise exception 'Could not resume after ambiguous chunk: %',v_claim; end if;
+ insert into public.qb_paper_extraction_requests(run_id,chunk_key,provider,model_name,idempotency_key,request_state,request_payload,sent_at)
+ values(v_run,'pages:4-5:v4','anthropic','test-model',v_run::text||':pages:4-5:v4','sent','{}'::jsonb,now());
+ v_claim:=public.qb_set_extraction_worker_state(v_run,'worker-two','processing','sent',null);
+ if coalesce((v_claim->>'ok')::boolean,false) is not true then raise exception 'Later independent batch was blocked by an older uncertain chunk: %',v_claim; end if;
  begin
    update public.qb_paper_extraction_requests set request_state='failed_before_send' where id=v_req;
    raise exception 'Expected sent request reset to be rejected';

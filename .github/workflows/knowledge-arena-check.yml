@@ -93,6 +93,8 @@ jobs:
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261114233000_qb_extraction_admin_reconciliation.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261114234000_qb_extraction_reconciled_claim_guard.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261115003000_qb_extraction_two_page_batch_state.sql
+          psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261115010000_qb_extraction_ambiguous_chunk_continuation.sql
+          psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261115011000_qb_extraction_resume_legacy_uncertain.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/qb-paper-extraction-safety-gate-smoke.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/qb-extraction-restartability-smoke.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/qb-extraction-worker-lease-smoke.sql
@@ -156,6 +158,8 @@ jobs:
         run: deno test supabase/functions/_shared/knowledge-arena_test.ts
       - name: Test AI JSON response parsing and malformed-output handling
         run: deno test supabase/functions/knowledge-arena-worker/json-response_test.ts
+      - name: Test Question Bank provider usage recovery and cost reconciliation
+        run: deno test supabase/functions/qb-paper-extraction-worker/usage_reconciliation_test.ts
       - name: Parse browser JavaScript
         run: |
           node --check knowledge-arena/knowledge-arena.js
