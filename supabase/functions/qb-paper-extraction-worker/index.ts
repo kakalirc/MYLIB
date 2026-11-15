@@ -135,9 +135,9 @@ Deno.serve(async(req)=>{
    const match=String(request.chunk_key||"").match(/^pages:(\d+)-(\d+):/);
    if(!match)continue;
    const first=Number(match[1]),last=Number(match[2]);
-   const {error:skipError}=await db.from("qb_paper_extraction_pages").update({page_state:"skipped",error_message:"Provider outcome is ambiguous; this chunk was not resent.",page_metadata:{chunk_key:request.chunk_key,reason:"ambiguous_provider_outcome"}}).eq("run_id",runId).gte("page_number",first).lte("page_number",last).neq("page_state","completed");
-   if(skipError)throw new Error("Could not checkpoint pages belonging to an ambiguous provider request.");
-   if(request.request_state==="sent")await db.from("qb_paper_extraction_requests").update({request_state:"uncertain",error_message:"Provider outcome is ambiguous; request was not resent and its pages were skipped so independent later batches can continue."}).eq("id",request.id).eq("request_state","sent");
+   const {error:pendingError}=await db.from("qb_paper_extraction_pages").update({page_state:"pending",error_message:"Provider outcome is ambiguous; an audited retry is required.",page_metadata:{chunk_key:request.chunk_key,reason:"ambiguous_provider_outcome",retry_policy:"initial_plus_two"}}).eq("run_id",runId).gte("page_number",first).lte("page_number",last).neq("page_state","completed");
+   if(pendingError)throw new Error("Could not restore pages for controlled retry.");
+   if(request.request_state==="sent")await db.from("qb_paper_extraction_requests").update({request_state:"uncertain",error_message:"Provider outcome is ambiguous; retained for audit and eligible for a separately recorded retry."}).eq("id",request.id).eq("request_state","sent");
   }
   if(ambiguousRequests.length){
    const {data:state,error:stateError}=await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"processing",p_ai_request_state:"responded",p_error_message:"One or more provider chunks remain ambiguous and were skipped; later independent batches may continue."});
@@ -153,24 +153,30 @@ Deno.serve(async(req)=>{
    const {data:batchLease,error:batchLeaseError}=await db.rpc("qb_renew_extraction_worker",{p_run_id:runId,p_lease_owner:owner,p_lease_seconds:900});
    if(batchLeaseError||batchLease!==true)throw new Error("Worker lease was lost before the next batch; this worker stopped without sending another provider request.");
    const last=Math.min(total,first+BATCH-1),chunk=`pages:${first}-${last}:v4`;
-   const old:any=byChunk.get(chunk);
+   const attempts=(requests||[]).filter((r:any)=>r.chunk_key===chunk||String(r.chunk_key||"").startsWith(chunk+":retry"));
+   const savedAttempt:any=attempts.filter((r:any)=>r.request_state==="responded").sort((a:any,b:any)=>String(b.sent_at||"").localeCompare(String(a.sent_at||"")))[0];
+   const ambiguousCount=attempts.filter((r:any)=>["sent","uncertain"].includes(r.request_state)).length;
+   const retryExhausted=ambiguousCount>=3&&!savedAttempt;
+   if(retryExhausted){
+    await db.from("qb_paper_extraction_pages").update({page_state:"skipped",error_message:"Provider outcome remained ambiguous after the initial attempt and two automatic retries.",page_metadata:{chunk_key:chunk,reason:"retry_exhausted",attempts:ambiguousCount}}).eq("run_id",runId).gte("page_number",first).lte("page_number",last).neq("page_state","completed");
+    continue;
+   }
+   const nextAttemptNumber=ambiguousCount===0?0:ambiguousCount;
+   const requestChunk=nextAttemptNumber===0?chunk:`${chunk}:retry${nextAttemptNumber}`;
+   const old:any=attempts.find((r:any)=>r.chunk_key===requestChunk&&["prepared","responded"].includes(r.request_state))||null;
    let parsed:any;
-   if(old?.request_state==="responded"){
-    parsed=parseSavedResponse(old.response_payload);
+   if(savedAttempt){
+    parsed=parseSavedResponse(savedAttempt.response_payload);
     const {error:resumeCostError}=await db.from("qb_paper_extraction_runs").update({input_tokens:input,output_tokens:output,actual_cost_usd:totalCost,estimated_cost_usd:totalCost,cost_budget_reserved_usd:totalCost}).eq("id",runId).eq("lease_owner",owner);
     if(resumeCostError)throw new Error("Could not reconcile saved USD usage before continuing.");
    }else{
-    if(old&&["sent","uncertain"].includes(old.request_state)){
-     if(old.request_state==="sent")await db.from("qb_paper_extraction_requests").update({request_state:"uncertain",error_message:"A prior provider send has no durably saved response; automatic retry is blocked."}).eq("id",old.id).eq("request_state","sent");
-     await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"uncertain",p_ai_request_state:"uncertain",p_error_message:`Ambiguous provider request ${chunk}; blocked from retry.`});
-     throw new Error(`Pages ${first}-${last} have an ambiguous provider request. No retry was made.`);
-    }
+    if(old?.request_state==="prepared"){ /* Safe to reuse: this attempt was never sent. */ }
     if(old?.request_state==="failed_before_send")throw new Error(`Pages ${first}-${last} failed before send; inspect and create an explicit retry.`);
     if(usd(totalCost+MAX_BATCH_RESERVE_USD)>BUDGET_USD)
      throw new Error(`USD spend guard stopped before pages ${first}-${last}. Actual accrued: ${totalCost.toFixed(6)}; conservative next-batch reserve: ${MAX_BATCH_RESERVE_USD.toFixed(6)}; per-paper budget: ${BUDGET_USD.toFixed(2)}.`);
     let requestId=old?.id;
     if(!requestId){
-     const {data:newReq,error:ne}=await db.from("qb_paper_extraction_requests").insert({run_id:runId,chunk_key:chunk,provider:"anthropic",model_name:MODEL,idempotency_key:`${runId}:${chunk}`,request_state:"prepared",request_payload:{page_start:first,page_end:last,prompt_version:"qb-extract-v1"}}).select("id").single();
+     const {data:newReq,error:ne}=await db.from("qb_paper_extraction_requests").insert({run_id:runId,chunk_key:requestChunk,provider:"anthropic",model_name:MODEL,idempotency_key:`${runId}:${requestChunk}`,request_state:"prepared",request_payload:{page_start:first,page_end:last,prompt_version:"qb-extract-v1",attempt:nextAttemptNumber+1,prior_ambiguous_attempts:ambiguousCount}}).select("id").single();
      if(ne||!newReq)throw new Error("Could not save provider request checkpoint.");
      requestId=newReq.id;
     }
@@ -191,7 +197,12 @@ Deno.serve(async(req)=>{
      const msg=String((e as Error).message||e);
      await db.from("qb_paper_extraction_requests").update({request_state:"uncertain",error_message:msg.slice(0,1500)}).eq("id",requestId).eq("request_state","sent");
      await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"processing",p_ai_request_state:"uncertain",p_error_message:msg.slice(0,1500)});
-     throw new Error("Provider outcome uncertain; this chunk will not be resent. Resume may continue with later independent pages: "+msg);
+     const attemptsUsed=ambiguousCount+1;
+     if(attemptsUsed<3){
+      return reply(200,{ok:true,run_id:runId,status:"processing",stage:"page_extraction",pages_total:total,pages_completed:(pageStates||[]).filter((p:any)=>p.page_state==="completed").length,next_page:first,retry_pending:true,retry_attempt:attemptsUsed+1,retry_limit:2,warning_message:`Pages ${first}-${last} timed out. Automatically retrying (attempt ${attemptsUsed+1} of 3); the original provider outcome may still complete.`,accounting_warnings:accountingWarnings,requires_admin_review:false,questions_published:0});
+     }
+     await db.from("qb_paper_extraction_pages").update({page_state:"skipped",error_message:"Provider outcome remained ambiguous after the initial attempt and two automatic retries.",page_metadata:{chunk_key:chunk,reason:"retry_exhausted",attempts:attemptsUsed}}).eq("run_id",runId).gte("page_number",first).lte("page_number",last).neq("page_state","completed");
+     return reply(200,{ok:true,run_id:runId,status:"processing",stage:"page_extraction",pages_total:total,pages_completed:(pageStates||[]).filter((p:any)=>p.page_state==="completed").length,next_page:last+1,pages_skipped:[first,last],retry_exhausted:true,warning_message:`Pages ${first}-${last} remain unresolved after 2 retries and require Admin review.`,accounting_warnings:accountingWarnings,requires_admin_review:false,questions_published:0});
     }
     // Persist the complete HTTP body before parsing the provider envelope or model JSON.
     const providerRequestId=response.headers.get("request-id")||response.headers.get("x-request-id");
