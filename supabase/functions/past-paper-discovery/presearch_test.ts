@@ -41,7 +41,12 @@ Deno.test("rejects non-HTTPS paper links", () => {
     title: "Kannada Question Paper 2026",
     snippet: "Question paper",
   }, "Kannada 2026");
-  if (accepted) throw new Error("Non-HTTPS paper links must be rejected.");
+  const ipHost = isQuestionPaperPdf({
+    url: "https://127.0.0.1/kannada-question-paper-2026.pdf",
+    title: "Kannada Question Paper 2026",
+    snippet: "Question paper",
+  }, "Kannada 2026");
+  if (accepted || ipHost) throw new Error("Non-HTTPS and IP-literal paper links must be rejected.");
 });
 
 Deno.test("validates discovered public DNS names", () => {
