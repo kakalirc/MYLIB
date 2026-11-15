@@ -4,6 +4,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument } from "npm:pdf-lib@1.17.1";
 import { parseQuestionItems } from "./response_parser.ts";
+import { readAnthropicUsage } from "./usage_reconciliation.ts";
 
 const MODEL=Deno.env.get("QB_EXTRACTION_MODEL")||"claude-haiku-4-5";
 const PRICING:Record<string,{input:number;output:number;source:string}>={
@@ -96,8 +97,29 @@ Deno.serve(async(req)=>{
   if(total<1||total>MAX_PAGES)throw new Error(`PDF has ${total} pages; the configured limit is ${MAX_PAGES} pages per paper.`);
   const seed=await db.from("qb_paper_extraction_pages").upsert(Array.from({length:total},(_,i)=>({run_id:runId,page_number:i+1,page_state:"pending",page_kind:"unknown"})),{onConflict:"run_id,page_number",ignoreDuplicates:true});
   if(seed.error)throw new Error("Could not initialise page checkpoints.");
-  const {data:requests,error:qe}=await db.from("qb_paper_extraction_requests").select("id,chunk_key,request_state,response_payload,input_tokens,output_tokens,input_cost_usd,output_cost_usd,total_cost_usd").eq("run_id",runId);
+  const {data:requests,error:qe}=await db.from("qb_paper_extraction_requests").select("id,chunk_key,request_state,response_payload,provider_request_id,input_tokens,output_tokens,input_cost_usd,output_cost_usd,total_cost_usd").eq("run_id",runId);
   if(qe)throw new Error("Could not inspect provider checkpoints.");
+  // A responded request is immutable at the payload level. Rebuild usage metadata
+  // from its durable raw Anthropic body, then update only the dedicated ledger columns.
+  // This makes the repair repeatable and never requires another provider call.
+  for(const request of (requests||[]).filter((x:any)=>x.request_state==="responded")){
+   const rawBody=request.response_payload?.raw_body;
+   if(typeof rawBody==="string"){
+    const usage=readAnthropicUsage(rawBody,PRICE.input,PRICE.output);
+    const {error:reconcileError}=await db.from("qb_paper_extraction_requests").update({
+     provider_request_id:usage.providerRequestId||request.provider_request_id,
+     input_tokens:usage.inputTokens,output_tokens:usage.outputTokens,
+     input_cost_usd:usage.inputCostUsd,output_cost_usd:usage.outputCostUsd,
+     total_cost_usd:usage.totalCostUsd
+    }).eq("id",request.id).eq("request_state","responded");
+    if(reconcileError)throw new Error("Saved provider response found, but usage metadata reconciliation failed: "+reconcileError.message+"; no provider request was resent.");
+    Object.assign(request,{provider_request_id:usage.providerRequestId||request.provider_request_id,
+     input_tokens:usage.inputTokens,output_tokens:usage.outputTokens,
+     input_cost_usd:usage.inputCostUsd,output_cost_usd:usage.outputCostUsd,total_cost_usd:usage.totalCostUsd});
+   }else if(request.input_tokens==null||request.output_tokens==null||request.total_cost_usd==null){
+    throw new Error("A saved provider response is missing recoverable raw usage data. No provider request was resent.");
+   }
+  }
   const ambiguousRequests=(requests||[]).filter((x:any)=>["sent","uncertain"].includes(x.request_state));
   if(ambiguousRequests.length){
    for(const request of ambiguousRequests){
@@ -170,20 +192,20 @@ Deno.serve(async(req)=>{
     if(respondedState.error||!respondedState.data?.ok)throw new Error("Provider response is saved, but run state could not be advanced; resume to reconcile without resending.");
     if(!response.ok)throw new Error(`Anthropic HTTP ${response.status}: ${rawBody.slice(0,1000)}`);
     const {data,text}=parseProviderBody(rawBody);
-    const usedInput=Number(data.usage?.input_tokens||0),usedOutput=Number(data.usage?.output_tokens||0);
-    const inputCost=usd(usedInput*PRICE.input/1_000_000),outputCost=usd(usedOutput*PRICE.output/1_000_000),batchCost=usd(inputCost+outputCost);
+    const usage=readAnthropicUsage(rawBody,PRICE.input,PRICE.output);
+    const usedInput=usage.inputTokens,usedOutput=usage.outputTokens,batchCost=usage.totalCostUsd;
     const {error:usageSave}=await db.from("qb_paper_extraction_requests").update({
-     response_payload:{raw_body:rawBody,raw_text:text},provider_request_id:data.id||providerRequestId,
-     input_tokens:usedInput,output_tokens:usedOutput,input_cost_usd:inputCost,
-     output_cost_usd:outputCost,total_cost_usd:batchCost
+     provider_request_id:usage.providerRequestId||providerRequestId,
+     input_tokens:usedInput,output_tokens:usedOutput,input_cost_usd:usage.inputCostUsd,
+     output_cost_usd:usage.outputCostUsd,total_cost_usd:batchCost
     }).eq("id",requestId).eq("request_state","responded");
     if(usageSave)throw new Error("Raw provider response is saved, but usage metadata could not be updated; resume to reconcile without resending.");
     input+=usedInput;output+=usedOutput;totalCost=usd(totalCost+batchCost);
     const {error:costSave}=await db.from("qb_paper_extraction_runs").update({input_tokens:input,output_tokens:output,actual_cost_usd:totalCost,estimated_cost_usd:totalCost,cost_budget_reserved_usd:totalCost}).eq("id",runId).eq("lease_owner",owner);
     if(costSave)throw new Error("Provider response and usage are saved; run-level cost update failed and can be reconciled on resume.");
     parsed=parseJson(text);
-    const {error:parsedSave}=await db.from("qb_paper_extraction_requests").update({response_payload:{raw_body:rawBody,raw_text:text,items:parsed.items,json_repaired:parsed.repaired}}).eq("id",requestId).eq("request_state","responded");
-    if(parsedSave)throw new Error("Parsed response could not be cached; raw response remains saved for recovery.");
+    // Keep response_payload immutable after the first durable save. Resume reparses
+    // raw_body, while token/cost metadata lives in dedicated mutable columns.
     parsed={items:parsed.items};
    }
    for(let i=0;i<(parsed.items||[]).length;i++){
