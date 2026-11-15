@@ -4,7 +4,7 @@
   if (window.__libPastPaperDiscoveryInstalled) return;
   window.__libPastPaperDiscoveryInstalled = true;
 
-  var state = { loaded:false, loading:false, sources:[], candidates:[], rejectedCandidates:[], schools:[], runs:[], auditRows:[], auditLimit:120, latestPreSearch:null, message:'', error:'', actionMessages:{}, searchBusy:false, scope:'board', queueTab:'review' };
+  var state = { loaded:false, loading:false, sources:[], candidates:[], rejectedCandidates:[], schools:[], runs:[], auditRows:[], auditLimit:120, latestPreSearch:null, message:'', error:'', loadErrors:{}, actionMessages:{}, searchBusy:false, scope:'board', queueTab:'review' };
   function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
   function byId(id) { return document.getElementById(id); }
   function val(id) { return byId(id) ? byId(id).value : ''; }
@@ -19,23 +19,33 @@
     if (state.loading || (state.loaded && !force)) return;
     if (typeof sb === 'undefined' || !sb || currentRole !== 'Admin') return;
     state.loading = true;
+    state.loadErrors = {};
     try {
-      var results = await Promise.all([
+      // Keep panels independent: an unavailable audit table must not hide approved sources.
+      var queries = [
         sb.from('qb_paper_discovery_sources').select('*').order('priority').order('display_name'),
         sb.from('qb_paper_discovery_candidates').select('*').order('discovered_at', {ascending:false}).limit(100),
         sb.from('qb_paper_discovery_candidates').select('*').eq('status', 'rejected').order('reviewed_at', {ascending:false}).limit(100),
         sb.from('qb_schools').select('id,name,archived').eq('archived', false).order('name'),
         sb.from('qb_paper_discovery_runs').select('*').order('started_at', {ascending:false}).limit(8),
         sb.from('qb_paper_discovery_run_sources').select('*').order('checked_at', {ascending:false}).limit(state.auditLimit)
-      ]);
-      var failure = results.find(function (r) { return r.error; });
-      if (failure) throw failure.error;
-      state.sources = results[0].data || [];
-      state.candidates = (results[1].data || []).filter(function (c) { return ['rejected', 'duplicate'].indexOf(c.status) < 0 && (c.status !== 'imported' || !!state.actionMessages[c.id]); });
-      state.rejectedCandidates = results[2].data || [];
-      state.schools = results[3].data || [];
-      state.runs = results[4].data || [];
-      state.auditRows = results[5].data || [];
+      ];
+      var results = await Promise.all(queries.map(function (query) {
+        return query.then(function (result) { return result; }).catch(function (error) { return {data:null, error:error}; });
+      }));
+      var setters = [
+        function (data) { state.sources = data || []; },
+        function (data) { state.candidates = (data || []).filter(function (c) { return ['rejected', 'duplicate'].indexOf(c.status) < 0 && (c.status !== 'imported' || !!state.actionMessages[c.id]); }); },
+        function (data) { state.rejectedCandidates = data || []; },
+        function (data) { state.schools = data || []; },
+        function (data) { state.runs = data || []; },
+        function (data) { state.auditRows = data || []; }
+      ];
+      var labels = ['approved sources', 'discovered papers', 'rejected papers', 'school directory', 'recent searches', 'source audit history'];
+      results.forEach(function (result, index) {
+        if (result && result.error) state.loadErrors[labels[index]] = result.error.message || String(result.error);
+        else setters[index](result && result.data);
+      });
       if (!state.latestPreSearch && state.runs.length) {
         var latestRun = state.runs.find(function (r) { return r.status === 'completed' || r.status === 'failed'; });
         if (latestRun) {
@@ -52,7 +62,7 @@
       state.loaded = true;
       state.error = '';
     } catch (e) {
-      state.error = 'Online Discovery database is not ready: ' + (e && e.message ? e.message : String(e));
+      state.error = 'Online Discovery could not load: ' + (e && e.message ? e.message : String(e));
       state.loaded = true;
     } finally {
       state.loading = false;
@@ -72,7 +82,8 @@
     return result.data || {};
   }
   function sourceRowsHtml() {
-    if (!state.sources.length) return '<p class="hint">No approved sources yet. Add an official board, school or trusted education domain below.</p>';
+    if (state.loadErrors['approved sources']) return '<p class="hint" style="color:var(--brick)">Could not load approved sources: ' + esc(state.loadErrors['approved sources']) + '</p>';
+    if (!state.sources.length) return '<p class="hint">No approved sources are configured in this database yet.</p>';
     return state.sources.map(function (s) {
       return '<div class="lib-ppd-source"><div><b>' + esc(s.display_name) + '</b><div class="hint">' + esc(s.domain) + ' · ' + esc(s.source_type) + ' · ' + esc(s.trust_level) + '</div></div>'
         + '<span class="hint">' + (s.enabled ? 'Enabled' : 'Disabled') + '</span>'
@@ -187,7 +198,7 @@
         + '</div>';
     }
     var sourceAudit = '<details class="lib-ppd-section lib-ppd-recent-searches"><summary>Source Intelligence · Search history (' + state.auditRows.length + ' records)</summary>'
-      + (state.auditRows.length ? state.auditRows.map(function (a) {
+      + (state.loadErrors['source audit history'] ? '<p class="hint" style="color:var(--brick)">Could not load source audit history: ' + esc(state.loadErrors['source audit history']) + '</p>' : (state.auditRows.length ? state.auditRows.map(function (a) {
         var outcomeLabel = ({pdf_found:'Potential question-paper PDFs found',no_matching_pdf:'No matching PDF',provider_error:'Search provider error',inaccessible:'Website inaccessible',disabled_registry:'Disabled in registry · excluded'})[a.outcome] || a.outcome;
         var promote = a.source_classification === 'discovered' && Number(a.pdf_count) > 0 && a.domain && !state.sources.some(function (source) { return a.domain === source.domain || a.domain.endsWith('.' + source.domain); })
           ? '<button class="btn-small" onclick="libPPDPromoteDomain(\'' + esc(a.domain) + '\',\'' + (a.source_type === 'school' ? 'school' : 'education_portal') + '\')">Add to approved registry</button>' : '';
@@ -200,7 +211,7 @@
         }).join(' · ') + '</div>' : '';
         return '<div class="lib-ppd-source"><div><b>' + esc(a.display_name || a.domain) + '</b><div class="hint">' + esc(a.domain) + ' · ' + esc(a.source_classification) + ' · ' + esc(outcomeLabel) + ' · ' + esc(a.pdf_count) + ' potential PDFs · ' + esc(new Date(a.checked_at).toLocaleString()) + '</div><div class="hint">Search: ' + esc(runLabel) + '</div>' + pdfLinks + '</div>' + promote + '</div>';
       }).join('') : '<p class="hint">Source audit records will appear after Pre-Search.</p>')
-      + (state.auditRows.length >= state.auditLimit ? '<button class="btn-small" type="button" onclick="libPPDLoadMoreAudit()">Load older source history</button>' : '') + '</details>';
+      + (state.auditRows.length >= state.auditLimit ? '<button class="btn-small" type="button" onclick="libPPDLoadMoreAudit()">Load older source history</button>' : '')) + '</details>';
     var candidates = renderQueueTabs();
     var runs = '<details class="lib-ppd-section lib-ppd-recent-searches"><summary>Recent searches</summary>' + (state.runs.length ? state.runs.map(function (r) {
       var progress = r.filters && r.filters.discovery_progress ? r.filters.discovery_progress : {};
