@@ -135,14 +135,14 @@ Deno.serve(async(req)=>{
   // so normalize those local numbers to the original PDF page range.
   const respondedByChunk=new Map<string,any>();
   for(const request of (requests||[]).filter((x:any)=>x.request_state==="responded")){
-   const match=String(request.chunk_key||"").match(/^pages:(\\d+)-(\\d+):/);
+   const match=String(request.chunk_key||"").match(/^pages:(\d+)-(\d+):/);
    if(!match)continue;
    const first=Number(match[1]),last=Number(match[2]),canonicalChunk=`pages:${first}-${last}:v4`;
    const prior=respondedByChunk.get(canonicalChunk);
    if(!prior||String(request.sent_at||"")>String(prior.sent_at||""))respondedByChunk.set(canonicalChunk,request);
   }
   for(const [chunk,request] of [...respondedByChunk.entries()].sort((a,b)=>a[0].localeCompare(b[0],undefined,{numeric:true}))){
-   const match=chunk.match(/^pages:(\\d+)-(\\d+):/);
+   const match=chunk.match(/^pages:(\d+)-(\d+):/);
    if(!match)continue;
    const first=Number(match[1]),last=Number(match[2]);
    const parsed=parseSavedResponse(request.response_payload);
