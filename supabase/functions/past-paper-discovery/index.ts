@@ -92,6 +92,9 @@ async function searchBingRss(query: string, limit = 20, domain?: string, offset 
   });
   if (!res.ok) throw new Error("Bing RSS returned HTTP " + res.status + ".");
   const xml = new TextDecoder().decode(await readBounded(res, 2 * 1024 * 1024));
+  if (!/<(?:rss|rdf:RDF)\\b/i.test(xml) || !/<channel\\b|<item\\b/i.test(xml)) {
+    throw new Error("Bing RSS returned HTTP 200 but the response was not a recognizable RSS feed.");
+  }
   const rows: Array<{ title: string; url: string; snippet: string; domain: string }> = [];
   const items = xml.match(/<item\b[\s\S]*?<\/item>/gi) || [];
   for (const item of items) {
@@ -111,28 +114,44 @@ async function searchBingRss(query: string, limit = 20, domain?: string, offset 
   }
   return rows;
 }
-async function searchWeb(query: string, limit = 20, domain?: string, offset = 0) {
+type SearchWebResult = {
+  rows: Array<{ title: string; url: string; snippet: string; domain: string }>;
+  providersSucceeded: string[];
+  providerErrors: string[];
+};
+async function searchDuckDuckGo(query: string, limit = 20, domain?: string, offset = 0) {
   const targeted = domain ? query + " site:" + domain : query;
-  try {
-    const res = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(targeted) + "&s=" + offset, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml",
-      },
-      signal: AbortSignal.timeout(12000),
-    });
-    if (!res.ok) throw new Error("DuckDuckGo returned HTTP " + res.status + ".");
-    const html = new TextDecoder().decode(await readBounded(res, 2 * 1024 * 1024));
-    const rows = parseSearchResults(html, limit).filter((row) => !domain || row.domain === domain || row.domain.endsWith("." + domain));
-    if (rows.length) return rows;
-    return await searchBingRss(query, limit, domain, offset);
-  } catch (ddgError) {
-    try { return await searchBingRss(query, limit, domain, offset); }
-    catch (bingError) {
-      throw new Error("DuckDuckGo: " + clip((ddgError as Error)?.message || ddgError, 180)
-        + " · Bing: " + clip((bingError as Error)?.message || bingError, 180));
-    }
+  const res = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(targeted) + "&s=" + offset, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml",
+    },
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!res.ok) throw new Error("DuckDuckGo returned HTTP " + res.status + ".");
+  const html = new TextDecoder().decode(await readBounded(res, 2 * 1024 * 1024));
+  return parseSearchResults(html, limit).filter((row) => !domain || row.domain === domain || row.domain.endsWith("." + domain));
+}
+async function searchWeb(query: string, limit = 20, domain?: string, offset = 0): Promise<SearchWebResult> {
+  // Run independent providers for every query. A partial result from one provider
+  // must not suppress the second provider's search or hide its failure diagnostics.
+  const attempts = await Promise.all([
+    Promise.resolve().then(async () => ({ provider: "DuckDuckGo HTML", rows: await searchDuckDuckGo(query, limit, domain, offset), error: "" }))
+      .catch((error) => ({ provider: "DuckDuckGo HTML", rows: [] as any[], error: clip((error as Error)?.message || error, 220) })),
+    Promise.resolve().then(async () => ({ provider: "Bing RSS", rows: await searchBingRss(query, limit, domain, offset), error: "" }))
+      .catch((error) => ({ provider: "Bing RSS", rows: [] as any[], error: clip((error as Error)?.message || error, 220) })),
+  ]);
+  const providersSucceeded = attempts.filter((item) => !item.error).map((item) => item.provider);
+  const providerErrors = attempts.filter((item) => !!item.error).map((item) => item.provider + ": " + item.error);
+  if (!providersSucceeded.length) {
+    throw new Error(providerErrors.join(" · ") || "All search providers failed.");
   }
+  const unique = new Map<string, any>();
+  for (const item of attempts) for (const row of item.rows) {
+    const key = String(row.url || "").toLowerCase();
+    if (key && !unique.has(key)) unique.set(key, row);
+  }
+  return { rows: [...unique.values()].slice(0, limit), providersSucceeded, providerErrors };
 }
 async function searchInBatches(sources: any[], query: string, batchSize = 4) {
   const results: Array<{ title: string; url: string; snippet: string; domain: string; source: any; archive_member?: string; pdf_search_hint?: boolean }> = [];
@@ -144,14 +163,19 @@ async function searchInBatches(sources: any[], query: string, batchSize = 4) {
       try {
         const variants = buildPdfQueryVariants(query);
         const attempts = await Promise.all(variants.flatMap((variant) => [0, 30].map(async (offset) => {
-          try { return { rows: await searchWeb(variant, 8, source.domain, offset), error: "" }; }
-          catch (e) { return { rows: [], error: clip((e as Error)?.message || e, 180) }; }
+          try {
+            const result = await searchWeb(variant, 8, source.domain, offset);
+            return { rows: result.rows, successfulQueries: result.providersSucceeded.length,
+              error: result.providerErrors.join(" · ") };
+          } catch (e) { return { rows: [], successfulQueries: 0, error: clip((e as Error)?.message || e, 300) }; }
         })));
-        const successful = attempts.filter((x) => !x.error);
-        const failed = attempts.filter((x) => x.error);
+        const successful = attempts.filter((x) => x.successfulQueries > 0);
+        const failed = attempts.filter((x) => x.successfulQueries === 0);
         if (!successful.length) throw new Error(failed.map((x) => x.error).join(" · "));
-        return { source, rows: successful.flatMap((x) => x.rows), successfulQueries: successful.length,
-          error: failed.length ? source.domain + ": Partial provider failures: " + failed.map((x) => x.error).join(" · ") : "" };
+        const partial = attempts.filter((x) => x.error && x.successfulQueries > 0);
+        return { source, rows: successful.flatMap((x) => x.rows),
+          successfulQueries: successful.reduce((sum, x) => sum + x.successfulQueries, 0),
+          error: [...failed, ...partial].length ? source.domain + ": " + [...failed, ...partial].map((x) => x.error).join(" · ") : "" };
       } catch (e) {
         return { source, rows: [], error: source.domain + ": " + clip((e as Error)?.message || e, 220) };
       }
@@ -634,13 +658,16 @@ Deno.serve(async (req) => {
       const broadQueries = buildPdfQueryVariants(query);
       const broadSearches = broadQueries.flatMap((broadQuery) => [0, 30].map((offset) => ({ broadQuery, offset })));
       const broadSettled = await Promise.all(broadSearches.map(async (search) => {
-        try { return { rows: await searchWeb(search.broadQuery, 20, undefined, search.offset), error: "" }; }
-        catch (e) { return { rows: [], error: clip((e as Error)?.message || e, 300) }; }
+        try {
+          const result = await searchWeb(search.broadQuery, 20, undefined, search.offset);
+          return { rows: result.rows, successfulQueries: result.providersSucceeded.length,
+            error: result.providerErrors.join(" · ") };
+        } catch (e) { return { rows: [], successfulQueries: 0, error: clip((e as Error)?.message || e, 300) }; }
       }));
       for (let i = 0; i < broadSettled.length; i++) {
         const item = broadSettled[i];
         if (item.error) providerErrors.push("Broad web search (" + (i + 1) + ", offset " + broadSearches[i].offset + "): " + item.error);
-        else successfulQueries++;
+        successfulQueries += Number(item.successfulQueries || 0);
         broadResults.push(...item.rows);
       }
     }
@@ -717,7 +744,7 @@ Deno.serve(async (req) => {
           ? (/Source returned HTTP|Too many redirects|timed out|Source returned an invalid redirect|Source hostname/i.test(sourceError) ? "inaccessible" : "provider_error")
           : "no_matching_pdf"),
         pdf_count: matching.length,
-        provider: "DuckDuckGo/Bing RSS + source-specific crawler",
+        provider: "DuckDuckGo HTML + Bing RSS (independent parallel searches) + source-specific crawler",
         evidence: {
           query_variants: [
             ...buildPdfQueryVariants(query),
