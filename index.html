@@ -25688,8 +25688,8 @@ async function qbRunSourcePaperExtraction(id) {
       ...state, ok: true, loading: false, stage: 'review',
       message: 'Extraction complete. ' + result.pages_total + ' pages processed and ' + result.staged_items
         + ' items staged. Actual API cost: ' + Number(result.actual_cost_usd || 0).toFixed(6)
-        + ' USD. Nothing has been published yet.',
-      pages: result.pages_total, pagesCompleted: result.pages_total, staged: result.staged_items,
+        + ' USD. Nothing has been published yet.' + (result.provider_outcome_warning ? ' WARNING: ' + result.warning_message : '') + (result.accounting_warning ? ' Accounting warning(s): ' + (result.accounting_warnings || []).join(' | ') : ''),
+      pages: result.pages_total, pagesCompleted: result.pages_completed ?? result.pages_total, staged: result.staged_items,
       inputTokens: result.input_tokens, outputTokens: result.output_tokens,
       actualCostUsd: result.actual_cost_usd, costBudgetUsd: result.cost_budget_usd, costCurrency: 'USD'
     };
@@ -25734,7 +25734,7 @@ async function qbCheckSourcePaperExtraction(id) {
       qbExtractionResults[id] = { ok: true, stage: 'none', message: 'No previous extraction run exists for this paper.' };
     } else {
       const run = result.run;
-      const isUncertain = run.status === 'uncertain' || run.ai_request_state === 'uncertain';
+      const isUncertain = run.status === 'uncertain' || (run.ai_request_state === 'uncertain' && run.status !== 'processing');
       const alreadyReconciled = !!run.admin_reconciled_at;
       qbExtractionResults[id] = { ok: true, runId: run.id, stage: run.current_stage, runStatus: run.status, aiRequestState: run.ai_request_state, reconciled: alreadyReconciled, reconciliationRequired: isUncertain && !alreadyReconciled, message: 'Saved extraction run: ' + run.status + ' · ' + run.current_stage + (run.actual_cost_usd != null ? ' · Cost ' + Number(run.actual_cost_usd).toFixed(6) + ' USD' : '') + (run.cost_budget_usd != null ? ' / ' + Number(run.cost_budget_usd).toFixed(2) + ' budget' : '') + '.' };
       if (isUncertain && alreadyReconciled) qbExtractionResults[id].message += ' This uncertain attempt was explicitly reconciled; a new run may be prepared.';
