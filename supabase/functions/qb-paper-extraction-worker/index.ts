@@ -15,7 +15,7 @@ let BUDGET_USD=2;
 let MAX_PDF_MB=20, MAX_PAGES=25, MAX_BYTES=20*1024*1024;
 const MAX_OUTPUT_TOKENS=32000;
 const MAX_BATCH_RESERVE_USD=(200000*(PRICE?.input||0)+MAX_OUTPUT_TOKENS*(PRICE?.output||0))/1_000_000;
-const BATCH=2;
+const BATCH=1;
 const usd=(n:number)=>Math.round((n+Number.EPSILON)*1e8)/1e8;
 const tokenCost=(input:number,output:number)=>usd(input*(PRICE?.input||0)/1_000_000+output*(PRICE?.output||0)/1_000_000);
 const CORS={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, x-client-info, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS"};
@@ -43,7 +43,7 @@ function parseSavedResponse(payload:any){
  }
  throw new Error("Saved provider response is not recoverable; do not resend automatically.");
 }
-function prompt(a:number,z:number){return `Extract ONLY examinable questions and their source passages from PDF fragment pages ${a}-${z}. Accuracy and completeness are both essential. Transcribe every legible question, option, subpart, mark and relevant instruction exactly in the source language. Never invent, paraphrase, answer, translate or silently omit unclear content; mark uncertain text with [unclear] and explain it in extraction_notes.
+function prompt(a:number,z:number){return `Extract ONLY examinable questions and their source passages from the SINGLE original PDF page ${a}. The supplied PDF contains exactly one page. Accuracy and completeness are both essential. Transcribe every legible question, option, subpart, mark and relevant instruction exactly in the source language. Never invent, paraphrase, answer, translate or silently omit unclear content; mark uncertain text with [unclear] and explain it in extraction_notes.
 
 Return ONLY JSON using this exact outer structure: {"items":[{"item_kind":"question"|"passage","page_number":1,"original_number":null,"parent_item_key":null,"payload":{...}}]}. Every item MUST have a non-empty payload object. Put all question/passage content fields inside payload; keep only item_kind, page_number, original_number and parent_item_key outside payload. Allowed item_kind values are ONLY "question" and "passage". NEVER emit headers, paper titles, page furniture, section headings, general instructions, marks summaries, or images as standalone items. Preserve section names, shared instructions and marks as metadata on the relevant question.
 
@@ -55,8 +55,19 @@ PICTURE COMPOSITION / DIAGRAMS / MAPS / GRAPHS / CARTOONS: Keep the complete pro
 
 UNSEEN PASSAGES: Keep the passage as one passage item and group every associated comprehension question and subpart under its parent question, linked by parent_item_key. Do not repeat passage text in each question. Do not attach unrelated questions to it.
 
-PAGE NUMBERS: page_number is the 1-based page number within this supplied PDF fragment (1 or 2); the worker maps it to the original PDF page. If a question or passage continues across pages, use its first page number and preserve all continued text. Blank pages produce no items.`;}
+PAGE NUMBERS: page_number MUST be the integer 1 for EVERY item because this request contains exactly one original PDF page. Do not use a printed page number visible in the document. The worker assigns the original PDF page number independently. If a question or passage continues across pages, use its first page number and preserve all continued text. Blank pages produce no items.`;}
 
+function validateExtractedItem(item:any){
+ const payload=item?.payload&&typeof item.payload==="object"?item.payload:item;
+ if(item.item_kind==="question" && !String(payload.question_text||"").trim() && !(Array.isArray(payload.subquestions)&&payload.subquestions.length))
+  throw new Error("Question item has no question text or subquestions; staging was blocked.");
+ if(item.item_kind==="passage"){
+  const passage=String(payload.passage_text||"").trim();
+  if(!passage)throw new Error("Passage item has no passage_text; staging was blocked.");
+  if(passage.toLowerCase().includes("[content from") || passage.toLowerCase().includes("appears to contain text beginning"))
+   throw new Error("Passage contains explanatory placeholder text instead of source transcription; staging was blocked.");
+ }
+}
 function normalizePayload(item:any,page:number){
  const payload=item.payload&&typeof item.payload==="object"?{...item.payload}:{raw:item};
  if(item.item_kind!=="question")return payload;
@@ -164,24 +175,22 @@ Deno.serve(async(req)=>{
   const respondedByChunk=new Map<string,any>();
   for(const request of (requests||[]).filter((x:any)=>x.request_state==="responded")){
    const match=String(request.chunk_key||"").match(/^pages:(\d+)-(\d+):/);
-   if(!match)continue;
-   const first=Number(match[1]),last=Number(match[2]),canonicalChunk=`pages:${first}-${last}:v4`;
+   if(!match || !String(request.chunk_key||"").endsWith(":v5"))continue;
+   const first=Number(match[1]),last=Number(match[2]),canonicalChunk=`pages:${first}-${last}:v5`;
    const prior=respondedByChunk.get(canonicalChunk);
    if(!prior||String(request.sent_at||"")>String(prior.sent_at||""))respondedByChunk.set(canonicalChunk,request);
   }
   for(const [chunk,request] of [...respondedByChunk.entries()].sort((a,b)=>a[0].localeCompare(b[0],undefined,{numeric:true}))){
    const match=chunk.match(/^pages:(\d+)-(\d+):/);
-   if(!match)continue;
+   if(!match || !String(chunk).endsWith(":v5"))continue;
    const first=Number(match[1]),last=Number(match[2]);
    const parsed=parseSavedResponse(request.response_payload);
    let savedCount=0;
    for(let i=0;i<(parsed.items||[]).length;i++){
-    const item=parsed.items[i];if(!item||!["question","passage"].includes(item.item_kind))continue;
+    const item=parsed.items[i];if(!item||!["question","passage"].includes(item.item_kind))continue;validateExtractedItem(item);
     const reportedPage=Number(item.page_number);
-    const page=Number.isInteger(reportedPage)&&reportedPage>=1&&reportedPage<=(last-first+1)
-      ?first+reportedPage-1
-      :(Number.isInteger(reportedPage)&&reportedPage>=first&&reportedPage<=last?reportedPage:NaN);
-    if(!Number.isInteger(page))continue;
+    if(BATCH===1 && reportedPage!==1)throw new Error("AI returned a non-local page number for a single-page request. The response is retained, but staging is blocked to prevent incorrect page attribution.");
+    const page=first;
     const payload=normalizePayload(item,page);
     const fingerprint=await hash(JSON.stringify(item));
     const {error:se}=await db.from("qb_paper_extraction_staging").upsert({
@@ -202,7 +211,7 @@ Deno.serve(async(req)=>{
   const ambiguousRequests=(requests||[]).filter((x:any)=>["sent","uncertain"].includes(x.request_state));
   for(const request of ambiguousRequests){
    const match=String(request.chunk_key||"").match(/^pages:(\d+)-(\d+):/);
-   if(!match)continue;
+   if(!match || !String(request.chunk_key||"").endsWith(":v5"))continue;
    const first=Number(match[1]),last=Number(match[2]);
    const {error:pendingError}=await db.from("qb_paper_extraction_pages").update({page_state:"pending",error_message:"Provider outcome is ambiguous; an audited retry is required.",page_metadata:{chunk_key:request.chunk_key,reason:"ambiguous_provider_outcome",retry_policy:"initial_plus_two"}}).eq("run_id",runId).gte("page_number",first).lte("page_number",last).neq("page_state","completed");
    if(pendingError)throw new Error("Could not restore pages for controlled retry.");
@@ -221,7 +230,7 @@ Deno.serve(async(req)=>{
   for(let first=nextPage||total+1;first<=total;first+=BATCH){
    const {data:batchLease,error:batchLeaseError}=await db.rpc("qb_renew_extraction_worker",{p_run_id:runId,p_lease_owner:owner,p_lease_seconds:900});
    if(batchLeaseError||batchLease!==true)throw new Error("Worker lease was lost before the next batch; this worker stopped without sending another provider request.");
-   const last=Math.min(total,first+BATCH-1),chunk=`pages:${first}-${last}:v4`;
+   const last=Math.min(total,first+BATCH-1),chunk=`pages:${first}-${last}:v5`;
    const attempts=(requests||[]).filter((r:any)=>r.chunk_key===chunk||String(r.chunk_key||"").startsWith(chunk+":retry"));
    const savedAttempt:any=attempts.filter((r:any)=>r.request_state==="responded").sort((a:any,b:any)=>String(b.sent_at||"").localeCompare(String(a.sent_at||"")))[0];
    const ambiguousCount=attempts.filter((r:any)=>["sent","uncertain"].includes(r.request_state)).length;
@@ -305,12 +314,10 @@ Deno.serve(async(req)=>{
     parsed={items:parsed.items};
    }
    for(let i=0;i<(parsed.items||[]).length;i++){
-    const item=parsed.items[i];if(!item||!["question","passage"].includes(item.item_kind))continue;
+    const item=parsed.items[i];if(!item||!["question","passage"].includes(item.item_kind))continue;validateExtractedItem(item);
     const reportedPage=Number(item.page_number);
-    const page=Number.isInteger(reportedPage)&&reportedPage>=1&&reportedPage<=(last-first+1)
-      ?first+reportedPage-1
-      :(Number.isInteger(reportedPage)&&reportedPage>=first&&reportedPage<=last?reportedPage:NaN);
-    if(!Number.isInteger(page))continue;
+    if(BATCH===1 && reportedPage!==1)throw new Error("AI returned a non-local page number for a single-page request. The saved response is retained; staging is blocked.");
+    const page=first;
     const payload=normalizePayload(item,page);
     const fingerprint=await hash(JSON.stringify(item));
     const {error:se}=await db.from("qb_paper_extraction_staging").upsert({run_id:runId,item_key:`${chunk}:item:${i+1}`,item_kind:item.item_kind,page_number:page,original_number:item.original_number==null?null:String(item.original_number),parent_item_key:item.parent_item_key==null?null:String(item.parent_item_key),payload,content_fingerprint:fingerprint,review_state:"pending"},{onConflict:"run_id,item_key"});
