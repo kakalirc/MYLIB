@@ -457,7 +457,9 @@ async function resolvePdf(candidate: any, domains: string[]) {
       if (type && !type.includes("octet-stream") && !type.includes("binary")) throw new Error("The search result did not return a direct PDF response.");
       const bytes = await readBounded(result.response);
       if (!isPdf(bytes)) throw new Error("The download endpoint did not return PDF file content.");
-      return { response: new Response(bytes, { headers: result.response.headers }), url: result.url };
+      const body = new ArrayBuffer(bytes.byteLength);
+      new Uint8Array(body).set(bytes);
+      return { response: new Response(body, { headers: result.response.headers }), url: result.url };
     }
     const html = await result.response.text();
     const links = [...html.matchAll(/(?:href|data-url)\s*=\s*["']([^"']+\.pdf(?:\?[^"']*)?)["']/gi)].map((m) => new URL(decodeEntities(m[1]), result.url).href);
