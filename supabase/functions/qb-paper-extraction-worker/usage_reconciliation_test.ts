@@ -1,5 +1,5 @@
 import { assertEquals, assertThrows } from "jsr:@std/assert@1";
-import { readAnthropicUsage } from "./usage_reconciliation.ts";
+import { readAnthropicUsage, hasVerifiedAnthropicUsage } from "./usage_reconciliation.ts";
 
 const response = JSON.stringify({
   id: "msg_saved_123",
@@ -39,4 +39,12 @@ Deno.test("rejects provider error envelopes instead of inventing zero cost", () 
     Error,
     "rate limited",
   );
+});
+
+
+Deno.test("requires complete durable token and USD cost fields before another request", () => {
+  assertEquals(hasVerifiedAnthropicUsage({ input_tokens: 10, output_tokens: 5, input_cost_usd: 0.00001, output_cost_usd: 0.000025, total_cost_usd: 0.000035 }), true);
+  assertEquals(hasVerifiedAnthropicUsage({ input_tokens: 10, output_tokens: 5, input_cost_usd: 0.00001, output_cost_usd: 0.000025, total_cost_usd: null }), false);
+  assertEquals(hasVerifiedAnthropicUsage({ input_tokens: 10, output_tokens: 5, total_cost_usd: 0.000035 }), false);
+  assertEquals(hasVerifiedAnthropicUsage({ input_tokens: null, output_tokens: 5, input_cost_usd: 0, output_cost_usd: 0, total_cost_usd: 0 }), false);
 });
