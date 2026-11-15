@@ -91,6 +91,10 @@ begin
  v_claim:=public.qb_set_extraction_worker_state(v_run,'worker-two','processing','uncertain','retry 2 ambiguous');
  if coalesce((v_claim->>'ok')::boolean,false) is not true then raise exception 'Second retry ambiguity was not recorded: %',v_claim; end if;
  if coalesce((v_claim->>'ok')::boolean,false) is not true then raise exception 'Later independent batch was blocked by an older uncertain chunk: %',v_claim; end if;
+ update public.qb_paper_extraction_requests set request_state='responded',response_payload='{"items":[]}'::jsonb,responded_at=now()
+  where run_id=v_run and chunk_key='pages:4-5:v4' and request_state='sent';
+ v_claim:=public.qb_set_extraction_worker_state(v_run,'worker-two','processing','responded','finish independent batch before retry checks');
+ if coalesce((v_claim->>'ok')::boolean,false) is not true then raise exception 'Could not finish independent batch before retry checks: %',v_claim; end if;
  begin
    update public.qb_paper_extraction_requests set request_state='failed_before_send' where id=v_req;
    raise exception 'Expected sent request reset to be rejected';
