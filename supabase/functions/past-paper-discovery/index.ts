@@ -4,6 +4,10 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { getPdfZipMember, listPdfMembersFromZip } from "./archive.ts";
 import { matchesApprovedSourceDomain } from "./source-domain.ts";
+import {
+  buildPdfQueryVariants, isPrivateAddress, isQuestionPaperPdf,
+  isValidDiscoveredDomain, matchesQuery, queryTerms,
+} from "./presearch.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -22,19 +26,6 @@ function safeHost(url: URL, domains: string[]): boolean {
   if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")
       || /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":")) return false;
   return domains.some((d) => host === d || host.endsWith("." + d));
-}
-function isPrivateAddress(address: string): boolean {
-  const value = address.toLowerCase().split("%")[0];
-  const octets = value.split(".").map(Number);
-  if (octets.length === 4 && octets.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)) {
-    const [a, b] = octets;
-    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
-      (a === 100 && b >= 64 && b <= 127) || a >= 224;
-  }
-  return value === "::" || value === "::1" || value.startsWith("fc") ||
-    value.startsWith("fd") || value.startsWith("fe80:") || value.startsWith("ff") ||
-    (value.startsWith("::ffff:") && isPrivateAddress(value.slice(7)));
 }
 async function assertPublicDns(host: string): Promise<void> {
   const addresses: string[] = [];
@@ -150,11 +141,7 @@ async function searchInBatches(sources: any[], query: string, batchSize = 4) {
     const batch = sources.slice(i, i + batchSize);
     const settled = await Promise.all(batch.map(async (source: any) => {
       try {
-        const variants = [
-          query + " question paper filetype:pdf",
-          query + " previous year examination paper filetype:pdf",
-          query + " annual exam question paper filetype:pdf",
-        ];
+        const variants = buildPdfQueryVariants(query);
         const attempts = await Promise.all(variants.map(async (variant) => {
           try { return { rows: await searchWeb(variant, 8, source.domain), error: "" }; }
           catch (e) { return { rows: [], error: clip((e as Error)?.message || e, 180) }; }
@@ -199,14 +186,6 @@ async function fetchAllowed(urlText: string, domains: string[], accept: string) 
   throw new Error("Too many redirects.");
 }
 type DiscoveryRow = {title:string;url:string;snippet:string;domain:string;source:any};
-function queryTerms(query: string): string[] {
-  return query.toLowerCase().replace(/\b(cbse|cisce|icse|isc|question papers?|previous year|past papers?|sample papers?|specimen|pdf|class|grade)\b/g, " ")
-    .replace(/\b(x|xii|10|12)\b/g, " ").split(/[^a-z0-9]+/).filter((x) => x.length > 1);
-}
-function matchesQuery(label: string, terms: string[]): boolean {
-  const value = label.toLowerCase();
-  return !terms.length || terms.some((term) => value.includes(term));
-}
 function linkRows(html: string, baseUrl: string, source: any, terms: string[], limit = 60): DiscoveryRow[] {
   const rows: DiscoveryRow[] = [];
   const anchors = html.match(/<a\b[^>]*>[\s\S]*?<\/a>/gi) || [];
@@ -464,20 +443,6 @@ function isPdf(bytes: Uint8Array): boolean {
   const head = new TextDecoder().decode(bytes.slice(0, Math.min(1024, bytes.length)));
   return head.includes("%PDF-");
 }
-function isQuestionPaperPdf(row: any, query: string): boolean {
-  if (row.archive_member) return true;
-  let parsed: URL;
-  try { parsed = new URL(String(row.url || "")); } catch { return false; }
-  if (parsed.protocol !== "https:" || parsed.username || parsed.password ||
-      !parsed.pathname.toLowerCase().endsWith(".pdf")) return false;
-  const evidence = [row.title, row.snippet, row.url].join(" ").toLowerCase();
-  const paperSignal = [
-    "question paper", "question-paper", "question_paper", "sample paper", "sample-paper",
-    "specimen paper", "specimen-paper", "past paper", "previous year", "annual exam",
-    "annual examination", "exam paper", "board paper",
-  ].some((signal) => evidence.includes(signal));
-  return paperSignal && matchesQuery(evidence, queryTerms(query));
-}
 async function resolvePdf(candidate: any, domains: string[]) {
   const choices = [candidate.pdf_url, candidate.source_url].filter(Boolean) as string[];
   for (const candidateUrl of choices) {
@@ -657,12 +622,7 @@ Deno.serve(async (req) => {
     if (complete) {
       // Always run broad discovery after registered-source crawling. A handful of
       // sample-paper hits must not suppress searches for annual / previous-year papers.
-      const broadQueries = [
-        query + " previous year board examination question paper filetype:pdf",
-        query + " annual examination question paper filetype:pdf",
-        query + " past exam question paper filetype:pdf",
-        query + " sample question paper filetype:pdf",
-      ];
+      const broadQueries = buildPdfQueryVariants(query);
       const broadSettled = await Promise.all(broadQueries.map(async (broadQuery) => {
         try { return { rows: await searchWeb(broadQuery, 20), error: "" }; }
         catch (e) { return { rows: [], error: clip((e as Error)?.message || e, 300) }; }
@@ -746,9 +706,7 @@ Deno.serve(async (req) => {
         provider: "DuckDuckGo/Bing RSS + source-specific crawler",
         evidence: {
           query_variants: [
-            query + " question paper filetype:pdf",
-            query + " previous year examination paper filetype:pdf",
-            query + " annual exam question paper filetype:pdf",
+            ...buildPdfQueryVariants(query),
           ],
           result_titles: matching.slice(0, 12).map((row: any) => row.title),
           diagnostic: partialError || null,
@@ -839,7 +797,7 @@ Deno.serve(async (req) => {
   const domains = registryRows.filter((source: any) => source.enabled).map((source: any) => source.domain);
   const isEnabledRegisteredSource = matchesApprovedSourceDomain(candidate.source_domain, domains);
   const discoveredDomain = String(candidate.source_domain || "").toLowerCase().trim();
-  const validDiscoveredDomain = /^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(discoveredDomain);
+  const validDiscoveredDomain = isValidDiscoveredDomain(discoveredDomain);
   const hasDirectPdfEvidence = !!candidate.discovery_metadata?.source_match &&
     candidate.discovery_metadata.source_match === "unregistered_domain" &&
     (/\.pdf(?:$|[?#])/i.test(String(candidate.pdf_url || candidate.source_url || "")) ||
