@@ -251,7 +251,7 @@ async function crawlCbseOfficial(source: any, query: string): Promise<DiscoveryR
       : /\b(10|x)\b/i.test(query) ? ["X"] : ["X", "XII"];
     const archiveLinks = [...archiveHtml.matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
     for (const cls of wantedClasses) {
-      const classPattern = new RegExp("SQP_CLASS" + cls + "_(\\d{4}-\\d{2})\\.html", "i");
+      const classPattern = new RegExp("SQP_CLASS" + cls + "_(\\d{4}-\\d{2})\.html", "i");
       const pages = archiveLinks.map((m) => {
         let href = ""; try { href = new URL(decodeEntities(m[1]), archive.url).href; } catch { return null; }
         const match = new URL(href).pathname.match(classPattern);
@@ -563,23 +563,17 @@ Deno.serve(async (req) => {
     }
 
     const { data: sources, error: sourceError } = await admin.from("qb_paper_discovery_sources")
-      .select("id,display_name,domain,source_type,trust_level,priority")
-      .eq("enabled", true).order("priority").limit(200);
+      .select("id,display_name,domain,source_type,trust_level,priority,enabled")
+      .order("priority").limit(300);
     if (sourceError) return reply(500, { error: "Could not load approved source registry: " + sourceError.message });
-    const eligible = (sources || []).filter((s: any) => s.source_type === scope || s.source_type === "education_portal");
+    const registry = sources || [];
+    const eligible = registry.filter((s: any) => s.enabled &&
+      (s.source_type === scope || s.source_type === "education_portal"));
     const searchTargets = scope === "school"
       ? eligible.filter((s: any) => s.source_type === "school")
       : eligible.filter((s: any) => s.source_type === "board" || s.source_type === "education_portal");
-    if (scope === "board" && !searchTargets.some((s: any) => s.source_type === "board")) {
-      await admin.from("qb_paper_discovery_runs").update({ status: "failed", heartbeat_at: null, error_message: "No enabled official board sources.",
-        completed_at: new Date().toISOString() }).eq("id", runId);
-      return reply(400, { error: "No enabled official board sources. Enable at least one board domain." });
-    }
-    if (!searchTargets.length) {
-      await admin.from("qb_paper_discovery_runs").update({ status: "failed", heartbeat_at: null, error_message: "No enabled sources match this search scope.",
-        completed_at: new Date().toISOString() }).eq("id", runId);
-      return reply(400, { error: "No enabled sources match this search scope." });
-    }
+    // Broad PDF search still runs when no registry entries are enabled. A disabled
+    // registry domain is never silently re-enabled or reintroduced by broad search.
 
     const progress = run.filters?.discovery_progress || {};
     const offset = Math.max(0, Number(progress.next_offset) || 0);
@@ -636,16 +630,21 @@ Deno.serve(async (req) => {
         broadResults.push(...item.rows);
       }
     }
-    const rows = [...batchRows, ...broadResults.map((r) => {
-      const matched = eligible.find((s: any) => r.domain === s.domain || r.domain.endsWith("." + s.domain));
-      return { ...r, source: matched || null };
+    const allRows = [...batchRows, ...broadResults.map((r) => {
+      const matched = registry.find((s: any) => s.enabled &&
+        (r.domain === s.domain || r.domain.endsWith("." + s.domain)));
+      const disabled = registry.find((s: any) => !s.enabled &&
+        (r.domain === s.domain || r.domain.endsWith("." + s.domain)));
+      return { ...r, source: matched || null, disabledSource: disabled || null };
     })];
+    const disabledRows = allRows.filter((row) => row.disabledSource);
+    const rows = allRows.filter((row) => !row.disabledSource);
     const unique = new Map<string, any>();
     for (const row of rows) if (!unique.has(String(row.url).toLowerCase())) unique.set(String(row.url).toLowerCase(), row);
     // Search providers may ignore filetype operators. Never create a paper candidate
     // from an ordinary HTML result: only direct PDF URLs and verified PDF members qualify.
     const flattened = [...unique.values()].filter((r) =>
-      !!r.archive_member || /\\.pdf(?:$|[?#])/i.test(String(r.url || ""))
+      !!r.archive_member || /\.pdf(?:$|[?#])/i.test(String(r.url || ""))
     );
 
     const inserts = flattened.slice(0, 80).map((r) => ({
@@ -679,7 +678,7 @@ Deno.serve(async (req) => {
     // Preserve one audit row per checked source attempt, including zero-result and failed checks.
     const sourceAuditRows: any[] = batch.map((source: any) => {
       const matching = batchRows.filter((row: any) => row.source?.id === source.id &&
-        (!!row.archive_member || /\\.pdf(?:$|[?#])/i.test(String(row.url || ""))));
+        (!!row.archive_member || /\.pdf(?:$|[?#])/i.test(String(row.url || ""))));
       const sourceError = providerErrors.find((message) => message.startsWith(source.domain + ":"));
       const partialError = sourceError;
       return {
@@ -704,11 +703,27 @@ Deno.serve(async (req) => {
     });
     const discoveredCounts = new Map<string, any[]>();
     for (const row of flattened) {
-      const registered = eligible.some((source: any) => row.domain === source.domain || row.domain.endsWith("." + source.domain));
+      const registered = registry.some((source: any) => row.domain === source.domain || row.domain.endsWith("." + source.domain));
       if (!registered) {
         const list = discoveredCounts.get(row.domain) || [];
         list.push(row); discoveredCounts.set(row.domain, list);
       }
+    }
+    const disabledCounts = new Map<string, any[]>();
+    for (const row of disabledRows) {
+      const domain = row.disabledSource.domain;
+      const list = disabledCounts.get(domain) || [];
+      list.push(row); disabledCounts.set(domain, list);
+    }
+    for (const [domain, foundRows] of disabledCounts) {
+      const source = foundRows[0].disabledSource;
+      sourceAuditRows.push({
+        discovery_run_id: runId, source_id: source.id, domain, display_name: source.display_name,
+        source_type: source.source_type, source_classification: "approved",
+        outcome: "disabled_registry", pdf_count: foundRows.length, provider: "Broad web PDF search",
+        evidence: { note: "A PDF result was found, but this domain is permanently disabled in the source registry.",
+          pdf_urls: foundRows.slice(0, 12).map((row: any) => row.url) },
+      });
     }
     for (const [domain, foundRows] of discoveredCounts) {
       sourceAuditRows.push({
@@ -761,14 +776,18 @@ Deno.serve(async (req) => {
   if (!uuid(candidateId)) return reply(400, { error: "Invalid candidate." });
   const { data: candidate, error: candidateError } = await admin.from("qb_paper_discovery_candidates").select("*").eq("id", candidateId).maybeSingle();
   if (candidateError || !candidate) return reply(404, { error: "Candidate not found." });
-  const { data: sourceRows } = await admin.from("qb_paper_discovery_sources").select("domain").eq("enabled", true);
-  const domains = (sourceRows || []).map((s: any) => s.domain);
+  const { data: sourceRows } = await admin.from("qb_paper_discovery_sources").select("domain,enabled").limit(500);
+  const registryRows = sourceRows || [];
+  const disabledRegistryMatch = registryRows.find((source: any) =>
+    !source.enabled && matchesApprovedSourceDomain(candidate.source_domain, [source.domain]));
+  if (disabledRegistryMatch) return reply(400, { error: "This domain is permanently disabled in Approved Sources and was excluded from this collection." });
+  const domains = registryRows.filter((source: any) => source.enabled).map((source: any) => source.domain);
   const isEnabledRegisteredSource = matchesApprovedSourceDomain(candidate.source_domain, domains);
   const discoveredDomain = String(candidate.source_domain || "").toLowerCase().trim();
-  const validDiscoveredDomain = /^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$/.test(discoveredDomain);
+  const validDiscoveredDomain = /^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(discoveredDomain);
   const hasDirectPdfEvidence = !!candidate.discovery_metadata?.source_match &&
     candidate.discovery_metadata.source_match === "unregistered_domain" &&
-    (/\\.pdf(?:$|[?#])/i.test(String(candidate.pdf_url || candidate.source_url || "")) ||
+    (/\.pdf(?:$|[?#])/i.test(String(candidate.pdf_url || candidate.source_url || "")) ||
       !!candidate.discovery_metadata?.archive_member);
   if (!isEnabledRegisteredSource) {
     if (!hasDirectPdfEvidence || !validDiscoveredDomain) {
