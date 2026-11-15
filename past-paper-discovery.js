@@ -484,6 +484,28 @@
       }).eq('id', id).select('id').maybeSingle();
       if (approval.error) throw new Error('Could not save review metadata: ' + approval.error.message);
       if (!approval.data) throw new Error('Review metadata was not saved. Check Admin access and refresh the candidate.');
+      // Metadata similarity is advisory only: the source-paper schema has no paper-set field,
+      // so only an exact PDF checksum can conclusively block a duplicate import.
+      var duplicateQuery = sb.from('qb_source_papers')
+        .select('id,status,subject_name,year,exam_type,medium,source_type')
+        .eq('grade_id', gradeId).eq('year', year).eq('exam_type', exam);
+      duplicateQuery = boardId ? duplicateQuery.eq('board_id', boardId) : duplicateQuery.eq('school_id', schoolId);
+      var possibleDuplicates = await duplicateQuery.limit(100);
+      if (possibleDuplicates.error) throw new Error('Could not complete the metadata duplicate check: ' + possibleDuplicates.error.message);
+      var normalized = function (value) { return String(value || '').normalize('NFKC').replace(/\\s+/g, ' ').trim().toLocaleLowerCase(); };
+      var metadataMatches = (possibleDuplicates.data || []).filter(function (paper) {
+        return normalized(paper.subject_name) === normalized(subject) && normalized(paper.medium) === normalized(medium) && paper.status !== 'rejected';
+      });
+      if (metadataMatches.length) {
+        var matchSummary = metadataMatches.slice(0, 5).map(function (paper) {
+          return '• ' + paper.subject_name + ' ' + paper.year + ' · ' + (paper.exam_type || 'exam') + ' · ' + (paper.status || 'unknown status') + ' · ID ' + String(paper.id).slice(0, 8);
+        }).join('\\n');
+        var more = metadataMatches.length > 5 ? '\\n…plus ' + (metadataMatches.length - 5) + ' more.' : '';
+        if (!window.confirm('Possible metadata matches already exist in Past Papers:\\n\\n' + matchSummary + more + '\\n\\nThese are warnings, not confirmed duplicates; the PDF checksum check remains definitive. Continue with import?')) {
+          notifyAction(id, 'Import cancelled after the possible-duplicate warning. The candidate remains approved for import.');
+          return;
+        }
+      }
       notifyAction(id, 'Importing verified PDF into the existing Past Papers review queue…');
       var result = await invoke({ action:'import', candidate_id:id, board_id:boardId, school_id:schoolId,
         grade_id:gradeId, subject_name:subject, year:year, exam_type:exam, medium:medium });
