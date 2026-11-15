@@ -9,7 +9,7 @@ create table if not exists public.qb_paper_discovery_run_sources (
   display_name text not null,
   source_type text check (source_type is null or source_type in ('board','school','education_portal')),
   source_classification text not null check (source_classification in ('approved','discovered')),
-  outcome text not null check (outcome in ('pdf_found','no_matching_pdf','provider_error','inaccessible')),
+  outcome text not null check (outcome in ('pdf_found','no_matching_pdf','provider_error','inaccessible','disabled_registry')),
   pdf_count integer not null default 0 check (pdf_count >= 0),
   provider text not null default 'web-search',
   evidence jsonb not null default '{}'::jsonb check (jsonb_typeof(evidence) = 'object'),
