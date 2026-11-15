@@ -1,7 +1,7 @@
 -- Exercise Admin-approved publication, passage linking and idempotent replay.
 -- Apply the proposed fail-closed guards here as well as in the CI migration sequence,
 -- so this smoke test remains meaningful on base-branch workflow definitions.
-\\ir ../migrations/20261115230000_qb_extraction_completeness_accounting_gates.sql
+\ir ../migrations/20261115230000_qb_extraction_completeness_accounting_gates.sql
 do $$
 declare v_admin uuid:=gen_random_uuid();v_grade uuid;v_board uuid;v_paper uuid;v_run uuid;v_passage uuid;v_passage_duplicate uuid;v_result jsonb;v_count integer;
 begin
@@ -15,7 +15,7 @@ begin
  values(v_paper,v_admin,'completed','responded','review') returning id into v_run;
  insert into public.qb_paper_extraction_pages(run_id,page_number,page_state,page_kind,page_metadata,completed_at)
  values(v_run,1,'completed','mixed','{"extraction_audit":{"version":1,"status":"review","question_count":1,"passage_count":1,"flags":["Test warning requiring visual comparison."]}}'::jsonb,now());
- insert into public.qb_paper_extraction_requests(run_id,chunk_key,provider,model_name,idempotency_key,request_state,request_payload)
+ insert into public.qb_paper_extraction_requests(run_id,chunk_key,provider,model_name,idempotency_key,request_state,request_payload,sent_at,response_payload)
  values(v_run,'pages:1-1:v5','anthropic','test-model',v_run::text||':pages:1-1:v5','responded','{}'::jsonb,now(),'{}'::jsonb);
  insert into public.qb_paper_extraction_staging(run_id,item_key,item_kind,original_number,payload,content_fingerprint,review_state)
  values(v_run,'passage:P1','passage','P1','{"passage_text":"A short test passage.","passage_type":"reading","passage_key":"passage-alias-P1"}'::jsonb,repeat('a',64),'approved'),
