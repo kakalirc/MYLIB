@@ -31,7 +31,7 @@ export function parseQuestionItems(source: string): ParsedQuestionResponse {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       throw new Error(`AI response schema invalid: item ${index + 1} is not an object.`);
     }
-    if (!["question", "passage", "section", "instruction", "image"].includes(item.item_kind)) {
+    if (!["question", "passage"].includes(item.item_kind)) {
       throw new Error(`AI response schema invalid: item ${index + 1} has an unsupported item_kind.`);
     }
     if (!Number.isInteger(Number(item.page_number))) {
