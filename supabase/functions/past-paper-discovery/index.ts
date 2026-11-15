@@ -23,6 +23,26 @@ function safeHost(url: URL, domains: string[]): boolean {
       || /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":")) return false;
   return domains.some((d) => host === d || host.endsWith("." + d));
 }
+function isPrivateAddress(address: string): boolean {
+  const value = address.toLowerCase().split("%")[0];
+  const octets = value.split(".").map(Number);
+  if (octets.length === 4 && octets.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)) {
+    const [a, b] = octets;
+    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
+      (a === 100 && b >= 64 && b <= 127) || a >= 224;
+  }
+  return value === "::" || value === "::1" || value.startsWith("fc") ||
+    value.startsWith("fd") || value.startsWith("fe80:") || value.startsWith("ff") ||
+    (value.startsWith("::ffff:") && isPrivateAddress(value.slice(7)));
+}
+async function assertPublicDns(host: string): Promise<void> {
+  const addresses: string[] = [];
+  try { addresses.push(...await Deno.resolveDns(host, "A")); } catch { /* Try AAAA. */ }
+  try { addresses.push(...await Deno.resolveDns(host, "AAAA")); } catch { /* No AAAA record is normal. */ }
+  if (!addresses.length) throw new Error("Source hostname did not resolve to a public IP address.");
+  if (addresses.some(isPrivateAddress)) throw new Error("Source hostname resolves to a private or reserved IP address.");
+}
 function decodeEntities(s: string): string {
   return s.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'")
     .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
@@ -161,6 +181,7 @@ async function fetchAllowed(urlText: string, domains: string[], accept: string) 
   try { url = new URL(urlText); } catch { throw new Error("Invalid URL."); }
   for (let hop = 0; hop <= 5; hop++) {
     if (!safeHost(url, domains)) throw new Error("URL or redirect is outside the approved source domains.");
+    await assertPublicDns(url.hostname);
     const res = await fetch(url.href, {
       redirect: "manual",
       headers: { "User-Agent": "Mozilla/5.0 (compatible; LIBEducationPastPaperDiscovery/1.0)", Accept: accept },
@@ -445,7 +466,10 @@ function isPdf(bytes: Uint8Array): boolean {
 }
 function isQuestionPaperPdf(row: any, query: string): boolean {
   if (row.archive_member) return true;
-  if (!String(row.url || "").toLowerCase().includes(".pdf")) return false;
+  let parsed: URL;
+  try { parsed = new URL(String(row.url || "")); } catch { return false; }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password ||
+      !parsed.pathname.toLowerCase().endsWith(".pdf")) return false;
   const evidence = [row.title, row.snippet, row.url].join(" ").toLowerCase();
   const paperSignal = [
     "question paper", "question-paper", "question_paper", "sample paper", "sample-paper",
@@ -657,7 +681,7 @@ Deno.serve(async (req) => {
         (r.domain === s.domain || r.domain.endsWith("." + s.domain)));
       return { ...r, source: matched || null, disabledSource: disabled || null };
     })];
-    const disabledRows = allRows.filter((row) => row.disabledSource);
+    const disabledRows = allRows.filter((row) => row.disabledSource && isQuestionPaperPdf(row, query));
     const rows = allRows.filter((row) => !row.disabledSource);
     const unique = new Map<string, any>();
     for (const row of rows) if (!unique.has(String(row.url).toLowerCase())) unique.set(String(row.url).toLowerCase(), row);
@@ -708,8 +732,7 @@ Deno.serve(async (req) => {
     }
     // Preserve one audit row per checked source attempt, including zero-result and failed checks.
     const sourceAuditRows: any[] = batch.map((source: any) => {
-      const matching = batchRows.filter((row: any) => row.source?.id === source.id &&
-        (!!row.archive_member || /\.pdf(?:$|[?#])/i.test(String(row.url || ""))));
+      const matching = batchRows.filter((row: any) => row.source?.id === source.id && isQuestionPaperPdf(row, query));
       const sourceError = providerErrors.find((message) => message.startsWith(source.domain + ":"));
       const partialError = sourceError;
       return {
