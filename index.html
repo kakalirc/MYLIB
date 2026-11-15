@@ -25721,6 +25721,7 @@ async function qbLoadExtractionReview(id, quiet) {
     qbExtractionBusyIds.delete(id);
     qbRenderSourcePreviewPreservingScroll();
   }
+  if (qbExtractionResults[id]?.reviewOpen && !qbSourcePreviewOpenIds.has(id)) await qbToggleSourcePaperPreview(id);
 }
 async function qbCheckSourcePaperExtraction(id) {
   if (currentRole !== 'Admin' || qbExtractionBusyIds.has(id)) return;
@@ -25967,7 +25968,7 @@ async function qbToggleSourcePaperPreview(id) {
   const sp = qbSourcePapers.find(x => x.id === id);
   if (!sp) return;
   qbSourcePreviewOpenIds.add(id); qbSourcePreviewLoadingIds.add(id);
-  delete qbSourcePreviewErrors[id]; delete qbSourcePreviewImages[id];
+  delete qbSourcePreviewErrors[id]; delete qbSourcePreviewImages[id]; delete qbSourcePreviewPageImages[id];
   qbRenderSourcePreviewPreservingScroll();
   try {
     let href = sp.stored_pdf_url && /^https?:/i.test(sp.stored_pdf_url) && String(sp.stored_pdf_url).indexOf('/object/sign/') < 0 ? sp.stored_pdf_url : null;
