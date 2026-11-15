@@ -641,7 +641,7 @@ Deno.serve(async (req) => {
         (r.domain === s.domain || r.domain.endsWith("." + s.domain)));
       return { ...r, source: matched || null, disabledSource: disabled || null };
     })];
-    const disabledRows = allRows.filter((row) => row.disabledSource && isQuestionPaperPdf(row, query));
+    const disabledRows = allRows.filter((row) => row.disabledSource);
     const rows = allRows.filter((row) => !row.disabledSource);
     const unique = new Map<string, any>();
     for (const row of rows) if (!unique.has(String(row.url).toLowerCase())) unique.set(String(row.url).toLowerCase(), row);
@@ -713,12 +713,14 @@ Deno.serve(async (req) => {
         },
       };
     });
-    const discoveredCounts = new Map<string, any[]>();
-    for (const row of flattened) {
+    // Record every unregistered domain surfaced by broad search, including sites
+    // that returned no relevant question-paper PDF. This is the per-run discovery inbox.
+    const discoveredDomainResults = new Map<string, any[]>();
+    for (const row of broadResults) {
       const registered = registry.some((source: any) => row.domain === source.domain || row.domain.endsWith("." + source.domain));
       if (!registered) {
-        const list = discoveredCounts.get(row.domain) || [];
-        list.push(row); discoveredCounts.set(row.domain, list);
+        const list = discoveredDomainResults.get(row.domain) || [];
+        list.push(row); discoveredDomainResults.set(row.domain, list);
       }
     }
     const disabledCounts = new Map<string, any[]>();
@@ -729,22 +731,26 @@ Deno.serve(async (req) => {
     }
     for (const [domain, foundRows] of disabledCounts) {
       const source = foundRows[0].disabledSource;
+      const relevant = foundRows.filter((row: any) => isQuestionPaperPdf(row, query));
       sourceAuditRows.push({
         discovery_run_id: runId, source_id: source.id, domain, display_name: source.display_name,
         source_type: source.source_type, source_classification: "approved",
-        outcome: "disabled_registry", pdf_count: foundRows.length, provider: "Broad web PDF search",
-        evidence: { note: "A PDF result was found, but this domain is permanently disabled in the source registry.",
-          pdf_urls: foundRows.slice(0, 12).map((row: any) => row.url) },
+        outcome: "disabled_registry", pdf_count: relevant.length, provider: "Broad web PDF search",
+        evidence: { note: "This domain is permanently disabled in the source registry and was excluded.",
+          surfaced_result_count: foundRows.length, relevant_pdf_urls: relevant.slice(0, 12).map((row: any) => row.url) },
       });
     }
-    for (const [domain, foundRows] of discoveredCounts) {
+    for (const [domain, surfacedRows] of discoveredDomainResults) {
+      const relevant = flattened.filter((row: any) => row.domain === domain);
       sourceAuditRows.push({
         discovery_run_id: runId, source_id: null, domain, display_name: domain,
         source_type: scope === "school" ? "school" : "education_portal",
-        source_classification: "discovered", outcome: "pdf_found", pdf_count: foundRows.length,
+        source_classification: "discovered",
+        outcome: relevant.length ? "pdf_found" : "no_matching_pdf", pdf_count: relevant.length,
         provider: "Broad web PDF search",
-        evidence: { result_titles: foundRows.slice(0, 12).map((row: any) => row.title),
-          pdf_urls: foundRows.slice(0, 12).map((row: any) => row.url) },
+        evidence: { surfaced_result_count: surfacedRows.length,
+          result_titles: surfacedRows.slice(0, 12).map((row: any) => row.title),
+          relevant_pdf_urls: relevant.slice(0, 12).map((row: any) => row.url) },
       });
     }
     if (sourceAuditRows.length) {
@@ -756,7 +762,7 @@ Deno.serve(async (req) => {
     insertedTotal += inserted;
     const previouslySeenTotal = Math.max(0, Number(progress.previously_seen_pdf_urls) || 0)
       + Math.max(0, Math.min(flattened.length, 80) - inserted);
-    const discoveredSourceTotal = Math.max(0, Number(progress.discovered_source_count) || 0) + discoveredCounts.size;
+    const discoveredSourceTotal = Math.max(0, Number(progress.discovered_source_count) || 0) + discoveredDomainResults.size;
     const nextProgress = { next_offset: nextOffset, successful_queries: successfulQueries,
       provider_errors: providerErrors.slice(0, 80), results_found: foundTotal, new_candidates: insertedTotal,
       previously_seen_pdf_urls: previouslySeenTotal, discovered_source_count: discoveredSourceTotal };
