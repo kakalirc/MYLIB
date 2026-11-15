@@ -4,7 +4,7 @@
   if (window.__libPastPaperDiscoveryInstalled) return;
   window.__libPastPaperDiscoveryInstalled = true;
 
-  var state = { loaded:false, loading:false, sources:[], candidates:[], rejectedCandidates:[], schools:[], runs:[], message:'', error:'', actionMessages:{}, searchBusy:false, scope:'board', queueTab:'review' };
+  var state = { loaded:false, loading:false, sources:[], candidates:[], rejectedCandidates:[], schools:[], runs:[], auditRows:[], auditLimit:120, latestPreSearch:null, previewRows:[], message:'', error:'', loadErrors:{}, actionMessages:{}, searchBusy:false, scope:'board', queueTab:'review' };
   function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
   function byId(id) { return document.getElementById(id); }
   function val(id) { return byId(id) ? byId(id).value : ''; }
@@ -19,25 +19,33 @@
     if (state.loading || (state.loaded && !force)) return;
     if (typeof sb === 'undefined' || !sb || currentRole !== 'Admin') return;
     state.loading = true;
+    state.loadErrors = {};
     try {
-      var results = await Promise.all([
+      // Keep panels independent: an unavailable audit table must not hide approved sources.
+      var queries = [
         sb.from('qb_paper_discovery_sources').select('*').order('priority').order('display_name'),
-        sb.from('qb_paper_discovery_candidates').select('*').order('discovered_at', {ascending:false}).limit(100),
-        sb.from('qb_paper_discovery_candidates').select('*').eq('status', 'rejected').order('reviewed_at', {ascending:false}).limit(100),
         sb.from('qb_schools').select('id,name,archived').eq('archived', false).order('name'),
-        sb.from('qb_paper_discovery_runs').select('*').order('started_at', {ascending:false}).limit(8)
-      ]);
-      var failure = results.find(function (r) { return r.error; });
-      if (failure) throw failure.error;
-      state.sources = results[0].data || [];
-      state.candidates = (results[1].data || []).filter(function (c) { return ['rejected', 'duplicate'].indexOf(c.status) < 0 && (c.status !== 'imported' || !!state.actionMessages[c.id]); });
-      state.rejectedCandidates = results[2].data || [];
-      state.schools = results[3].data || [];
-      state.runs = results[4].data || [];
+        sb.from('qb_paper_discovery_runs').select('*').order('started_at', {ascending:false}).limit(8),
+        sb.from('qb_paper_discovery_run_sources').select('*').order('checked_at', {ascending:false}).limit(state.auditLimit)
+      ];
+      var results = await Promise.all(queries.map(function (query) {
+        return query.then(function (result) { return result; }).catch(function (error) { return {data:null, error:error}; });
+      }));
+      var setters = [
+        function (data) { state.sources = data || []; },
+        function (data) { state.schools = data || []; },
+        function (data) { state.runs = data || []; },
+        function (data) { state.auditRows = data || []; }
+      ];
+      var labels = ['approved sources', 'school directory', 'recent searches', 'source audit history'];
+      results.forEach(function (result, index) {
+        if (result && result.error) state.loadErrors[labels[index]] = result.error.message || String(result.error);
+        else setters[index](result && result.data);
+      });
       state.loaded = true;
       state.error = '';
     } catch (e) {
-      state.error = 'Online Discovery database is not ready: ' + (e && e.message ? e.message : String(e));
+      state.error = 'Online Discovery could not load: ' + (e && e.message ? e.message : String(e));
       state.loaded = true;
     } finally {
       state.loading = false;
@@ -57,7 +65,8 @@
     return result.data || {};
   }
   function sourceRowsHtml() {
-    if (!state.sources.length) return '<p class="hint">No approved sources yet. Add an official board, school or trusted education domain below.</p>';
+    if (state.loadErrors['approved sources']) return '<p class="hint" style="color:var(--brick)">Could not load approved sources: ' + esc(state.loadErrors['approved sources']) + '</p>';
+    if (!state.sources.length) return '<p class="hint">No approved sources are configured in this database yet.</p>';
     return state.sources.map(function (s) {
       return '<div class="lib-ppd-source"><div><b>' + esc(s.display_name) + '</b><div class="hint">' + esc(s.domain) + ' · ' + esc(s.source_type) + ' · ' + esc(s.trust_level) + '</div></div>'
         + '<span class="hint">' + (s.enabled ? 'Enabled' : 'Disabled') + '</span>'
@@ -70,7 +79,7 @@
     var school = c.school_id ? state.schools.find(function (s) { return s.id === c.school_id; }) : null;
     var registeredSource = state.sources.find(function (s) { return s.id === c.source_id || c.source_domain === s.domain || c.source_domain.endsWith('.' + s.domain); });
     var domainAction = (!registeredSource || c.source_id !== registeredSource.id || !registeredSource.enabled)
-      ? '<div class="lib-ppd-domain-approval">' + (!registeredSource ? '<select id="ppd-domaintype-' + esc(c.id) + '"><option value="school">School website</option><option value="education_portal">Education portal</option></select>' : '') + '<button class="btn-small" onclick="libPPDApproveDomain(' + "'" + esc(c.id) + "'" + ')">' + (registeredSource && !registeredSource.enabled ? 'Enable and link source domain' : 'Approve / link source domain') + '</button></div>'
+      ? '<div class="lib-ppd-domain-approval">' + (!registeredSource ? '<select id="ppd-domaintype-' + esc(c.id) + '"><option value="school">School website</option><option value="education_portal">Education portal</option></select>' : '') + '<button class="btn-small" onclick="libPPDApproveDomain(' + "'" + esc(c.id) + "'" + ')">' + (registeredSource && !registeredSource.enabled ? 'Enable and link source domain' : 'Add to permanent source registry') + '</button></div>'
       : '';
     var meta = c.discovery_metadata || {};
     var previewUrl = c.pdf_url || c.source_url;
@@ -117,6 +126,7 @@
       ? '<div class="lib-ppd-action-status hint" role="status" aria-live="polite" style="color:' + (actionMessage.error ? 'var(--brick)' : 'var(--forest)') + ';margin:6px 0 0">' + esc(actionMessage.message) + '</div>'
       : '';
     return '<article class="lib-ppd-candidate"><div class="lib-ppd-review-layout"><div class="lib-ppd-review-summary"><div class="lib-ppd-candidate-head"><div><b>' + esc(c.title) + '</b><div class="hint">' + esc(c.source_domain) + ' · ' + esc(c.source_type) + ' · ' + esc(c.status) + ' · PDF: ' + esc(c.verification_status) + '</div>'
+      + (meta.source_match === 'unregistered_domain' ? '<p class="hint">Newly discovered domain · eligible for this run after PDF verification; permanent registry approval is optional.</p>' : '')
       + (meta.snippet ? '<p class="hint">' + esc(meta.snippet) + '</p>' : '')
       + (school ? '<div class="hint">School: ' + esc(school.name) + '</div>' : (c.discovered_school_name ? '<div class="hint">Possible school: ' + esc(c.discovered_school_name) + '</div>' : ''))
       + '</div></div>' + actions + actionStatus + domainAction + '</div><div class="lib-ppd-review-fields">' + metadata + '</div></div></article>';
@@ -145,16 +155,46 @@
   function renderPanel() {
     ensureLoaded();
     if (state.loading && !state.loaded) return '<section class="lib-ppd"><h3>Discover papers online</h3><p class="hint">Loading discovery sources and review queue…</p></section>';
-    var sources = '<details class="lib-ppd-section lib-ppd-approved-sources"><summary>Approved sources</summary><p class="hint">Searches cover the wider web. The registry highlights official boards and trusted education portals; newly discovered domains require Admin approval before PDF verification.</p>' + sourceRowsHtml()
+    var sources = '<details class="lib-ppd-section lib-ppd-approved-sources"><summary>Approved sources registry</summary><p class="hint">Permanent source trust is managed here. Newly discovered websites can contribute verified PDFs to the current collection without being permanently added to this registry.</p>' + sourceRowsHtml()
       + '<div class="lib-ppd-source-form"><input id="ppd-source-name" placeholder="Source name (e.g. Delhi Public School)"><input id="ppd-source-domain" placeholder="Domain only (e.g. dps.example.edu)"><select id="ppd-source-type"><option value="board">Board</option><option value="school">School</option><option value="education_portal">Education portal</option></select><select id="ppd-source-trust"><option value="official">Official</option><option value="trusted">Trusted</option><option value="review">Review</option></select><button class="btn-small btn-primary" onclick="libPPDAddSource()">Add source</button></div></details>';
     var search = (state.error ? '<div class="hint" style="color:var(--brick);margin:8px 0">' + esc(state.error) + '</div>' : '') + '<div class="lib-ppd-section"><h3>Find question papers online</h3><div class="lib-ppd-search">'
       + '<select id="ppd-scope" onchange="libPPDSetScope(this.value)"><option value="board"' + (state.scope === 'board' ? ' selected' : '') + '>Board papers</option><option value="school"' + (state.scope === 'school' ? ' selected' : '') + '>Individual school papers</option></select>'
       + '<input id="ppd-query" placeholder="e.g. CBSE Class 10 Sanskrit question paper 2025" value="' + esc(state.lastQuery || '') + '">'
       + '<input id="ppd-school-name" placeholder="School name (optional)" value="' + esc(state.lastSchool || '') + '">'
-      + '<button class="btn-small btn-primary" onclick="libPPDSearch()" ' + (state.searchBusy ? 'disabled' : '') + '>' + (state.searchBusy ? 'Searching…' : ('Search the web')) + '</button></div>'
-      + '<p class="hint">Search results are candidates only. No paper enters the Question Bank until you verify its PDF and explicitly import it.</p>'
+      + '<button class="btn-small btn-primary" onclick="libPPDSearch()" ' + (state.searchBusy ? 'disabled' : '') + '>' + (state.searchBusy ? 'Pre-Searching…' : ('Run Pre-Search')) + '</button></div>'
+      + '<p class="hint">Pre-Search uses PDF-focused queries and records source outcomes. It only displays possible PDF records temporarily; it never creates candidates or a review queue.</p>'
       + (state.message ? '<div class="hint" style="color:' + (state.error ? 'var(--brick)' : 'var(--forest)') + ';margin:8px 0">' + esc(state.message) + '</div>' : '') + '</div>';
-    var candidates = renderQueueTabs();
+    var preview = state.previewRows.length ? '<div class="lib-ppd-section"><h3>Temporary Pre-Search preview (' + state.previewRows.length + ' records)</h3><p class="hint">These are search-result examples only. They are not saved as candidates, added to a review queue, downloaded or imported.</p>' + state.previewRows.map(function (r) { return '<div class="lib-ppd-source"><div><b>' + esc(r.title || 'Untitled PDF') + '</b><div class="hint">' + esc(r.domain) + ' · ' + esc(r.source_name || r.source_match) + ' · ' + esc(r.search_provider) + '</div>' + (r.snippet ? '<div class="hint">' + esc(r.snippet) + '</div>' : '') + '</div><a class="btn-small" href="' + esc(r.url) + '" target="_blank" rel="noopener noreferrer">Open PDF</a></div>'; }).join('') + '</div>' : '';
+    var preSearchSummary = '';
+    if (state.latestPreSearch) {
+      var estimate = state.latestPreSearch;
+      var warnings = estimate.provider_errors && estimate.provider_errors.length
+        ? '<p class="hint" style="color:var(--brick)">Partial search: ' + esc(estimate.provider_errors.length) + ' provider/source warning(s). Retry before treating this estimate as complete.</p>' : '';
+      if (estimate.unprocessed_pdf_links > 0) warnings += '<p class="hint" style="color:var(--brick)">' + esc(estimate.unprocessed_pdf_links) + ' additional matching PDF links exceeded the per-batch safety cap and were not queued. Narrow the criteria and run another Pre-Search.</p>';
+      preSearchSummary = '<div class="lib-ppd-section lib-ppd-estimate"><h3>Pre-Search estimate</h3><div class="lib-ppd-estimate-grid">'
+        + '<div><b>' + esc(estimate.pdfs_found || 0) + '</b><span>Potential PDFs found</span></div>'
+        + '<div><b>' + esc(state.previewRows.length || 0) + '</b><span>Preview records shown</span></div>'
+        + '<div><b>0</b><span>Records created in review queue</span></div>'
+        + '<div><b>' + esc(estimate.discovered_source_count || 0) + '</b><span>New domains surfaced</span></div></div>'
+        + '<p class="hint">This is a search estimate, not a count of confirmed papers. No PDF is downloaded and no review-queue record is created.</p>'
+        + warnings
+        + '</div>';
+    }
+    var sourceAudit = '<details class="lib-ppd-section lib-ppd-recent-searches"><summary>Source Intelligence · Search history (' + state.auditRows.length + ' records)</summary>'
+      + (state.loadErrors['source audit history'] ? '<p class="hint" style="color:var(--brick)">Could not load source audit history: ' + esc(state.loadErrors['source audit history']) + '</p>' : (state.auditRows.length ? state.auditRows.map(function (a) {
+        var outcomeLabel = ({pdf_found:'Potential question-paper PDFs found',no_matching_pdf:'No matching PDF',provider_error:'Search provider error',inaccessible:'Website inaccessible',disabled_registry:'Disabled in registry · excluded'})[a.outcome] || a.outcome;
+        var promote = a.source_classification === 'discovered' && Number(a.pdf_count) > 0 && a.domain && !state.sources.some(function (source) { return a.domain === source.domain || a.domain.endsWith('.' + source.domain); })
+          ? '<button class="btn-small" onclick="libPPDPromoteDomain(\'' + esc(a.domain) + '\',\'' + (a.source_type === 'school' ? 'school' : 'education_portal') + '\')">Add to approved registry</button>' : '';
+        var run = state.runs.find(function (r) { return r.id === a.discovery_run_id; });
+        var runLabel = run ? run.query_text : ('Run ' + String(a.discovery_run_id || '').slice(0, 8));
+        var evidence = a.evidence || {};
+        var pdfUrls = evidence.pdf_urls || evidence.relevant_pdf_urls || [];
+        var pdfLinks = pdfUrls.length ? '<div class="hint">' + pdfUrls.map(function (url, index) {
+          return '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">PDF ' + (index + 1) + '</a>';
+        }).join(' · ') + '</div>' : '';
+        return '<div class="lib-ppd-source"><div><b>' + esc(a.display_name || a.domain) + '</b><div class="hint">' + esc(a.domain) + ' · ' + esc(a.source_classification) + ' · ' + esc(outcomeLabel) + ' · ' + esc(a.pdf_count) + ' potential PDFs · ' + esc(new Date(a.checked_at).toLocaleString()) + '</div><div class="hint">Search: ' + esc(runLabel) + '</div>' + pdfLinks + '</div>' + promote + '</div>';
+      }).join('') : '<p class="hint">Source audit records will appear after Pre-Search.</p>')
+      + (state.auditRows.length >= state.auditLimit ? '<button class="btn-small" type="button" onclick="libPPDLoadMoreAudit()">Load older source history</button>' : '')) + '</details>';
     var runs = '<details class="lib-ppd-section lib-ppd-recent-searches"><summary>Recent searches</summary>' + (state.runs.length ? state.runs.map(function (r) {
       var progress = r.filters && r.filters.discovery_progress ? r.filters.discovery_progress : {};
       var progressText = r.status === 'running' ? ' · ' + Number(progress.next_offset || 0) + ' sources processed' : '';
@@ -164,9 +204,16 @@
     }).join('') : '<p class="hint">No searches yet.</p>') + '</details>';
     return '<section class="lib-ppd"><style>'
       + '.lib-ppd{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}.lib-ppd-recent-searches{border:1px solid var(--line);border-radius:9px;padding:10px 12px}.lib-ppd-recent-searches>summary{cursor:pointer;font-weight:700;list-style:disclosure-closed}.lib-ppd-recent-searches[open]>summary{margin-bottom:10px;list-style:disclosure-open}.lib-ppd-queue-tabs{display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:14px 0 10px}.lib-ppd-queue-tab{border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;background:var(--surface);color:var(--ink);padding:9px 13px;cursor:pointer;font:inherit}.lib-ppd-queue-tab.active{background:var(--surface-2,var(--surface));font-weight:700;border-color:var(--accent,var(--line))}.lib-ppd-rejected{border-left:3px solid var(--brick,var(--line))}.lib-ppd h3{font-family:Zilla Slab,serif;margin:0 0 7px}.lib-ppd-section{margin:14px 0 20px}.lib-ppd-approved-sources{border:1px solid var(--line);border-radius:9px;padding:10px 12px}.lib-ppd-approved-sources>summary{cursor:pointer;font-weight:700;list-style:disclosure-closed}.lib-ppd-approved-sources[open]>summary{margin-bottom:10px;list-style:disclosure-open}.lib-ppd-search,.lib-ppd-source-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.lib-ppd-search input{flex:1;min-width:190px}.lib-ppd-search select,.lib-ppd-search input,.lib-ppd-source-form input,.lib-ppd-source-form select,.lib-ppd-meta input,.lib-ppd-meta select{min-height:38px;padding:7px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);box-sizing:border-box}.lib-ppd-source-form input{flex:1;min-width:170px}.lib-ppd-source{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line)}.lib-ppd-candidate{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}.lib-ppd-review-layout{display:grid;grid-template-columns:minmax(0,0.9fr) minmax(0,1.1fr);gap:16px;align-items:start}.lib-ppd-review-summary,.lib-ppd-review-fields{min-width:0}.lib-ppd-review-fields{border-left:1px solid var(--line);padding-left:16px}.lib-ppd-candidate-head,.lib-ppd-title,.lib-ppd-actions{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}.lib-ppd-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:0}.lib-ppd-meta label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);font-weight:700}.lib-ppd-meta input,.lib-ppd-meta select{width:100%}.lib-ppd-actions{justify-content:flex-start;margin-top:10px}.lib-ppd-domain-approval{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}.lib-ppd-domain-approval select{min-height:34px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink)}.lib-ppd p.hint{margin:5px 0 10px}@media(max-width:700px){.lib-ppd-review-layout{grid-template-columns:minmax(0,1fr)}.lib-ppd-review-fields{border-left:0;border-top:1px solid var(--line);padding:12px 0 0}.lib-ppd-search,.lib-ppd-source-form{align-items:stretch}.lib-ppd-search>* ,.lib-ppd-source-form>*{width:100%;min-width:0}.lib-ppd-candidate-head{align-items:flex-start}}'
-      + '</style>' + search + sources + candidates + runs + '</section>';
+      + '.lib-ppd-estimate{border:1px solid var(--line);border-radius:9px;padding:12px}.lib-ppd-estimate-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.lib-ppd-estimate-grid>div{background:var(--surface-2,var(--surface));border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:3px}.lib-ppd-estimate-grid b{font-size:22px}.lib-ppd-estimate-grid span{font-size:11px;color:var(--muted)}@media(max-width:700px){.lib-ppd-estimate-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}'
+      + '</style>' + search + preSearchSummary + preview + sources + sourceAudit + runs + '</section>';
   }
 
+  window.libPPDLoadMoreAudit = async function () {
+    state.auditLimit += 120;
+    state.loaded = false;
+    await loadData(true);
+    if (typeof render === 'function') render();
+  };
   window.libPPDSetScope = function (v) { state.scope = v === 'school' ? 'school' : 'board'; };
   window.libPPDSetQueueTab = function (v) { state.queueTab = v === 'rejected' ? 'rejected' : 'review'; if (typeof render === 'function') render(); };
   window.libPPDRestore = async function (id) {
@@ -185,22 +232,91 @@
     var scope = val('ppd-scope') || state.scope;
     if (query.length < 2) { notify('Enter at least two characters to search.', true); return; }
     state.scope = scope; state.lastQuery = query; state.lastSchool = val('ppd-school-name');
-    state.searchBusy = true; state.message = 'Searching the wider web…'; state.error = ''; if (typeof render === 'function') render();
+    state.searchBusy = true; state.previewRows = []; state.message = 'Searching the wider web…'; state.error = ''; if (typeof render === 'function') render();
     try {
       var result = await invoke({ action:'search', query:query, scope:scope, school_name:state.lastSchool });
       var calls = 0;
+      function addPreviewRows(payload) { (payload.preview_results || []).forEach(function (row) { if (!state.previewRows.some(function (existing) { return existing.url === row.url; })) state.previewRows.push(row); }); }
+      addPreviewRows(result);
       while (!result.complete && result.run_id && calls < 200) {
         state.message = 'Searching source ' + result.sources_processed + ' of ' + result.sources_total
-          + (result.next_source ? ' · Next: ' + result.next_source : '') + ' · ' + result.found + ' candidates found so far…';
+          + (result.next_source ? ' · Next: ' + result.next_source : '') + ' · ' + result.found + ' potential PDF records found so far…';
         if (typeof render === 'function') render();
         result = await invoke({ action:'continue_search', run_id:result.run_id });
+        addPreviewRows(result);
         calls++;
       }
       if (!result.complete) throw new Error('Discovery is still in progress. Refresh the page and check Recent searches before starting another run.');
-      state.message = 'Search complete (' + (result.provider || 'web search') + '): checked ' + result.sources_processed + ' of ' + result.sources_total + ' registered sources; ' + (result.provider_successful_queries || 0) + ' provider queries succeeded; ' + result.found + ' results found; ' + result.new_candidates + ' new candidates saved. Approved-source matches: ' + (result.approved_source_results || 0) + '.' + (result.provider_errors && result.provider_errors.length ? ' Provider warnings: ' + result.provider_errors.slice(0, 3).join(' | ') : '') + ' Unregistered domains need Admin approval before PDF verification.';
+      state.latestPreSearch = { run_id:result.run_id, complete:true,
+        pdfs_found:Number(result.pdfs_found || result.found || 0),
+        estimated_new_candidates:Number(result.estimated_new_candidates || result.new_candidates || 0),
+        previously_seen_pdf_urls:Number(result.previously_seen_pdf_urls || 0),
+        unprocessed_pdf_links:Number(result.unprocessed_pdf_links || 0),
+        discovered_source_count:Number(result.discovered_source_count || 0),
+        provider_errors:result.provider_errors || [] };
+      state.message = 'Pre-Search complete: ' + state.latestPreSearch.pdfs_found + ' potential PDFs found; '
+        + state.previewRows.length + ' temporary preview records shown; no review-queue records created; '
+        + state.latestPreSearch.discovered_source_count + ' new source domains identified.'
+        + (result.provider_errors && result.provider_errors.length ? ' Some sources/providers need retry; see Source Intelligence.' : '');
       state.loaded = false; await loadData(true);
     } catch (e) { state.message = e.message || String(e); state.error = state.message; }
     finally { state.searchBusy = false; if (typeof render === 'function') render(); }
+  };
+
+  window.libPPDCollectRun = async function (runId) {
+    if (state.searchBusy || !runId) return;
+    state.searchBusy = true; state.error = ''; state.message = 'Preparing Primary Collection…';
+    if (typeof render === 'function') render();
+    try {
+      var runLinks = await sb.from('qb_paper_discovery_run_candidates').select('candidate_id')
+        .eq('discovery_run_id', runId);
+      if (runLinks.error) throw runLinks.error;
+      var candidateIds = (runLinks.data || []).map(function (row) { return row.candidate_id; });
+      if (!candidateIds.length) {
+        state.message = 'No PDF candidates are linked to this Pre-Search. Check the search diagnostics or broaden the criteria.';
+        return;
+      }
+      var loaded = await sb.from('qb_paper_discovery_candidates').select('id,title,verification_status,status')
+        .in('id', candidateIds).order('discovered_at', {ascending:true});
+      if (loaded.error) throw loaded.error;
+      var candidates = (loaded.data || []).filter(function (c) {
+        return ['rejected','duplicate','imported'].indexOf(c.status) < 0 &&
+          ['verified','duplicate'].indexOf(c.verification_status) < 0;
+      });
+      if (!candidates.length) {
+        state.message = 'All PDFs linked to this Pre-Search have already been verified or processed.';
+        if (state.latestPreSearch && state.latestPreSearch.run_id === runId) state.latestPreSearch.collectionComplete = true;
+        return;
+      }
+      var verified = 0, duplicates = 0, failed = 0;
+      for (var i = 0; i < candidates.length; i++) {
+        state.message = 'Primary Collection · verifying PDF ' + (i + 1) + ' of ' + candidates.length + ': ' + candidates[i].title;
+        if (typeof render === 'function') render();
+        try {
+          var result = await invoke({ action:'verify', candidate_id:candidates[i].id });
+          if (result.duplicate) duplicates++; else if (result.verified) verified++; else failed++;
+        } catch (e) { failed++; }
+      }
+      state.message = 'Primary Collection finished: ' + verified + ' verified PDFs, ' + duplicates
+        + ' exact duplicates, ' + failed + ' requiring attention. No papers were imported or published.';
+      state.loaded = false; await loadData(true);
+      if (state.latestPreSearch && state.latestPreSearch.run_id === runId) state.latestPreSearch.collectionComplete = true;
+    } catch (e) { state.message = e.message || String(e); state.error = state.message; }
+    finally { state.searchBusy = false; if (typeof render === 'function') render(); }
+  };
+  window.libPPDPromoteDomain = async function (domain, type) {
+    domain = String(domain || '').toLowerCase().trim();
+    type = type === 'school' ? 'school' : 'education_portal';
+    if (!/^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(domain)) {
+      notify('The discovered domain is not valid for the approved registry.', true); return;
+    }
+    var existing = state.sources.find(function (source) { return source.domain === domain; });
+    if (existing) { notify('This domain is already in the approved registry.'); return; }
+    var result = await sb.from('qb_paper_discovery_sources').insert({
+      display_name:domain, domain:domain, source_type:type, trust_level:'review', priority:100, enabled:true
+    }).select('*').single();
+    if (result.error) { notify('Could not add discovered domain: ' + result.error.message, true); return; }
+    state.loaded = false; await loadData(true); notify('Domain added to the permanent registry. Existing search history is unchanged.');
   };
   window.libPPDResumeRun = async function (runId) {
     if (state.searchBusy) return;
@@ -238,7 +354,7 @@
         calls++;
       }
       if (!result.complete) throw new Error('The restarted run remains in progress. Resume it from Recent searches.');
-      state.message = 'Restart complete: ' + result.found + ' results found; ' + result.new_candidates + ' additional candidates saved.';
+      state.message = 'Restart complete: ' + result.found + ' potential records found. Nothing was queued.';
       if (result.provider_errors && result.provider_errors.length) state.message += ' Provider warnings: ' + result.provider_errors.slice(0, 3).join(' | ');
       state.loaded = false; await loadData(true);
     } catch (e) { state.message = e.message || String(e); state.error = state.message; state.loaded = false; await loadData(true); }

@@ -1,9 +1,13 @@
 // Admin-only online Past Paper discovery.
-// Board search uses Admin-approved domains; school search discovers new hosts that require Admin approval before PDF fetch.
-// Verification is restricted to enabled source domains; imports use the existing qb_source_papers workflow.
+// Pre-Search is PDF-only; newly discovered direct-PDF domains receive candidate-scoped verification,
+// while permanent source-registry changes remain explicit Admin actions. Imports use the existing workflow.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { getPdfZipMember, listPdfMembersFromZip } from "./archive.ts";
 import { matchesApprovedSourceDomain } from "./source-domain.ts";
+import {
+  buildPdfQueryVariants, filterBoardSourcesForQuery, isPrivateAddress, isQuestionPaperPdf,
+  isValidDiscoveredDomain, matchesQuery, queryTerms,
+} from "./presearch.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -14,6 +18,7 @@ const reply = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 const clip = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
 const MAX_PDF_BYTES = 50 * 1024 * 1024;
+const MAX_DISCOVERED_CANDIDATES_PER_BATCH = 300;
 const uuid = (v: unknown) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v ?? ""));
 
 function safeHost(url: URL, domains: string[]): boolean {
@@ -22,6 +27,13 @@ function safeHost(url: URL, domains: string[]): boolean {
   if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")
       || /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":")) return false;
   return domains.some((d) => host === d || host.endsWith("." + d));
+}
+async function assertPublicDns(host: string): Promise<void> {
+  const addresses: string[] = [];
+  try { addresses.push(...await Deno.resolveDns(host, "A")); } catch { /* Try AAAA. */ }
+  try { addresses.push(...await Deno.resolveDns(host, "AAAA")); } catch { /* No AAAA record is normal. */ }
+  if (!addresses.length) throw new Error("Source hostname did not resolve to a public IP address.");
+  if (addresses.some(isPrivateAddress)) throw new Error("Source hostname resolves to a private or reserved IP address.");
 }
 function decodeEntities(s: string): string {
   return s.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'")
@@ -69,9 +81,9 @@ function parseSearchResults(html: string, limit: number) {
   }
   return rows;
 }
-async function searchBingRss(query: string, limit = 20, domain?: string) {
+async function searchBingRss(query: string, limit = 20, domain?: string, offset = 0) {
   const targeted = domain ? query + " site:" + domain : query;
-  const res = await fetch("https://www.bing.com/search?format=rss&q=" + encodeURIComponent(targeted), {
+  const res = await fetch("https://www.bing.com/search?format=rss&first=" + (offset + 1) + "&q=" + encodeURIComponent(targeted), {
     headers: {
       "User-Agent": "Mozilla/5.0 (compatible; LIBEducationPastPaperDiscovery/1.0)",
       "Accept": "application/rss+xml, application/xml, text/xml",
@@ -80,6 +92,9 @@ async function searchBingRss(query: string, limit = 20, domain?: string) {
   });
   if (!res.ok) throw new Error("Bing RSS returned HTTP " + res.status + ".");
   const xml = new TextDecoder().decode(await readBounded(res, 2 * 1024 * 1024));
+  if (!/<(?:rss|rdf:RDF)\b/i.test(xml) || !/<channel\b|<item\b/i.test(xml)) {
+    throw new Error("Bing RSS returned HTTP 200 but the response was not a recognizable RSS feed.");
+  }
   const rows: Array<{ title: string; url: string; snippet: string; domain: string }> = [];
   const items = xml.match(/<item\b[\s\S]*?<\/item>/gi) || [];
   for (const item of items) {
@@ -99,47 +114,110 @@ async function searchBingRss(query: string, limit = 20, domain?: string) {
   }
   return rows;
 }
-async function searchWeb(query: string, limit = 20, domain?: string) {
+async function searchGoogleSerper(query: string, limit = 20, domain?: string, offset = 0) {
+  const apiKey = Deno.env.get("SERPER_API_KEY")?.trim();
+  if (!apiKey) throw new Error("SERPER_API_KEY is not configured in Supabase Edge Function secrets.");
   const targeted = domain ? query + " site:" + domain : query;
-  try {
-    const res = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(targeted), {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml",
-      },
-      signal: AbortSignal.timeout(12000),
-    });
-    if (!res.ok) throw new Error("DuckDuckGo returned HTTP " + res.status + ".");
-    const html = new TextDecoder().decode(await readBounded(res, 2 * 1024 * 1024));
-    const rows = parseSearchResults(html, limit).filter((row) => !domain || row.domain === domain || row.domain.endsWith("." + domain));
-    if (rows.length) return rows;
-    return await searchBingRss(query, limit, domain);
-  } catch (ddgError) {
-    try { return await searchBingRss(query, limit, domain); }
-    catch (bingError) {
-      throw new Error("DuckDuckGo: " + clip((ddgError as Error)?.message || ddgError, 180)
-        + " · Bing: " + clip((bingError as Error)?.message || bingError, 180));
-    }
+  const page = Math.floor(offset / 10) + 1;
+  const res = await fetch("https://google.serper.dev/search", {
+    method: "POST",
+    headers: { "X-API-KEY": apiKey, "Content-Type": "application/json", "Accept": "application/json" },
+    body: JSON.stringify({ q: targeted, num: Math.min(10, Math.max(1, limit)), page }),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) throw new Error("Google Search (Serper) returned HTTP " + res.status + ".");
+  const payload = await res.json().catch(() => null);
+  if (!payload || typeof payload !== "object" ||
+      (!Array.isArray((payload as any).organic) && !(payload as any).searchParameters)) {
+    throw new Error("Google Search (Serper) returned an unrecognized response; zero results cannot be trusted.");
   }
+  const organic = Array.isArray((payload as any).organic) ? (payload as any).organic : [];
+  return organic.slice(0, limit).flatMap((item: any) => {
+    let target: URL;
+    try { target = new URL(String(item.link || "")); } catch { return []; }
+    if (target.protocol !== "https:" || !target.hostname) return [];
+    const host = target.hostname.toLowerCase().replace(/^www\./, "");
+    if (domain && host !== domain && !host.endsWith("." + domain)) return [];
+    return [{
+      title: clip(item.title || target.pathname.split("/").pop() || host, 500),
+      url: target.href,
+      snippet: clip(item.snippet || "", 1200),
+      domain: host,
+    }];
+  });
+}
+type SearchWebResult = {
+  rows: Array<{ title: string; url: string; snippet: string; domain: string }>;
+  providersSucceeded: string[];
+  providerErrors: string[];
+};
+async function searchDuckDuckGo(query: string, limit = 20, domain?: string, offset = 0) {
+  const targeted = domain ? query + " site:" + domain : query;
+  const res = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(targeted) + "&s=" + offset, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml",
+    },
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!res.ok) throw new Error("DuckDuckGo returned HTTP " + res.status + ".");
+  const html = new TextDecoder().decode(await readBounded(res, 2 * 1024 * 1024));
+  return parseSearchResults(html, limit).filter((row) => !domain || row.domain === domain || row.domain.endsWith("." + domain));
+}
+async function searchWeb(query: string, limit = 20, domain?: string, offset = 0): Promise<SearchWebResult> {
+  // Run independent providers for every query. A partial result from one provider
+  // must not suppress the second provider's search or hide its failure diagnostics.
+  const attempts = await Promise.all([
+    Promise.resolve().then(async () => ({ provider: "DuckDuckGo HTML", rows: await searchDuckDuckGo(query, limit, domain, offset), error: "" }))
+      .catch((error) => ({ provider: "DuckDuckGo HTML", rows: [] as any[], error: clip((error as Error)?.message || error, 220) })),
+    Promise.resolve().then(async () => ({ provider: "Bing RSS", rows: await searchBingRss(query, limit, domain, offset), error: "" }))
+      .catch((error) => ({ provider: "Bing RSS", rows: [] as any[], error: clip((error as Error)?.message || error, 220) })),
+    Promise.resolve().then(async () => ({ provider: "Google Search (Serper)", rows: await searchGoogleSerper(query, limit, domain, offset), error: "" }))
+      .catch((error) => ({ provider: "Google Search (Serper)", rows: [] as any[], error: clip((error as Error)?.message || error, 220) })),
+  ]);
+  const providersSucceeded = attempts.filter((item) => !item.error).map((item) => item.provider);
+  const providerErrors = attempts.filter((item) => !!item.error).map((item) => item.provider + ": " + item.error);
+  if (!providersSucceeded.length) {
+    throw new Error(providerErrors.join(" · ") || "All search providers failed.");
+  }
+  const unique = new Map<string, any>();
+  for (const item of attempts) for (const row of item.rows) {
+    const key = String(row.url || "").toLowerCase();
+    if (key && !unique.has(key)) unique.set(key, row);
+  }
+  return { rows: [...unique.values()].slice(0, limit), providersSucceeded, providerErrors };
 }
 async function searchInBatches(sources: any[], query: string, batchSize = 4) {
-  const results: Array<{ title: string; url: string; snippet: string; domain: string; source: any; archive_member?: string }> = [];
+  const results: Array<{ title: string; url: string; snippet: string; domain: string; source: any; archive_member?: string; pdf_search_hint?: boolean }> = [];
   const errors: string[] = [];
   let successfulQueries = 0;
   for (let i = 0; i < sources.length; i += batchSize) {
     const batch = sources.slice(i, i + batchSize);
     const settled = await Promise.all(batch.map(async (source: any) => {
       try {
-        const rows = await searchWeb(query + " question paper PDF", 8, source.domain);
-        return { source, rows, error: "" };
+        const variants = buildPdfQueryVariants(query);
+        const attempts = await Promise.all(variants.flatMap((variant) => [0, 30].map(async (offset) => {
+          try {
+            const result = await searchWeb(variant, 8, source.domain, offset);
+            return { rows: result.rows, successfulQueries: result.providersSucceeded.length,
+              error: result.providerErrors.join(" · ") };
+          } catch (e) { return { rows: [], successfulQueries: 0, error: clip((e as Error)?.message || e, 300) }; }
+        })));
+        const successful = attempts.filter((x) => x.successfulQueries > 0);
+        const failed = attempts.filter((x) => x.successfulQueries === 0);
+        if (!successful.length) throw new Error(failed.map((x) => x.error).join(" · "));
+        const partial = attempts.filter((x) => x.error && x.successfulQueries > 0);
+        return { source, rows: successful.flatMap((x) => x.rows),
+          successfulQueries: successful.reduce((sum, x) => sum + x.successfulQueries, 0),
+          error: [...failed, ...partial].length ? source.domain + ": " + [...failed, ...partial].map((x) => x.error).join(" · ") : "" };
       } catch (e) {
         return { source, rows: [], error: source.domain + ": " + clip((e as Error)?.message || e, 220) };
       }
     }));
     for (const item of settled) {
       if (item.error) errors.push(item.error);
-      else successfulQueries++;
-      for (const row of item.rows) results.push({ ...row, source: item.source });
+      successfulQueries += Number((item as any).successfulQueries || (!item.error ? 1 : 0));
+      for (const row of item.rows) results.push({ ...row, source: item.source, pdf_search_hint: true });
     }
   }
   return { results, errors, successfulQueries };
@@ -149,6 +227,7 @@ async function fetchAllowed(urlText: string, domains: string[], accept: string) 
   try { url = new URL(urlText); } catch { throw new Error("Invalid URL."); }
   for (let hop = 0; hop <= 5; hop++) {
     if (!safeHost(url, domains)) throw new Error("URL or redirect is outside the approved source domains.");
+    await assertPublicDns(url.hostname);
     const res = await fetch(url.href, {
       redirect: "manual",
       headers: { "User-Agent": "Mozilla/5.0 (compatible; LIBEducationPastPaperDiscovery/1.0)", Accept: accept },
@@ -165,15 +244,7 @@ async function fetchAllowed(urlText: string, domains: string[], accept: string) 
   }
   throw new Error("Too many redirects.");
 }
-type DiscoveryRow = {title:string;url:string;snippet:string;domain:string;source:any};
-function queryTerms(query: string): string[] {
-  return query.toLowerCase().replace(/\b(cbse|cisce|icse|isc|question papers?|previous year|past papers?|sample papers?|specimen|pdf|class|grade)\b/g, " ")
-    .replace(/\b(x|xii|10|12)\b/g, " ").split(/[^a-z0-9]+/).filter((x) => x.length > 1);
-}
-function matchesQuery(label: string, terms: string[]): boolean {
-  const value = label.toLowerCase();
-  return !terms.length || terms.some((term) => value.includes(term));
-}
+type DiscoveryRow = {title:string;url:string;snippet:string;domain:string;source:any;archive_member?:string;pdf_search_hint?:boolean};
 function linkRows(html: string, baseUrl: string, source: any, terms: string[], limit = 60): DiscoveryRow[] {
   const rows: DiscoveryRow[] = [];
   const anchors = html.match(/<a\b[^>]*>[\s\S]*?<\/a>/gi) || [];
@@ -191,7 +262,8 @@ function linkRows(html: string, baseUrl: string, source: any, terms: string[], l
     if (!safeHost(target, [source.domain])) continue;
     const isPdf = /\.pdf(?:$|[?#])/i.test(target.href);
     if (!matchesQuery(label + " " + context + " " + target.pathname, terms)) continue;
-    if (!isPdf && !/(question|paper|sample|specimen|exam|academic|download|resource)/i.test(label + " " + target.pathname)) continue;
+    // Web pages are discovery evidence only. A candidate must point to an actual PDF.
+    if (!isPdf) continue;
     rows.push({ title: (label || target.pathname.split("/").pop() || source.display_name).slice(0, 500),
       url: target.href, snippet: "Official source page · " + source.display_name + (context ? " · " + context.slice(0, 260) : ""),
       domain: target.hostname.toLowerCase().replace(/^www\./, ""), source });
@@ -238,7 +310,7 @@ async function crawlCbseOfficial(source: any, query: string): Promise<DiscoveryR
       : /\b(10|x)\b/i.test(query) ? ["X"] : ["X", "XII"];
     const archiveLinks = [...archiveHtml.matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
     for (const cls of wantedClasses) {
-      const classPattern = new RegExp("SQP_CLASS" + cls + "_(\\d{4}-\\d{2})\\.html", "i");
+      const classPattern = new RegExp("SQP_CLASS" + cls + "_(\\d{4}-\\d{2})\.html", "i");
       const pages = archiveLinks.map((m) => {
         let href = ""; try { href = new URL(decodeEntities(m[1]), archive.url).href; } catch { return null; }
         const match = new URL(href).pathname.match(classPattern);
@@ -439,6 +511,14 @@ async function resolvePdf(candidate: any, domains: string[]) {
     const result = await fetchAllowed(parsed.href, domains, "application/pdf,application/octet-stream,text/html;q=0.8,*/*;q=0.5");
     const type = (result.response.headers.get("content-type") || "").toLowerCase();
     if (type.includes("pdf") || /\.pdf(?:$|[?#])/i.test(result.url)) return result;
+    if (candidate.discovery_metadata?.pdf_search_hint) {
+      if (type && !type.includes("octet-stream") && !type.includes("binary")) throw new Error("The search result did not return a direct PDF response.");
+      const bytes = await readBounded(result.response);
+      if (!isPdf(bytes)) throw new Error("The download endpoint did not return PDF file content.");
+      const body = new ArrayBuffer(bytes.byteLength);
+      new Uint8Array(body).set(bytes);
+      return { response: new Response(body, { headers: result.response.headers }), url: result.url };
+    }
     const html = await result.response.text();
     const links = [...html.matchAll(/(?:href|data-url)\s*=\s*["']([^"']+\.pdf(?:\?[^"']*)?)["']/gi)].map((m) => new URL(decodeEntities(m[1]), result.url).href);
     for (const link of links) {
@@ -506,9 +586,10 @@ Deno.serve(async (req) => {
           .select("id").eq("discovery_run_id", runId);
         if (countError) return reply(500, { error: "Could not inspect existing candidates before restart: " + countError.message });
         const preservedCount = priorCandidates?.length || 0;
-        const resetFilters = { ...existing.filters, discovery_progress: {
+        const resetFilters = { ...existing.filters, source_snapshot: null, discovery_progress: {
           next_offset: 0, successful_queries: 0, provider_errors: [],
           results_found: preservedCount, new_candidates: 0,
+          previously_seen_pdf_urls: 0, unprocessed_pdf_links: 0, discovered_source_count: 0,
         } };
         const { data: restarted, error: restartError } = await admin.from("qb_paper_discovery_runs")
           .update({ status: "running", filters: resetFilters, results_found: preservedCount,
@@ -549,24 +630,29 @@ Deno.serve(async (req) => {
       }
     }
 
-    const { data: sources, error: sourceError } = await admin.from("qb_paper_discovery_sources")
-      .select("id,display_name,domain,source_type,trust_level,priority")
-      .eq("enabled", true).order("priority").limit(200);
-    if (sourceError) return reply(500, { error: "Could not load approved source registry: " + sourceError.message });
-    const eligible = (sources || []).filter((s: any) => s.source_type === scope || s.source_type === "education_portal");
+    let registry: any[] = Array.isArray(run.filters?.source_snapshot) ? run.filters.source_snapshot : [];
+    if (!Array.isArray(run.filters?.source_snapshot)) {
+      const { data: sources, error: sourceError } = await admin.from("qb_paper_discovery_sources")
+        .select("id,display_name,domain,source_type,trust_level,priority,enabled")
+        .order("priority").limit(300);
+      if (sourceError) return reply(500, { error: "Could not load approved source registry: " + sourceError.message });
+      registry = sources || [];
+      const snapshotFilters = { ...run.filters, source_snapshot: registry };
+      const { error: snapshotError } = await admin.from("qb_paper_discovery_runs")
+        .update({ filters: snapshotFilters }).eq("id", runId);
+      if (snapshotError) return reply(500, { error: "Could not preserve the source snapshot for this run: " + snapshotError.message });
+      run.filters = snapshotFilters;
+    }
+    const eligible = registry.filter((s: any) => s.enabled &&
+      (s.source_type === scope || s.source_type === "education_portal"));
+    const eligibleBoards = filterBoardSourcesForQuery(
+      eligible.filter((s: any) => s.source_type === "board"), query,
+    );
     const searchTargets = scope === "school"
       ? eligible.filter((s: any) => s.source_type === "school")
-      : eligible.filter((s: any) => s.source_type === "board" || s.source_type === "education_portal");
-    if (scope === "board" && !searchTargets.some((s: any) => s.source_type === "board")) {
-      await admin.from("qb_paper_discovery_runs").update({ status: "failed", heartbeat_at: null, error_message: "No enabled official board sources.",
-        completed_at: new Date().toISOString() }).eq("id", runId);
-      return reply(400, { error: "No enabled official board sources. Enable at least one board domain." });
-    }
-    if (!searchTargets.length) {
-      await admin.from("qb_paper_discovery_runs").update({ status: "failed", heartbeat_at: null, error_message: "No enabled sources match this search scope.",
-        completed_at: new Date().toISOString() }).eq("id", runId);
-      return reply(400, { error: "No enabled sources match this search scope." });
-    }
+      : [...eligibleBoards, ...eligible.filter((s: any) => s.source_type === "education_portal")];
+    // Broad PDF search still runs when no registry entries are enabled. A disabled
+    // registry domain is never silently re-enabled or reintroduced by broad search.
 
     const progress = run.filters?.discovery_progress || {};
     const offset = Math.max(0, Number(progress.next_offset) || 0);
@@ -574,7 +660,7 @@ Deno.serve(async (req) => {
     const providerErrors: string[] = Array.isArray(progress.provider_errors) ? progress.provider_errors.slice(0, 80) : [];
     let successfulQueries = Math.max(0, Number(progress.successful_queries) || 0);
     let foundTotal = Math.max(0, Number(progress.results_found) || 0);
-    let insertedTotal = Math.max(0, Number(progress.new_candidates) || 0);
+    let insertedTotal = 0;
     const batchRows: any[] = [];
 
     // One registered domain per invocation keeps each Edge Function execution bounded.
@@ -606,62 +692,140 @@ Deno.serve(async (req) => {
     if (complete) {
       // Always run broad discovery after registered-source crawling. A handful of
       // sample-paper hits must not suppress searches for annual / previous-year papers.
-      const broadQueries = [
-        query + " previous year board examination question paper PDF",
-        query + " annual examination question paper PDF",
-        query + " past exam question paper PDF",
-      ];
-      const broadSettled = await Promise.all(broadQueries.map(async (broadQuery) => {
-        try { return { rows: await searchWeb(broadQuery, 20), error: "" }; }
-        catch (e) { return { rows: [], error: clip((e as Error)?.message || e, 300) }; }
+      const broadQueries = buildPdfQueryVariants(query);
+      const broadSearches = broadQueries.flatMap((broadQuery) => [0, 30].map((offset) => ({ broadQuery, offset })));
+      const broadSettled = await Promise.all(broadSearches.map(async (search) => {
+        try {
+          const result = await searchWeb(search.broadQuery, 20, undefined, search.offset);
+          return { rows: result.rows, successfulQueries: result.providersSucceeded.length,
+            error: result.providerErrors.join(" · ") };
+        } catch (e) { return { rows: [], successfulQueries: 0, error: clip((e as Error)?.message || e, 300) }; }
       }));
       for (let i = 0; i < broadSettled.length; i++) {
         const item = broadSettled[i];
-        if (item.error) providerErrors.push("Broad web search (" + (i + 1) + "): " + item.error);
-        else successfulQueries++;
+        if (item.error) providerErrors.push("Broad web search (" + (i + 1) + ", offset " + broadSearches[i].offset + "): " + item.error);
+        successfulQueries += Number(item.successfulQueries || 0);
         broadResults.push(...item.rows);
       }
     }
-    const rows = [...batchRows, ...broadResults.map((r) => {
-      const matched = eligible.find((s: any) => r.domain === s.domain || r.domain.endsWith("." + s.domain));
-      return { ...r, source: matched || null };
+    const allRows = [...batchRows, ...broadResults.map((r) => {
+      const matched = registry.find((s: any) => s.enabled &&
+        (r.domain === s.domain || r.domain.endsWith("." + s.domain)));
+      const disabled = registry.find((s: any) => !s.enabled &&
+        (r.domain === s.domain || r.domain.endsWith("." + s.domain)));
+      return { ...r, source: matched || null, disabledSource: disabled || null, pdf_search_hint: /\\.pdf(?:$|[?#])/i.test(r.url) };
     })];
+    const disabledRows = allRows.filter((row) => row.disabledSource);
+    const rows = allRows.filter((row) => !row.disabledSource);
     const unique = new Map<string, any>();
     for (const row of rows) if (!unique.has(String(row.url).toLowerCase())) unique.set(String(row.url).toLowerCase(), row);
-    const flattened = [...unique.values()];
-
-    const inserts = flattened.slice(0, 80).map((r) => ({
-      discovery_run_id: runId, source_id: r.source?.id || null, source_type: scope,
-      source_domain: r.domain, title: r.title, source_url: r.url,
-      pdf_url: r.archive_member || /\.pdf(?:$|[?#])/i.test(r.url) ? r.url : null,
-      discovered_school_name: scope === "school" ? schoolName || null : null,
-      discovery_metadata: {
-        snippet: r.snippet, archive_member: r.archive_member || null,
-        marking_scheme_url: r.marking_scheme_url || null,
-        trust_level: r.source?.trust_level || "unverified",
-        source_name: r.source?.display_name || r.domain,
-        source_match: r.source ? "approved_registry" : "unregistered_domain",
-        search_provider: r.snippet.startsWith("Bing RSS search") ? "Bing RSS" : r.snippet.startsWith("Official CBSE") ? "CBSE official archive crawler"
-          : r.snippet.startsWith("Official CISCE") ? "CISCE official media crawler"
-          : r.snippet.startsWith("Official source page") ? (r.source?.source_type === "education_portal" ? "Registered education portal crawler" : "Registered school website crawler") : "DuckDuckGo HTML",
-        search_method: r.source ? "targeted_domain" : "broad_web",
-      },
+    // Search providers may ignore filetype operators. Never create a paper candidate
+    // from an ordinary HTML result: only direct PDF URLs and verified PDF members qualify.
+    const flattened = [...unique.values()].filter((r) => isQuestionPaperPdf(r, query));
+    // Pre-Search is preview-only. Never create discovery-candidate or review-queue rows here.
+    const previewResults = flattened.slice(0, MAX_DISCOVERED_CANDIDATES_PER_BATCH).map((r) => ({
+      title: clip(r.title, 500), url: String(r.url), domain: String(r.domain || new URL(String(r.url)).hostname),
+      snippet: clip(r.snippet, 1200), source_name: r.source?.display_name || r.domain,
+      source_match: r.source ? 'approved_registry' : 'unregistered_domain',
+      search_provider: r.snippet.startsWith('Bing RSS search') ? 'Bing RSS' : r.snippet.startsWith('Official CBSE') ? 'CBSE official archive crawler'
+        : r.snippet.startsWith('Official CISCE') ? 'CISCE official media crawler'
+        : r.snippet.startsWith('Official source page') ? 'Registered source crawler' : 'Web search',
     }));
-    let inserted = 0;
-    if (inserts.length) {
-      const { data, error } = await admin.from("qb_paper_discovery_candidates")
-        .upsert(inserts, { onConflict: "source_url", ignoreDuplicates: true }).select("id");
-      if (error) {
-        await admin.from("qb_paper_discovery_runs").update({ status: "failed", heartbeat_at: null,
-          error_message: "Could not save search results: " + error.message, completed_at: new Date().toISOString() }).eq("id", runId);
-        return reply(500, { error: "Could not save search results: " + error.message });
+    foundTotal += previewResults.length;
+    const previouslySeenTotal = 0;
+    const unprocessedPdfLinksTotal = Math.max(0, Number(progress.unprocessed_pdf_links) || 0)
+      + Math.max(0, flattened.length - MAX_DISCOVERED_CANDIDATES_PER_BATCH);
+    // Preserve one audit row per checked source attempt, including zero-result and failed checks.
+    const sourceAuditRows: any[] = batch.map((source: any) => {
+      const matching = batchRows.filter((row: any) => row.source?.id === source.id && isQuestionPaperPdf(row, query));
+      const sourceError = providerErrors.find((message) => message.startsWith(source.domain + ":"));
+      const partialError = sourceError;
+      return {
+        discovery_run_id: runId, source_id: source.id, domain: source.domain,
+        display_name: source.display_name, source_type: source.source_type,
+        source_classification: "approved",
+        outcome: matching.length ? "pdf_found" : (sourceError
+          ? (/Source returned HTTP|Too many redirects|timed out|Source returned an invalid redirect|Source hostname/i.test(sourceError) ? "inaccessible" : "provider_error")
+          : "no_matching_pdf"),
+        pdf_count: matching.length,
+        provider: "Google Search (Serper) + DuckDuckGo HTML + Bing RSS (independent parallel searches) + source-specific crawler",
+        evidence: {
+          query_variants: [
+            ...buildPdfQueryVariants(query),
+          ],
+          result_pages: [0, 30],
+          result_titles: matching.slice(0, 12).map((row: any) => row.title),
+          pdf_urls: matching.slice(0, 12).map((row: any) => row.url),
+          diagnostic: partialError || null,
+        },
+      };
+    });
+    // Record every unregistered domain surfaced by broad search, including sites
+    // that returned no relevant question-paper PDF. This is the per-run discovery inbox.
+    const discoveredDomainResults = new Map<string, any[]>();
+    const registeredBroadResults = new Map<string, any[]>();
+    for (const row of broadResults) {
+      if (row.source) {
+        const list = registeredBroadResults.get(row.source.id) || [];
+        list.push(row); registeredBroadResults.set(row.source.id, list);
+      } else if (!row.disabledSource) {
+        const list = discoveredDomainResults.get(row.domain) || [];
+        list.push(row); discoveredDomainResults.set(row.domain, list);
       }
-      inserted = data?.length || 0;
     }
-    foundTotal += flattened.length;
-    insertedTotal += inserted;
+    const disabledCounts = new Map<string, any[]>();
+    for (const row of disabledRows) {
+      const domain = row.disabledSource.domain;
+      const list = disabledCounts.get(domain) || [];
+      list.push(row); disabledCounts.set(domain, list);
+    }
+    for (const [domain, foundRows] of disabledCounts) {
+      const source = foundRows[0].disabledSource;
+      const relevant = foundRows.filter((row: any) => isQuestionPaperPdf(row, query));
+      sourceAuditRows.push({
+        discovery_run_id: runId, source_id: source.id, domain, display_name: source.display_name,
+        source_type: source.source_type, source_classification: "approved",
+        outcome: "disabled_registry", pdf_count: relevant.length, provider: "Broad web PDF search",
+        evidence: { note: "This domain is permanently disabled in the source registry and was excluded.",
+          surfaced_result_count: foundRows.length, relevant_pdf_urls: relevant.slice(0, 12).map((row: any) => row.url) },
+      });
+    }
+    for (const [sourceId, surfacedRows] of registeredBroadResults) {
+      const source = surfacedRows[0].source;
+      const relevant = surfacedRows.filter((row: any) => isQuestionPaperPdf(row, query));
+      sourceAuditRows.push({
+        discovery_run_id: runId, source_id: source.id, domain: source.domain, display_name: source.display_name,
+        source_type: source.source_type, source_classification: "approved",
+        outcome: relevant.length ? "pdf_found" : "no_matching_pdf", pdf_count: relevant.length,
+        provider: "Broad web PDF search",
+        evidence: { surfaced_result_count: surfacedRows.length,
+          result_titles: surfacedRows.slice(0, 12).map((row: any) => row.title),
+          pdf_urls: relevant.slice(0, 12).map((row: any) => row.url) },
+      });
+    }
+    for (const [domain, surfacedRows] of discoveredDomainResults) {
+      const relevant = flattened.filter((row: any) => row.domain === domain);
+      sourceAuditRows.push({
+        discovery_run_id: runId, source_id: null, domain, display_name: domain,
+        source_type: scope === "school" ? "school" : "education_portal",
+        source_classification: "discovered",
+        outcome: relevant.length ? "pdf_found" : "no_matching_pdf", pdf_count: relevant.length,
+        provider: "Broad web PDF search",
+        evidence: { surfaced_result_count: surfacedRows.length,
+          result_titles: surfacedRows.slice(0, 12).map((row: any) => row.title),
+          relevant_pdf_urls: relevant.slice(0, 12).map((row: any) => row.url) },
+      });
+    }
+    if (sourceAuditRows.length) {
+      const { error: auditError } = await admin.from("qb_paper_discovery_run_sources").insert(sourceAuditRows);
+      if (auditError) providerErrors.push("Source audit could not be saved: " + auditError.message);
+    }
+
+    const discoveredSourceTotal = Math.max(0, Number(progress.discovered_source_count) || 0) + discoveredDomainResults.size;
     const nextProgress = { next_offset: nextOffset, successful_queries: successfulQueries,
-      provider_errors: providerErrors.slice(0, 80), results_found: foundTotal, new_candidates: insertedTotal };
+      provider_errors: providerErrors.slice(0, 80), results_found: foundTotal, new_candidates: insertedTotal,
+      previously_seen_pdf_urls: previouslySeenTotal, unprocessed_pdf_links: unprocessedPdfLinksTotal,
+      discovered_source_count: discoveredSourceTotal };
     const update: any = { filters: { ...run.filters, discovery_progress: nextProgress },
       results_found: foundTotal, heartbeat_at: null,
       error_message: providerErrors.length ? clip(providerErrors.join(" | "), 1000) : null };
@@ -674,13 +838,18 @@ Deno.serve(async (req) => {
     return reply(200, {
       run_id: runId, complete, next_source: complete ? null : searchTargets[nextOffset]?.display_name,
       sources_processed: nextOffset, sources_total: searchTargets.length,
-      found: foundTotal, new_candidates: insertedTotal,
+      found: foundTotal, pdfs_found: foundTotal, new_candidates: 0,
+      estimated_new_candidates: 0,
+      previously_seen_pdf_urls: previouslySeenTotal,
+      unprocessed_pdf_links: unprocessedPdfLinksTotal,
       approved_source_results: flattened.filter((r) => r.source).length,
-      provider: "Official board archive + DuckDuckGo fallback",
+      discovered_source_count: discoveredSourceTotal,
+      preview_results: previewResults,
+      provider: "Official board archive + Google Search (Serper), DuckDuckGo HTML and Bing RSS",
       provider_successful_queries: successfulQueries, provider_errors: providerErrors.slice(-8),
       message: complete
-        ? (providerErrors.length ? "Search completed with partial provider failures. Review provider diagnostics before concluding no papers exist." : "Search completed. Review candidates before importing.")
-        : "Batch saved. Continuing discovery with the next registered source.",
+        ? (providerErrors.length ? "Search completed with partial provider failures. Review provider diagnostics before concluding no papers exist." : "Search completed. Potential PDF records were previewed only; nothing was added to a review queue.")
+        : "Search batch complete. Continuing discovery with the next registered source.",
     });
   }
 
@@ -688,9 +857,26 @@ Deno.serve(async (req) => {
   if (!uuid(candidateId)) return reply(400, { error: "Invalid candidate." });
   const { data: candidate, error: candidateError } = await admin.from("qb_paper_discovery_candidates").select("*").eq("id", candidateId).maybeSingle();
   if (candidateError || !candidate) return reply(404, { error: "Candidate not found." });
-  const { data: sourceRows } = await admin.from("qb_paper_discovery_sources").select("domain").eq("enabled", true);
-  const domains = (sourceRows || []).map((s: any) => s.domain);
-  if (!matchesApprovedSourceDomain(candidate.source_domain, domains)) return reply(400, { error: "This source is no longer enabled. Enable its registered domain in Approved sources, then retry verification." });
+  const { data: sourceRows } = await admin.from("qb_paper_discovery_sources").select("domain,enabled").limit(500);
+  const registryRows = sourceRows || [];
+  const disabledRegistryMatch = registryRows.find((source: any) =>
+    !source.enabled && matchesApprovedSourceDomain(candidate.source_domain, [source.domain]));
+  if (disabledRegistryMatch) return reply(400, { error: "This domain is permanently disabled in Approved Sources and was excluded from this collection." });
+  const domains = registryRows.filter((source: any) => source.enabled).map((source: any) => source.domain);
+  const isEnabledRegisteredSource = matchesApprovedSourceDomain(candidate.source_domain, domains);
+  const discoveredDomain = String(candidate.source_domain || "").toLowerCase().trim();
+  const validDiscoveredDomain = isValidDiscoveredDomain(discoveredDomain);
+  const hasDirectPdfEvidence = candidate.discovery_metadata?.source_match === "unregistered_domain" &&
+    (/\.pdf(?:$|[?#])/i.test(String(candidate.pdf_url || candidate.source_url || "")) ||
+      !!candidate.discovery_metadata?.archive_member || !!candidate.discovery_metadata?.pdf_search_hint);
+  if (!isEnabledRegisteredSource) {
+    if (!hasDirectPdfEvidence || !validDiscoveredDomain) {
+      return reply(400, { error: "This source is not enabled and the candidate does not contain eligible direct-PDF discovery evidence." });
+    }
+    // Temporary, candidate-scoped allowlist: only this discovered hostname and its
+    // subdomains may be fetched. It is not added to the permanent source registry.
+    domains.push(discoveredDomain);
+  }
 
   if (action === "verify") {
     try {
@@ -703,12 +889,20 @@ Deno.serve(async (req) => {
       }
       const checksum = await sha256(bytes);
       const { data: duplicate } = await admin.from("qb_source_papers").select("id").eq("checksum", checksum).maybeSingle();
-      const status = duplicate ? "duplicate" : "verified";
+      const { data: duplicateCandidate } = await admin.from("qb_paper_discovery_candidates")
+        .select("id").eq("checksum", checksum).neq("id", candidateId).limit(1).maybeSingle();
+      const isDuplicate = !!duplicate || !!duplicateCandidate;
+      const status = isDuplicate ? "duplicate" : "verified";
       await admin.from("qb_paper_discovery_candidates").update({
-        pdf_url: pdf.url, verification_status: status, status: duplicate ? "duplicate" : "needs_review",
-        checksum, file_size_bytes: bytes.length, duplicate_of_paper_id: duplicate?.id || null, updated_at: new Date().toISOString(),
+        pdf_url: pdf.url, verification_status: status, status: isDuplicate ? "duplicate" : "needs_review",
+        checksum, file_size_bytes: bytes.length, duplicate_of_paper_id: duplicate?.id || null,
+        discovery_metadata: { ...candidate.discovery_metadata,
+          exact_duplicate_candidate_id: duplicateCandidate?.id || null },
+        updated_at: new Date().toISOString(),
       }).eq("id", candidateId);
-      return reply(200, { verified: !duplicate, duplicate: !!duplicate, pdf_url: pdf.url, checksum, file_size_bytes: bytes.length });
+      return reply(200, { verified: !isDuplicate, duplicate: isDuplicate,
+        duplicate_paper_id: duplicate?.id || null, duplicate_candidate_id: duplicateCandidate?.id || null,
+        pdf_url: pdf.url, checksum, file_size_bytes: bytes.length });
     } catch (e) {
       const message = clip((e as Error)?.message || e, 500);
       const status = /outside|invalid url|redirect/i.test(message) ? "unsafe_url" : "inaccessible";
