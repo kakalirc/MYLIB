@@ -1,8 +1,8 @@
 // Pure helpers for PDF-focused question-paper discovery. Kept separate for deterministic unit tests.
 export function queryTerms(query: string): string[] {
   return query.toLowerCase()
-    .replace(/\\b(cbse|cisce|icse|isc|question papers?|previous year|past papers?|sample papers?|specimen|pdf|class|grade)\\b/g, " ")
-    .replace(/\\b(x|xii|10|12)\\b/g, " ")
+    .replace(/\b(cbse|cisce|icse|isc|question papers?|previous year|past papers?|sample papers?|specimen|pdf|class|grade)\b/g, " ")
+    .replace(/\b(x|xii|10|12)\b/g, " ")
     .split(/[^a-z0-9]+/).filter((x) => x.length > 1);
 }
 
@@ -21,7 +21,7 @@ export function buildPdfQueryVariants(query: string): string[] {
 }
 
 export function isValidDiscoveredDomain(domain: string): boolean {
-  return /^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$/.test(domain);
+  return /^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(domain);
 }
 
 export function isPrivateAddress(address: string): boolean {
