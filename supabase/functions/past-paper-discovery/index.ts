@@ -92,7 +92,7 @@ async function searchBingRss(query: string, limit = 20, domain?: string, offset 
   });
   if (!res.ok) throw new Error("Bing RSS returned HTTP " + res.status + ".");
   const xml = new TextDecoder().decode(await readBounded(res, 2 * 1024 * 1024));
-  if (!/<(?:rss|rdf:RDF)\\b/i.test(xml) || !/<channel\\b|<item\\b/i.test(xml)) {
+  if (!/<(?:rss|rdf:RDF)\b/i.test(xml) || !/<channel\b|<item\b/i.test(xml)) {
     throw new Error("Bing RSS returned HTTP 200 but the response was not a recognizable RSS feed.");
   }
   const rows: Array<{ title: string; url: string; snippet: string; domain: string }> = [];
