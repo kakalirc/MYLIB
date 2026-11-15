@@ -159,7 +159,7 @@ async function searchInBatches(sources: any[], query: string, batchSize = 4) {
     for (const item of settled) {
       if (item.error) errors.push(item.error);
       successfulQueries += Number((item as any).successfulQueries || (!item.error ? 1 : 0));
-      for (const row of item.rows) results.push({ ...row, source: item.source });
+      for (const row of item.rows) results.push({ ...row, source: item.source, pdf_search_hint: true });
     }
   }
   return { results, errors, successfulQueries };
@@ -453,6 +453,12 @@ async function resolvePdf(candidate: any, domains: string[]) {
     const result = await fetchAllowed(parsed.href, domains, "application/pdf,application/octet-stream,text/html;q=0.8,*/*;q=0.5");
     const type = (result.response.headers.get("content-type") || "").toLowerCase();
     if (type.includes("pdf") || /\.pdf(?:$|[?#])/i.test(result.url)) return result;
+    if (candidate.discovery_metadata?.pdf_search_hint) {
+      if (!type.includes("octet-stream")) throw new Error("The search result did not return a direct PDF response.");
+      const bytes = await readBounded(result.response);
+      if (!isPdf(bytes)) throw new Error("The download endpoint did not return PDF file content.");
+      return { response: new Response(bytes, { headers: result.response.headers }), url: result.url };
+    }
     const html = await result.response.text();
     const links = [...html.matchAll(/(?:href|data-url)\s*=\s*["']([^"']+\.pdf(?:\?[^"']*)?)["']/gi)].map((m) => new URL(decodeEntities(m[1]), result.url).href);
     for (const link of links) {
@@ -641,7 +647,7 @@ Deno.serve(async (req) => {
         (r.domain === s.domain || r.domain.endsWith("." + s.domain)));
       const disabled = registry.find((s: any) => !s.enabled &&
         (r.domain === s.domain || r.domain.endsWith("." + s.domain)));
-      return { ...r, source: matched || null, disabledSource: disabled || null };
+      return { ...r, source: matched || null, disabledSource: disabled || null, pdf_search_hint: true };
     })];
     const disabledRows = allRows.filter((row) => row.disabledSource);
     const rows = allRows.filter((row) => !row.disabledSource);
@@ -653,10 +659,10 @@ Deno.serve(async (req) => {
     const inserts = flattened.slice(0, MAX_DISCOVERED_CANDIDATES_PER_BATCH).map((r) => ({
       discovery_run_id: runId, source_id: r.source?.id || null, source_type: scope,
       source_domain: r.domain, title: r.title, source_url: r.url,
-      pdf_url: r.archive_member || /\.pdf(?:$|[?#])/i.test(r.url) ? r.url : null,
+      pdf_url: r.archive_member || /\.pdf(?:$|[?#])/i.test(r.url) || r.pdf_search_hint ? r.url : null,
       discovered_school_name: scope === "school" ? schoolName || null : null,
       discovery_metadata: {
-        snippet: r.snippet, archive_member: r.archive_member || null,
+        snippet: r.snippet, archive_member: r.archive_member || null, pdf_search_hint: !!r.pdf_search_hint,
         marking_scheme_url: r.marking_scheme_url || null,
         trust_level: r.source?.trust_level || "unverified",
         source_name: r.source?.display_name || r.domain,
@@ -832,10 +838,9 @@ Deno.serve(async (req) => {
   const isEnabledRegisteredSource = matchesApprovedSourceDomain(candidate.source_domain, domains);
   const discoveredDomain = String(candidate.source_domain || "").toLowerCase().trim();
   const validDiscoveredDomain = isValidDiscoveredDomain(discoveredDomain);
-  const hasDirectPdfEvidence = !!candidate.discovery_metadata?.source_match &&
-    candidate.discovery_metadata.source_match === "unregistered_domain" &&
+  const hasDirectPdfEvidence = candidate.discovery_metadata?.source_match === "unregistered_domain" &&
     (/\.pdf(?:$|[?#])/i.test(String(candidate.pdf_url || candidate.source_url || "")) ||
-      !!candidate.discovery_metadata?.archive_member);
+      !!candidate.discovery_metadata?.archive_member || !!candidate.discovery_metadata?.pdf_search_hint);
   if (!isEnabledRegisteredSource) {
     if (!hasDirectPdfEvidence || !validDiscoveredDomain) {
       return reply(400, { error: "This source is not enabled and the candidate does not contain eligible direct-PDF discovery evidence." });
