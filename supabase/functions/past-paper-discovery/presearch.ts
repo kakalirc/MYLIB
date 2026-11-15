@@ -54,3 +54,21 @@ export function isQuestionPaperPdf(row: any, query: string): boolean {
   return paperSignals.some((signal) => (signal === " qp " ? normalizedEvidence.includes(signal) : evidence.includes(signal))) &&
     matchesQuery(evidence, queryTerms(query));
 }
+
+/** Restrict registered board crawling when the query names a specific board. */
+export function filterBoardSourcesForQuery<T extends { domain?: string; display_name?: string }>(sources: T[], query: string): T[] {
+  const q = query.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const families: Array<{ query: RegExp; source: RegExp }> = [
+    { query: /\b(karnataka|kseab)\b/, source: /karnataka|kseab|karnataka school examination|secondary education examination board/ },
+    { query: /\b(cbse|central board of secondary education)\b/, source: /cbse|central board of secondary education/ },
+    { query: /\b(cisce|icse|isc|council for the indian school certificate)\b/, source: /cisce|icse|council for the indian school certificate/ },
+    { query: /\b(kerala|kbpe|pareeksha bhavan)\b/, source: /kerala|kbpe|pareeksha bhavan/ },
+    { query: /\b(maharashtra|msbshse|msbshe)\b/, source: /maharashtra|msbshse|msbshe/ },
+    { query: /\b(tamil nadu|tn state board|dge tn)\b/, source: /tamil nadu|dge tn|dge\.tn/ },
+    { query: /\b(andhra pradesh|bse ap|bie ap)\b/, source: /andhra pradesh|bseap|bse ap|bieap/ },
+    { query: /\b(telangana|bse ts|bse telangana)\b/, source: /telangana|bse telangana|bse ts/ },
+  ];
+  const family = families.find((item) => item.query.test(q));
+  if (!family) return sources;
+  return sources.filter((source) => family.source.test(String(source.domain || '').toLowerCase()) || family.source.test(String(source.display_name || '').toLowerCase()));
+}
