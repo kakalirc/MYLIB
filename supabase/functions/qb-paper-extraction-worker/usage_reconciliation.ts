@@ -28,8 +28,8 @@ export function readAnthropicUsage(
     throw new Error(body.error.message || "Saved Anthropic response contains a provider error.");
   }
 
-  const inputTokens = Number(body?.usage?.input_tokens);
-  const outputTokens = Number(body?.usage?.output_tokens);
+  const inputTokens = body?.usage?.input_tokens;
+  const outputTokens = body?.usage?.output_tokens;
   if (!Number.isSafeInteger(inputTokens) || inputTokens < 0 ||
       !Number.isSafeInteger(outputTokens) || outputTokens < 0) {
     throw new Error("Saved Anthropic response does not contain valid token usage; no retry is safe.");
