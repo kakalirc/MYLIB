@@ -724,9 +724,12 @@ Deno.serve(async (req) => {
     // Record every unregistered domain surfaced by broad search, including sites
     // that returned no relevant question-paper PDF. This is the per-run discovery inbox.
     const discoveredDomainResults = new Map<string, any[]>();
+    const registeredBroadResults = new Map<string, any[]>();
     for (const row of broadResults) {
-      const registered = registry.some((source: any) => row.domain === source.domain || row.domain.endsWith("." + source.domain));
-      if (!registered) {
+      if (row.source) {
+        const list = registeredBroadResults.get(row.source.id) || [];
+        list.push(row); registeredBroadResults.set(row.source.id, list);
+      } else if (!row.disabledSource) {
         const list = discoveredDomainResults.get(row.domain) || [];
         list.push(row); discoveredDomainResults.set(row.domain, list);
       }
@@ -746,6 +749,19 @@ Deno.serve(async (req) => {
         outcome: "disabled_registry", pdf_count: relevant.length, provider: "Broad web PDF search",
         evidence: { note: "This domain is permanently disabled in the source registry and was excluded.",
           surfaced_result_count: foundRows.length, relevant_pdf_urls: relevant.slice(0, 12).map((row: any) => row.url) },
+      });
+    }
+    for (const [sourceId, surfacedRows] of registeredBroadResults) {
+      const source = surfacedRows[0].source;
+      const relevant = surfacedRows.filter((row: any) => isQuestionPaperPdf(row, query));
+      sourceAuditRows.push({
+        discovery_run_id: runId, source_id: source.id, domain: source.domain, display_name: source.display_name,
+        source_type: source.source_type, source_classification: "approved",
+        outcome: relevant.length ? "pdf_found" : "no_matching_pdf", pdf_count: relevant.length,
+        provider: "Broad web PDF search",
+        evidence: { surfaced_result_count: surfacedRows.length,
+          result_titles: surfacedRows.slice(0, 12).map((row: any) => row.title),
+          pdf_urls: relevant.slice(0, 12).map((row: any) => row.url) },
       });
     }
     for (const [domain, surfacedRows] of discoveredDomainResults) {
