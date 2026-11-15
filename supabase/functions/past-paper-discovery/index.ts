@@ -186,7 +186,7 @@ async function fetchAllowed(urlText: string, domains: string[], accept: string) 
   }
   throw new Error("Too many redirects.");
 }
-type DiscoveryRow = {title:string;url:string;snippet:string;domain:string;source:any};
+type DiscoveryRow = {title:string;url:string;snippet:string;domain:string;source:any;archive_member?:string;pdf_search_hint?:boolean};
 function linkRows(html: string, baseUrl: string, source: any, terms: string[], limit = 60): DiscoveryRow[] {
   const rows: DiscoveryRow[] = [];
   const anchors = html.match(/<a\b[^>]*>[\s\S]*?<\/a>/gi) || [];
