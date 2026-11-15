@@ -715,6 +715,7 @@ Deno.serve(async (req) => {
           ],
           result_pages: [0, 30],
           result_titles: matching.slice(0, 12).map((row: any) => row.title),
+          pdf_urls: matching.slice(0, 12).map((row: any) => row.url),
           diagnostic: partialError || null,
         },
       };
