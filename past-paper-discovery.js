@@ -277,6 +277,11 @@
         return ['rejected','duplicate','imported'].indexOf(c.status) < 0 &&
           ['verified','duplicate'].indexOf(c.verification_status) < 0;
       });
+      if (!candidates.length) {
+        state.message = 'All PDFs linked to this Pre-Search have already been verified or processed.';
+        if (state.latestPreSearch && state.latestPreSearch.run_id === runId) state.latestPreSearch.collectionComplete = true;
+        return;
+      }
       var verified = 0, duplicates = 0, failed = 0;
       for (var i = 0; i < candidates.length; i++) {
         state.message = 'Primary Collection · verifying PDF ' + (i + 1) + ' of ' + candidates.length + ': ' + candidates[i].title;
