@@ -187,7 +187,7 @@
       preSearchSummary = '<div class="lib-ppd-section lib-ppd-estimate"><h3>Pre-Search estimate</h3><div class="lib-ppd-estimate-grid">'
         + '<div><b>' + esc(estimate.pdfs_found || 0) + '</b><span>Potential PDFs found</span></div>'
         + '<div><b>' + esc(state.previewRows.length || 0) + '</b><span>Preview records shown</span></div>'
-        + '<div><b>' + esc(estimate.previously_seen_pdf_urls || 0) + '</b><span>Previously seen links</span></div>'
+        + '<div><b>' + esc(estimate.previously_seen_pdf_urls || 0) + '</b><span>Saved to review queue</span></div>'
         + '<div><b>' + esc(estimate.discovered_source_count || 0) + '</b><span>New domains surfaced</span></div></div>'
         + '<p class="hint">This is a search estimate, not a count of confirmed papers. No PDF is downloaded and no review-queue record is created.</p>'
         + warnings
