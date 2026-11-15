@@ -25749,7 +25749,7 @@ async function qbResetSourcePaperExtraction(id) {
     });
     qbExtractionResults[id] = {
       ok: true, loading: false, stage: 'prepared', runId: fresh.run_id || '',
-      previousRunId: previous.id,
+      previousRunId: previous.id, runHistory: history.history || [previous],
       message: 'Fresh run created from page 1. Previous run ' + previous.id + ' is retained in history. New provider requests and a separate cost ledger will be used.',
       metadataMatches: Array.isArray(fresh.possible_metadata_matches) ? fresh.possible_metadata_matches.length : 0
     };
