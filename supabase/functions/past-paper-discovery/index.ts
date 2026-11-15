@@ -5,7 +5,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { getPdfZipMember, listPdfMembersFromZip } from "./archive.ts";
 import { matchesApprovedSourceDomain } from "./source-domain.ts";
 import {
-  buildPdfQueryVariants, isPrivateAddress, isQuestionPaperPdf,
+  buildPdfQueryVariants, filterBoardSourcesForQuery, isPrivateAddress, isQuestionPaperPdf,
   isValidDiscoveredDomain, matchesQuery, queryTerms,
 } from "./presearch.ts";
 
@@ -645,9 +645,12 @@ Deno.serve(async (req) => {
     }
     const eligible = registry.filter((s: any) => s.enabled &&
       (s.source_type === scope || s.source_type === "education_portal"));
+    const eligibleBoards = filterBoardSourcesForQuery(
+      eligible.filter((s: any) => s.source_type === "board"), query,
+    );
     const searchTargets = scope === "school"
       ? eligible.filter((s: any) => s.source_type === "school")
-      : eligible.filter((s: any) => s.source_type === "board" || s.source_type === "education_portal");
+      : [...eligibleBoards, ...eligible.filter((s: any) => s.source_type === "education_portal")];
     // Broad PDF search still runs when no registry entries are enabled. A disabled
     // registry domain is never silently re-enabled or reintroduced by broad search.
 
