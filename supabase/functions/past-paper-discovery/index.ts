@@ -548,6 +548,55 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { return reply(400, { error: "Invalid request." }); }
   const action = clip(body.action, 30);
 
+  if (action === "collect") {
+    const runId = clip(body.run_id, 64);
+    if (!uuid(runId)) return reply(400, { error: "Invalid discovery run." });
+    const { data: run, error: runError } = await admin.from("qb_paper_discovery_runs").select("id,status,filters,query_text").eq("id", runId).maybeSingle();
+    if (runError || !run) return reply(404, { error: "Discovery run not found." });
+    if (run.status !== "completed") return reply(409, { error: "Finish or resume Search before collecting its results." });
+    const saved = Array.isArray(run.filters?.search_results) ? run.filters.search_results : [];
+    if (!saved.length) return reply(409, { error: "This search has no saved PDF results. Run a fresh Search." });
+    const registry = Array.isArray(run.filters?.source_snapshot) ? run.filters.source_snapshot : [];
+    let created = 0, linked = 0, skipped = 0;
+    const candidateIds: string[] = [];
+    for (const row of saved.slice(0, 1000)) {
+      let url: URL;
+      try { url = new URL(String(row.url || "")); } catch { skipped++; continue; }
+      const domain = url.hostname.toLowerCase().replace(/^www\./, "");
+      if (url.protocol !== "https:" || !isQuestionPaperPdf(row, String(run.query_text || ""))) { skipped++; continue; }
+      if (registry.some((s: any) => !s.enabled && (domain === s.domain || domain.endsWith("." + s.domain)))) { skipped++; continue; }
+      const source = registry.find((s: any) => s.enabled && (domain === s.domain || domain.endsWith("." + s.domain)));
+      const { data: existing } = await admin.from("qb_paper_discovery_candidates").select("id").eq("source_url", url.href).maybeSingle();
+      let candidateId = existing?.id || null;
+      if (!candidateId) {
+        const { data: inserted, error: insertError } = await admin.from("qb_paper_discovery_candidates").insert({
+          discovery_run_id: runId, source_id: source?.id || null,
+          source_type: source?.source_type || (run.filters?.scope === "school" ? "school" : "education_portal"),
+          source_domain: domain, title: clip(row.title || url.pathname.split("/").pop() || domain, 500),
+          source_url: url.href, pdf_url: url.href, discovered_school_name: clip(run.filters?.school_name || "", 200) || null,
+          verification_status: "not_checked", status: "new",
+          discovery_metadata: { source_match: source ? "approved_registry" : "unregistered_domain",
+            source_name: clip(row.source_name || domain, 200), search_provider: clip(row.search_provider || "Web search", 80),
+            snippet: clip(row.snippet || "", 1200), pdf_search_hint: true, collected_from_search: true },
+          discovered_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        }).select("id").single();
+        if (insertError) {
+          if (insertError.code === "23505") {
+            const { data: raced } = await admin.from("qb_paper_discovery_candidates").select("id").eq("source_url", url.href).maybeSingle();
+            candidateId = raced?.id || null;
+          } else return reply(500, { error: "Could not create a candidate: " + insertError.message });
+        } else { candidateId = inserted.id; created++; }
+      }
+      if (!candidateId) { skipped++; continue; }
+      const { error: linkError } = await admin.from("qb_paper_discovery_run_candidates")
+        .upsert({ discovery_run_id: runId, candidate_id: candidateId }, { onConflict: "discovery_run_id,candidate_id", ignoreDuplicates: true });
+      if (linkError) return reply(500, { error: "Could not link candidate to this search: " + linkError.message });
+      candidateIds.push(candidateId); linked++;
+    }
+    return reply(200, { collected: true, created, linked, skipped, candidate_ids: candidateIds,
+      message: "Saved search results collected. No PDFs were downloaded or verified." });
+  }
+
   if (action === "search" || action === "continue_search" || action === "restart_search") {
     const isNewRun = action === "search";
     const isRestart = action === "restart_search";
@@ -586,7 +635,7 @@ Deno.serve(async (req) => {
           .select("id").eq("discovery_run_id", runId);
         if (countError) return reply(500, { error: "Could not inspect existing candidates before restart: " + countError.message });
         const preservedCount = priorCandidates?.length || 0;
-        const resetFilters = { ...existing.filters, source_snapshot: null, discovery_progress: {
+        const resetFilters = { ...existing.filters, source_snapshot: null, search_results: [], discovery_progress: {
           next_offset: 0, successful_queries: 0, provider_errors: [],
           results_found: preservedCount, new_candidates: 0,
           previously_seen_pdf_urls: 0, unprocessed_pdf_links: 0, discovered_source_count: 0,
@@ -822,11 +871,16 @@ Deno.serve(async (req) => {
     }
 
     const discoveredSourceTotal = Math.max(0, Number(progress.discovered_source_count) || 0) + discoveredDomainResults.size;
+    const priorSavedResults = Array.isArray(run.filters?.search_results) ? run.filters.search_results : [];
+    const savedByUrl = new Map<string, any>();
+    for (const row of priorSavedResults) if (row?.url) savedByUrl.set(String(row.url).toLowerCase(), row);
+    for (const row of previewResults) if (row?.url) savedByUrl.set(String(row.url).toLowerCase(), row);
+    const savedSearchResults = [...savedByUrl.values()].slice(0, 1000);
     const nextProgress = { next_offset: nextOffset, successful_queries: successfulQueries,
       provider_errors: providerErrors.slice(0, 80), results_found: foundTotal, new_candidates: insertedTotal,
       previously_seen_pdf_urls: previouslySeenTotal, unprocessed_pdf_links: unprocessedPdfLinksTotal,
       discovered_source_count: discoveredSourceTotal };
-    const update: any = { filters: { ...run.filters, discovery_progress: nextProgress },
+    const update: any = { filters: { ...run.filters, search_results: savedSearchResults, discovery_progress: nextProgress },
       results_found: foundTotal, heartbeat_at: null,
       error_message: providerErrors.length ? clip(providerErrors.join(" | "), 1000) : null };
     if (complete) {
