@@ -40,6 +40,21 @@ Deno.test("rejects non-paper PDFs and ordinary web pages", () => {
   if (textbook || webpage || timetable) throw new Error("Textbooks, timetables and HTML pages must not become paper candidates.");
 });
 
+Deno.test("accepts extensionless PDF search results only with a PDF hint", () => {
+  const accepted = isQuestionPaperPdf({
+    url: "https://school.example.edu/download?id=2026-kannada",
+    title: "Class 10 Kannada Question Paper 2026",
+    snippet: "Question paper PDF download",
+    pdf_search_hint: true,
+  }, "Class 10 Kannada 2026");
+  const unhinted = isQuestionPaperPdf({
+    url: "https://school.example.edu/kannada-question-paper-2026",
+    title: "Class 10 Kannada Question Paper 2026",
+    snippet: "Question paper page",
+  }, "Class 10 Kannada 2026");
+  if (!accepted || unhinted) throw new Error("Extensionless results require the PDF search hint and are verified as direct PDFs later.");
+});
+
 Deno.test("rejects non-HTTPS paper links", () => {
   const accepted = isQuestionPaperPdf({
     url: "http://school.example.edu/kannada-question-paper-2026.pdf",
