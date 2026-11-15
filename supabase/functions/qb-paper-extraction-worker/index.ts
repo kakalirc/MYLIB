@@ -311,7 +311,7 @@ Deno.serve(async(req)=>{
       ?first+reportedPage-1
       :(Number.isInteger(reportedPage)&&reportedPage>=first&&reportedPage<=last?reportedPage:NaN);
     if(!Number.isInteger(page))continue;
-    const payload=item.payload&&typeof item.payload==="object"?item.payload:{raw:item};
+    const payload=normalizePayload(item,page);
     const fingerprint=await hash(JSON.stringify(item));
     const {error:se}=await db.from("qb_paper_extraction_staging").upsert({run_id:runId,item_key:`${chunk}:item:${i+1}`,item_kind:item.item_kind,page_number:page,original_number:item.original_number==null?null:String(item.original_number),parent_item_key:item.parent_item_key==null?null:String(item.parent_item_key),payload,content_fingerprint:fingerprint,review_state:"pending"},{onConflict:"run_id,item_key"});
     if(se)throw new Error("Could not save staged item; saved provider response will be reused on resume.");
