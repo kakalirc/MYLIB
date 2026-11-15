@@ -185,7 +185,7 @@
       if (estimate.unprocessed_pdf_links > 0) warnings += '<p class="hint" style="color:var(--brick)">' + esc(estimate.unprocessed_pdf_links) + ' additional matching PDF links exceeded the per-batch safety cap and were not queued. Narrow the criteria and run another Pre-Search.</p>';
       preSearchSummary = '<div class="lib-ppd-section lib-ppd-estimate"><h3>Pre-Search estimate</h3><div class="lib-ppd-estimate-grid">'
         + '<div><b>' + esc(estimate.pdfs_found || 0) + '</b><span>Potential PDFs found</span></div>'
-        + '<div><b>' + esc(estimate.estimated_new_candidates || 0) + '</b><span>Preview records shown</span></div>'
+        + '<div><b>' + esc(state.previewRows.length || 0) + '</b><span>Preview records shown</span></div>'
         + '<div><b>' + esc(estimate.previously_seen_pdf_urls || 0) + '</b><span>Previously seen links</span></div>'
         + '<div><b>' + esc(estimate.discovered_source_count || 0) + '</b><span>New domains surfaced</span></div></div>'
         + '<p class="hint">This is a search estimate, not a count of confirmed papers. No PDF is downloaded and no review-queue record is created.</p>'
@@ -207,7 +207,6 @@
         return '<div class="lib-ppd-source"><div><b>' + esc(a.display_name || a.domain) + '</b><div class="hint">' + esc(a.domain) + ' · ' + esc(a.source_classification) + ' · ' + esc(outcomeLabel) + ' · ' + esc(a.pdf_count) + ' potential PDFs · ' + esc(new Date(a.checked_at).toLocaleString()) + '</div><div class="hint">Search: ' + esc(runLabel) + '</div>' + pdfLinks + '</div>' + promote + '</div>';
       }).join('') : '<p class="hint">Source audit records will appear after Pre-Search.</p>')
       + (state.auditRows.length >= state.auditLimit ? '<button class="btn-small" type="button" onclick="libPPDLoadMoreAudit()">Load older source history</button>' : '')) + '</details>';
-    var candidates = renderQueueTabs();
     var runs = '<details class="lib-ppd-section lib-ppd-recent-searches"><summary>Recent searches</summary>' + (state.runs.length ? state.runs.map(function (r) {
       var progress = r.filters && r.filters.discovery_progress ? r.filters.discovery_progress : {};
       var progressText = r.status === 'running' ? ' · ' + Number(progress.next_offset || 0) + ' sources processed' : '';
@@ -251,7 +250,7 @@
       var calls = 0;
       while (!result.complete && result.run_id && calls < 200) {
         state.message = 'Searching source ' + result.sources_processed + ' of ' + result.sources_total
-          + (result.next_source ? ' · Next: ' + result.next_source : '') + ' · ' + result.found + ' candidates found so far…';
+          + (result.next_source ? ' · Next: ' + result.next_source : '') + ' · ' + result.found + ' potential PDF records found so far…';
         if (typeof render === 'function') render();
         result = await invoke({ action:'continue_search', run_id:result.run_id });
         calls++;
