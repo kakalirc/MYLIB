@@ -80,9 +80,9 @@ function parseSearchResults(html: string, limit: number) {
   }
   return rows;
 }
-async function searchBingRss(query: string, limit = 20, domain?: string) {
+async function searchBingRss(query: string, limit = 20, domain?: string, offset = 0) {
   const targeted = domain ? query + " site:" + domain : query;
-  const res = await fetch("https://www.bing.com/search?format=rss&q=" + encodeURIComponent(targeted), {
+  const res = await fetch("https://www.bing.com/search?format=rss&first=" + (offset + 1) + "&q=" + encodeURIComponent(targeted), {
     headers: {
       "User-Agent": "Mozilla/5.0 (compatible; LIBEducationPastPaperDiscovery/1.0)",
       "Accept": "application/rss+xml, application/xml, text/xml",
@@ -110,10 +110,10 @@ async function searchBingRss(query: string, limit = 20, domain?: string) {
   }
   return rows;
 }
-async function searchWeb(query: string, limit = 20, domain?: string) {
+async function searchWeb(query: string, limit = 20, domain?: string, offset = 0) {
   const targeted = domain ? query + " site:" + domain : query;
   try {
-    const res = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(targeted), {
+    const res = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(targeted) + "&s=" + offset, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml",
@@ -124,9 +124,9 @@ async function searchWeb(query: string, limit = 20, domain?: string) {
     const html = new TextDecoder().decode(await readBounded(res, 2 * 1024 * 1024));
     const rows = parseSearchResults(html, limit).filter((row) => !domain || row.domain === domain || row.domain.endsWith("." + domain));
     if (rows.length) return rows;
-    return await searchBingRss(query, limit, domain);
+    return await searchBingRss(query, limit, domain, offset);
   } catch (ddgError) {
-    try { return await searchBingRss(query, limit, domain); }
+    try { return await searchBingRss(query, limit, domain, offset); }
     catch (bingError) {
       throw new Error("DuckDuckGo: " + clip((ddgError as Error)?.message || ddgError, 180)
         + " · Bing: " + clip((bingError as Error)?.message || bingError, 180));
@@ -142,10 +142,10 @@ async function searchInBatches(sources: any[], query: string, batchSize = 4) {
     const settled = await Promise.all(batch.map(async (source: any) => {
       try {
         const variants = buildPdfQueryVariants(query);
-        const attempts = await Promise.all(variants.map(async (variant) => {
-          try { return { rows: await searchWeb(variant, 8, source.domain), error: "" }; }
+        const attempts = await Promise.all(variants.flatMap((variant) => [0, 30].map(async (offset) => {
+          try { return { rows: await searchWeb(variant, 8, source.domain, offset), error: "" }; }
           catch (e) { return { rows: [], error: clip((e as Error)?.message || e, 180) }; }
-        }));
+        })));
         const successful = attempts.filter((x) => !x.error);
         const failed = attempts.filter((x) => x.error);
         if (!successful.length) throw new Error(failed.map((x) => x.error).join(" · "));
@@ -623,13 +623,14 @@ Deno.serve(async (req) => {
       // Always run broad discovery after registered-source crawling. A handful of
       // sample-paper hits must not suppress searches for annual / previous-year papers.
       const broadQueries = buildPdfQueryVariants(query);
-      const broadSettled = await Promise.all(broadQueries.map(async (broadQuery) => {
-        try { return { rows: await searchWeb(broadQuery, 20), error: "" }; }
+      const broadSearches = broadQueries.flatMap((broadQuery) => [0, 30].map((offset) => ({ broadQuery, offset })));
+      const broadSettled = await Promise.all(broadSearches.map(async (search) => {
+        try { return { rows: await searchWeb(search.broadQuery, 20, undefined, search.offset), error: "" }; }
         catch (e) { return { rows: [], error: clip((e as Error)?.message || e, 300) }; }
       }));
       for (let i = 0; i < broadSettled.length; i++) {
         const item = broadSettled[i];
-        if (item.error) providerErrors.push("Broad web search (" + (i + 1) + "): " + item.error);
+        if (item.error) providerErrors.push("Broad web search (" + (i + 1) + ", offset " + broadSearches[i].offset + "): " + item.error);
         else successfulQueries++;
         broadResults.push(...item.rows);
       }
@@ -712,6 +713,7 @@ Deno.serve(async (req) => {
           query_variants: [
             ...buildPdfQueryVariants(query),
           ],
+          result_pages: [0, 30],
           result_titles: matching.slice(0, 12).map((row: any) => row.title),
           diagnostic: partialError || null,
         },
