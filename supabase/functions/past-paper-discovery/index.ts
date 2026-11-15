@@ -135,7 +135,7 @@ async function searchWeb(query: string, limit = 20, domain?: string, offset = 0)
   }
 }
 async function searchInBatches(sources: any[], query: string, batchSize = 4) {
-  const results: Array<{ title: string; url: string; snippet: string; domain: string; source: any; archive_member?: string }> = [];
+  const results: Array<{ title: string; url: string; snippet: string; domain: string; source: any; archive_member?: string; pdf_search_hint?: boolean }> = [];
   const errors: string[] = [];
   let successfulQueries = 0;
   for (let i = 0; i < sources.length; i += batchSize) {
