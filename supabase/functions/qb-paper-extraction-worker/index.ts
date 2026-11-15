@@ -57,6 +57,17 @@ UNSEEN PASSAGES: Keep the passage as one passage item and group every associated
 
 PAGE NUMBERS: page_number MUST be the integer 1 for EVERY item because this request contains exactly one original PDF page. Do not use a printed page number visible in the document. The worker assigns the original PDF page number independently. If a question or passage continues across pages, use its first page number and preserve all continued text. Blank pages produce no items.`;}
 
+function validateExtractedItem(item:any){
+ const payload=item?.payload&&typeof item.payload==="object"?item.payload:item;
+ if(item.item_kind==="question" && !String(payload.question_text||"").trim() && !(Array.isArray(payload.subquestions)&&payload.subquestions.length))
+  throw new Error("Question item has no question text or subquestions; staging was blocked.");
+ if(item.item_kind==="passage"){
+  const passage=String(payload.passage_text||"").trim();
+  if(!passage)throw new Error("Passage item has no passage_text; staging was blocked.");
+  if(passage.toLowerCase().includes("[content from") || passage.toLowerCase().includes("appears to contain text beginning"))
+   throw new Error("Passage contains explanatory placeholder text instead of source transcription; staging was blocked.");
+ }
+}
 function normalizePayload(item:any,page:number){
  const payload=item.payload&&typeof item.payload==="object"?{...item.payload}:{raw:item};
  if(item.item_kind!=="question")return payload;
@@ -176,7 +187,7 @@ Deno.serve(async(req)=>{
    const parsed=parseSavedResponse(request.response_payload);
    let savedCount=0;
    for(let i=0;i<(parsed.items||[]).length;i++){
-    const item=parsed.items[i];if(!item||!["question","passage"].includes(item.item_kind))continue;
+    const item=parsed.items[i];if(!item||!["question","passage"].includes(item.item_kind))continue;validateExtractedItem(item);
     const reportedPage=Number(item.page_number);
     if(BATCH===1 && reportedPage!==1)throw new Error("AI returned a non-local page number for a single-page request. The response is retained, but staging is blocked to prevent incorrect page attribution.");
     const page=first;
