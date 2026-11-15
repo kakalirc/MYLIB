@@ -142,15 +142,15 @@ async function searchInBatches(sources: any[], query: string, batchSize = 4) {
         const successful = attempts.filter((x) => !x.error);
         const failed = attempts.filter((x) => x.error);
         if (!successful.length) throw new Error(failed.map((x) => x.error).join(" · "));
-        return { source, rows: successful.flatMap((x) => x.rows), error: failed.length
-          ? "Partial provider failures: " + failed.map((x) => x.error).join(" · ") : "" };
+        return { source, rows: successful.flatMap((x) => x.rows), successfulQueries: successful.length,
+          error: failed.length ? source.domain + ": Partial provider failures: " + failed.map((x) => x.error).join(" · ") : "" };
       } catch (e) {
         return { source, rows: [], error: source.domain + ": " + clip((e as Error)?.message || e, 220) };
       }
     }));
     for (const item of settled) {
       if (item.error) errors.push(item.error);
-      else successfulQueries++;
+      successfulQueries += Number((item as any).successfulQueries || (!item.error ? 1 : 0));
       for (const row of item.rows) results.push({ ...row, source: item.source });
     }
   }
@@ -678,14 +678,15 @@ Deno.serve(async (req) => {
     }
     // Preserve one audit row per checked source attempt, including zero-result and failed checks.
     const sourceAuditRows: any[] = batch.map((source: any) => {
-      const matching = batchRows.filter((row: any) => row.source?.id === source.id);
+      const matching = batchRows.filter((row: any) => row.source?.id === source.id &&
+        (!!row.archive_member || /\\.pdf(?:$|[?#])/i.test(String(row.url || ""))));
       const sourceError = providerErrors.find((message) => message.startsWith(source.domain + ":"));
-      const partialError = providerErrors.find((message) => message.startsWith(source.domain + ":"));
+      const partialError = sourceError;
       return {
         discovery_run_id: runId, source_id: source.id, domain: source.domain,
         display_name: source.display_name, source_type: source.source_type,
         source_classification: "approved",
-        outcome: sourceError ? "provider_error" : (matching.length ? "pdf_found" : "no_matching_pdf"),
+        outcome: matching.length ? "pdf_found" : (sourceError ? "provider_error" : "no_matching_pdf"),
         pdf_count: matching.length,
         provider: "DuckDuckGo/Bing RSS + source-specific crawler",
         evidence: {
