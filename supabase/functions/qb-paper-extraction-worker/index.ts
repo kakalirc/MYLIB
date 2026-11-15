@@ -127,7 +127,7 @@ Deno.serve(async(req)=>{
      input_tokens:usage.inputTokens,output_tokens:usage.outputTokens,
      input_cost_usd:usage.inputCostUsd,output_cost_usd:usage.outputCostUsd,total_cost_usd:usage.totalCostUsd});
    }else if(request.input_tokens==null||request.output_tokens==null||request.total_cost_usd==null){
-    accountingWarning("usage_reconstruction","Saved response has no recoverable usage fields; extraction will continue without verified cost.",request.chunk_key);
+    await accountingWarning("usage_reconstruction","Saved response has no recoverable usage fields; extraction will continue without verified cost.",request.chunk_key);
    }
   }
   const ambiguousRequests=(requests||[]).filter((x:any)=>["sent","uncertain"].includes(x.request_state));
