@@ -45,7 +45,7 @@ function parseSavedResponse(payload:any){
 }
 function prompt(a:number,z:number){return `Extract ONLY examinable questions and their source passages from PDF fragment pages ${a}-${z}. Accuracy and completeness are both essential. Transcribe every legible question, option, subpart, mark and relevant instruction exactly in the source language. Never invent, paraphrase, answer, translate or silently omit unclear content; mark uncertain text with [unclear] and explain it in extraction_notes.
 
-Return ONLY JSON: {"items":[...]}. Allowed item_kind values are ONLY "question" and "passage". NEVER emit headers, paper titles, page furniture, section headings, general instructions, marks summaries, or images as standalone items. Preserve section names, shared instructions and marks as metadata on the relevant question.
+Return ONLY JSON using this exact outer structure: {"items":[{"item_kind":"question"|"passage","page_number":1,"original_number":null,"parent_item_key":null,"payload":{...}}]}. Every item MUST have a non-empty payload object. Put all question/passage content fields inside payload; keep only item_kind, page_number, original_number and parent_item_key outside payload. Allowed item_kind values are ONLY "question" and "passage". NEVER emit headers, paper titles, page furniture, section headings, general instructions, marks summaries, or images as standalone items. Preserve section names, shared instructions and marks as metadata on the relevant question.
 
 PASSAGES: Emit each complete unseen/comprehension/source passage once as one passage item with passage_text, passage_type, original_number and page_number. Preserve paragraph breaks. Questions that refer to it must set parent_item_key to that passage original_number exactly.
 
