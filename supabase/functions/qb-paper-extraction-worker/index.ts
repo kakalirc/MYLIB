@@ -6,6 +6,7 @@ import { PDFDocument } from "npm:pdf-lib@1.17.1";
 import { parseQuestionItems } from "./response_parser.ts";
 import { readAnthropicUsage } from "./usage_reconciliation.ts";
 import { assessExtractionQuality, formatOption } from "./quality_validation.ts";
+import { auditExtractedPage } from "./page_completeness.ts";
 
 const MODEL=Deno.env.get("QB_EXTRACTION_MODEL")||"claude-haiku-4-5";
 const PRICING:Record<string,{input:number;output:number;source:string}>={
@@ -208,7 +209,7 @@ Deno.serve(async(req)=>{
    }
    const {error:pageRepairError}=await db.from("qb_paper_extraction_pages").update({
     page_state:"completed",page_kind:"mixed",completed_at:request.responded_at||new Date().toISOString(),
-    error_message:null,page_metadata:{chunk_key:chunk,staged_items:savedCount,recovered_from_saved_response:true}
+    error_message:null,page_metadata:{chunk_key:chunk,staged_items:savedCount,recovered_from_saved_response:true,extraction_audit:auditExtractedPage((parsed.items||[]).filter((item:any)=>item&&["question","passage"].includes(item.item_kind)).map((item:any)=>({item_kind:item.item_kind,original_number:item.original_number,payload:item.payload&&typeof item.payload==="object"?item.payload:item}))),audit_version:1}
    }).eq("run_id",runId).gte("page_number",first).lte("page_number",last);
    if(pageRepairError)throw new Error("Could not repair page checkpoints from the saved provider response.");
   }
@@ -328,7 +329,7 @@ Deno.serve(async(req)=>{
     if(se)throw new Error("Could not save staged item; saved provider response will be reused on resume.");
     staged++;
    }
-   const {error:pu}=await db.from("qb_paper_extraction_pages").update({page_state:"completed",page_kind:"mixed",completed_at:new Date().toISOString(),page_metadata:{chunk_key:chunk,staged_items:staged}}).eq("run_id",runId).gte("page_number",first).lte("page_number",last);
+   const {error:pu}=await db.from("qb_paper_extraction_pages").update({page_state:"completed",page_kind:"mixed",completed_at:new Date().toISOString(),page_metadata:{chunk_key:chunk,staged_items:staged,extraction_audit:auditExtractedPage((parsed.items||[]).filter((item:any)=>item&&["question","passage"].includes(item.item_kind)).map((item:any)=>({item_kind:item.item_kind,original_number:item.original_number,payload:item.payload&&typeof item.payload==="object"?item.payload:item}))),audit_version:1}}).eq("run_id",runId).gte("page_number",first).lte("page_number",last);
    if(pu)throw new Error("Could not save page checkpoints; saved response will be reused on resume.");
    const {data:checkpointLease,error:checkpointLeaseError}=await db.rpc("qb_renew_extraction_worker",{p_run_id:runId,p_lease_owner:owner,p_lease_seconds:900});
    if(checkpointLeaseError||checkpointLease!==true)throw new Error("Worker lease was lost after saving this batch; the saved provider response and page checkpoints will be reused on resume.");
