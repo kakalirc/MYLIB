@@ -42,7 +42,7 @@ export function isQuestionPaperPdf(row: any, query: string): boolean {
   let parsed: URL;
   try { parsed = new URL(String(row.url || "")); } catch { return false; }
   if (parsed.protocol !== "https:" || parsed.username || parsed.password ||
-      !isValidDiscoveredDomain(parsed.hostname.toLowerCase().replace(/^www\\./, ""))) return false;
+      !isValidDiscoveredDomain(parsed.hostname.toLowerCase())) return false;
   if (row.archive_member) return true;
   if (!parsed.pathname.toLowerCase().endsWith(".pdf")) return false;
   const evidence = [row.title, row.snippet, row.url].join(" ").toLowerCase();
