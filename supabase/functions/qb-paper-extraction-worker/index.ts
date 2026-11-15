@@ -368,6 +368,12 @@ Deno.serve(async(req)=>{
   const skippedPages=(finalPageStates||[]).filter((p:any)=>p.page_state==="skipped").map((p:any)=>p.page_number);
   const {count:finalStagedTotal,error:finalStagedCountError}=await db.from("qb_paper_extraction_staging").select("id",{count:"exact",head:true}).eq("run_id",runId);
   if(finalStagedCountError)throw new Error("Could not count the final durable staged items.");
+  const {error:finalAccountingError}=await db.from("qb_paper_extraction_runs").update({
+   input_tokens:input,output_tokens:output,actual_cost_usd:totalCost,estimated_cost_usd:totalCost,cost_budget_reserved_usd:totalCost
+  }).eq("id",runId).eq("lease_owner",owner);
+  if(finalAccountingError)return reply(200,{ok:true,run_id:runId,status:"processing",stage:"accounting_reconciliation",accounting_blocked:true,
+   warning_message:"All page responses are saved, but the final run-level usage totals could not be reconciled. Resume this run to rebuild totals from its immutable request ledger before completion.",
+   accounting_warnings:accountingWarnings,questions_published:0});
   const {data:doneState,error:done}=await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"completed",p_ai_request_state:"responded",p_error_message:null});
   if(done||!doneState?.ok)throw new Error("All page responses are saved but run finalisation failed because the worker lease is no longer valid; resume to reconcile.");
   await db.from("qb_paper_extraction_runs").update({current_stage:"review",input_tokens:input,output_tokens:output,actual_cost_usd:totalCost,estimated_cost_usd:totalCost,cost_budget_reserved_usd:totalCost,accounting_warnings:accountingWarnings, error_message:skippedPages.length?`Unresolved provider outcome; pages skipped: ${skippedPages.join(", ")}.`:null,lease_owner:null,lease_expires_at:null,heartbeat_at:new Date().toISOString(),last_checkpoint_at:new Date().toISOString()}).eq("id",runId).eq("lease_owner",owner);
