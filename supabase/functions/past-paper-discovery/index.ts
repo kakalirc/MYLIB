@@ -710,7 +710,7 @@ Deno.serve(async (req) => {
         (r.domain === s.domain || r.domain.endsWith("." + s.domain)));
       const disabled = registry.find((s: any) => !s.enabled &&
         (r.domain === s.domain || r.domain.endsWith("." + s.domain)));
-      return { ...r, source: matched || null, disabledSource: disabled || null, pdf_search_hint: true };
+      return { ...r, source: matched || null, disabledSource: disabled || null, pdf_search_hint: /\\.pdf(?:$|[?#])/i.test(r.url) };
     })];
     const disabledRows = allRows.filter((row) => row.disabledSource);
     const rows = allRows.filter((row) => !row.disabledSource);
