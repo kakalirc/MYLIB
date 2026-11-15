@@ -657,7 +657,7 @@ Deno.serve(async (req) => {
     const providerErrors: string[] = Array.isArray(progress.provider_errors) ? progress.provider_errors.slice(0, 80) : [];
     let successfulQueries = Math.max(0, Number(progress.successful_queries) || 0);
     let foundTotal = Math.max(0, Number(progress.results_found) || 0);
-    let insertedTotal = Math.max(0, Number(progress.new_candidates) || 0);
+    let insertedTotal = 0;
     const batchRows: any[] = [];
 
     // One registered domain per invocation keeps each Edge Function execution bounded.
