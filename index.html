@@ -25734,13 +25734,14 @@ async function qbCheckSourcePaperExtraction(id) {
       qbExtractionResults[id] = { ok: true, stage: 'none', message: 'No previous extraction run exists for this paper.' };
     } else {
       const run = result.run;
-      const isUncertain = run.status === 'uncertain' || (run.ai_request_state === 'uncertain' && run.status !== 'processing');
+      const canContinueAmbiguous = run.current_stage === 'page_extraction' && run.ai_request_state === 'uncertain';
+      const isUncertain = !canContinueAmbiguous && (run.status === 'uncertain' || run.ai_request_state === 'uncertain');
       const alreadyReconciled = !!run.admin_reconciled_at;
       qbExtractionResults[id] = { ok: true, runId: run.id, stage: run.current_stage, runStatus: run.status, aiRequestState: run.ai_request_state, reconciled: alreadyReconciled, reconciliationRequired: isUncertain && !alreadyReconciled, message: 'Saved extraction run: ' + run.status + ' · ' + run.current_stage + (run.actual_cost_usd != null ? ' · Cost ' + Number(run.actual_cost_usd).toFixed(6) + ' USD' : '') + (run.cost_budget_usd != null ? ' / ' + Number(run.cost_budget_usd).toFixed(2) + ' budget' : '') + '.' };
       if (isUncertain && alreadyReconciled) qbExtractionResults[id].message += ' This uncertain attempt was explicitly reconciled; a new run may be prepared.';
       else if (isUncertain) qbExtractionResults[id].message += ' Provider outcome needs Admin reconciliation; it will not be resent.';
       else if (run.status === 'completed' && ['review','finished'].includes(run.current_stage)) review = true;
-      else if (['queued','processing'].includes(run.status)) resume = true;
+      else if (['queued','processing'].includes(run.status) || canContinueAmbiguous) resume = true;
       else if (run.status === 'failed' && run.ai_request_state === 'not_sent') qbExtractionResults[id].message += ' No provider request was sent; a new preflight attempt is safe.';
     }
   } catch (error) {
