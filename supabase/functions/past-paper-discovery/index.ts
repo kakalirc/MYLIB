@@ -574,7 +574,7 @@ Deno.serve(async (req) => {
           source_type: source?.source_type || (run.filters?.scope === "school" ? "school" : "education_portal"),
           source_domain: domain, title: clip(row.title || url.pathname.split("/").pop() || domain, 500),
           source_url: url.href, pdf_url: url.href, discovered_school_name: clip(run.filters?.school_name || "", 200) || null,
-          verification_status: "not_checked", status: "new",
+          verification_status: "unverified", status: "discovered",
           discovery_metadata: { source_match: source ? "approved_registry" : "unregistered_domain",
             source_name: clip(row.source_name || domain, 200), search_provider: clip(row.search_provider || "Web search", 80),
             snippet: clip(row.snippet || "", 1200), pdf_search_hint: true, collected_from_search: true },
