@@ -526,9 +526,10 @@ Deno.serve(async (req) => {
           .select("id").eq("discovery_run_id", runId);
         if (countError) return reply(500, { error: "Could not inspect existing candidates before restart: " + countError.message });
         const preservedCount = priorCandidates?.length || 0;
-        const resetFilters = { ...existing.filters, discovery_progress: {
+        const resetFilters = { ...existing.filters, source_snapshot: null, discovery_progress: {
           next_offset: 0, successful_queries: 0, provider_errors: [],
           results_found: preservedCount, new_candidates: 0,
+          previously_seen_pdf_urls: 0, discovered_source_count: 0,
         } };
         const { data: restarted, error: restartError } = await admin.from("qb_paper_discovery_runs")
           .update({ status: "running", filters: resetFilters, results_found: preservedCount,
@@ -569,11 +570,19 @@ Deno.serve(async (req) => {
       }
     }
 
-    const { data: sources, error: sourceError } = await admin.from("qb_paper_discovery_sources")
-      .select("id,display_name,domain,source_type,trust_level,priority,enabled")
-      .order("priority").limit(300);
-    if (sourceError) return reply(500, { error: "Could not load approved source registry: " + sourceError.message });
-    const registry = sources || [];
+    let registry: any[] = Array.isArray(run.filters?.source_snapshot) ? run.filters.source_snapshot : [];
+    if (!Array.isArray(run.filters?.source_snapshot)) {
+      const { data: sources, error: sourceError } = await admin.from("qb_paper_discovery_sources")
+        .select("id,display_name,domain,source_type,trust_level,priority,enabled")
+        .order("priority").limit(300);
+      if (sourceError) return reply(500, { error: "Could not load approved source registry: " + sourceError.message });
+      registry = sources || [];
+      const snapshotFilters = { ...run.filters, source_snapshot: registry };
+      const { error: snapshotError } = await admin.from("qb_paper_discovery_runs")
+        .update({ filters: snapshotFilters }).eq("id", runId);
+      if (snapshotError) return reply(500, { error: "Could not preserve the source snapshot for this run: " + snapshotError.message });
+      run.filters = snapshotFilters;
+    }
     const eligible = registry.filter((s: any) => s.enabled &&
       (s.source_type === scope || s.source_type === "education_portal"));
     const searchTargets = scope === "school"
@@ -679,6 +688,20 @@ Deno.serve(async (req) => {
       }
       inserted = data?.length || 0;
     }
+    // Link both new and previously known URLs to this run without changing the
+    // candidate's original discovery_run_id or its historical provenance.
+    const candidateUrls = flattened.slice(0, 80).map((row) => String(row.url));
+    if (candidateUrls.length) {
+      const { data: runCandidates, error: runCandidateError } = await admin.from("qb_paper_discovery_candidates")
+        .select("id,source_url").in("source_url", candidateUrls);
+      if (runCandidateError) return reply(500, { error: "PDF candidates were saved, but run membership could not be loaded: " + runCandidateError.message });
+      const links = (runCandidates || []).map((candidate: any) => ({ discovery_run_id: runId, candidate_id: candidate.id }));
+      if (links.length) {
+        const { error: linkError } = await admin.from("qb_paper_discovery_run_candidates")
+          .upsert(links, { onConflict: "discovery_run_id,candidate_id", ignoreDuplicates: true });
+        if (linkError) return reply(500, { error: "PDF candidates were saved, but run membership could not be recorded: " + linkError.message });
+      }
+    }
     // Preserve one audit row per checked source attempt, including zero-result and failed checks.
     const sourceAuditRows: any[] = batch.map((source: any) => {
       const matching = batchRows.filter((row: any) => row.source?.id === source.id &&
@@ -746,7 +769,8 @@ Deno.serve(async (req) => {
 
     foundTotal += flattened.length;
     insertedTotal += inserted;
-    const previouslySeenTotal = Math.max(0, Number(progress.previously_seen_pdf_urls) || 0) + Math.max(0, flattened.length - inserted);
+    const previouslySeenTotal = Math.max(0, Number(progress.previously_seen_pdf_urls) || 0)
+      + Math.max(0, Math.min(flattened.length, 80) - inserted);
     const discoveredSourceTotal = Math.max(0, Number(progress.discovered_source_count) || 0) + discoveredCounts.size;
     const nextProgress = { next_offset: nextOffset, successful_queries: successfulQueries,
       provider_errors: providerErrors.slice(0, 80), results_found: foundTotal, new_candidates: insertedTotal,
