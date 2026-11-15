@@ -161,24 +161,25 @@
       + '<select id="ppd-scope" onchange="libPPDSetScope(this.value)"><option value="board"' + (state.scope === 'board' ? ' selected' : '') + '>Board papers</option><option value="school"' + (state.scope === 'school' ? ' selected' : '') + '>Individual school papers</option></select>'
       + '<input id="ppd-query" placeholder="e.g. CBSE Class 10 Sanskrit question paper 2025" value="' + esc(state.lastQuery || '') + '">'
       + '<input id="ppd-school-name" placeholder="School name (optional)" value="' + esc(state.lastSchool || '') + '">'
-      + '<button class="btn-small btn-primary" onclick="libPPDSearch()" ' + (state.searchBusy ? 'disabled' : '') + '>' + (state.searchBusy ? 'Pre-Searching…' : ('Run Pre-Search')) + '</button></div>'
-      + '<p class="hint">Pre-Search uses PDF-focused queries and records source outcomes. It only displays possible PDF records temporarily; it never creates candidates or a review queue.</p>'
+      + '<button class="btn-small btn-primary" onclick="libPPDSearch()" ' + (state.searchBusy ? 'disabled' : '') + '>' + (state.searchBusy ? 'Searching…' : ('Search')) + '</button></div>'
+      + '<p class="hint">Search uses PDF-focused queries and records source outcomes. Results are saved with this run. Search does not download or verify PDFs or create review-queue records.</p>'
       + (state.message ? '<div class="hint" style="color:' + (state.error ? 'var(--brick)' : 'var(--forest)') + ';margin:8px 0">' + esc(state.message) + '</div>' : '') + '</div>';
-    var preview = state.previewRows.length ? '<div class="lib-ppd-section"><h3>Temporary Pre-Search preview (' + state.previewRows.length + ' records)</h3><p class="hint">These are search-result examples only. They are not saved as candidates, added to a review queue, downloaded or imported.</p>' + state.previewRows.map(function (r) { return '<div class="lib-ppd-source"><div><b>' + esc(r.title || 'Untitled PDF') + '</b><div class="hint">' + esc(r.domain) + ' · ' + esc(r.source_name || r.source_match) + ' · ' + esc(r.search_provider) + '</div>' + (r.snippet ? '<div class="hint">' + esc(r.snippet) + '</div>' : '') + '</div><a class="btn-small" href="' + esc(r.url) + '" target="_blank" rel="noopener noreferrer">Open PDF</a></div>'; }).join('') + '</div>' : '';
+    var preview = state.previewRows.length ? '<div class="lib-ppd-section"><h3>Search results preview (' + state.previewRows.length + ' records)</h3><p class="hint">These are saved results from this search. They are not candidates or review-queue records until you choose Collect.</p>' + state.previewRows.map(function (r) { return '<div class="lib-ppd-source"><div><b>' + esc(r.title || 'Untitled PDF') + '</b><div class="hint">' + esc(r.domain) + ' · ' + esc(r.source_name || r.source_match) + ' · ' + esc(r.search_provider) + '</div>' + (r.snippet ? '<div class="hint">' + esc(r.snippet) + '</div>' : '') + '</div><a class="btn-small" href="' + esc(r.url) + '" target="_blank" rel="noopener noreferrer">Open PDF</a></div>'; }).join('') + '</div>' : '';
     var preSearchSummary = '';
     if (state.latestPreSearch) {
       var estimate = state.latestPreSearch;
       var warnings = estimate.provider_errors && estimate.provider_errors.length
         ? '<p class="hint" style="color:var(--brick)">Partial search: ' + esc(estimate.provider_errors.length) + ' provider/source warning(s). Retry before treating this estimate as complete.</p>' : '';
-      if (estimate.unprocessed_pdf_links > 0) warnings += '<p class="hint" style="color:var(--brick)">' + esc(estimate.unprocessed_pdf_links) + ' additional matching PDF links exceeded the per-batch safety cap and were not queued. Narrow the criteria and run another Pre-Search.</p>';
-      preSearchSummary = '<div class="lib-ppd-section lib-ppd-estimate"><h3>Pre-Search estimate</h3><div class="lib-ppd-estimate-grid">'
+      if (estimate.unprocessed_pdf_links > 0) warnings += '<p class="hint" style="color:var(--brick)">' + esc(estimate.unprocessed_pdf_links) + ' additional matching PDF links exceeded the per-batch safety cap and were not queued. Narrow the criteria and run another Search.</p>';
+      preSearchSummary = '<div class="lib-ppd-section lib-ppd-estimate"><h3>Search summary</h3><div class="lib-ppd-estimate-grid">'
         + '<div><b>' + esc(estimate.pdfs_found || 0) + '</b><span>Potential PDFs found</span></div>'
         + '<div><b>' + esc(state.previewRows.length || 0) + '</b><span>Preview records shown</span></div>'
         + '<div><b>0</b><span>Records created in review queue</span></div>'
         + '<div><b>' + esc(estimate.discovered_source_count || 0) + '</b><span>New domains surfaced</span></div></div>'
         + '<p class="hint">This is a search estimate, not a count of confirmed papers. No PDF is downloaded and no review-queue record is created.</p>'
         + warnings
-        + '</div>';
+        + '<button class="btn-small btn-primary" type="button" onclick="libPPDCollectRun(\'' + esc(estimate.run_id) + '\')" ' + (state.searchBusy || estimate.collectionComplete ? 'disabled' : '') + '>Collect saved results</button>'
+        + '</div>'
     }
     var sourceAudit = '<details class="lib-ppd-section lib-ppd-recent-searches"><summary>Source Intelligence · Search history (' + state.auditRows.length + ' records)</summary>'
       + (state.loadErrors['source audit history'] ? '<p class="hint" style="color:var(--brick)">Could not load source audit history: ' + esc(state.loadErrors['source audit history']) + '</p>' : (state.auditRows.length ? state.auditRows.map(function (a) {
@@ -193,7 +194,7 @@
           return '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">PDF ' + (index + 1) + '</a>';
         }).join(' · ') + '</div>' : '';
         return '<div class="lib-ppd-source"><div><b>' + esc(a.display_name || a.domain) + '</b><div class="hint">' + esc(a.domain) + ' · ' + esc(a.source_classification) + ' · ' + esc(outcomeLabel) + ' · ' + esc(a.pdf_count) + ' potential PDFs · ' + esc(new Date(a.checked_at).toLocaleString()) + '</div><div class="hint">Search: ' + esc(runLabel) + '</div>' + pdfLinks + '</div>' + promote + '</div>';
-      }).join('') : '<p class="hint">Source audit records will appear after Pre-Search.</p>')
+      }).join('') : '<p class="hint">Source audit records will appear after Search.</p>')
       + (state.auditRows.length >= state.auditLimit ? '<button class="btn-small" type="button" onclick="libPPDLoadMoreAudit()">Load older source history</button>' : '')) + '</details>';
     var runs = '<details class="lib-ppd-section lib-ppd-recent-searches"><summary>Recent searches</summary>' + (state.runs.length ? state.runs.map(function (r) {
       var progress = r.filters && r.filters.discovery_progress ? r.filters.discovery_progress : {};
@@ -254,8 +255,8 @@
         unprocessed_pdf_links:Number(result.unprocessed_pdf_links || 0),
         discovered_source_count:Number(result.discovered_source_count || 0),
         provider_errors:result.provider_errors || [] };
-      state.message = 'Pre-Search complete: ' + state.latestPreSearch.pdfs_found + ' potential PDFs found; '
-        + state.previewRows.length + ' temporary preview records shown; no review-queue records created; '
+      state.message = 'Search complete: ' + state.latestPreSearch.pdfs_found + ' potential PDFs found; '
+        + state.previewRows.length + ' saved search results shown; no review-queue records created; '
         + state.latestPreSearch.discovered_source_count + ' new source domains identified.'
         + (result.provider_errors && result.provider_errors.length ? ' Some sources/providers need retry; see Source Intelligence.' : '');
       state.loaded = false; await loadData(true);
@@ -265,15 +266,16 @@
 
   window.libPPDCollectRun = async function (runId) {
     if (state.searchBusy || !runId) return;
-    state.searchBusy = true; state.error = ''; state.message = 'Preparing Primary Collection…';
+    state.searchBusy = true; state.error = ''; state.message = 'Collecting saved search results…';
     if (typeof render === 'function') render();
     try {
+      var promotion = await invoke({ action:'collect', run_id:runId });
       var runLinks = await sb.from('qb_paper_discovery_run_candidates').select('candidate_id')
         .eq('discovery_run_id', runId);
       if (runLinks.error) throw runLinks.error;
       var candidateIds = (runLinks.data || []).map(function (row) { return row.candidate_id; });
       if (!candidateIds.length) {
-        state.message = 'No PDF candidates are linked to this Pre-Search. Check the search diagnostics or broaden the criteria.';
+        state.message = 'No eligible candidates were created. ' + (promotion.skipped || 0) + ' result(s) were skipped.';
         return;
       }
       var loaded = await sb.from('qb_paper_discovery_candidates').select('id,title,verification_status,status')
@@ -284,20 +286,20 @@
           ['verified','duplicate'].indexOf(c.verification_status) < 0;
       });
       if (!candidates.length) {
-        state.message = 'All PDFs linked to this Pre-Search have already been verified or processed.';
+        state.message = 'All PDFs linked to this Search have already been verified or processed.';
         if (state.latestPreSearch && state.latestPreSearch.run_id === runId) state.latestPreSearch.collectionComplete = true;
         return;
       }
       var verified = 0, duplicates = 0, failed = 0;
       for (var i = 0; i < candidates.length; i++) {
-        state.message = 'Primary Collection · verifying PDF ' + (i + 1) + ' of ' + candidates.length + ': ' + candidates[i].title;
+        state.message = 'Collection · verifying PDF ' + (i + 1) + ' of ' + candidates.length + ': ' + candidates[i].title;
         if (typeof render === 'function') render();
         try {
           var result = await invoke({ action:'verify', candidate_id:candidates[i].id });
           if (result.duplicate) duplicates++; else if (result.verified) verified++; else failed++;
         } catch (e) { failed++; }
       }
-      state.message = 'Primary Collection finished: ' + verified + ' verified PDFs, ' + duplicates
+      state.message = 'Collection finished: ' + Number(promotion.created || 0) + ' new candidates; ' + verified + ' verified PDFs, ' + duplicates
         + ' exact duplicates, ' + failed + ' requiring attention. No papers were imported or published.';
       state.loaded = false; await loadData(true);
       if (state.latestPreSearch && state.latestPreSearch.run_id === runId) state.latestPreSearch.collectionComplete = true;
