@@ -27,6 +27,13 @@ Deno.serve(async(req)=>{
   if(saveError||!saved)return reply(500,{error:"Could not save extraction settings."});
   return reply(200,{ok:true,settings:{max_pdf_mb:saved.max_pdf_mb,max_pages:saved.max_pages,budget_usd:Number(saved.budget_usd)}});
  }
+ if(action==="reset_source_paper"){
+  const sourceId=String(body.source_paper_id||"");
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sourceId))return reply(400,{error:"Valid source_paper_id required."});
+  const {data:reset,error:resetError}=await db.rpc("qb_reset_paper_extraction",{p_source_paper_id:sourceId,p_admin_id:auth.user.id});
+  if(resetError||!reset?.ok)return reply(409,{error:resetError?.message||"The paper reset was not completed."});
+  return reply(200,reset);
+ }
  if(action==="latest"){
   const sourceId=String(body.source_paper_id||"");
   if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sourceId))return reply(400,{error:"Valid source_paper_id required."});
