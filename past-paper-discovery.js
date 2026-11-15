@@ -26,7 +26,9 @@
         sb.from('qb_paper_discovery_sources').select('*').order('priority').order('display_name'),
         sb.from('qb_schools').select('id,name,archived').eq('archived', false).order('name'),
         sb.from('qb_paper_discovery_runs').select('*').order('started_at', {ascending:false}).limit(8),
-        sb.from('qb_paper_discovery_run_sources').select('*').order('checked_at', {ascending:false}).limit(state.auditLimit)
+        sb.from('qb_paper_discovery_run_sources').select('*').order('checked_at', {ascending:false}).limit(state.auditLimit),
+        sb.from('qb_paper_discovery_candidates').select('*').neq('status', 'rejected').order('discovered_at', {ascending:false}).limit(100),
+        sb.from('qb_paper_discovery_candidates').select('*').eq('status', 'rejected').order('reviewed_at', {ascending:false}).limit(100)
       ];
       var results = await Promise.all(queries.map(function (query) {
         return query.then(function (result) { return result; }).catch(function (error) { return {data:null, error:error}; });
@@ -35,9 +37,11 @@
         function (data) { state.sources = data || []; },
         function (data) { state.schools = data || []; },
         function (data) { state.runs = data || []; },
-        function (data) { state.auditRows = data || []; }
+        function (data) { state.auditRows = data || []; },
+        function (data) { state.candidates = data || []; },
+        function (data) { state.rejectedCandidates = data || []; }
       ];
-      var labels = ['approved sources', 'school directory', 'recent searches', 'source audit history'];
+      var labels = ['approved sources', 'school directory', 'recent searches', 'source audit history', 'discovered papers', 'rejected papers'];
       results.forEach(function (result, index) {
         if (result && result.error) state.loadErrors[labels[index]] = result.error.message || String(result.error);
         else setters[index](result && result.data);
@@ -207,7 +211,7 @@
     return '<section class="lib-ppd"><style>'
       + '.lib-ppd{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}.lib-ppd-recent-searches{border:1px solid var(--line);border-radius:9px;padding:10px 12px}.lib-ppd-recent-searches>summary{cursor:pointer;font-weight:700;list-style:disclosure-closed}.lib-ppd-recent-searches[open]>summary{margin-bottom:10px;list-style:disclosure-open}.lib-ppd-queue-tabs{display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:14px 0 10px}.lib-ppd-queue-tab{border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;background:var(--surface);color:var(--ink);padding:9px 13px;cursor:pointer;font:inherit}.lib-ppd-queue-tab.active{background:var(--surface-2,var(--surface));font-weight:700;border-color:var(--accent,var(--line))}.lib-ppd-rejected{border-left:3px solid var(--brick,var(--line))}.lib-ppd h3{font-family:Zilla Slab,serif;margin:0 0 7px}.lib-ppd-section{margin:14px 0 20px}.lib-ppd-approved-sources{border:1px solid var(--line);border-radius:9px;padding:10px 12px}.lib-ppd-approved-sources>summary{cursor:pointer;font-weight:700;list-style:disclosure-closed}.lib-ppd-approved-sources[open]>summary{margin-bottom:10px;list-style:disclosure-open}.lib-ppd-search,.lib-ppd-source-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.lib-ppd-search input{flex:1;min-width:190px}.lib-ppd-search select,.lib-ppd-search input,.lib-ppd-source-form input,.lib-ppd-source-form select,.lib-ppd-meta input,.lib-ppd-meta select{min-height:38px;padding:7px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);box-sizing:border-box}.lib-ppd-source-form input{flex:1;min-width:170px}.lib-ppd-source{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line)}.lib-ppd-candidate{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}.lib-ppd-review-layout{display:grid;grid-template-columns:minmax(0,0.9fr) minmax(0,1.1fr);gap:16px;align-items:start}.lib-ppd-review-summary,.lib-ppd-review-fields{min-width:0}.lib-ppd-review-fields{border-left:1px solid var(--line);padding-left:16px}.lib-ppd-candidate-head,.lib-ppd-title,.lib-ppd-actions{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}.lib-ppd-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:0}.lib-ppd-meta label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);font-weight:700}.lib-ppd-meta input,.lib-ppd-meta select{width:100%}.lib-ppd-actions{justify-content:flex-start;margin-top:10px}.lib-ppd-domain-approval{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}.lib-ppd-domain-approval select{min-height:34px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink)}.lib-ppd p.hint{margin:5px 0 10px}@media(max-width:700px){.lib-ppd-review-layout{grid-template-columns:minmax(0,1fr)}.lib-ppd-review-fields{border-left:0;border-top:1px solid var(--line);padding:12px 0 0}.lib-ppd-search,.lib-ppd-source-form{align-items:stretch}.lib-ppd-search>* ,.lib-ppd-source-form>*{width:100%;min-width:0}.lib-ppd-candidate-head{align-items:flex-start}}'
       + '.lib-ppd-estimate{border:1px solid var(--line);border-radius:9px;padding:12px}.lib-ppd-estimate-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.lib-ppd-estimate-grid>div{background:var(--surface-2,var(--surface));border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:3px}.lib-ppd-estimate-grid b{font-size:22px}.lib-ppd-estimate-grid span{font-size:11px;color:var(--muted)}@media(max-width:700px){.lib-ppd-estimate-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}'
-      + '</style>' + search + preSearchSummary + preview + sources + sourceAudit + runs + '</section>';
+      + '</style>' + search + preSearchSummary + preview + renderQueueTabs() + sources + sourceAudit + runs + '</section>';
   }
 
   window.libPPDLoadMoreAudit = async function () {
@@ -270,40 +274,12 @@
     state.searchBusy = true; state.error = ''; state.message = 'Collecting saved search results…';
     if (typeof render === 'function') render();
     try {
-      var promotion = await invoke({ action:'collect', run_id:runId });
-      var runLinks = await sb.from('qb_paper_discovery_run_candidates').select('candidate_id')
-        .eq('discovery_run_id', runId);
-      if (runLinks.error) throw runLinks.error;
-      var candidateIds = (runLinks.data || []).map(function (row) { return row.candidate_id; });
-      if (!candidateIds.length) {
-        state.message = 'No eligible candidates were created. ' + (promotion.skipped || 0) + ' result(s) were skipped.';
-        return;
-      }
-      var loaded = await sb.from('qb_paper_discovery_candidates').select('id,title,verification_status,status')
-        .in('id', candidateIds).order('discovered_at', {ascending:true});
-      if (loaded.error) throw loaded.error;
-      var candidates = (loaded.data || []).filter(function (c) {
-        return ['rejected','duplicate','imported'].indexOf(c.status) < 0 &&
-          ['verified','duplicate'].indexOf(c.verification_status) < 0;
-      });
-      if (!candidates.length) {
-        state.message = 'All PDFs linked to this Search have already been verified or processed.';
-        if (state.latestPreSearch && state.latestPreSearch.run_id === runId) state.latestPreSearch.collectionComplete = true;
-        return;
-      }
-      var verified = 0, duplicates = 0, failed = 0;
-      for (var i = 0; i < candidates.length; i++) {
-        state.message = 'Collection · verifying PDF ' + (i + 1) + ' of ' + candidates.length + ': ' + candidates[i].title;
-        if (typeof render === 'function') render();
-        try {
-          var result = await invoke({ action:'verify', candidate_id:candidates[i].id });
-          if (result.duplicate) duplicates++; else if (result.verified) verified++; else failed++;
-        } catch (e) { failed++; }
-      }
-      state.message = 'Collection finished: ' + Number(promotion.created || 0) + ' new candidates; ' + verified + ' verified PDFs, ' + duplicates
-        + ' exact duplicates, ' + failed + ' requiring attention. No papers were imported or published.';
-      state.loaded = false; await loadData(true);
+      var result = await invoke({ action:'collect', run_id:runId });
+      state.message = 'Collection complete: ' + Number(result.created || 0) + ' new candidates; '
+        + Number(result.skipped || 0) + ' result(s) skipped. PDFs have not been downloaded or verified. '
+        + 'Use Verify PDF on each candidate when you are ready; import is available only after verification.';
       if (state.latestPreSearch && state.latestPreSearch.run_id === runId) state.latestPreSearch.collectionComplete = true;
+      state.loaded = false; await loadData(true);
     } catch (e) { state.message = e.message || String(e); state.error = state.message; }
     finally { state.searchBusy = false; if (typeof render === 'function') render(); }
   };
