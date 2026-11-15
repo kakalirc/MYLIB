@@ -18,6 +18,7 @@ const reply = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 const clip = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
 const MAX_PDF_BYTES = 50 * 1024 * 1024;
+const MAX_DISCOVERED_CANDIDATES_PER_BATCH = 300;
 const uuid = (v: unknown) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v ?? ""));
 
 function safeHost(url: URL, domains: string[]): boolean {
@@ -649,7 +650,7 @@ Deno.serve(async (req) => {
     // Search providers may ignore filetype operators. Never create a paper candidate
     // from an ordinary HTML result: only direct PDF URLs and verified PDF members qualify.
     const flattened = [...unique.values()].filter((r) => isQuestionPaperPdf(r, query));
-    const inserts = flattened.slice(0, 80).map((r) => ({
+    const inserts = flattened.slice(0, MAX_DISCOVERED_CANDIDATES_PER_BATCH).map((r) => ({
       discovery_run_id: runId, source_id: r.source?.id || null, source_type: scope,
       source_domain: r.domain, title: r.title, source_url: r.url,
       pdf_url: r.archive_member || /\.pdf(?:$|[?#])/i.test(r.url) ? r.url : null,
@@ -679,7 +680,7 @@ Deno.serve(async (req) => {
     }
     // Link both new and previously known URLs to this run without changing the
     // candidate's original discovery_run_id or its historical provenance.
-    const candidateUrls = flattened.slice(0, 80).map((row) => String(row.url));
+    const candidateUrls = flattened.slice(0, MAX_DISCOVERED_CANDIDATES_PER_BATCH).map((row) => String(row.url));
     if (candidateUrls.length) {
       const { data: runCandidates, error: runCandidateError } = await admin.from("qb_paper_discovery_candidates")
         .select("id,source_url").in("source_url", candidateUrls);
@@ -768,11 +769,14 @@ Deno.serve(async (req) => {
     foundTotal += flattened.length;
     insertedTotal += inserted;
     const previouslySeenTotal = Math.max(0, Number(progress.previously_seen_pdf_urls) || 0)
-      + Math.max(0, Math.min(flattened.length, 80) - inserted);
+      + Math.max(0, Math.min(flattened.length, MAX_DISCOVERED_CANDIDATES_PER_BATCH) - inserted);
+    const unprocessedPdfLinksTotal = Math.max(0, Number(progress.unprocessed_pdf_links) || 0)
+      + Math.max(0, flattened.length - MAX_DISCOVERED_CANDIDATES_PER_BATCH);
     const discoveredSourceTotal = Math.max(0, Number(progress.discovered_source_count) || 0) + discoveredDomainResults.size;
     const nextProgress = { next_offset: nextOffset, successful_queries: successfulQueries,
       provider_errors: providerErrors.slice(0, 80), results_found: foundTotal, new_candidates: insertedTotal,
-      previously_seen_pdf_urls: previouslySeenTotal, discovered_source_count: discoveredSourceTotal };
+      previously_seen_pdf_urls: previouslySeenTotal, unprocessed_pdf_links: unprocessedPdfLinksTotal,
+      discovered_source_count: discoveredSourceTotal };
     const update: any = { filters: { ...run.filters, discovery_progress: nextProgress },
       results_found: foundTotal, heartbeat_at: null,
       error_message: providerErrors.length ? clip(providerErrors.join(" | "), 1000) : null };
@@ -788,6 +792,7 @@ Deno.serve(async (req) => {
       found: foundTotal, pdfs_found: foundTotal, new_candidates: insertedTotal,
       estimated_new_candidates: insertedTotal,
       previously_seen_pdf_urls: previouslySeenTotal,
+      unprocessed_pdf_links: unprocessedPdfLinksTotal,
       approved_source_results: flattened.filter((r) => r.source).length,
       discovered_source_count: discoveredSourceTotal,
       provider: "Official board archive + DuckDuckGo fallback",
