@@ -25865,7 +25865,7 @@ function qbExtractionReviewHtml(id) {
   const normalize = value => String(value || '').toLocaleLowerCase().normalize('NFKC').replace(/\\s+/g, ' ').trim();
   const passageRows = rows.filter(x => x.item_kind === 'passage');
   const passageAliases = new Map();
-  passageRows.forEach(x => { [x.original_number, x.item_key].filter(Boolean).forEach(k => passageAliases.set(String(k), x)); });
+  passageRows.forEach((x, i) => { [x.original_number, x.item_key, x.payload?.original_number, x.payload?.passage_key, x.payload?.id, 'passage_' + (i + 1), 'passage-' + (i + 1), 'passage ' + (i + 1)].filter(Boolean).forEach(k => passageAliases.set(String(k), x)); });
   const duplicateOf = new Map();
   const seenPassages = new Map();
   passageRows.forEach(x => {
