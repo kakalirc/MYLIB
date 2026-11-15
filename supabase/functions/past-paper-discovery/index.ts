@@ -690,6 +690,10 @@ Deno.serve(async (req) => {
         if (linkError) return reply(500, { error: "PDF candidates were saved, but run membership could not be recorded: " + linkError.message });
       }
     }
+    const { count: uniqueRunCandidateCount, error: runCountError } = await admin.from("qb_paper_discovery_run_candidates")
+      .select("candidate_id", { count: "exact", head: true }).eq("discovery_run_id", runId);
+    if (runCountError) return reply(500, { error: "Could not calculate the unique PDF estimate for this run: " + runCountError.message });
+    foundTotal = Number(uniqueRunCandidateCount || 0);
     // Preserve one audit row per checked source attempt, including zero-result and failed checks.
     const sourceAuditRows: any[] = batch.map((source: any) => {
       const matching = batchRows.filter((row: any) => row.source?.id === source.id && isQuestionPaperPdf(row, query));
