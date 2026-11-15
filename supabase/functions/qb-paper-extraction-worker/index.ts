@@ -99,25 +99,33 @@ Deno.serve(async(req)=>{
   if(seed.error)throw new Error("Could not initialise page checkpoints.");
   const {data:requests,error:qe}=await db.from("qb_paper_extraction_requests").select("id,chunk_key,request_state,response_payload,provider_request_id,input_tokens,output_tokens,input_cost_usd,output_cost_usd,total_cost_usd").eq("run_id",runId);
   if(qe)throw new Error("Could not inspect provider checkpoints.");
+  const accountingWarnings:string[]=[];
+  const accountingWarning=(stage:string,message:string,chunk:string)=>{
+   const warning={run_id:runId,chunk_key:chunk,stage,message,at:new Date().toISOString()};
+   accountingWarnings.push(`${stage} (${chunk}): ${message}`);
+   console.error("[QB_EXTRACTION_ACCOUNTING_WARNING]",JSON.stringify(warning));
+  };
   // A responded request is immutable at the payload level. Rebuild usage metadata
   // from its durable raw Anthropic body, then update only the dedicated ledger columns.
   // This makes the repair repeatable and never requires another provider call.
   for(const request of (requests||[]).filter((x:any)=>x.request_state==="responded")){
    const rawBody=request.response_payload?.raw_body;
    if(typeof rawBody==="string"){
-    const usage=readAnthropicUsage(rawBody,PRICE.input,PRICE.output);
+    let usage:any=null;
+    try{usage=readAnthropicUsage(rawBody,PRICE.input,PRICE.output);}
+    catch(e){accountingWarning("usage_reconstruction",String((e as Error).message||e),request.chunk_key);continue;}
     const {error:reconcileError}=await db.from("qb_paper_extraction_requests").update({
      provider_request_id:usage.providerRequestId||request.provider_request_id,
      input_tokens:usage.inputTokens,output_tokens:usage.outputTokens,
      input_cost_usd:usage.inputCostUsd,output_cost_usd:usage.outputCostUsd,
      total_cost_usd:usage.totalCostUsd
     }).eq("id",request.id).eq("request_state","responded");
-    if(reconcileError)throw new Error("Saved provider response found, but usage metadata reconciliation failed: "+reconcileError.message+"; no provider request was resent.");
-    Object.assign(request,{provider_request_id:usage.providerRequestId||request.provider_request_id,
+    if(reconcileError){accountingWarning("request_usage_update",reconcileError.message,request.chunk_key);}
+    else Object.assign(request,{provider_request_id:usage.providerRequestId||request.provider_request_id,
      input_tokens:usage.inputTokens,output_tokens:usage.outputTokens,
      input_cost_usd:usage.inputCostUsd,output_cost_usd:usage.outputCostUsd,total_cost_usd:usage.totalCostUsd});
    }else if(request.input_tokens==null||request.output_tokens==null||request.total_cost_usd==null){
-    throw new Error("A saved provider response is missing recoverable raw usage data. No provider request was resent.");
+    accountingWarning("usage_reconstruction","Saved response has no recoverable usage fields; extraction will continue without verified cost.",request.chunk_key);
    }
   }
   const ambiguousRequests=(requests||[]).filter((x:any)=>["sent","uncertain"].includes(x.request_state));
@@ -192,17 +200,19 @@ Deno.serve(async(req)=>{
     if(respondedState.error||!respondedState.data?.ok)throw new Error("Provider response is saved, but run state could not be advanced; resume to reconcile without resending.");
     if(!response.ok)throw new Error(`Anthropic HTTP ${response.status}: ${rawBody.slice(0,1000)}`);
     const {text}=parseProviderBody(rawBody);
-    const usage=readAnthropicUsage(rawBody,PRICE.input,PRICE.output);
-    const usedInput=usage.inputTokens,usedOutput=usage.outputTokens,batchCost=usage.totalCostUsd;
-    const {error:usageSave}=await db.from("qb_paper_extraction_requests").update({
+    let usage:any=null;
+    try{usage=readAnthropicUsage(rawBody,PRICE.input,PRICE.output);}
+    catch(e){accountingWarning("usage_reconstruction",String((e as Error).message||e),chunk);}
+    const usedInput=usage?.inputTokens??0,usedOutput=usage?.outputTokens??0,batchCost=usage?.totalCostUsd??0;
+    const {error:usageSave}=usage?await db.from("qb_paper_extraction_requests").update({
      provider_request_id:usage.providerRequestId||providerRequestId,
      input_tokens:usedInput,output_tokens:usedOutput,input_cost_usd:usage.inputCostUsd,
      output_cost_usd:usage.outputCostUsd,total_cost_usd:batchCost
-    }).eq("id",requestId).eq("request_state","responded");
-    if(usageSave)throw new Error("Raw provider response is saved, but usage metadata could not be updated; resume to reconcile without resending.");
-    input+=usedInput;output+=usedOutput;totalCost=usd(totalCost+batchCost);
+    }).eq("id",requestId).eq("request_state","responded"): {error:null};
+    if(usageSave)accountingWarning("request_usage_update",usageSave.message,chunk);
+    if(usage){input+=usedInput;output+=usedOutput;totalCost=usd(totalCost+batchCost);}
     const {error:costSave}=await db.from("qb_paper_extraction_runs").update({input_tokens:input,output_tokens:output,actual_cost_usd:totalCost,estimated_cost_usd:totalCost,cost_budget_reserved_usd:totalCost}).eq("id",runId).eq("lease_owner",owner);
-    if(costSave)throw new Error("Provider response and usage are saved; run-level cost update failed and can be reconciled on resume.");
+    if(costSave)accountingWarning("run_usage_update",costSave.message,chunk);
     parsed=parseJson(text);
     // Keep response_payload immutable after the first durable save. Resume reparses
     // raw_body, while token/cost metadata lives in dedicated mutable columns.
@@ -225,7 +235,7 @@ Deno.serve(async(req)=>{
    const completedCount=(pageStates||[]).filter((p:any)=>p.page_state==="completed").length+(last-first+1);
    const {count:stagedTotal,error:stagedCountError}=await db.from("qb_paper_extraction_staging").select("id",{count:"exact",head:true}).eq("run_id",runId);
    if(stagedCountError)throw new Error("Could not count the durable staged items.");
-   if(last<total)return reply(200,{ok:true,run_id:runId,status:"processing",stage:"page_extraction",pages_total:total,pages_completed:completedCount,next_page:last+1,staged_items:stagedTotal||0,input_tokens:input,output_tokens:output,model:MODEL,cost_currency:"USD",actual_cost_usd:totalCost,cost_budget_usd:BUDGET_USD,requires_admin_review:false,questions_published:0});
+   if(last<total)return reply(200,{ok:true,run_id:runId,status:"processing",stage:"page_extraction",pages_total:total,pages_completed:completedCount,next_page:last+1,staged_items:stagedTotal||0,input_tokens:input,output_tokens:output,model:MODEL,cost_currency:"USD",actual_cost_usd:totalCost,cost_budget_usd:BUDGET_USD,accounting_warnings:accountingWarnings,requires_admin_review:false,questions_published:0});
    break;
   }
   const {data:finalPageStates,error:finalPageStatesError}=await db.from("qb_paper_extraction_pages").select("page_number,page_state").eq("run_id",runId).order("page_number");
@@ -236,7 +246,7 @@ Deno.serve(async(req)=>{
   const {data:doneState,error:done}=await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"completed",p_ai_request_state:"responded",p_error_message:null});
   if(done||!doneState?.ok)throw new Error("All page responses are saved but run finalisation failed because the worker lease is no longer valid; resume to reconcile.");
   await db.from("qb_paper_extraction_runs").update({current_stage:"review",input_tokens:input,output_tokens:output,lease_owner:null,lease_expires_at:null,heartbeat_at:new Date().toISOString(),last_checkpoint_at:new Date().toISOString()}).eq("id",runId).eq("lease_owner",owner);
-  return reply(200,{ok:true,run_id:runId,status:"completed",stage:"review",pages_total:total,staged_items:finalStagedTotal||0,input_tokens:input,output_tokens:output,model:MODEL,cost_currency:"USD",actual_cost_usd:totalCost,cost_budget_usd:BUDGET_USD,requires_admin_review:true,questions_published:0});
+  return reply(200,{ok:true,run_id:runId,status:"completed",stage:"review",pages_total:total,staged_items:finalStagedTotal||0,input_tokens:input,output_tokens:output,model:MODEL,cost_currency:"USD",actual_cost_usd:totalCost,cost_budget_usd:BUDGET_USD,accounting_warnings:accountingWarnings,accounting_warning:accountingWarnings.length>0,requires_admin_review:true,questions_published:0});
  }catch(e){
   const msg=String((e as Error).message||e);
   // A stale worker must never change the state after its lease was replaced.
