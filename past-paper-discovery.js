@@ -175,9 +175,9 @@
       + '<input id="ppd-query" placeholder="e.g. CBSE Class 10 Sanskrit question paper 2025" value="' + esc(state.lastQuery || '') + '">'
       + '<input id="ppd-school-name" placeholder="School name (optional)" value="' + esc(state.lastSchool || '') + '">'
       + '<button class="btn-small btn-primary" onclick="libPPDSearch()" ' + (state.searchBusy ? 'disabled' : '') + '>' + (state.searchBusy ? 'Pre-Searching…' : ('Run Pre-Search')) + '</button></div>'
-      + '<p class="hint">Pre-Search always uses PDF-focused query operators and records source-by-source outcomes. Only direct question-paper PDF links become candidates; webpages are discovery evidence only.</p>'
+      + '<p class="hint">Pre-Search uses PDF-focused queries and records source outcomes. It only displays possible PDF records temporarily; it never creates candidates or a review queue.</p>'
       + (state.message ? '<div class="hint" style="color:' + (state.error ? 'var(--brick)' : 'var(--forest)') + ';margin:8px 0">' + esc(state.message) + '</div>' : '') + '</div>';
-    var preSearchSummary = '';
+    var preview = state.previewRows.length ? '<div class="lib-ppd-section"><h3>Temporary Pre-Search preview (' + state.previewRows.length + ' records)</h3><p class="hint">These are search-result examples only. They are not saved as candidates, added to a review queue, downloaded or imported.</p>' + state.previewRows.map(function (r) { return '<div class="lib-ppd-source"><div><b>' + esc(r.title || 'Untitled PDF') + '</b><div class="hint">' + esc(r.domain) + ' · ' + esc(r.source_name || r.source_match) + ' · ' + esc(r.search_provider) + '</div>' + (r.snippet ? '<div class="hint">' + esc(r.snippet) + '</div>' : '') + '</div><a class="btn-small" href="' + esc(r.url) + '" target="_blank" rel="noopener noreferrer">Open PDF</a></div>'; }).join('') + '</div>' : '';\n    var preSearchSummary = '';
     if (state.latestPreSearch) {
       var estimate = state.latestPreSearch;
       var warnings = estimate.provider_errors && estimate.provider_errors.length
@@ -185,12 +185,11 @@
       if (estimate.unprocessed_pdf_links > 0) warnings += '<p class="hint" style="color:var(--brick)">' + esc(estimate.unprocessed_pdf_links) + ' additional matching PDF links exceeded the per-batch safety cap and were not queued. Narrow the criteria and run another Pre-Search.</p>';
       preSearchSummary = '<div class="lib-ppd-section lib-ppd-estimate"><h3>Pre-Search estimate</h3><div class="lib-ppd-estimate-grid">'
         + '<div><b>' + esc(estimate.pdfs_found || 0) + '</b><span>Potential PDFs found</span></div>'
-        + '<div><b>' + esc(estimate.estimated_new_candidates || 0) + '</b><span>New candidates saved</span></div>'
+        + '<div><b>' + esc(estimate.estimated_new_candidates || 0) + '</b><span>Preview records shown</span></div>'
         + '<div><b>' + esc(estimate.previously_seen_pdf_urls || 0) + '</b><span>Previously seen links</span></div>'
         + '<div><b>' + esc(estimate.discovered_source_count || 0) + '</b><span>New domains surfaced</span></div></div>'
-        + '<p class="hint">This is an estimate, not a count of confirmed new papers. Exact duplicates are determined only after downloading the PDF and checking its SHA-256 checksum.</p>'
+        + '<p class="hint">This is a search estimate, not a count of confirmed papers. No PDF is downloaded and no review-queue record is created.</p>'
         + warnings
-        + (estimate.run_id ? '<button class="btn-small btn-primary" type="button" onclick="libPPDCollectRun(&#39;' + esc(estimate.run_id) + '&#39;)" ' + (state.searchBusy || !estimate.complete || estimate.collectionComplete ? 'disabled' : '') + '>' + (estimate.collectionComplete ? 'Primary Collection completed' : 'Start Primary Collection · Verify these PDFs') + '</button>' : '')
         + '</div>';
     }
     var sourceAudit = '<details class="lib-ppd-section lib-ppd-recent-searches"><summary>Source Intelligence · Search history (' + state.auditRows.length + ' records)</summary>'
@@ -246,7 +245,7 @@
     var scope = val('ppd-scope') || state.scope;
     if (query.length < 2) { notify('Enter at least two characters to search.', true); return; }
     state.scope = scope; state.lastQuery = query; state.lastSchool = val('ppd-school-name');
-    state.searchBusy = true; state.message = 'Searching the wider web…'; state.error = ''; if (typeof render === 'function') render();
+    state.searchBusy = true; state.previewRows = []; state.message = 'Searching the wider web…'; state.error = ''; if (typeof render === 'function') render();
     try {
       var result = await invoke({ action:'search', query:query, scope:scope, school_name:state.lastSchool });
       var calls = 0;
