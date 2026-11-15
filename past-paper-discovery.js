@@ -249,11 +249,14 @@
     try {
       var result = await invoke({ action:'search', query:query, scope:scope, school_name:state.lastSchool });
       var calls = 0;
+      function addPreviewRows(payload) { (payload.preview_results || []).forEach(function (row) { if (!state.previewRows.some(function (existing) { return existing.url === row.url; })) state.previewRows.push(row); }); }
+      addPreviewRows(result);
       while (!result.complete && result.run_id && calls < 200) {
         state.message = 'Searching source ' + result.sources_processed + ' of ' + result.sources_total
           + (result.next_source ? ' · Next: ' + result.next_source : '') + ' · ' + result.found + ' potential PDF records found so far…';
         if (typeof render === 'function') render();
         result = await invoke({ action:'continue_search', run_id:result.run_id });
+        addPreviewRows(result);
         calls++;
       }
       if (!result.complete) throw new Error('Discovery is still in progress. Refresh the page and check Recent searches before starting another run.');
