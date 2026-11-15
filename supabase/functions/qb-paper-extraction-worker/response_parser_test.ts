@@ -27,6 +27,6 @@ Deno.test("rejects unrecoverable malformed output", async () => {
   await assertRejects(
     async () => parseQuestionItems('{"items":[{"item_kind":"question","page_number":'),
     Error,
-    "malformed and could not be safely repaired",
+    "complete JSON object",
   );
 });
