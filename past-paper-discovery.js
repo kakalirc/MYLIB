@@ -43,6 +43,8 @@
           state.latestPreSearch = { run_id:latestRun.id, complete:latestRun.status === 'completed',
             pdfs_found:Number(progress.results_found || latestRun.results_found || 0),
             estimated_new_candidates:Number(progress.new_candidates || 0),
+            previously_seen_pdf_urls:Number(progress.previously_seen_pdf_urls || 0),
+            discovered_source_count:Number(progress.discovered_source_count || 0),
             provider_errors:progress.provider_errors || [] };
         }
       }
@@ -82,7 +84,7 @@
     var school = c.school_id ? state.schools.find(function (s) { return s.id === c.school_id; }) : null;
     var registeredSource = state.sources.find(function (s) { return s.id === c.source_id || c.source_domain === s.domain || c.source_domain.endsWith('.' + s.domain); });
     var domainAction = (!registeredSource || c.source_id !== registeredSource.id || !registeredSource.enabled)
-      ? '<div class="lib-ppd-domain-approval">' + (!registeredSource ? '<select id="ppd-domaintype-' + esc(c.id) + '"><option value="school">School website</option><option value="education_portal">Education portal</option></select>' : '') + '<button class="btn-small" onclick="libPPDApproveDomain(' + "'" + esc(c.id) + "'" + ')">' + (registeredSource && !registeredSource.enabled ? 'Enable and link source domain' : 'Approve / link source domain') + '</button></div>'
+      ? '<div class="lib-ppd-domain-approval">' + (!registeredSource ? '<select id="ppd-domaintype-' + esc(c.id) + '"><option value="school">School website</option><option value="education_portal">Education portal</option></select>' : '') + '<button class="btn-small" onclick="libPPDApproveDomain(' + "'" + esc(c.id) + "'" + ')">' + (registeredSource && !registeredSource.enabled ? 'Enable and link source domain' : 'Add to permanent source registry') + '</button></div>'
       : '';
     var meta = c.discovery_metadata || {};
     var previewUrl = c.pdf_url || c.source_url;
@@ -129,6 +131,7 @@
       ? '<div class="lib-ppd-action-status hint" role="status" aria-live="polite" style="color:' + (actionMessage.error ? 'var(--brick)' : 'var(--forest)') + ';margin:6px 0 0">' + esc(actionMessage.message) + '</div>'
       : '';
     return '<article class="lib-ppd-candidate"><div class="lib-ppd-review-layout"><div class="lib-ppd-review-summary"><div class="lib-ppd-candidate-head"><div><b>' + esc(c.title) + '</b><div class="hint">' + esc(c.source_domain) + ' · ' + esc(c.source_type) + ' · ' + esc(c.status) + ' · PDF: ' + esc(c.verification_status) + '</div>'
+      + (meta.source_match === 'unregistered_domain' ? '<p class="hint">Newly discovered domain · eligible for this run after PDF verification; permanent registry approval is optional.</p>' : '')
       + (meta.snippet ? '<p class="hint">' + esc(meta.snippet) + '</p>' : '')
       + (school ? '<div class="hint">School: ' + esc(school.name) + '</div>' : (c.discovered_school_name ? '<div class="hint">Possible school: ' + esc(c.discovered_school_name) + '</div>' : ''))
       + '</div></div>' + actions + actionStatus + domainAction + '</div><div class="lib-ppd-review-fields">' + metadata + '</div></div></article>';
@@ -178,7 +181,7 @@
         + '<div><b>' + esc(estimate.discovered_source_count || 0) + '</b><span>New source domains</span></div></div>'
         + '<p class="hint">This is an estimate, not a count of confirmed new papers. Exact duplicates are determined only after downloading the PDF and checking its SHA-256 checksum.</p>'
         + warnings
-        + (estimate.run_id ? '<button class="btn-small btn-primary" type="button" onclick="libPPDCollectRun(\'' + esc(estimate.run_id) + '\')" ' + (state.searchBusy || !estimate.complete ? 'disabled' : '') + '>Start Primary Collection · Verify these PDFs</button>' : '')
+        + (estimate.run_id ? '<button class="btn-small btn-primary" type="button" onclick="libPPDCollectRun(&#39;' + esc(estimate.run_id) + '&#39;)" ' + (state.searchBusy || !estimate.complete || estimate.collectionComplete ? 'disabled' : '') + '>' + (estimate.collectionComplete ? 'Primary Collection completed' : 'Start Primary Collection · Verify these PDFs') + '</button>' : '')
         + '</div>';
     }
     var sourceAudit = '<details class="lib-ppd-section lib-ppd-recent-searches"><summary>Source Intelligence · Search history (' + state.auditRows.length + ' records)</summary>'
@@ -278,7 +281,7 @@
   window.libPPDPromoteDomain = async function (domain, type) {
     domain = String(domain || '').toLowerCase().trim();
     type = type === 'school' ? 'school' : 'education_portal';
-    if (!/^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$/.test(domain)) {
+    if (!/^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(domain)) {
       notify('The discovered domain is not valid for the approved registry.', true); return;
     }
     var existing = state.sources.find(function (source) { return source.domain === domain; });
