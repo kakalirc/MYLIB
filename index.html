@@ -25714,7 +25714,7 @@ async function qbLoadExtractionReview(id, quiet) {
   try {
     const result = await qbExtractionPost('qb-paper-extraction-review', { action: 'list', run_id: state.runId });
     qbExtractionReviewRows[id] = result.items || [];
-    qbExtractionResults[id] = { ...state, loading: false, stage: result.run.current_stage, reviewSummary: result.summary, reviewOpen: true, message: 'Review each extracted item. Only approved questions and passages can be published.' };
+    qbExtractionResults[id] = { ...state, pages: Array.isArray(result.pages) ? result.pages : [], loading: false, stage: result.run.current_stage, reviewSummary: result.summary, reviewOpen: true, message: 'Review each extracted item. Only approved questions and passages can be published.' };
   } catch (error) {
     qbExtractionResults[id] = { ...state, loading: false, ok: false, message: error.message || 'Could not load review records.' };
   } finally {
@@ -25862,6 +25862,8 @@ function qbExtractionReviewHtml(id) {
   const state = qbExtractionResults[id], rows = qbExtractionReviewRows[id];
   if (!state?.reviewOpen || !Array.isArray(rows)) return '';
   const pending = rows.filter(x => ['pending','edited'].includes(x.review_state)).length;
+  const pageRows = Array.isArray(state.pages) ? state.pages : [];
+  const pageAuditHtml = pageRows.length ? '<div style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:8px"><b>Page completeness audit</b><div class="hint" style="margin:4px 0 8px">Structural screening only; a clear result does not prove that every visible item was captured.</div>' + pageRows.map(page => { const audit = page.page_metadata?.extraction_audit; const flags = Array.isArray(audit?.flags) ? audit.flags : []; const hasAudit = audit && Number(audit.version) === 1; const status = hasAudit ? audit.status : 'not available'; return '<div style="padding:7px 0;border-top:1px solid var(--line)"><div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap"><b>Page ' + esc(page.page_number) + '</b><span class="hint">' + esc(page.page_state || 'unknown') + ' · ' + (hasAudit ? esc(status === 'clear' ? '✓ Clear' : '⚠ Review required') + ' · ' + esc(audit.question_count || 0) + ' question(s) · ' + esc(audit.passage_count || 0) + ' passage(s)' : 'Audit not available for this page') + '</span></div>' + (flags.length ? '<ul style="margin:5px 0 0;padding-left:18px;color:var(--brick)">' + flags.map(flag => '<li>' + esc(flag) + '</li>').join('') + '</ul>' : (hasAudit ? '<div class="hint">No structural issues detected. Compare the original PDF page before approval.</div>' : (page.error_message ? '<div class="hint" role="alert">' + esc(page.error_message) + '</div>' : ''))) + '</div>'; }).join('') + '</div>' : '';
   const normalize = value => String(value || '').toLocaleLowerCase().normalize('NFKC').replace(/\\s+/g, ' ').trim();
   const passageRows = rows.filter(x => x.item_kind === 'passage');
   const passageAliases = new Map();
@@ -25899,6 +25901,7 @@ function qbExtractionReviewHtml(id) {
   return '<div style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface)">'
     + '<b>Extraction review</b><div class="hint" style="margin:4px 0 8px">' + rows.length + ' items · ' + pending + ' awaiting decision · ' + warningCount + ' quality warning(s) · ' + duplicateCount + ' possible duplicate passage(s)</div>'
     + '<div class="hint" style="margin-bottom:8px">Each item includes its original PDF page for visual comparison. Expand the comparison to verify OCR, options, numbering and diagrams before approving.</div>'
+    + pageAuditHtml
     + (content || '<div class="hint">No items were extracted.</div>')
     + (state.stage === 'finished' ? '<div class="hint">This run has already been published.</div>' : '<button class="btn-small btn-primary" ' + (pending ? 'disabled' : '') + ' onclick="qbPublishExtractionRun(\'' + id + '\')">Publish approved items</button>')
     + '</div>';
