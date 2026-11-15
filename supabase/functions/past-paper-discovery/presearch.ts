@@ -44,7 +44,7 @@ export function isQuestionPaperPdf(row: any, query: string): boolean {
   if (parsed.protocol !== "https:" || parsed.username || parsed.password ||
       !isValidDiscoveredDomain(parsed.hostname.toLowerCase())) return false;
   if (row.archive_member) return true;
-  if (!parsed.pathname.toLowerCase().endsWith(".pdf")) return false;
+  if (!parsed.pathname.toLowerCase().endsWith(".pdf") && !row.pdf_search_hint) return false;
   const evidence = [row.title, row.snippet, row.url].join(" ").toLowerCase();
   const paperSignals = [
     "question paper", "question-paper", "question_paper", "sample paper", "sample-paper",
