@@ -35,11 +35,14 @@ begin
     raise exception 'Reset blocked: published Question Bank questions are linked to this paper';
   end if;
 
+  perform 1 from public.qb_paper_extraction_runs
+  where source_paper_id = p_source_paper_id
+  for update;
   select count(*) into v_active_runs
   from public.qb_paper_extraction_runs
   where source_paper_id = p_source_paper_id
     and status in ('queued','processing')
-    and (lease_expires_at is null or lease_expires_at > now());
+    and lease_expires_at > now();
   if v_active_runs > 0 then
     raise exception 'Reset blocked: an extraction worker still owns an active lease. Wait for it to finish or expire, then inspect again.';
   end if;
@@ -55,7 +58,6 @@ begin
   delete from public.qb_paper_extraction_staging s using public.qb_paper_extraction_runs x
     where s.run_id=x.id and x.source_paper_id=p_source_paper_id
       and s.published_question_id is null and s.published_passage_id is null;
-  if found then null; end if;
 
   if exists (
     select 1 from public.qb_paper_extraction_staging s
