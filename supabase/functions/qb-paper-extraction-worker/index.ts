@@ -4,7 +4,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument } from "npm:pdf-lib@1.17.1";
 import { parseQuestionItems } from "./response_parser.ts";
-import { readAnthropicUsage } from "./usage_reconciliation.ts";
+import { readAnthropicUsage, hasVerifiedAnthropicUsage } from "./usage_reconciliation.ts";
 import { assessExtractionQuality, formatOption } from "./quality_validation.ts";
 import { auditExtractedPage } from "./page_completeness.ts";
 
@@ -174,6 +174,13 @@ Deno.serve(async(req)=>{
     await accountingWarning("usage_reconstruction","Saved response has no recoverable usage fields; extraction will continue without verified cost.",request.chunk_key);
    }
   }
+  const unaccountedResponses=(requests||[]).filter((x:any)=>x.request_state==="responded"&&!hasVerifiedAnthropicUsage(x));
+  if(unaccountedResponses.length){
+   const chunks=unaccountedResponses.map((x:any)=>String(x.chunk_key||x.id)).join(", ");
+   return reply(200,{ok:true,run_id:runId,status:"processing",stage:"accounting_reconciliation",accounting_blocked:true,
+    warning_message:"Extraction is paused because verified token usage and USD cost are missing for: "+chunks+". Saved provider responses are retained; no further Anthropic request will be sent until usage is reconciled.",
+    accounting_warnings:accountingWarnings,questions_published:0});
+  }
   // Rebuild staging from every durable provider response before deciding which pages need work.
   // Anthropic sees a two-page PDF fragment and commonly numbers its pages locally (1, 2),
   // so normalize those local numbers to the original PDF page range.
@@ -302,17 +309,32 @@ Deno.serve(async(req)=>{
     const {text}=parseProviderBody(rawBody);
     let usage:any=null;
     try{usage=readAnthropicUsage(rawBody,PRICE.input,PRICE.output);}
-    catch(e){await accountingWarning("usage_reconstruction",String((e as Error).message||e),chunk);}
-    const usedInput=usage?.inputTokens??0,usedOutput=usage?.outputTokens??0,batchCost=usage?.totalCostUsd??0;
+    catch(e){
+     await accountingWarning("usage_reconstruction",String((e as Error).message||e),chunk);
+     return reply(200,{ok:true,run_id:runId,status:"processing",stage:"accounting_reconciliation",accounting_blocked:true,
+      warning_message:"Anthropic returned a durable response, but its token usage could not be verified. The response is retained and extraction is paused; no further provider request will be sent.",
+      accounting_warnings:accountingWarnings,questions_published:0});
+    }
+    const usedInput=usage.inputTokens,usedOutput=usage.outputTokens,batchCost=usage.totalCostUsd;
     const {error:usageSave}=usage?await db.from("qb_paper_extraction_requests").update({
      provider_request_id:usage.providerRequestId||providerRequestId,
      input_tokens:usedInput,output_tokens:usedOutput,input_cost_usd:usage.inputCostUsd,
      output_cost_usd:usage.outputCostUsd,total_cost_usd:batchCost
     }).eq("id",requestId).eq("request_state","responded"): {error:null};
-    if(usageSave)await accountingWarning("request_usage_update",usageSave.message,chunk);
-    if(usage){input+=usedInput;output+=usedOutput;totalCost=usd(totalCost+batchCost);}
+    if(usageSave){
+     await accountingWarning("request_usage_update",usageSave.message,chunk);
+     return reply(200,{ok:true,run_id:runId,status:"processing",stage:"accounting_reconciliation",accounting_blocked:true,
+      warning_message:"Provider usage was read but could not be saved to the request ledger. Extraction is paused before another provider request.",
+      accounting_warnings:accountingWarnings,questions_published:0});
+    }
+    input+=usedInput;output+=usedOutput;totalCost=usd(totalCost+batchCost);
     const {error:costSave}=await db.from("qb_paper_extraction_runs").update({input_tokens:input,output_tokens:output,actual_cost_usd:totalCost,estimated_cost_usd:totalCost,cost_budget_reserved_usd:totalCost,accounting_warnings:accountingWarnings}).eq("id",runId).eq("lease_owner",owner);
-    if(costSave)await accountingWarning("run_usage_update",costSave.message,chunk);
+    if(costSave){
+     await accountingWarning("run_usage_update",costSave.message,chunk);
+     return reply(200,{ok:true,run_id:runId,status:"processing",stage:"accounting_reconciliation",accounting_blocked:true,
+      warning_message:"Request-level usage is saved, but run-level cost reconciliation failed. Extraction is paused before another provider request; resume to rebuild totals from the immutable request ledger.",
+      accounting_warnings:accountingWarnings,questions_published:0});
+    }
     parsed=parseJson(text);
     // Keep response_payload immutable after the first durable save. Resume reparses
     // raw_body, while token/cost metadata lives in dedicated mutable columns.
