@@ -32,3 +32,24 @@ create policy qb_paper_discovery_run_sources_admin_read
 
 comment on table public.qb_paper_discovery_run_sources is
   'Per-run audit of approved domains checked and newly discovered domains returning relevant question-paper PDFs. Repeated attempts are retained as separate rows.';
+
+-- A candidate can be discovered by more than one search. Keep run membership
+-- separately so the candidate's original audit provenance is never overwritten.
+create table if not exists public.qb_paper_discovery_run_candidates (
+  discovery_run_id uuid not null references public.qb_paper_discovery_runs(id) on delete cascade,
+  candidate_id uuid not null references public.qb_paper_discovery_candidates(id) on delete cascade,
+  linked_at timestamptz not null default now(),
+  primary key (discovery_run_id, candidate_id)
+);
+create index if not exists qb_paper_discovery_run_candidates_candidate_idx
+  on public.qb_paper_discovery_run_candidates (candidate_id, linked_at desc);
+alter table public.qb_paper_discovery_run_candidates enable row level security;
+revoke all on public.qb_paper_discovery_run_candidates from anon, authenticated;
+grant select on public.qb_paper_discovery_run_candidates to authenticated;
+create policy qb_paper_discovery_run_candidates_admin_read
+  on public.qb_paper_discovery_run_candidates
+  for select to authenticated
+  using (public.qb_my_role() = 'Admin');
+
+comment on table public.qb_paper_discovery_run_candidates is
+  'Many-to-many audit link between search runs and reusable candidate records; preserves earlier candidate provenance.';
