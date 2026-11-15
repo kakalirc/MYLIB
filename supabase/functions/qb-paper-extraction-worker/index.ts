@@ -100,10 +100,12 @@ Deno.serve(async(req)=>{
   const {data:requests,error:qe}=await db.from("qb_paper_extraction_requests").select("id,chunk_key,request_state,response_payload,provider_request_id,input_tokens,output_tokens,input_cost_usd,output_cost_usd,total_cost_usd").eq("run_id",runId);
   if(qe)throw new Error("Could not inspect provider checkpoints.");
   const accountingWarnings:string[]=Array.isArray(run.accounting_warnings)?run.accounting_warnings.map((x:any)=>String(x)):[];
-  const accountingWarning=(stage:string,message:string,chunk:string)=>{
+  const accountingWarning=async(stage:string,message:string,chunk:string)=>{
    const warning={run_id:runId,chunk_key:chunk,stage,message,at:new Date().toISOString()};
    accountingWarnings.push(`${stage} (${chunk}): ${message}`);
    console.error("[QB_EXTRACTION_ACCOUNTING_WARNING]",JSON.stringify(warning));
+   const {error}=await db.from("qb_paper_extraction_runs").update({accounting_warnings:accountingWarnings}).eq("id",runId).eq("lease_owner",owner);
+   if(error)console.error("[QB_EXTRACTION_ACCOUNTING_WARNING_PERSIST_FAILED]",JSON.stringify({run_id:runId,chunk_key:chunk,message:error.message}));
   };
   // A responded request is immutable at the payload level. Rebuild usage metadata
   // from its durable raw Anthropic body, then update only the dedicated ledger columns.
@@ -113,14 +115,14 @@ Deno.serve(async(req)=>{
    if(typeof rawBody==="string"){
     let usage:any=null;
     try{usage=readAnthropicUsage(rawBody,PRICE.input,PRICE.output);}
-    catch(e){accountingWarning("usage_reconstruction",String((e as Error).message||e),request.chunk_key);continue;}
+    catch(e){await accountingWarning("usage_reconstruction",String((e as Error).message||e),request.chunk_key);continue;}
     const {error:reconcileError}=await db.from("qb_paper_extraction_requests").update({
      provider_request_id:usage.providerRequestId||request.provider_request_id,
      input_tokens:usage.inputTokens,output_tokens:usage.outputTokens,
      input_cost_usd:usage.inputCostUsd,output_cost_usd:usage.outputCostUsd,
      total_cost_usd:usage.totalCostUsd
     }).eq("id",request.id).eq("request_state","responded");
-    if(reconcileError){accountingWarning("request_usage_update",reconcileError.message,request.chunk_key);}
+    if(reconcileError){await accountingWarning("request_usage_update",reconcileError.message,request.chunk_key);}
     else Object.assign(request,{provider_request_id:usage.providerRequestId||request.provider_request_id,
      input_tokens:usage.inputTokens,output_tokens:usage.outputTokens,
      input_cost_usd:usage.inputCostUsd,output_cost_usd:usage.outputCostUsd,total_cost_usd:usage.totalCostUsd});
@@ -206,17 +208,17 @@ Deno.serve(async(req)=>{
     const {text}=parseProviderBody(rawBody);
     let usage:any=null;
     try{usage=readAnthropicUsage(rawBody,PRICE.input,PRICE.output);}
-    catch(e){accountingWarning("usage_reconstruction",String((e as Error).message||e),chunk);}
+    catch(e){await accountingWarning("usage_reconstruction",String((e as Error).message||e),chunk);}
     const usedInput=usage?.inputTokens??0,usedOutput=usage?.outputTokens??0,batchCost=usage?.totalCostUsd??0;
     const {error:usageSave}=usage?await db.from("qb_paper_extraction_requests").update({
      provider_request_id:usage.providerRequestId||providerRequestId,
      input_tokens:usedInput,output_tokens:usedOutput,input_cost_usd:usage.inputCostUsd,
      output_cost_usd:usage.outputCostUsd,total_cost_usd:batchCost
     }).eq("id",requestId).eq("request_state","responded"): {error:null};
-    if(usageSave)accountingWarning("request_usage_update",usageSave.message,chunk);
+    if(usageSave)await accountingWarning("request_usage_update",usageSave.message,chunk);
     if(usage){input+=usedInput;output+=usedOutput;totalCost=usd(totalCost+batchCost);}
     const {error:costSave}=await db.from("qb_paper_extraction_runs").update({input_tokens:input,output_tokens:output,actual_cost_usd:totalCost,estimated_cost_usd:totalCost,cost_budget_reserved_usd:totalCost,accounting_warnings:accountingWarnings}).eq("id",runId).eq("lease_owner",owner);
-    if(costSave)accountingWarning("run_usage_update",costSave.message,chunk);
+    if(costSave)await accountingWarning("run_usage_update",costSave.message,chunk);
     parsed=parseJson(text);
     // Keep response_payload immutable after the first durable save. Resume reparses
     // raw_body, while token/cost metadata lives in dedicated mutable columns.
