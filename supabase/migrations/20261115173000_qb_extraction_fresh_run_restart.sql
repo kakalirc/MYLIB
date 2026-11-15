@@ -9,6 +9,13 @@ create index if not exists qb_paper_extraction_runs_restart_of_idx
   on public.qb_paper_extraction_runs(restart_of_run_id)
   where restart_of_run_id is not null;
 
+-- Historical uncertain runs are retained, but an Admin-confirmed restart may
+-- coexist with them. Only actually queued/processing runs reserve the active slot.
+drop index if exists public.qb_paper_extraction_runs_one_active_per_paper;
+create unique index qb_paper_extraction_runs_one_active_per_paper
+  on public.qb_paper_extraction_runs(source_paper_id)
+  where status in ('queued','processing');
+
 create or replace function public.qb_restart_paper_extraction(
   p_source_paper_id uuid,
   p_requested_by uuid,
@@ -56,7 +63,9 @@ begin
   end if;
   if exists (
     select 1 from public.qb_paper_extraction_runs
-     where source_paper_id=p_source_paper_id and status in ('queued','processing')
+     where source_paper_id=p_source_paper_id
+       and (status in ('queued','processing')
+         or (status='uncertain' and lease_expires_at > now()))
   ) then
     return jsonb_build_object('ok',false,'code','run_still_active','message','An extraction run for this paper is still active. Resume or wait for it to stop before starting a fresh run. No AI request was made.');
   end if;
