@@ -686,7 +686,9 @@ Deno.serve(async (req) => {
         discovery_run_id: runId, source_id: source.id, domain: source.domain,
         display_name: source.display_name, source_type: source.source_type,
         source_classification: "approved",
-        outcome: matching.length ? "pdf_found" : (sourceError ? "provider_error" : "no_matching_pdf"),
+        outcome: matching.length ? "pdf_found" : (sourceError
+          ? (/Source returned HTTP|Too many redirects|timed out|Source returned an invalid redirect/i.test(sourceError) ? "inaccessible" : "provider_error")
+          : "no_matching_pdf"),
         pdf_count: matching.length,
         provider: "DuckDuckGo/Bing RSS + source-specific crawler",
         evidence: {
@@ -725,8 +727,11 @@ Deno.serve(async (req) => {
 
     foundTotal += flattened.length;
     insertedTotal += inserted;
+    const previouslySeenTotal = Math.max(0, Number(progress.previously_seen_pdf_urls) || 0) + Math.max(0, flattened.length - inserted);
+    const discoveredSourceTotal = Math.max(0, Number(progress.discovered_source_count) || 0) + discoveredCounts.size;
     const nextProgress = { next_offset: nextOffset, successful_queries: successfulQueries,
-      provider_errors: providerErrors.slice(0, 80), results_found: foundTotal, new_candidates: insertedTotal };
+      provider_errors: providerErrors.slice(0, 80), results_found: foundTotal, new_candidates: insertedTotal,
+      previously_seen_pdf_urls: previouslySeenTotal, discovered_source_count: discoveredSourceTotal };
     const update: any = { filters: { ...run.filters, discovery_progress: nextProgress },
       results_found: foundTotal, heartbeat_at: null,
       error_message: providerErrors.length ? clip(providerErrors.join(" | "), 1000) : null };
@@ -741,9 +746,9 @@ Deno.serve(async (req) => {
       sources_processed: nextOffset, sources_total: searchTargets.length,
       found: foundTotal, pdfs_found: foundTotal, new_candidates: insertedTotal,
       estimated_new_candidates: insertedTotal,
-      previously_seen_pdf_urls: Math.max(0, flattened.length - inserted),
+      previously_seen_pdf_urls: previouslySeenTotal,
       approved_source_results: flattened.filter((r) => r.source).length,
-      discovered_source_count: discoveredCounts.size,
+      discovered_source_count: discoveredSourceTotal,
       provider: "Official board archive + DuckDuckGo fallback",
       provider_successful_queries: successfulQueries, provider_errors: providerErrors.slice(-8),
       message: complete
