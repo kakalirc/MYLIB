@@ -96,6 +96,8 @@ jobs:
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261115010000_qb_extraction_ambiguous_chunk_continuation.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261115011000_qb_extraction_resume_legacy_uncertain.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261115013000_qb_extraction_ambiguous_retry_policy.sql
+          psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261115140000_qb_extraction_question_grouping_visual_context.sql
+          psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261115160000_qb_extraction_passage_dedup_parent_resolution.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/qb-paper-extraction-safety-gate-smoke.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/qb-extraction-restartability-smoke.sql
           psql "$QB_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/qb-extraction-worker-lease-smoke.sql
@@ -170,3 +172,36 @@ jobs:
           node --check knowledge-arena/knowledge-arena.js
           node --check student-portal-tabs.js
           node --check past-paper-discovery.js
+
+      - name: Parse inline JavaScript in Admin portal
+        run: |
+          python - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          class Scripts(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.parts = []
+                  self.current = None
+                  self.skip = False
+              def handle_starttag(self, tag, attrs):
+                  if tag == 'script':
+                      attrs = dict(attrs)
+                      kind = attrs.get('type', '').lower()
+                      self.skip = bool(attrs.get('src')) or kind in ('application/ld+json', 'application/json')
+                      self.current = [] if not self.skip else None
+              def handle_data(self, data):
+                  if self.current is not None:
+                      self.current.append(data)
+              def handle_endtag(self, tag):
+                  if tag == 'script':
+                      if self.current is not None:
+                          self.parts.append(''.join(self.current))
+                      self.current = None
+          parser = Scripts()
+          parser.feed(Path('index.html').read_text(encoding='utf-8'))
+          for i, script in enumerate(parser.parts):
+              Path(f'/tmp/index-inline-{i}.js').write_text(script, encoding='utf-8')
+          print(f'Extracted {len(parser.parts)} inline script block(s)')
+          PY
+          for file in /tmp/index-inline-*.js; do [ -e "$file" ] && node --check "$file"; done

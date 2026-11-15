@@ -2152,7 +2152,7 @@ let qbAssignIds = new Set();    // students ticked in the assign panel
 let qbAssignUntil = '';         // due date (yyyy-mm-dd) for new assignments
 let qbAssignAllGrades = false;  // also list the teacher's students who don't match the paper's board / grade / subject
 let qbSourcePapers = [];        // qb_source_papers rows (published papers + own submissions)
-const qbSourcePreviewOpenIds = new Set(), qbSourcePreviewUrls = {}, qbSourcePreviewLoadingIds = new Set(), qbSourcePreviewErrors = {}, qbSourcePreviewImages = {};
+const qbSourcePreviewOpenIds = new Set(), qbSourcePreviewUrls = {}, qbSourcePreviewLoadingIds = new Set(), qbSourcePreviewErrors = {}, qbSourcePreviewImages = {}, qbSourcePreviewPageImages = {};
 let qbSourceEditId = '';
 let qbSourceMetaMsg = '';
 let qbSourceReviews = [];       // Admin-visible status history across all submissions
@@ -25721,6 +25721,7 @@ async function qbLoadExtractionReview(id, quiet) {
     qbExtractionBusyIds.delete(id);
     qbRenderSourcePreviewPreservingScroll();
   }
+  if (qbExtractionResults[id]?.reviewOpen && !qbSourcePreviewOpenIds.has(id)) await qbToggleSourcePaperPreview(id);
 }
 async function qbCheckSourcePaperExtraction(id) {
   if (currentRole !== 'Admin' || qbExtractionBusyIds.has(id)) return;
@@ -25861,19 +25862,43 @@ function qbExtractionReviewHtml(id) {
   const state = qbExtractionResults[id], rows = qbExtractionReviewRows[id];
   if (!state?.reviewOpen || !Array.isArray(rows)) return '';
   const pending = rows.filter(x => ['pending','edited'].includes(x.review_state)).length;
+  const normalize = value => String(value || '').toLocaleLowerCase().normalize('NFKC').replace(/\\s+/g, ' ').trim();
+  const passageRows = rows.filter(x => x.item_kind === 'passage');
+  const passageAliases = new Map();
+  passageRows.forEach((x, i) => { [x.original_number, x.item_key, x.payload?.original_number, x.payload?.passage_key, x.payload?.id, 'passage_' + (i + 1), 'passage-' + (i + 1), 'passage ' + (i + 1)].filter(Boolean).forEach(k => passageAliases.set(String(k), x)); });
+  const duplicateOf = new Map();
+  const seenPassages = new Map();
+  passageRows.forEach(x => {
+    const key = normalize(x.payload?.passage_text);
+    if (!key) return;
+    if (seenPassages.has(key)) duplicateOf.set(x.id, seenPassages.get(key));
+    else seenPassages.set(key, x);
+  });
   const content = rows.map(item => {
     const p = item.payload || {};
     const main = item.item_kind === 'question' ? p.question_text : item.item_kind === 'passage' ? p.passage_text : p.text || p.image_description || JSON.stringify(p);
-    const extra = item.item_kind === 'question' ? [p.options && Array.isArray(p.options) ? 'Options: ' + p.options.join(' | ') : '', p.answer_text ? 'Answer: ' + p.answer_text : '', p.marks ? 'Marks: ' + p.marks : ''].filter(Boolean).join(' · ') : p.passage_type || p.image_description || '';
+    const extra = item.item_kind === 'question' ? [p.options && Array.isArray(p.options) ? 'Options: ' + p.options.map(x => typeof x === 'object' ? [x.option_number || x.label, x.option_text || x.text].filter(Boolean).join('. ') : x).join(' | ') : '', p.answer_text ? 'Answer: ' + p.answer_text : '', p.marks ? 'Marks: ' + p.marks : ''].filter(Boolean).join(' · ') : p.passage_type || p.image_description || '';
+    const flags = Array.isArray(p.extraction_quality_flags) ? p.extraction_quality_flags : [];
+    const parent = item.parent_item_key ? passageAliases.get(String(item.parent_item_key)) : null;
+    const duplicate = duplicateOf.get(item.id);
+    const pageImage = qbSourcePreviewPageImages[id]?.[Number(item.page_number)] || '';
+    const warningHtml = flags.length ? '<div role="alert" style="margin:8px 0;padding:9px 10px;border:1px solid #d69b38;border-left:4px solid #d69b38;border-radius:7px;background:#fff8e9;color:#805515"><b>Quality warning · Manual verification required</b><ul style="margin:5px 0 0;padding-left:18px">' + flags.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul></div>' : '';
+    const linkHtml = item.item_kind === 'question' ? (item.parent_item_key ? (parent ? '<div class="hint" style="color:var(--forest)">Passage link: ' + esc(parent.original_number || parent.item_key) + ' · Page ' + esc(parent.page_number) + '</div>' : '<div role="alert" class="hint" style="color:var(--brick)">Unresolved passage reference: ' + esc(item.parent_item_key) + ' · verify before approval</div>') : '') : '';
+    const duplicateHtml = duplicate ? '<div role="alert" class="hint" style="color:var(--brick)">Possible duplicate passage of ' + esc(duplicate.original_number || duplicate.item_key) + ' · Page ' + esc(duplicate.page_number) + '. Publication will reuse one passage record.</div>' : '';
     return '<div style="border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0">'
-      + '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>' + esc(item.item_kind) + ' · Page ' + esc(item.page_number || '—') + (item.original_number ? ' · No. ' + esc(item.original_number) : '') + '</b><span class="hint">' + esc(item.review_state) + '</span></div>'
+      + '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>' + esc(item.item_kind) + ' · Page ' + esc(item.page_number || '—') + (item.original_number ? ' · No. ' + esc(item.original_number) : '') + '</b><span class="hint">' + esc(item.review_state) + (flags.length ? ' · ⚠ ' + flags.length + ' warning(s)' : '') + '</span></div>'
+      + warningHtml + linkHtml + duplicateHtml
       + '<div style="white-space:pre-wrap;margin:7px 0">' + esc(main || '[No extracted text]') + '</div>'
       + (extra ? '<div class="hint" style="margin-bottom:7px">' + esc(extra) + '</div>' : '')
+      + (pageImage ? '<details style="margin:8px 0"><summary style="cursor:pointer;font-size:12px;font-weight:700">Compare with original PDF · Page ' + esc(item.page_number) + '</summary><img loading="lazy" alt="Original PDF page ' + esc(item.page_number) + '" src="' + esc(pageImage) + '" style="display:block;width:100%;height:auto;margin-top:8px;border:1px solid var(--line);border-radius:6px"></details>' : '<div class="hint">Original page preview is not loaded yet. Open the paper PDF preview to compare.</div>')
       + (item.review_state === 'pending' || item.review_state === 'edited' ? '<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn-small" onclick="qbEditExtractionItem(\'' + id + '\',\'' + item.id + '\')">Edit</button><button class="btn-small btn-primary" onclick="qbSetExtractionReview(\'' + id + '\',\'' + item.id + '\',\'approved\')">Approve</button><button class="btn-small" onclick="qbSetExtractionReview(\'' + id + '\',\'' + item.id + '\',\'rejected\')">Reject</button></div>' : '')
       + '</div>';
   }).join('');
+  const warningCount = rows.reduce((n, x) => n + (Array.isArray(x.payload?.extraction_quality_flags) ? x.payload.extraction_quality_flags.length : 0), 0);
+  const duplicateCount = duplicateOf.size;
   return '<div style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface)">'
-    + '<b>Extraction review</b><div class="hint" style="margin:4px 0 8px">' + rows.length + ' items · ' + pending + ' awaiting decision</div>'
+    + '<b>Extraction review</b><div class="hint" style="margin:4px 0 8px">' + rows.length + ' items · ' + pending + ' awaiting decision · ' + warningCount + ' quality warning(s) · ' + duplicateCount + ' possible duplicate passage(s)</div>'
+    + '<div class="hint" style="margin-bottom:8px">Each item includes its original PDF page for visual comparison. Expand the comparison to verify OCR, options, numbering and diagrams before approving.</div>'
     + (content || '<div class="hint">No items were extracted.</div>')
     + (state.stage === 'finished' ? '<div class="hint">This run has already been published.</div>' : '<button class="btn-small btn-primary" ' + (pending ? 'disabled' : '') + ' onclick="qbPublishExtractionRun(\'' + id + '\')">Publish approved items</button>')
     + '</div>';
@@ -25907,31 +25932,32 @@ function qbSourcePaperPreviewHtml(sp) {
   if (qbSourcePreviewErrors[sp.id]) return '<div class="qb-source-pdf-preview" style="' + shell + '"><div class="hint" role="alert" style="color:var(--brick)">' + esc(qbSourcePreviewErrors[sp.id]) + '</div></div>';
   if (!qbSourcePreviewImages[sp.id]) return '';
   return '<div class="qb-source-pdf-preview" style="' + shell + '" role="region" aria-label="PDF page preview for ' + esc(heading) + '">'
-    + '<div class="hint" style="margin-bottom:7px"><b>Paper preview</b> · Page 1</div>'
-    + '<div style="max-height:560px;overflow:auto;text-align:center;background:#fff;border:1px solid var(--line);border-radius:6px">'
-    + '<img alt="First page of ' + esc(heading) + '" src="' + esc(qbSourcePreviewImages[sp.id]) + '" style="display:block;width:100%;height:auto;max-width:100%;margin:0 auto">'
+    + '<div class="hint" style="margin-bottom:7px"><b>Original paper</b> · ' + Object.keys(qbSourcePreviewPageImages[sp.id] || {}).length + ' page(s) rendered for visual audit</div>'
+    + '<div style="max-height:700px;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:6px;padding:8px">'
+    + Object.entries(qbSourcePreviewPageImages[sp.id] || {}).map(([n,src]) => '<details style="margin:5px 0" ' + (Number(n) === 1 ? 'open' : '') + '><summary style="cursor:pointer;font-size:12px;font-weight:700;padding:5px">Original PDF · Page ' + esc(n) + '</summary><img loading="lazy" alt="Original page ' + esc(n) + ' of ' + esc(heading) + '" src="' + esc(src) + '" style="display:block;width:100%;height:auto;margin:6px auto;border:1px solid var(--line)"></details>').join('')
     + '</div></div>';
 }
 function qbRenderSourcePreviewPreservingScroll() {
   const left = window.scrollX, top = window.scrollY;
   render(); qbRestoreSourcePaperScroll(left, top);
 }
-async function qbRenderFirstPdfPage(pdf) {
-  const page = await pdf.getPage(1);
-  const baseViewport = page.getViewport({ scale: 1 });
-  const scale = Math.min(1.6, 1800 / Math.max(baseViewport.width, baseViewport.height));
-  const viewport = page.getViewport({ scale });
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.ceil(viewport.width);
-  canvas.height = Math.ceil(viewport.height);
-  const context = canvas.getContext('2d', { alpha: false });
-  if (!context) throw new Error('Could not create the PDF preview canvas.');
-  context.fillStyle = '#ffffff';
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  await page.render({ canvasContext: context, viewport }).promise;
-  const imageUrl = canvas.toDataURL('image/jpeg', 0.9);
-  canvas.width = 0; canvas.height = 0;
-  return imageUrl;
+async function qbRenderAllPdfPages(pdf) {
+  const images = {};
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+    const page = await pdf.getPage(pageNumber);
+    const baseViewport = page.getViewport({ scale: 1 });
+    const scale = Math.min(1.35, 1500 / Math.max(baseViewport.width, baseViewport.height));
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
+    const context = canvas.getContext('2d', { alpha: false });
+    if (!context) throw new Error('Could not create the PDF preview canvas for page ' + pageNumber + '.');
+    context.fillStyle = '#ffffff'; context.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: context, viewport }).promise;
+    images[pageNumber] = canvas.toDataURL('image/jpeg', 0.82);
+    canvas.width = 0; canvas.height = 0;
+  }
+  return images;
 }
 async function qbToggleSourcePaperPreview(id) {
   if (currentRole !== 'Admin' || !sb) return;
@@ -25942,7 +25968,7 @@ async function qbToggleSourcePaperPreview(id) {
   const sp = qbSourcePapers.find(x => x.id === id);
   if (!sp) return;
   qbSourcePreviewOpenIds.add(id); qbSourcePreviewLoadingIds.add(id);
-  delete qbSourcePreviewErrors[id]; delete qbSourcePreviewImages[id];
+  delete qbSourcePreviewErrors[id]; delete qbSourcePreviewImages[id]; delete qbSourcePreviewPageImages[id];
   qbRenderSourcePreviewPreservingScroll();
   try {
     let href = sp.stored_pdf_url && /^https?:/i.test(sp.stored_pdf_url) && String(sp.stored_pdf_url).indexOf('/object/sign/') < 0 ? sp.stored_pdf_url : null;
@@ -25960,9 +25986,9 @@ async function qbToggleSourcePaperPreview(id) {
     if (!resp.ok) throw new Error('Could not download PDF (' + resp.status + ').');
     const pdfjsLib = await loadPdfJs();
     const pdf = await pdfjsLib.getDocument({ data: await resp.arrayBuffer() }).promise;
-    const imageUrl = await qbRenderFirstPdfPage(pdf);
+    const pageImages = await qbRenderAllPdfPages(pdf);
     if (!qbSourcePreviewOpenIds.has(id)) return;
-    qbSourcePreviewImages[id] = imageUrl;
+    qbSourcePreviewPageImages[id] = pageImages; qbSourcePreviewImages[id] = pageImages[1] || '';
   } catch (error) {
     if (!qbSourcePreviewOpenIds.has(id)) return;
     qbSourcePreviewErrors[id] = 'Could not render PDF preview: ' + (error && error.message ? error.message : String(error));
