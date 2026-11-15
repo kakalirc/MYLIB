@@ -732,7 +732,6 @@ Deno.serve(async (req) => {
     const previouslySeenTotal = 0;
     const unprocessedPdfLinksTotal = Math.max(0, Number(progress.unprocessed_pdf_links) || 0)
       + Math.max(0, flattened.length - MAX_DISCOVERED_CANDIDATES_PER_BATCH);
-    const discoveredSourceTotal = Math.max(0, Number(progress.discovered_source_count) || 0) + discoveredDomainResults.size;
     // Preserve one audit row per checked source attempt, including zero-result and failed checks.
     const sourceAuditRows: any[] = batch.map((source: any) => {
       const matching = batchRows.filter((row: any) => row.source?.id === source.id && isQuestionPaperPdf(row, query));
@@ -819,6 +818,7 @@ Deno.serve(async (req) => {
       if (auditError) providerErrors.push("Source audit could not be saved: " + auditError.message);
     }
 
+    const discoveredSourceTotal = Math.max(0, Number(progress.discovered_source_count) || 0) + discoveredDomainResults.size;
     const nextProgress = { next_offset: nextOffset, successful_queries: successfulQueries,
       provider_errors: providerErrors.slice(0, 80), results_found: foundTotal, new_candidates: insertedTotal,
       previously_seen_pdf_urls: previouslySeenTotal, unprocessed_pdf_links: unprocessedPdfLinksTotal,
@@ -845,8 +845,8 @@ Deno.serve(async (req) => {
       provider: "Official board archive + Google Search (Serper), DuckDuckGo HTML and Bing RSS",
       provider_successful_queries: successfulQueries, provider_errors: providerErrors.slice(-8),
       message: complete
-        ? (providerErrors.length ? "Search completed with partial provider failures. Review provider diagnostics before concluding no papers exist." : "Search completed. Review candidates before importing.")
-        : "Batch saved. Continuing discovery with the next registered source.",
+        ? (providerErrors.length ? "Search completed with partial provider failures. Review provider diagnostics before concluding no papers exist." : "Search completed. Potential PDF records were previewed only; nothing was added to a review queue.")
+        : "Search batch complete. Continuing discovery with the next registered source.",
     });
   }
 
