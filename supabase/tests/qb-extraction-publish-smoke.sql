@@ -23,6 +23,8 @@ begin
  if v_passage is null or not exists(select 1 from public.qb_passages where id=v_passage and approved=true) then
    raise exception 'Approved passage was not linked to the question';
  end if;
+ select published_passage_id into v_passage_duplicate from public.qb_paper_extraction_staging where run_id=v_run and item_key='passage:P1-copy';
+ if v_passage_duplicate is distinct from v_passage then raise exception 'Duplicate passage did not reuse the canonical passage id'; end if;
  v_result:=public.qb_publish_extraction_run(v_run,v_admin);
  if coalesce((v_result->>'ok')::boolean,false) is not true then raise exception 'Replay failed: %',v_result; end if;
  select count(*) into v_count from public.qb_questions where source_paper_id=v_paper;
