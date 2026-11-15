@@ -56,6 +56,22 @@ PICTURE COMPOSITION / DIAGRAMS / MAPS / GRAPHS / CARTOONS: Keep the complete pro
 UNSEEN PASSAGES: Keep the passage as one passage item and group every associated comprehension question and subpart under its parent question, linked by parent_item_key. Do not repeat passage text in each question. Do not attach unrelated questions to it.
 
 PAGE NUMBERS: page_number is the 1-based page number within this supplied PDF fragment (1 or 2); the worker maps it to the original PDF page. If a question or passage continues across pages, use its first page number and preserve all continued text. Blank pages produce no items.`;}
+
+function normalizePayload(item:any,page:number){
+ const payload=item.payload&&typeof item.payload==="object"?{...item.payload}:{raw:item};
+ if(item.item_kind!=="question")return payload;
+ const parts=Array.isArray(payload.subquestions)?payload.subquestions:[];
+ const rendered=parts.map((part:any)=>[
+  part.original_number?String(part.original_number)+") ":"",
+  String(part.question_text||""),
+  Array.isArray(part.options)&&part.options.length?"Options: "+part.options.join(" | "):"",
+  part.marks!=null?"("+part.marks+" marks)":""
+ ].filter(Boolean).join(" ")).join("\\n");
+ const visual=payload.visual_stimulus_description?"[Visual stimulus: "+payload.visual_stimulus_description+"]":"";
+ const shared=payload.shared_instructions?"[Shared instructions: "+payload.shared_instructions+"]":"";
+ payload.question_text=[payload.question_text||"",rendered,visual,shared].filter(Boolean).join("\\n");
+ return payload;
+}
 async function adminUser(db:any,token:string){if(!token)throw new Error("Please sign in again.");const {data,error}=await db.auth.getUser(token);if(error||!data?.user)throw new Error("Please sign in again.");const {data:p,error:pe}=await db.from("profiles").select("role,archived").eq("id",data.user.id).maybeSingle();if(pe||p?.role!=="Admin"||p.archived===true)throw new Error("Only an active Admin can extract papers.");return data.user;}
 Deno.serve(async(req)=>{
  if(req.method==="OPTIONS")return new Response("ok",{headers:CORS});
@@ -166,7 +182,7 @@ Deno.serve(async(req)=>{
       ?first+reportedPage-1
       :(Number.isInteger(reportedPage)&&reportedPage>=first&&reportedPage<=last?reportedPage:NaN);
     if(!Number.isInteger(page))continue;
-    const payload=item.payload&&typeof item.payload==="object"?item.payload:{raw:item};
+    const payload=normalizePayload(item,page);
     const fingerprint=await hash(JSON.stringify(item));
     const {error:se}=await db.from("qb_paper_extraction_staging").upsert({
      run_id:runId,item_key:`${chunk}:item:${i+1}`,item_kind:item.item_kind,page_number:page,
@@ -289,7 +305,7 @@ Deno.serve(async(req)=>{
     parsed={items:parsed.items};
    }
    for(let i=0;i<(parsed.items||[]).length;i++){
-    const item=parsed.items[i];if(!item||!["question","passage","section","instruction","image"].includes(item.item_kind))continue;
+    const item=parsed.items[i];if(!item||!["question","passage"].includes(item.item_kind))continue;
     const reportedPage=Number(item.page_number);
     const page=Number.isInteger(reportedPage)&&reportedPage>=1&&reportedPage<=(last-first+1)
       ?first+reportedPage-1
