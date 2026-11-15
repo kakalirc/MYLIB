@@ -719,52 +719,20 @@ Deno.serve(async (req) => {
     // Search providers may ignore filetype operators. Never create a paper candidate
     // from an ordinary HTML result: only direct PDF URLs and verified PDF members qualify.
     const flattened = [...unique.values()].filter((r) => isQuestionPaperPdf(r, query));
-    const inserts = flattened.slice(0, MAX_DISCOVERED_CANDIDATES_PER_BATCH).map((r) => ({
-      discovery_run_id: runId, source_id: r.source?.id || null, source_type: scope,
-      source_domain: r.domain, title: r.title, source_url: r.url,
-      pdf_url: r.archive_member || /\.pdf(?:$|[?#])/i.test(r.url) || r.pdf_search_hint ? r.url : null,
-      discovered_school_name: scope === "school" ? schoolName || null : null,
-      discovery_metadata: {
-        snippet: r.snippet, archive_member: r.archive_member || null, pdf_search_hint: !!r.pdf_search_hint,
-        marking_scheme_url: r.marking_scheme_url || null,
-        trust_level: r.source?.trust_level || "unverified",
-        source_name: r.source?.display_name || r.domain,
-        source_match: r.source ? "approved_registry" : "unregistered_domain",
-        search_provider: r.snippet.startsWith("Bing RSS search") ? "Bing RSS" : r.snippet.startsWith("Official CBSE") ? "CBSE official archive crawler"
-          : r.snippet.startsWith("Official CISCE") ? "CISCE official media crawler"
-          : r.snippet.startsWith("Official source page") ? (r.source?.source_type === "education_portal" ? "Registered education portal crawler" : "Registered school website crawler") : "DuckDuckGo HTML",
-        search_method: r.source ? "targeted_domain" : "broad_web",
-      },
+    // Pre-Search is preview-only. Never create discovery-candidate or review-queue rows here.
+    const previewResults = flattened.slice(0, MAX_DISCOVERED_CANDIDATES_PER_BATCH).map((r) => ({
+      title: clip(r.title, 500), url: String(r.url), domain: String(r.domain || new URL(String(r.url)).hostname),
+      snippet: clip(r.snippet, 1200), source_name: r.source?.display_name || r.domain,
+      source_match: r.source ? 'approved_registry' : 'unregistered_domain',
+      search_provider: r.snippet.startsWith('Bing RSS search') ? 'Bing RSS' : r.snippet.startsWith('Official CBSE') ? 'CBSE official archive crawler'
+        : r.snippet.startsWith('Official CISCE') ? 'CISCE official media crawler'
+        : r.snippet.startsWith('Official source page') ? 'Registered source crawler' : 'Web search',
     }));
-    let inserted = 0;
-    if (inserts.length) {
-      const { data, error } = await admin.from("qb_paper_discovery_candidates")
-        .upsert(inserts, { onConflict: "source_url", ignoreDuplicates: true }).select("id");
-      if (error) {
-        await admin.from("qb_paper_discovery_runs").update({ status: "failed", heartbeat_at: null,
-          error_message: "Could not save search results: " + error.message, completed_at: new Date().toISOString() }).eq("id", runId);
-        return reply(500, { error: "Could not save search results: " + error.message });
-      }
-      inserted = data?.length || 0;
-    }
-    // Link both new and previously known URLs to this run without changing the
-    // candidate's original discovery_run_id or its historical provenance.
-    const candidateUrls = flattened.slice(0, MAX_DISCOVERED_CANDIDATES_PER_BATCH).map((row) => String(row.url));
-    if (candidateUrls.length) {
-      const { data: runCandidates, error: runCandidateError } = await admin.from("qb_paper_discovery_candidates")
-        .select("id,source_url").in("source_url", candidateUrls);
-      if (runCandidateError) return reply(500, { error: "PDF candidates were saved, but run membership could not be loaded: " + runCandidateError.message });
-      const links = (runCandidates || []).map((candidate: any) => ({ discovery_run_id: runId, candidate_id: candidate.id }));
-      if (links.length) {
-        const { error: linkError } = await admin.from("qb_paper_discovery_run_candidates")
-          .upsert(links, { onConflict: "discovery_run_id,candidate_id", ignoreDuplicates: true });
-        if (linkError) return reply(500, { error: "PDF candidates were saved, but run membership could not be recorded: " + linkError.message });
-      }
-    }
-    const { count: uniqueRunCandidateCount, error: runCountError } = await admin.from("qb_paper_discovery_run_candidates")
-      .select("candidate_id", { count: "exact", head: true }).eq("discovery_run_id", runId);
-    if (runCountError) return reply(500, { error: "Could not calculate the unique PDF estimate for this run: " + runCountError.message });
-    foundTotal = Number(uniqueRunCandidateCount || 0);
+    foundTotal += previewResults.length;
+    const previouslySeenTotal = 0;
+    const unprocessedPdfLinksTotal = Math.max(0, Number(progress.unprocessed_pdf_links) || 0)
+      + Math.max(0, flattened.length - MAX_DISCOVERED_CANDIDATES_PER_BATCH);
+    const discoveredSourceTotal = Math.max(0, Number(progress.discovered_source_count) || 0) + discoveredDomainResults.size;
     // Preserve one audit row per checked source attempt, including zero-result and failed checks.
     const sourceAuditRows: any[] = batch.map((source: any) => {
       const matching = batchRows.filter((row: any) => row.source?.id === source.id && isQuestionPaperPdf(row, query));
@@ -851,13 +819,6 @@ Deno.serve(async (req) => {
       if (auditError) providerErrors.push("Source audit could not be saved: " + auditError.message);
     }
 
-    foundTotal += flattened.length;
-    insertedTotal += inserted;
-    const previouslySeenTotal = Math.max(0, Number(progress.previously_seen_pdf_urls) || 0)
-      + Math.max(0, Math.min(flattened.length, MAX_DISCOVERED_CANDIDATES_PER_BATCH) - inserted);
-    const unprocessedPdfLinksTotal = Math.max(0, Number(progress.unprocessed_pdf_links) || 0)
-      + Math.max(0, flattened.length - MAX_DISCOVERED_CANDIDATES_PER_BATCH);
-    const discoveredSourceTotal = Math.max(0, Number(progress.discovered_source_count) || 0) + discoveredDomainResults.size;
     const nextProgress = { next_offset: nextOffset, successful_queries: successfulQueries,
       provider_errors: providerErrors.slice(0, 80), results_found: foundTotal, new_candidates: insertedTotal,
       previously_seen_pdf_urls: previouslySeenTotal, unprocessed_pdf_links: unprocessedPdfLinksTotal,
@@ -874,12 +835,13 @@ Deno.serve(async (req) => {
     return reply(200, {
       run_id: runId, complete, next_source: complete ? null : searchTargets[nextOffset]?.display_name,
       sources_processed: nextOffset, sources_total: searchTargets.length,
-      found: foundTotal, pdfs_found: foundTotal, new_candidates: insertedTotal,
-      estimated_new_candidates: insertedTotal,
+      found: foundTotal, pdfs_found: foundTotal, new_candidates: 0,
+      estimated_new_candidates: 0,
       previously_seen_pdf_urls: previouslySeenTotal,
       unprocessed_pdf_links: unprocessedPdfLinksTotal,
       approved_source_results: flattened.filter((r) => r.source).length,
       discovered_source_count: discoveredSourceTotal,
+      preview_results: previewResults,
       provider: "Official board archive + Google Search (Serper), DuckDuckGo HTML and Bing RSS",
       provider_successful_queries: successfulQueries, provider_errors: providerErrors.slice(-8),
       message: complete
