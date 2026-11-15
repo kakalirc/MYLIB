@@ -706,7 +706,7 @@ Deno.serve(async (req) => {
         display_name: source.display_name, source_type: source.source_type,
         source_classification: "approved",
         outcome: matching.length ? "pdf_found" : (sourceError
-          ? (/Source returned HTTP|Too many redirects|timed out|Source returned an invalid redirect/i.test(sourceError) ? "inaccessible" : "provider_error")
+          ? (/Source returned HTTP|Too many redirects|timed out|Source returned an invalid redirect|Source hostname/i.test(sourceError) ? "inaccessible" : "provider_error")
           : "no_matching_pdf"),
         pdf_count: matching.length,
         provider: "DuckDuckGo/Bing RSS + source-specific crawler",
