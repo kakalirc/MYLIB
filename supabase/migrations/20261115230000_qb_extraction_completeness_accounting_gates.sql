@@ -27,8 +27,11 @@ begin
  if v_paper.board_id is null then
    return jsonb_build_object('ok',false,'code','board_mapping_required','message','This school paper has no board mapping. Assign a board before publishing questions.');
  end if;
- if exists(select 1 from public.qb_paper_extraction_pages p where p.run_id=p_run_id and p.page_state<>'completed') then
-   return jsonb_build_object('ok',false,'code','page_coverage_incomplete','message','Every original PDF page must have a completed extraction checkpoint before publication.');
+ if not exists(select 1 from public.qb_paper_extraction_pages p where p.run_id=p_run_id)
+   or exists(select 1 from public.qb_paper_extraction_pages p where p.run_id=p_run_id and p.page_state is distinct from 'completed')
+   or exists(select 1 from public.qb_paper_extraction_pages p where p.run_id=p_run_id group by p.run_id
+     having min(p.page_number)<>1 or max(p.page_number)<>count(*)) then
+   return jsonb_build_object('ok',false,'code','page_coverage_incomplete','message','Every original PDF page must have a contiguous, completed extraction checkpoint beginning at page 1 before publication.');
  end if;
  if exists(select 1 from public.qb_paper_extraction_pages p
    where p.run_id=p_run_id and coalesce(p.page_metadata->'extraction_audit'->>'status','review')<>'clear'
@@ -41,8 +44,11 @@ begin
  end if;
  if exists(select 1 from public.qb_paper_extraction_requests r where r.run_id=p_run_id and r.request_state='responded'
    and (r.input_tokens is null or r.output_tokens is null or r.input_cost_usd is null or r.output_cost_usd is null or r.total_cost_usd is null)
- ) then return jsonb_build_object('ok',false,'code','usage_accounting_incomplete',
-   'message','Publication is blocked because one or more provider responses lack verified token and USD cost accounting.');
+ ) or coalesce(v_run.input_tokens,0)<>coalesce((select sum(r.input_tokens) from public.qb_paper_extraction_requests r where r.run_id=p_run_id and r.request_state='responded'),0)
+   or coalesce(v_run.output_tokens,0)<>coalesce((select sum(r.output_tokens) from public.qb_paper_extraction_requests r where r.run_id=p_run_id and r.request_state='responded'),0)
+   or coalesce(v_run.actual_cost_usd,0)<>coalesce((select sum(r.total_cost_usd) from public.qb_paper_extraction_requests r where r.run_id=p_run_id and r.request_state='responded'),0)
+ then return jsonb_build_object('ok',false,'code','usage_accounting_incomplete',
+   'message','Publication is blocked because provider usage is incomplete or the run-level totals do not reconcile to the immutable request ledger.');
  end if;
  if exists(select 1 from public.qb_paper_extraction_requests r where r.run_id=p_run_id and r.request_state in ('sent','uncertain')
  ) then return jsonb_build_object('ok',false,'code','provider_outcome_unresolved',
