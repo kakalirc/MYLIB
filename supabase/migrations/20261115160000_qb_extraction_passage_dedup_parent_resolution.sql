@@ -42,17 +42,17 @@ begin
    else
      v_payload:=v_item.payload;
      if coalesce(trim(v_payload->>'passage_text'),'')='' then raise exception 'Approved passage % has no passage_text',v_item.item_key; end if;
-     v_normalized_passage:=lower(regexp_replace(trim(v_payload->>'passage_text'),'\\s+',' ','g'));
+     v_normalized_passage:=lower(regexp_replace(trim(v_payload->>'passage_text'),'[[:space:]]+',' ','g'));
      select s.published_passage_id into v_passage_id
        from public.qb_paper_extraction_staging s
        where s.run_id=p_run_id and s.item_kind='passage' and s.review_state='approved'
          and s.id<>v_item.id and s.published_passage_id is not null
-         and lower(regexp_replace(trim(s.payload->>'passage_text'),'\\s+',' ','g'))=v_normalized_passage
+         and lower(regexp_replace(trim(s.payload->>'passage_text'),'[[:space:]]+',' ','g'))=v_normalized_passage
        order by s.created_at limit 1;
      if v_passage_id is null then
        insert into public.qb_passages(subject_name,passage_text,passage_type,word_count,difficulty,source,approved)
        values(v_paper.subject_name,v_payload->>'passage_text',nullif(v_payload->>'passage_type',''),
-         array_length(regexp_split_to_array(trim(v_payload->>'passage_text'),'\\s+'),1),
+         array_length(regexp_split_to_array(trim(v_payload->>'passage_text'),'[[:space:]]+'),1),
          coalesce(nullif(v_payload->>'difficulty',''),'medium'),
          'Past paper '||v_paper.year,true)
        returning id into v_passage_id;
