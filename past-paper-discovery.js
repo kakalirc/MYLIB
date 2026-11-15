@@ -177,7 +177,7 @@
         ? '<p class="hint" style="color:var(--brick)">Partial search: ' + esc(estimate.provider_errors.length) + ' provider/source warning(s). Retry before treating this estimate as complete.</p>' : '';
       if (estimate.unprocessed_pdf_links > 0) warnings += '<p class="hint" style="color:var(--brick)">' + esc(estimate.unprocessed_pdf_links) + ' additional matching PDF links exceeded the per-batch safety cap and were not queued. Narrow the criteria and run another Pre-Search.</p>';
       preSearchSummary = '<div class="lib-ppd-section lib-ppd-estimate"><h3>Pre-Search estimate</h3><div class="lib-ppd-estimate-grid">'
-        + '<div><b>' + esc(estimate.pdfs_found || 0) + '</b><span>PDF links found</span></div>'
+        + '<div><b>' + esc(estimate.pdfs_found || 0) + '</b><span>Potential PDFs found</span></div>'
         + '<div><b>' + esc(estimate.estimated_new_candidates || 0) + '</b><span>New candidates saved</span></div>'
         + '<div><b>' + esc(estimate.previously_seen_pdf_urls || 0) + '</b><span>Previously seen links</span></div>'
         + '<div><b>' + esc(estimate.discovered_source_count || 0) + '</b><span>New domains surfaced</span></div></div>'
@@ -258,7 +258,7 @@
         unprocessed_pdf_links:Number(result.unprocessed_pdf_links || 0),
         discovered_source_count:Number(result.discovered_source_count || 0),
         provider_errors:result.provider_errors || [] };
-      state.message = 'Pre-Search complete: ' + state.latestPreSearch.pdfs_found + ' PDF links found; '
+      state.message = 'Pre-Search complete: ' + state.latestPreSearch.pdfs_found + ' potential PDFs found; '
         + state.latestPreSearch.estimated_new_candidates + ' new candidates saved; '
         + state.latestPreSearch.discovered_source_count + ' new source domains identified.'
         + (result.provider_errors && result.provider_errors.length ? ' Some sources/providers need retry; see Source Intelligence.' : '');
