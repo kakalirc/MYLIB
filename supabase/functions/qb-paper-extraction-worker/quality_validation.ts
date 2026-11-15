@@ -69,7 +69,7 @@ export function assessExtractionQuality(payload: Record<string, unknown>): Extra
   } else if (!questionText) {
     flags.push("Question stem is empty.");
   }
-  if (/\[(?:unclear|illegible|question text not clearly legible|subquestion text not clearly legible)[^\\]]*\]/i.test(questionText)) {
+  if (questionText.includes("[") && /unclear|illegible|not clearly legible/i.test(questionText)) {
     flags.push("Question stem contains an OCR placeholder or unresolved text.");
   }
   if (isMcq(payload)) flags.push(...optionFlags(payload.options, "Main question"));
@@ -82,7 +82,7 @@ export function assessExtractionQuality(payload: Record<string, unknown>): Extra
       const sub = part as Record<string, unknown>;
       const label = clean(sub.original_number) || String(index + 1);
       if (!clean(sub.question_text)) flags.push(`Subquestion ${label} has an empty question stem.`);
-      if (/\[(?:unclear|illegible|question text not clearly legible|subquestion text not clearly legible)[^\\]]*\]/i.test(clean(sub.question_text))) {
+      if (clean(sub.question_text).includes("[") && /unclear|illegible|not clearly legible/i.test(clean(sub.question_text))) {
         flags.push(`Subquestion ${label} contains an OCR placeholder or unresolved text.`);
       }
       if (isMcq(sub)) flags.push(...optionFlags(sub.options, `Subquestion ${label}`));
