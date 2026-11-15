@@ -11,7 +11,8 @@ begin
  insert into public.qb_paper_extraction_runs(source_paper_id,requested_by,status,ai_request_state,current_stage)
  values(v_paper,v_admin,'completed','responded','review') returning id into v_run;
  insert into public.qb_paper_extraction_staging(run_id,item_key,item_kind,original_number,payload,content_fingerprint,review_state)
- values(v_run,'passage:P1','passage','P1','{"passage_text":"A short test passage.","passage_type":"reading","passage_key":"passage-alias-P1"}'::jsonb,repeat('a',64),'approved'),\n (v_run,'passage:P1-copy','passage','P1-copy','{"passage_text":"A   short test passage.","passage_type":"reading"}'::jsonb,repeat('c',64),'approved');
+ values(v_run,'passage:P1','passage','P1','{"passage_text":"A short test passage.","passage_type":"reading","passage_key":"passage-alias-P1"}'::jsonb,repeat('a',64),'approved'),
+ (v_run,'passage:P1-copy','passage','P1-copy','{"passage_text":"A   short test passage.","passage_type":"reading"}'::jsonb,repeat('c',64),'approved');
  insert into public.qb_paper_extraction_staging(run_id,item_key,item_kind,page_number,original_number,parent_item_key,payload,content_fingerprint,review_state)
  values(v_run,'question:1','question',1,'1','passage-alias-P1','{"question_text":"What is the passage about?","question_type":"short_answer","marks":2,"answer_text":"A test.","difficulty":"easy"}'::jsonb,repeat('b',64),'approved');
  perform set_config('request.jwt.claim.role','service_role',true);
@@ -23,6 +24,8 @@ begin
  if v_passage is null or not exists(select 1 from public.qb_passages where id=v_passage and approved=true) then
    raise exception 'Approved passage was not linked to the question';
  end if;
+ select published_passage_id into v_passage_duplicate from public.qb_paper_extraction_staging where run_id=v_run and item_key='passage:P1-copy';
+ if v_passage_duplicate is distinct from v_passage then raise exception 'Duplicate passage did not reuse the canonical passage id'; end if;
  select published_passage_id into v_passage_duplicate from public.qb_paper_extraction_staging where run_id=v_run and item_key='passage:P1-copy';
  if v_passage_duplicate is distinct from v_passage then raise exception 'Duplicate passage did not reuse the canonical passage id'; end if;
  v_result:=public.qb_publish_extraction_run(v_run,v_admin);
