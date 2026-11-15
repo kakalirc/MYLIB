@@ -5,6 +5,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument } from "npm:pdf-lib@1.17.1";
 import { parseQuestionItems } from "./response_parser.ts";
 import { readAnthropicUsage } from "./usage_reconciliation.ts";
+import { assessExtractionQuality, formatOption } from "./quality_validation.ts";
 
 const MODEL=Deno.env.get("QB_EXTRACTION_MODEL")||"claude-haiku-4-5";
 const PRICING:Record<string,{input:number;output:number;source:string}>={
@@ -75,9 +76,12 @@ function normalizePayload(item:any,page:number){
  const rendered=parts.map((part:any)=>[
   part.original_number?String(part.original_number)+") ":"",
   String(part.question_text||""),
-  Array.isArray(part.options)&&part.options.length?"Options: "+part.options.join(" | "):"",
+  Array.isArray(part.options)&&part.options.length?"Options: "+part.options.map(formatOption).join(" | "):"",
   part.marks!=null?"("+part.marks+" marks)":""
  ].filter(Boolean).join(" ")).join("\n");
+ const quality=assessExtractionQuality(payload);
+ payload.extraction_quality_flags=quality.flags;
+ payload.extraction_quality_status=quality.status;
  const visual=payload.visual_stimulus_description?"[Visual stimulus: "+payload.visual_stimulus_description+"]":"";
  const shared=payload.shared_instructions?"[Shared instructions: "+payload.shared_instructions+"]":"";
  payload.question_text=[payload.question_text||"",rendered,visual,shared].filter(Boolean).join("\n");
