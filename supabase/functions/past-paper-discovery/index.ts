@@ -778,7 +778,7 @@ Deno.serve(async (req) => {
           ? (/Source returned HTTP|Too many redirects|timed out|Source returned an invalid redirect|Source hostname/i.test(sourceError) ? "inaccessible" : "provider_error")
           : "no_matching_pdf"),
         pdf_count: matching.length,
-        provider: "Google Search (Serper) + Google Search (Serper) + DuckDuckGo HTML + Bing RSS (independent parallel searches) + source-specific crawler",
+        provider: "Google Search (Serper) + DuckDuckGo HTML + Bing RSS (independent parallel searches) + source-specific crawler",
         evidence: {
           query_variants: [
             ...buildPdfQueryVariants(query),
