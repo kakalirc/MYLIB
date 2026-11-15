@@ -4,7 +4,7 @@
   if (window.__libPastPaperDiscoveryInstalled) return;
   window.__libPastPaperDiscoveryInstalled = true;
 
-  var state = { loaded:false, loading:false, sources:[], candidates:[], rejectedCandidates:[], schools:[], runs:[], auditRows:[], latestPreSearch:null, message:'', error:'', actionMessages:{}, searchBusy:false, scope:'board', queueTab:'review' };
+  var state = { loaded:false, loading:false, sources:[], candidates:[], rejectedCandidates:[], schools:[], runs:[], auditRows:[], auditLimit:120, latestPreSearch:null, message:'', error:'', actionMessages:{}, searchBusy:false, scope:'board', queueTab:'review' };
   function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
   function byId(id) { return document.getElementById(id); }
   function val(id) { return byId(id) ? byId(id).value : ''; }
@@ -26,7 +26,7 @@
         sb.from('qb_paper_discovery_candidates').select('*').eq('status', 'rejected').order('reviewed_at', {ascending:false}).limit(100),
         sb.from('qb_schools').select('id,name,archived').eq('archived', false).order('name'),
         sb.from('qb_paper_discovery_runs').select('*').order('started_at', {ascending:false}).limit(8),
-        sb.from('qb_paper_discovery_run_sources').select('*').order('checked_at', {ascending:false}).limit(120)
+        sb.from('qb_paper_discovery_run_sources').select('*').order('checked_at', {ascending:false}).limit(state.auditLimit)
       ]);
       var failure = results.find(function (r) { return r.error; });
       if (failure) throw failure.error;
@@ -190,7 +190,8 @@
         var promote = a.source_classification === 'discovered' && a.domain && !state.sources.some(function (source) { return a.domain === source.domain || a.domain.endsWith('.' + source.domain); })
           ? '<button class="btn-small" onclick="libPPDPromoteDomain(\'' + esc(a.domain) + '\',\'' + (a.source_type === 'school' ? 'school' : 'education_portal') + '\')">Add to approved registry</button>' : '';
         return '<div class="lib-ppd-source"><div><b>' + esc(a.display_name || a.domain) + '</b><div class="hint">' + esc(a.domain) + ' · ' + esc(a.source_classification) + ' · ' + esc(outcomeLabel) + ' · ' + esc(a.pdf_count) + ' PDFs · ' + esc(new Date(a.checked_at).toLocaleString()) + '</div></div>' + promote + '</div>';
-      }).join('') : '<p class="hint">Source audit records will appear after Pre-Search.</p>') + '</details>';
+      }).join('') : '<p class="hint">Source audit records will appear after Pre-Search.</p>')
+      + (state.auditRows.length >= state.auditLimit ? '<button class="btn-small" type="button" onclick="libPPDLoadMoreAudit()">Load older source history</button>' : '') + '</details>';
     var candidates = renderQueueTabs();
     var runs = '<details class="lib-ppd-section lib-ppd-recent-searches"><summary>Recent searches</summary>' + (state.runs.length ? state.runs.map(function (r) {
       var progress = r.filters && r.filters.discovery_progress ? r.filters.discovery_progress : {};
@@ -205,6 +206,12 @@
       + '</style>' + search + preSearchSummary + sources + sourceAudit + candidates + runs + '</section>';
   }
 
+  window.libPPDLoadMoreAudit = async function () {
+    state.auditLimit += 120;
+    state.loaded = false;
+    await loadData(true);
+    if (typeof render === 'function') render();
+  };
   window.libPPDSetScope = function (v) { state.scope = v === 'school' ? 'school' : 'board'; };
   window.libPPDSetQueueTab = function (v) { state.queueTab = v === 'rejected' ? 'rejected' : 'review'; if (typeof render === 'function') render(); };
   window.libPPDRestore = async function (id) {
