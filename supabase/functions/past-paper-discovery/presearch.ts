@@ -46,10 +46,11 @@ export function isQuestionPaperPdf(row: any, query: string): boolean {
   if (row.archive_member) return true;
   if (!parsed.pathname.toLowerCase().endsWith(".pdf") && !row.pdf_search_hint) return false;
   const evidence = [row.title, row.snippet, row.url].join(" ").toLowerCase();
+  const normalizedEvidence = " " + evidence.replace(/[^a-z0-9]+/g, " ") + " ";
   const paperSignals = [
     "question paper", "question-paper", "question_paper", "sample paper", "sample-paper",
-    "specimen paper", "specimen-paper", "past paper", "exam paper", "board paper",
+    "specimen paper", "specimen-paper", "past paper", "exam paper", "board paper", " qp ",
   ];
-  return paperSignals.some((signal) => evidence.includes(signal)) &&
+  return paperSignals.some((signal) => (signal === " qp " ? normalizedEvidence.includes(signal) : evidence.includes(signal))) &&
     matchesQuery(evidence, queryTerms(query));
 }
