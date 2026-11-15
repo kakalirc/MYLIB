@@ -44,6 +44,7 @@
             pdfs_found:Number(progress.results_found || latestRun.results_found || 0),
             estimated_new_candidates:Number(progress.new_candidates || 0),
             previously_seen_pdf_urls:Number(progress.previously_seen_pdf_urls || 0),
+            unprocessed_pdf_links:Number(progress.unprocessed_pdf_links || 0),
             discovered_source_count:Number(progress.discovered_source_count || 0),
             provider_errors:progress.provider_errors || [] };
         }
@@ -174,6 +175,7 @@
       var estimate = state.latestPreSearch;
       var warnings = estimate.provider_errors && estimate.provider_errors.length
         ? '<p class="hint" style="color:var(--brick)">Partial search: ' + esc(estimate.provider_errors.length) + ' provider/source warning(s). Retry before treating this estimate as complete.</p>' : '';
+      if (estimate.unprocessed_pdf_links > 0) warnings += '<p class="hint" style="color:var(--brick)">' + esc(estimate.unprocessed_pdf_links) + ' additional matching PDF links exceeded the per-batch safety cap and were not queued. Narrow the criteria and run another Pre-Search.</p>';
       preSearchSummary = '<div class="lib-ppd-section lib-ppd-estimate"><h3>Pre-Search estimate</h3><div class="lib-ppd-estimate-grid">'
         + '<div><b>' + esc(estimate.pdfs_found || 0) + '</b><span>PDF links found</span></div>'
         + '<div><b>' + esc(estimate.estimated_new_candidates || 0) + '</b><span>New candidates saved</span></div>'
@@ -253,6 +255,7 @@
         pdfs_found:Number(result.pdfs_found || result.found || 0),
         estimated_new_candidates:Number(result.estimated_new_candidates || result.new_candidates || 0),
         previously_seen_pdf_urls:Number(result.previously_seen_pdf_urls || 0),
+        unprocessed_pdf_links:Number(result.unprocessed_pdf_links || 0),
         discovered_source_count:Number(result.discovered_source_count || 0),
         provider_errors:result.provider_errors || [] };
       state.message = 'Pre-Search complete: ' + state.latestPreSearch.pdfs_found + ' PDF links found; '
