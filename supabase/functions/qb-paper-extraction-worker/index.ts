@@ -132,7 +132,7 @@ Deno.serve(async(req)=>{
   }
   const ambiguousRequests=(requests||[]).filter((x:any)=>["sent","uncertain"].includes(x.request_state));
   for(const request of ambiguousRequests){
-   const match=String(request.chunk_key||"").match(/^pages:(\\d+)-(\\d+):/);
+   const match=String(request.chunk_key||"").match(/^pages:(\d+)-(\d+):/);
    if(!match)continue;
    const first=Number(match[1]),last=Number(match[2]);
    const {error:skipError}=await db.from("qb_paper_extraction_pages").update({page_state:"skipped",error_message:"Provider outcome is ambiguous; this chunk was not resent.",page_metadata:{chunk_key:request.chunk_key,reason:"ambiguous_provider_outcome"}}).eq("run_id",runId).gte("page_number",first).lte("page_number",last).neq("page_state","completed");
