@@ -523,7 +523,7 @@ Deno.serve(async (req) => {
         const resetFilters = { ...existing.filters, source_snapshot: null, discovery_progress: {
           next_offset: 0, successful_queries: 0, provider_errors: [],
           results_found: preservedCount, new_candidates: 0,
-          previously_seen_pdf_urls: 0, discovered_source_count: 0,
+          previously_seen_pdf_urls: 0, unprocessed_pdf_links: 0, discovered_source_count: 0,
         } };
         const { data: restarted, error: restartError } = await admin.from("qb_paper_discovery_runs")
           .update({ status: "running", filters: resetFilters, results_found: preservedCount,
