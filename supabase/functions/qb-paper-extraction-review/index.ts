@@ -67,7 +67,7 @@ Deno.serve(async(req)=>{
  if(action==="list"){
   const [{data:items,error:itemError},{data:pages,error:pageError},{data:paper}] = await Promise.all([
    db.from("qb_paper_extraction_staging").select("id,item_key,item_kind,page_number,original_number,parent_item_key,payload,review_state,review_note,published_question_id,published_passage_id").eq("run_id",runId).order("page_number").order("created_at"),
-   db.from("qb_paper_extraction_pages").select("page_number,page_state,page_kind,error_message").eq("run_id",runId).order("page_number"),
+   db.from("qb_paper_extraction_pages").select("page_number,page_state,page_kind,error_message,page_metadata").eq("run_id",runId).order("page_number"),
    db.from("qb_source_papers").select("subject_name,year,exam_type,medium,board_id,grade_id,source_type").eq("id",run.source_paper_id).maybeSingle()
   ]);
   if(itemError||pageError)return reply(500,{error:"Could not load staged review records."});
