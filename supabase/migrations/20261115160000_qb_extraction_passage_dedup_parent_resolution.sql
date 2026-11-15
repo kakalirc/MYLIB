@@ -10,7 +10,7 @@ as $function$
 declare
  v_run record; v_paper record; v_item record; v_prior record; v_payload jsonb; v_key text;
  v_passages jsonb:='{}'::jsonb; v_passage_id uuid; v_question_id uuid;
- v_type text; v_options jsonb; v_marks numeric; v_questions integer:=0; v_passage_count integer:=0;
+ v_type text; v_options jsonb; v_marks numeric; v_questions integer:=0; v_passage_count integer:=0; v_passage_index integer:=0; v_duplicate_count integer:=0;
  v_normalized_passage text;
 begin
  if coalesce(auth.role(),'')<>'service_role' then raise exception 'Publication is restricted to the trusted server'; end if;
@@ -36,6 +36,7 @@ begin
    where run_id=p_run_id and item_kind='passage' and review_state='approved'
    order by page_number,created_at
  loop
+   v_passage_index:=v_passage_index+1;
    if v_item.published_passage_id is not null then
      v_passage_id:=v_item.published_passage_id;
    else
@@ -56,10 +57,15 @@ begin
          'Past paper '||v_paper.year,true)
        returning id into v_passage_id;
        v_passage_count:=v_passage_count+1;
+     else
+       v_duplicate_count:=v_duplicate_count+1;
      end if;
      update public.qb_paper_extraction_staging set published_passage_id=v_passage_id,updated_at=now() where id=v_item.id;
    end if;
    -- Register every stable alias used by extraction models or staging.
+   v_passages:=jsonb_set(v_passages,array['passage_'||v_passage_index],to_jsonb(v_passage_id::text),true);
+   v_passages:=jsonb_set(v_passages,array['passage-'||v_passage_index],to_jsonb(v_passage_id::text),true);
+   v_passages:=jsonb_set(v_passages,array['passage '||v_passage_index],to_jsonb(v_passage_id::text),true);
    foreach v_key in array array[
      nullif(v_item.original_number,''), nullif(v_item.item_key,''),
      nullif(v_item.payload->>'original_number',''), nullif(v_item.payload->>'passage_key',''),
@@ -124,7 +130,6 @@ begin
    linked_question_count_at_end=(select count(*) from public.qb_questions where source_paper_id=v_paper.id),
    updated_at=now() where id=p_run_id;
  return jsonb_build_object('ok',true,'run_id',p_run_id,'questions_published',v_questions,
-   'passages_published',v_passage_count,'stage','finished','passage_duplicates_reused',
-   (select count(*) from public.qb_paper_extraction_staging where run_id=p_run_id and item_kind='passage' and published_passage_id is not null)-v_passage_count);
+   'passages_published',v_passage_count,'stage','finished','passage_duplicates_reused',v_duplicate_count);
 end
 $function$;
