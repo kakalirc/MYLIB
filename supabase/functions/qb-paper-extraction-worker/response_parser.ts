@@ -26,20 +26,27 @@ export function parseQuestionItems(source: string): ParsedQuestionResponse {
   if (!value || typeof value !== "object" || Array.isArray(value) || !Array.isArray(value.items)) {
     throw new Error("AI response schema invalid: expected an object containing an items array.");
   }
-  for (let index = 0; index < value.items.length; index++) {
-    const item = value.items[index];
-    if (!item || typeof item !== "object" || Array.isArray(item)) {
+  const normalizedItems = value.items.map((sourceItem: any, index: number) => {
+    if (!sourceItem || typeof sourceItem !== "object" || Array.isArray(sourceItem)) {
       throw new Error(`AI response schema invalid: item ${index + 1} is not an object.`);
     }
-    if (!["question", "passage"].includes(item.item_kind)) {
+    if (!["question", "passage"].includes(sourceItem.item_kind)) {
       throw new Error(`AI response schema invalid: item ${index + 1} has an unsupported item_kind.`);
     }
-    if (!Number.isInteger(Number(item.page_number))) {
+    if (!Number.isInteger(Number(sourceItem.page_number))) {
       throw new Error(`AI response schema invalid: item ${index + 1} has no valid page_number.`);
     }
-    if (!item.payload || typeof item.payload !== "object" || Array.isArray(item.payload)) {
-      throw new Error(`AI response schema invalid: item ${index + 1} has no payload object.`);
+    const envelopeKeys = new Set(["item_kind", "page_number", "original_number", "parent_item_key", "payload"]);
+    let payload = sourceItem.payload;
+    if (payload == null) {
+      // Models sometimes return the requested payload fields at item level.
+      // Accept that equivalent shape and canonicalize it before staging.
+      payload = Object.fromEntries(Object.entries(sourceItem).filter(([key]) => !envelopeKeys.has(key)));
     }
-  }
-  return { items: value.items, repaired };
+    if (!payload || typeof payload !== "object" || Array.isArray(payload) || Object.keys(payload).length === 0) {
+      throw new Error(`AI response schema invalid: item ${index + 1} has no usable question/passage content.`);
+    }
+    return { ...sourceItem, payload };
+  });
+  return { items: normalizedItems, repaired };
 }
