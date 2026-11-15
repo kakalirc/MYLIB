@@ -191,7 +191,7 @@ Deno.serve(async(req)=>{
     const respondedState=await db.rpc("qb_set_extraction_worker_state",{p_run_id:runId,p_lease_owner:owner,p_status:"processing",p_ai_request_state:"responded",p_error_message:null});
     if(respondedState.error||!respondedState.data?.ok)throw new Error("Provider response is saved, but run state could not be advanced; resume to reconcile without resending.");
     if(!response.ok)throw new Error(`Anthropic HTTP ${response.status}: ${rawBody.slice(0,1000)}`);
-    const {data,text}=parseProviderBody(rawBody);
+    const {text}=parseProviderBody(rawBody);
     const usage=readAnthropicUsage(rawBody,PRICE.input,PRICE.output);
     const usedInput=usage.inputTokens,usedOutput=usage.outputTokens,batchCost=usage.totalCostUsd;
     const {error:usageSave}=await db.from("qb_paper_extraction_requests").update({
