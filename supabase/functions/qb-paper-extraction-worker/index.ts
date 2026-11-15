@@ -66,10 +66,10 @@ function normalizePayload(item:any,page:number){
   String(part.question_text||""),
   Array.isArray(part.options)&&part.options.length?"Options: "+part.options.join(" | "):"",
   part.marks!=null?"("+part.marks+" marks)":""
- ].filter(Boolean).join(" ")).join("\\n");
+ ].filter(Boolean).join(" ")).join("\n");
  const visual=payload.visual_stimulus_description?"[Visual stimulus: "+payload.visual_stimulus_description+"]":"";
  const shared=payload.shared_instructions?"[Shared instructions: "+payload.shared_instructions+"]":"";
- payload.question_text=[payload.question_text||"",rendered,visual,shared].filter(Boolean).join("\\n");
+ payload.question_text=[payload.question_text||"",rendered,visual,shared].filter(Boolean).join("\n");
  return payload;
 }
 async function adminUser(db:any,token:string){if(!token)throw new Error("Please sign in again.");const {data,error}=await db.auth.getUser(token);if(error||!data?.user)throw new Error("Please sign in again.");const {data:p,error:pe}=await db.from("profiles").select("role,archived").eq("id",data.user.id).maybeSingle();if(pe||p?.role!=="Admin"||p.archived===true)throw new Error("Only an active Admin can extract papers.");return data.user;}
@@ -245,7 +245,7 @@ Deno.serve(async(req)=>{
      throw new Error(`USD spend guard stopped before pages ${first}-${last}. Actual accrued: ${totalCost.toFixed(6)}; conservative next-batch reserve: ${MAX_BATCH_RESERVE_USD.toFixed(6)}; per-paper budget: ${BUDGET_USD.toFixed(2)}.`);
     let requestId=old?.id;
     if(!requestId){
-     const {data:newReq,error:ne}=await db.from("qb_paper_extraction_requests").insert({run_id:runId,chunk_key:requestChunk,provider:"anthropic",model_name:MODEL,idempotency_key:`${runId}:${requestChunk}`,request_state:"prepared",request_payload:{page_start:first,page_end:last,prompt_version:"qb-extract-v1",attempt:nextAttemptNumber+1,prior_ambiguous_attempts:ambiguousCount}}).select("id").single();
+     const {data:newReq,error:ne}=await db.from("qb_paper_extraction_requests").insert({run_id:runId,chunk_key:requestChunk,provider:"anthropic",model_name:MODEL,idempotency_key:`${runId}:${requestChunk}`,request_state:"prepared",request_payload:{page_start:first,page_end:last,prompt_version:"qb-extract-v2",attempt:nextAttemptNumber+1,prior_ambiguous_attempts:ambiguousCount}}).select("id").single();
      if(ne||!newReq)throw new Error("Could not save provider request checkpoint.");
      requestId=newReq.id;
     }
@@ -260,7 +260,7 @@ Deno.serve(async(req)=>{
     let response:Response;
     let rawBody:string;
     try{
-     response=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":ai.api_key,"anthropic-version":"2023-06-01"},body:JSON.stringify({model:MODEL,max_tokens:MAX_OUTPUT_TOKENS,system:"Transcribe faithfully. Accuracy is more important than completeness. Never infer unclear text.",messages:[{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:b64(await part.save({useObjectStreams:false}))}},{type:"text",text:prompt(first,last)}]}]}),signal:AbortSignal.timeout(105000)});
+     response=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":ai.api_key,"anthropic-version":"2023-06-01"},body:JSON.stringify({model:MODEL,max_tokens:MAX_OUTPUT_TOKENS,system:"Transcribe every legible examinable item accurately and completely. Never infer unclear text; flag uncertainty explicitly.",messages:[{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:b64(await part.save({useObjectStreams:false}))}},{type:"text",text:prompt(first,last)}]}]}),signal:AbortSignal.timeout(105000)});
      rawBody=await response.text();
     }catch(e){
      const msg=String((e as Error).message||e);
