@@ -1,6 +1,6 @@
 // Admin-only online Past Paper discovery.
-// Board search uses Admin-approved domains; school search discovers new hosts that require Admin approval before PDF fetch.
-// Verification is restricted to enabled source domains; imports use the existing qb_source_papers workflow.
+// Pre-Search is PDF-only; newly discovered direct-PDF domains receive candidate-scoped verification,
+// while permanent source-registry changes remain explicit Admin actions. Imports use the existing workflow.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { getPdfZipMember, listPdfMembersFromZip } from "./archive.ts";
 import { matchesApprovedSourceDomain } from "./source-domain.ts";
@@ -130,8 +130,20 @@ async function searchInBatches(sources: any[], query: string, batchSize = 4) {
     const batch = sources.slice(i, i + batchSize);
     const settled = await Promise.all(batch.map(async (source: any) => {
       try {
-        const rows = await searchWeb(query + " question paper PDF", 8, source.domain);
-        return { source, rows, error: "" };
+        const variants = [
+          query + " question paper filetype:pdf",
+          query + " previous year examination paper filetype:pdf",
+          query + " annual exam question paper filetype:pdf",
+        ];
+        const attempts = await Promise.all(variants.map(async (variant) => {
+          try { return { rows: await searchWeb(variant, 8, source.domain), error: "" }; }
+          catch (e) { return { rows: [], error: clip((e as Error)?.message || e, 180) }; }
+        }));
+        const successful = attempts.filter((x) => !x.error);
+        const failed = attempts.filter((x) => x.error);
+        if (!successful.length) throw new Error(failed.map((x) => x.error).join(" · "));
+        return { source, rows: successful.flatMap((x) => x.rows), error: failed.length
+          ? "Partial provider failures: " + failed.map((x) => x.error).join(" · ") : "" };
       } catch (e) {
         return { source, rows: [], error: source.domain + ": " + clip((e as Error)?.message || e, 220) };
       }
@@ -191,7 +203,8 @@ function linkRows(html: string, baseUrl: string, source: any, terms: string[], l
     if (!safeHost(target, [source.domain])) continue;
     const isPdf = /\.pdf(?:$|[?#])/i.test(target.href);
     if (!matchesQuery(label + " " + context + " " + target.pathname, terms)) continue;
-    if (!isPdf && !/(question|paper|sample|specimen|exam|academic|download|resource)/i.test(label + " " + target.pathname)) continue;
+    // Web pages are discovery evidence only. A candidate must point to an actual PDF.
+    if (!isPdf) continue;
     rows.push({ title: (label || target.pathname.split("/").pop() || source.display_name).slice(0, 500),
       url: target.href, snippet: "Official source page · " + source.display_name + (context ? " · " + context.slice(0, 260) : ""),
       domain: target.hostname.toLowerCase().replace(/^www\./, ""), source });
@@ -607,9 +620,10 @@ Deno.serve(async (req) => {
       // Always run broad discovery after registered-source crawling. A handful of
       // sample-paper hits must not suppress searches for annual / previous-year papers.
       const broadQueries = [
-        query + " previous year board examination question paper PDF",
-        query + " annual examination question paper PDF",
-        query + " past exam question paper PDF",
+        query + " previous year board examination question paper filetype:pdf",
+        query + " annual examination question paper filetype:pdf",
+        query + " past exam question paper filetype:pdf",
+        query + " sample question paper filetype:pdf",
       ];
       const broadSettled = await Promise.all(broadQueries.map(async (broadQuery) => {
         try { return { rows: await searchWeb(broadQuery, 20), error: "" }; }
@@ -628,7 +642,11 @@ Deno.serve(async (req) => {
     })];
     const unique = new Map<string, any>();
     for (const row of rows) if (!unique.has(String(row.url).toLowerCase())) unique.set(String(row.url).toLowerCase(), row);
-    const flattened = [...unique.values()];
+    // Search providers may ignore filetype operators. Never create a paper candidate
+    // from an ordinary HTML result: only direct PDF URLs and verified PDF members qualify.
+    const flattened = [...unique.values()].filter((r) =>
+      !!r.archive_member || /\\.pdf(?:$|[?#])/i.test(String(r.url || ""))
+    );
 
     const inserts = flattened.slice(0, 80).map((r) => ({
       discovery_run_id: runId, source_id: r.source?.id || null, source_type: scope,
@@ -658,6 +676,52 @@ Deno.serve(async (req) => {
       }
       inserted = data?.length || 0;
     }
+    // Preserve one audit row per checked source attempt, including zero-result and failed checks.
+    const sourceAuditRows: any[] = batch.map((source: any) => {
+      const matching = batchRows.filter((row: any) => row.source?.id === source.id);
+      const sourceError = providerErrors.find((message) => message.startsWith(source.domain + ":"));
+      const partialError = providerErrors.find((message) => message.startsWith(source.domain + ":"));
+      return {
+        discovery_run_id: runId, source_id: source.id, domain: source.domain,
+        display_name: source.display_name, source_type: source.source_type,
+        source_classification: "approved",
+        outcome: sourceError ? "provider_error" : (matching.length ? "pdf_found" : "no_matching_pdf"),
+        pdf_count: matching.length,
+        provider: "DuckDuckGo/Bing RSS + source-specific crawler",
+        evidence: {
+          query_variants: [
+            query + " question paper filetype:pdf",
+            query + " previous year examination paper filetype:pdf",
+            query + " annual exam question paper filetype:pdf",
+          ],
+          result_titles: matching.slice(0, 12).map((row: any) => row.title),
+          diagnostic: partialError || null,
+        },
+      };
+    });
+    const discoveredCounts = new Map<string, any[]>();
+    for (const row of flattened) {
+      const registered = eligible.some((source: any) => row.domain === source.domain || row.domain.endsWith("." + source.domain));
+      if (!registered) {
+        const list = discoveredCounts.get(row.domain) || [];
+        list.push(row); discoveredCounts.set(row.domain, list);
+      }
+    }
+    for (const [domain, foundRows] of discoveredCounts) {
+      sourceAuditRows.push({
+        discovery_run_id: runId, source_id: null, domain, display_name: domain,
+        source_type: scope === "school" ? "school" : "education_portal",
+        source_classification: "discovered", outcome: "pdf_found", pdf_count: foundRows.length,
+        provider: "Broad web PDF search",
+        evidence: { result_titles: foundRows.slice(0, 12).map((row: any) => row.title),
+          pdf_urls: foundRows.slice(0, 12).map((row: any) => row.url) },
+      });
+    }
+    if (sourceAuditRows.length) {
+      const { error: auditError } = await admin.from("qb_paper_discovery_run_sources").insert(sourceAuditRows);
+      if (auditError) providerErrors.push("Source audit could not be saved: " + auditError.message);
+    }
+
     foundTotal += flattened.length;
     insertedTotal += inserted;
     const nextProgress = { next_offset: nextOffset, successful_queries: successfulQueries,
@@ -674,8 +738,11 @@ Deno.serve(async (req) => {
     return reply(200, {
       run_id: runId, complete, next_source: complete ? null : searchTargets[nextOffset]?.display_name,
       sources_processed: nextOffset, sources_total: searchTargets.length,
-      found: foundTotal, new_candidates: insertedTotal,
+      found: foundTotal, pdfs_found: foundTotal, new_candidates: insertedTotal,
+      estimated_new_candidates: insertedTotal,
+      previously_seen_pdf_urls: Math.max(0, flattened.length - inserted),
       approved_source_results: flattened.filter((r) => r.source).length,
+      discovered_source_count: discoveredCounts.size,
       provider: "Official board archive + DuckDuckGo fallback",
       provider_successful_queries: successfulQueries, provider_errors: providerErrors.slice(-8),
       message: complete
@@ -690,7 +757,21 @@ Deno.serve(async (req) => {
   if (candidateError || !candidate) return reply(404, { error: "Candidate not found." });
   const { data: sourceRows } = await admin.from("qb_paper_discovery_sources").select("domain").eq("enabled", true);
   const domains = (sourceRows || []).map((s: any) => s.domain);
-  if (!matchesApprovedSourceDomain(candidate.source_domain, domains)) return reply(400, { error: "This source is no longer enabled. Enable its registered domain in Approved sources, then retry verification." });
+  const isEnabledRegisteredSource = matchesApprovedSourceDomain(candidate.source_domain, domains);
+  const discoveredDomain = String(candidate.source_domain || "").toLowerCase().trim();
+  const validDiscoveredDomain = /^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$/.test(discoveredDomain);
+  const hasDirectPdfEvidence = !!candidate.discovery_metadata?.source_match &&
+    candidate.discovery_metadata.source_match === "unregistered_domain" &&
+    (/\\.pdf(?:$|[?#])/i.test(String(candidate.pdf_url || candidate.source_url || "")) ||
+      !!candidate.discovery_metadata?.archive_member);
+  if (!isEnabledRegisteredSource) {
+    if (!hasDirectPdfEvidence || !validDiscoveredDomain) {
+      return reply(400, { error: "This source is not enabled and the candidate does not contain eligible direct-PDF discovery evidence." });
+    }
+    // Temporary, candidate-scoped allowlist: only this discovered hostname and its
+    // subdomains may be fetched. It is not added to the permanent source registry.
+    domains.push(discoveredDomain);
+  }
 
   if (action === "verify") {
     try {
