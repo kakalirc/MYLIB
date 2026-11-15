@@ -129,7 +129,7 @@
       + '</div>';
     var actions = '<div class="lib-ppd-actions"><a class="btn-small" href="' + esc(previewUrl) + '" target="_blank" rel="noopener noreferrer">Open source / PDF</a>'
       + '<button class="btn-small" type="button" onclick="libPPDSaveMetadata(\'' + esc(c.id) + '\')">Save Metadata</button>'
-      + '<button class="btn-small" onclick="libPPDVerify(\'' + esc(c.id) + '\')" ' + (state.bulkVerifyBusy || ['verified','duplicate'].indexOf(c.verification_status) >= 0 ? 'disabled' : '') + '>Verify PDF</button>'
+      + '<button class="btn-small" onclick="libPPDVerify(\'' + esc(c.id) + '\')" ' + (state.bulkVerifyBusy || ['verified','duplicate'].indexOf(c.verification_status) >= 0 ? 'disabled' : '') + '>' + (['inaccessible','invalid_pdf','unsafe_url'].indexOf(c.verification_status) >= 0 ? 'Retry PDF verification' : 'Verify PDF') + '</button>'
       + (c.verification_status === 'verified' && c.status !== 'imported' && c.status !== 'rejected' && c.status !== 'duplicate'
         ? '<button class="btn-small btn-primary" onclick="libPPDImport(\'' + esc(c.id) + '\')">Import to Past Papers</button>'
         : '')
@@ -142,6 +142,7 @@
     return '<article class="lib-ppd-candidate"><div class="lib-ppd-review-layout"><div class="lib-ppd-review-summary"><div class="lib-ppd-candidate-head"><label class="lib-ppd-select"><input type="checkbox" ' + (state.selectedCandidates[c.id] ? 'checked' : '') + (state.bulkVerifyBusy ? ' disabled' : '') + ' onchange="libPPDSelectCandidate(\'' + esc(c.id) + '\',this.checked)"> Select</label><div><b>' + esc(c.title) + '</b><div class="hint">' + esc(c.source_domain) + ' · ' + esc(c.source_type) + ' · ' + esc(c.status) + ' · PDF: ' + esc(c.verification_status) + '</div>'
       + (meta.source_match === 'unregistered_domain' ? '<p class="hint">Newly discovered domain · eligible for this run after PDF verification; permanent registry approval is optional.</p>' : '')
       + (meta.snippet ? '<p class="hint">' + esc(meta.snippet) + '</p>' : '')
+      + (c.rejection_reason ? '<p class="hint" style="color:var(--brick)">Last verification issue: ' + esc(c.rejection_reason) + '</p>' : '')
       + (school ? '<div class="hint">School: ' + esc(school.name) + '</div>' : (c.discovered_school_name ? '<div class="hint">Possible school: ' + esc(c.discovered_school_name) + '</div>' : ''))
       + '</div></div>' + actions + actionStatus + domainAction + '</div><div class="lib-ppd-review-fields">' + metadata + '</div></div></article>';
   }
