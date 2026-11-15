@@ -62,3 +62,19 @@ set page_state='pending',
     page_metadata=coalesce(page_metadata,'{}'::jsonb) || jsonb_build_object('retry_policy','initial_plus_two','restored_for_retry_at',now())
 where page_state='skipped'
   and page_metadata->>'reason'='ambiguous_provider_outcome';
+
+-- Completed runs with ambiguous skipped pages are not truly complete.
+-- Reopen them so the worker can retry the missing page ranges.
+update public.qb_paper_extraction_runs r
+set status='queued',
+    current_stage='page_extraction',
+    completed_at=null,
+    error_message='Reopened for controlled retries of previously skipped ambiguous provider pages.',
+    updated_at=now()
+where r.status='completed'
+  and exists (
+    select 1 from public.qb_paper_extraction_pages p
+    where p.run_id=r.id
+      and p.page_state='pending'
+      and p.page_metadata->>'retry_policy'='initial_plus_two'
+  );
