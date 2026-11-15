@@ -70,7 +70,10 @@ Deno.serve(async (req) => {
   let body: Record<string, unknown>;
   try { body = await req.json(); } catch { return reply(400, { error: "Invalid request." }); }
   const paperId = String(body.source_paper_id || "");
+  const resetAndExtract = body.reset_and_extract === true;
+  const previousRunId = String(body.previous_run_id || "");
   if (!uuid(paperId)) return reply(400, { error: "A valid source paper ID is required." });
+  if (resetAndExtract && !uuid(previousRunId)) return reply(400, { error: "A valid previous_run_id is required for a fresh restart." });
 
   const { data: paper, error: paperError } = await admin.from("qb_source_papers")
     .select("id,status,extraction_status,stored_pdf_url,source_type,school_id,board_id,grade_id,subject_name,year,exam_type,medium")
@@ -101,7 +104,7 @@ Deno.serve(async (req) => {
       || ["sent", "responded", "uncertain"].includes(run.ai_request_state)
     )
   );
-  if (previous) {
+  if (previous && !resetAndExtract) {
     return reply(409, {
       ok: false, code: "prior_extraction_run",
       message: "A previous extraction attempt exists. It must be inspected or reconciled before another AI request. No AI request was made.",
@@ -143,11 +146,19 @@ Deno.serve(async (req) => {
   else if (paper.board_id) duplicateQuery = duplicateQuery.eq("board_id", paper.board_id);
   const { data: possibleDuplicates } = await duplicateQuery;
 
-  const { data: claim, error: claimError } = await admin.rpc("qb_begin_paper_extraction", {
-    p_source_paper_id: paperId,
-    p_requested_by: auth.user.id,
-    p_pdf_sha256: checksum,
-  });
+  const { data: claim, error: claimError } = resetAndExtract
+    ? await admin.rpc("qb_restart_paper_extraction", {
+        p_source_paper_id: paperId,
+        p_requested_by: auth.user.id,
+        p_pdf_sha256: checksum,
+        p_previous_run_id: previousRunId,
+        p_restart_reason: "Admin confirmed Reset & extract again from Question Bank source-paper manager",
+      })
+    : await admin.rpc("qb_begin_paper_extraction", {
+        p_source_paper_id: paperId,
+        p_requested_by: auth.user.id,
+        p_pdf_sha256: checksum,
+      });
   if (claimError) return reply(500, { ok: false, code: "claim_failed", message: "The safety gate could not claim this paper. No AI request was made." });
   if (!claim?.ok) return reply(409, claim);
 
