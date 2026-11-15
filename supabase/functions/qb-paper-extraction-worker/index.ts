@@ -314,7 +314,7 @@ Deno.serve(async(req)=>{
     parsed={items:parsed.items};
    }
    for(let i=0;i<(parsed.items||[]).length;i++){
-    const item=parsed.items[i];if(!item||!["question","passage"].includes(item.item_kind))continue;
+    const item=parsed.items[i];if(!item||!["question","passage"].includes(item.item_kind))continue;validateExtractedItem(item);
     const reportedPage=Number(item.page_number);
     if(BATCH===1 && reportedPage!==1)throw new Error("AI returned a non-local page number for a single-page request. The saved response is retained; staging is blocked.");
     const page=first;
