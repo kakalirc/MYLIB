@@ -255,8 +255,16 @@
     state.searchBusy = true; state.error = ''; state.message = 'Preparing Primary Collection…';
     if (typeof render === 'function') render();
     try {
+      var runLinks = await sb.from('qb_paper_discovery_run_candidates').select('candidate_id')
+        .eq('discovery_run_id', runId);
+      if (runLinks.error) throw runLinks.error;
+      var candidateIds = (runLinks.data || []).map(function (row) { return row.candidate_id; });
+      if (!candidateIds.length) {
+        state.message = 'No PDF candidates are linked to this Pre-Search. Check the search diagnostics or broaden the criteria.';
+        return;
+      }
       var loaded = await sb.from('qb_paper_discovery_candidates').select('id,title,verification_status,status')
-        .eq('discovery_run_id', runId).order('discovered_at', {ascending:true});
+        .in('id', candidateIds).order('discovered_at', {ascending:true});
       if (loaded.error) throw loaded.error;
       var candidates = (loaded.data || []).filter(function (c) {
         return ['rejected','duplicate','imported'].indexOf(c.status) < 0 &&
