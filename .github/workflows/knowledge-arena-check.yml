@@ -167,6 +167,8 @@ jobs:
         run: deno test supabase/functions/qb-paper-extraction-worker/response_parser_test.ts
       - name: Test Question Bank extraction quality validation
         run: deno test supabase/functions/qb-paper-extraction-worker/quality_validation_test.ts
+      - name: Test Question Bank page completeness audit
+        run: deno test supabase/functions/qb-paper-extraction-worker/page_completeness_test.ts
       - name: Parse browser JavaScript
         run: |
           node --check knowledge-arena/knowledge-arena.js
