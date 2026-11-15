@@ -14,7 +14,7 @@ begin
  values(v_run,'passage:P1','passage','P1','{"passage_text":"A short test passage.","passage_type":"reading","passage_key":"passage-alias-P1"}'::jsonb,repeat('a',64),'approved'),
  (v_run,'passage:P1-copy','passage','P1-copy','{"passage_text":"A   short test passage.","passage_type":"reading"}'::jsonb,repeat('c',64),'approved');
  insert into public.qb_paper_extraction_staging(run_id,item_key,item_kind,page_number,original_number,parent_item_key,payload,content_fingerprint,review_state)
- values(v_run,'question:1','question',1,'1','passage-alias-P1','{"question_text":"What is the passage about?","question_type":"short_answer","marks":2,"answer_text":"A test.","difficulty":"easy"}'::jsonb,repeat('b',64),'approved');
+ values(v_run,'question:1','question',1,'1','passage_1','{"question_text":"What is the passage about?","question_type":"short_answer","marks":2,"answer_text":"A test.","difficulty":"easy"}'::jsonb,repeat('b',64),'approved');
  perform set_config('request.jwt.claim.role','service_role',true);
  v_result:=public.qb_publish_extraction_run(v_run,v_admin);
  if coalesce((v_result->>'ok')::boolean,false) is not true then raise exception 'First publication failed: %',v_result; end if;
