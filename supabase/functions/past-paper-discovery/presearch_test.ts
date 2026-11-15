@@ -32,7 +32,12 @@ Deno.test("rejects non-paper PDFs and ordinary web pages", () => {
     title: "Kannada Question Paper 2026",
     snippet: "Question paper page",
   }, "Class 10 Kannada 2026");
-  if (textbook || webpage) throw new Error("Textbooks and HTML pages must not become paper candidates.");
+  const timetable = isQuestionPaperPdf({
+    url: "https://school.example.edu/annual-examination-schedule-2026.pdf",
+    title: "Annual Examination Schedule 2026",
+    snippet: "Examination timetable and dates",
+  }, "Class 10 Kannada 2026");
+  if (textbook || webpage || timetable) throw new Error("Textbooks, timetables and HTML pages must not become paper candidates.");
 });
 
 Deno.test("rejects non-HTTPS paper links", () => {
