@@ -17,6 +17,7 @@ export function formatOption(option: unknown): string {
 function optionFlags(options: unknown, path: string): string[] {
   if (!Array.isArray(options) || options.length === 0) return [`${path}: MCQ has no captured answer options.`];
   const flags: string[] = [];
+  if (options.length < 2) flags.push(`${path}: fewer than two answer options were captured; verify against the PDF.`);
   const labels = options.map((option) => {
     if (option && typeof option === "object" && !Array.isArray(option)) {
       const item = option as Record<string, unknown>;
