@@ -1,6 +1,6 @@
 -- Exercise Admin-approved publication, passage linking and idempotent replay.
 do $$
-declare v_admin uuid:=gen_random_uuid();v_grade uuid;v_board uuid;v_paper uuid;v_run uuid;v_passage uuid;v_result jsonb;v_count integer;
+declare v_admin uuid:=gen_random_uuid();v_grade uuid;v_board uuid;v_paper uuid;v_run uuid;v_passage uuid;v_passage_duplicate uuid;v_result jsonb;v_count integer;
 begin
  insert into auth.users(id) values(v_admin);
  insert into public.profiles(id,role,archived) values(v_admin,'Admin',false);
@@ -11,9 +11,9 @@ begin
  insert into public.qb_paper_extraction_runs(source_paper_id,requested_by,status,ai_request_state,current_stage)
  values(v_paper,v_admin,'completed','responded','review') returning id into v_run;
  insert into public.qb_paper_extraction_staging(run_id,item_key,item_kind,original_number,payload,content_fingerprint,review_state)
- values(v_run,'passage:P1','passage','P1','{"passage_text":"A short test passage.","passage_type":"reading"}'::jsonb,repeat('a',64),'approved');
+ values(v_run,'passage:P1','passage','P1','{"passage_text":"A short test passage.","passage_type":"reading","passage_key":"passage-alias-P1"}'::jsonb,repeat('a',64),'approved'),\n (v_run,'passage:P1-copy','passage','P1-copy','{"passage_text":"A   short test passage.","passage_type":"reading"}'::jsonb,repeat('c',64),'approved');
  insert into public.qb_paper_extraction_staging(run_id,item_key,item_kind,page_number,original_number,parent_item_key,payload,content_fingerprint,review_state)
- values(v_run,'question:1','question',1,'1','P1','{"question_text":"What is the passage about?","question_type":"short_answer","marks":2,"answer_text":"A test.","difficulty":"easy"}'::jsonb,repeat('b',64),'approved');
+ values(v_run,'question:1','question',1,'1','passage-alias-P1','{"question_text":"What is the passage about?","question_type":"short_answer","marks":2,"answer_text":"A test.","difficulty":"easy"}'::jsonb,repeat('b',64),'approved');
  perform set_config('request.jwt.claim.role','service_role',true);
  v_result:=public.qb_publish_extraction_run(v_run,v_admin);
  if coalesce((v_result->>'ok')::boolean,false) is not true then raise exception 'First publication failed: %',v_result; end if;
