@@ -65,6 +65,21 @@ Deno.serve(async(req)=>{
   return reply(200,{ok:true,reconciled:true,run_id:runId,reconciliation:updated,
    warning:"The original provider outcome remains unknown. A future extraction may incur a duplicate provider charge. The original request and run records have not been deleted or rewritten."});
  }
+ if(action==="resolve_page_audit"){
+  if(run.status!=="completed"||run.current_stage!=="review")return reply(409,{error:"Only a completed run awaiting review can have page audits resolved."});
+  const pageNumber=Number(body.page_number),note=String(body.review_note||"").trim();
+  if(!Number.isInteger(pageNumber)||pageNumber<1)return reply(400,{error:"A valid original PDF page number is required."});
+  if(note.length<15)return reply(400,{error:"Record at least 15 characters explaining what was visually checked against the original PDF."});
+  const {data:page,error:pageError}=await db.from("qb_paper_extraction_pages").select("id,page_number,page_state,page_metadata").eq("run_id",runId).eq("page_number",pageNumber).maybeSingle();
+  if(pageError||!page)return reply(404,{error:"Page checkpoint not found for this extraction run."});
+  if(page.page_state!=="completed")return reply(409,{error:"Only successfully extracted pages can be visually reviewed. Resolve page extraction first."});
+  const metadata=page.page_metadata&&typeof page.page_metadata==="object"?page.page_metadata:{},audit=metadata.extraction_audit;
+  if(audit&&Number(audit.version)===1&&audit.status==="clear")return reply(409,{error:"This page has no structural audit flags and does not require an exception acknowledgement."});
+  const reviewedAt=new Date().toISOString(),nextMetadata={...metadata,admin_audit_review:{decision:"visually_verified",reviewed_by:auth.user.id,reviewed_at:reviewedAt,note:note.slice(0,1200)}};
+  const {data:updated,error:updateError}=await db.from("qb_paper_extraction_pages").update({page_metadata:nextMetadata}).eq("id",page.id).eq("run_id",runId).eq("page_state","completed").select("page_number,page_metadata").maybeSingle();
+  if(updateError||!updated)return reply(409,{error:"Page audit acknowledgement could not be saved. Refresh and inspect the page again."});
+  return reply(200,{ok:true,page:updated,warning:"Admin acknowledgement records that the original PDF page was visually checked; it does not change the extraction audit or its flags."});
+ }
  if(action==="list"){
   const [{data:items,error:itemError},{data:pages,error:pageError},{data:paper}] = await Promise.all([
    db.from("qb_paper_extraction_staging").select("id,item_key,item_kind,page_number,original_number,parent_item_key,payload,review_state,review_note,published_question_id,published_passage_id").eq("run_id",runId).order("page_number").order("created_at"),

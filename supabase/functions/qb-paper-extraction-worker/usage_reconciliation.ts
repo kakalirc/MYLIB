@@ -50,3 +50,10 @@ export function readAnthropicUsage(
     totalCostUsd: roundUsd(inputCostUsd + outputCostUsd),
   };
 }
+
+
+/** True only when every billable usage field has been durably recorded. */
+export function hasVerifiedAnthropicUsage(record: { input_tokens?: unknown; output_tokens?: unknown; input_cost_usd?: unknown; output_cost_usd?: unknown; total_cost_usd?: unknown }): boolean {
+  return [record.input_tokens, record.output_tokens].every((value) => Number.isSafeInteger(value) && Number(value) >= 0) &&
+    [record.input_cost_usd, record.output_cost_usd, record.total_cost_usd].every((value) => typeof value === "number" && Number.isFinite(value) && value >= 0);
+}
