@@ -245,6 +245,25 @@ async function fetchAllowed(urlText: string, domains: string[], accept: string) 
   throw new Error("Too many redirects.");
 }
 type DiscoveryRow = {title:string;url:string;snippet:string;domain:string;source:any;archive_member?:string;pdf_search_hint?:boolean};
+function websiteUrlRelevance(url: URL, criteria: string): number {
+  const value = (url.pathname + " " + url.search).toLowerCase().replace(/[^a-z0-9]+/g, " ");
+  const terms = queryTerms(criteria);
+  const paper = /question paper|previous year|past paper|sample paper|specimen|exam paper|paper archive|qp/.test(value);
+  const subjectMatches = !terms.length || terms.some((term) => value.includes(term));
+  const classMatch = criteria.match(/\b(class|grade)\s*(10|12|xii|x)\b/i);
+  const classMatches = !classMatch || new RegExp("(?:class|grade|std|standard)[-_/ ]*(?:" + (classMatch[2].toLowerCase() === "12" || classMatch[2].toLowerCase() === "xii" ? "12|xii" : "10|x") + ")(?:\\b|/|$)", "i").test(value);
+  if (subjectMatches && paper && classMatches) return 100;
+  if (paper && subjectMatches) return 70;
+  if (paper && classMatches) return 45;
+  if (/archive|question|paper|exam|download|resource/.test(value)) return 20;
+  return 0;
+}
+function canonicalScanUrl(url: URL, rootHost: string): URL {
+  const copy = new URL(url.href);
+  const canonical = canonicalWebsiteScanDomain(copy.hostname);
+  if (canonical === rootHost || copy.hostname === rootHost) copy.hostname = rootHost;
+  return copy;
+}
 function linkRows(html: string, baseUrl: string, source: any, terms: string[], limit = 60): DiscoveryRow[] {
   const rows: DiscoveryRow[] = [];
   const anchors = html.match(/<a\b[^>]*>[\s\S]*?<\/a>/gi) || [];
@@ -563,6 +582,7 @@ Deno.serve(async (req) => {
       if (existing.status === "completed") return reply(200, { run_id: existing.id, complete: true, website_scan: true, pages_scanned: existing.filters?.pages_scanned || 0, pages_remaining: 0, pdfs_found: (existing.filters?.search_results || []).length, preview_results: existing.filters?.search_results || [], provider_errors: existing.filters?.provider_errors || [] });
       try { root = new URL(existing.filters.website_url); } catch { return reply(400, { error: "Saved website URL is invalid." }); }
       rootHost = canonicalWebsiteScanDomain(root.hostname);
+      root.hostname = rootHost;
       state = existing.filters?.website_scan_state || {};
       runId = existing.id;
     } else {
@@ -574,8 +594,12 @@ Deno.serve(async (req) => {
       state = { page_queue: [root.href], sitemap_queue: [new URL("/sitemap.xml", root.origin).href, new URL("/sitemap_index.xml", root.origin).href], visited: [], results: [], errors: [] };
     }
     const source = { id: null, display_name: rootHost, domain: rootHost, source_type: "education_portal", trust_level: "review", enabled: true };
-    const pageQueue: string[] = Array.isArray(state.page_queue) ? state.page_queue : [];
-    const sitemapQueue: string[] = Array.isArray(state.sitemap_queue) ? state.sitemap_queue : [];
+    const normalizeQueue = (items: unknown[]) => [...new Set(items.flatMap((value) => {
+      try { const u = canonicalScanUrl(new URL(String(value)), rootHost); return safeHost(u, [rootHost]) ? [u.href] : []; }
+      catch { return []; }
+    }))];
+    const pageQueue: string[] = normalizeQueue(Array.isArray(state.page_queue) ? state.page_queue : []);
+    const sitemapQueue: string[] = normalizeQueue(Array.isArray(state.sitemap_queue) ? state.sitemap_queue : []);
     const visited = new Set<string>(Array.isArray(state.visited) ? state.visited : []);
     const discovered = new Map<string, any>((Array.isArray(state.results) ? state.results : []).map((row: any) => [String(row.url).toLowerCase(), row]));
     const errors: string[] = Array.isArray(state.errors) ? state.errors : [];
