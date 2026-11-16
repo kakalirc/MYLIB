@@ -52,7 +52,7 @@
         ['duplicates', function (q) { return q.eq('status','duplicate'); }],
         ['imported', function (q) { return q.eq('status','imported'); }],
         ['rejected', function (q) { return q.eq('status','rejected'); }],
-        ['failed', function (q) { return q.in('verification_status',['inaccessible','invalid_pdf','unsafe_url']); }]
+        ['failed', function (q) { return q.in('verification_status',['inaccessible','invalid_pdf','unsafe_url','remote_blocked']); }]
       ];
       var metricResults = await Promise.all(metricSpecs.map(function (spec) { return spec[1](sb.from('qb_paper_discovery_candidates').select('id',{count:'exact',head:true})); }));
       metricResults.forEach(function (result,index) { if (!result.error) state.metrics[metricSpecs[index][0]] = Number(result.count || 0); else state.loadErrors['candidate metrics'] = result.error.message || String(result.error); });
