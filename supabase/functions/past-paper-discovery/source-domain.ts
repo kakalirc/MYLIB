@@ -29,3 +29,19 @@ export function canonicalWebsiteScanDomain(hostname: string): string {
   if (host === "schools.aglasem.com") return "aglasem.com";
   return host;
 }
+
+
+/**
+ * Upgrade an approved first-party HTTP redirect to HTTPS before fetching it.
+ * No HTTP request is ever made; non-approved hosts and non-default ports are
+ * left unchanged so the caller's HTTPS/host validation rejects them.
+ */
+export function upgradeApprovedHttpRedirect(url: URL, enabledDomains: string[]): URL {
+  const upgraded = new URL(url.href);
+  if (upgraded.protocol !== "http:" || upgraded.username || upgraded.password ||
+      (upgraded.port !== "" && upgraded.port !== "80") ||
+      !matchesApprovedSourceDomain(upgraded.hostname, enabledDomains)) return upgraded;
+  upgraded.protocol = "https:";
+  upgraded.port = "";
+  return upgraded;
+}
