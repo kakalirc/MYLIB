@@ -15333,7 +15333,7 @@ function renderStudents() {
   `;
 
   if (!selectedStudentId) {
-    return block1 + block2 + studentCallsDueCardHtml() + `<div class="card"><div class="empty">Choose a student above to manage their subscriptions, enrollments, and login.</div></div>` + bulkStudentCardHtml();
+    return block1 + block2 + studentCallsDueCardHtml() + `<div class="card"><div class="empty">Choose a student above to manage their subscriptions, enrollments, and login. Use Student &amp; Parent Login Management for all login creation and account controls.</div></div>`;
   }
 
   const student = data.students.find(s=>s.id===selectedStudentId);
