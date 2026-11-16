@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { matchesApprovedSourceDomain } from "./source-domain.ts";
+import { canonicalWebsiteScanDomain, matchesApprovedSourceDomain } from "./source-domain.ts";
 
 Deno.test("accepts the www host of an enabled root domain", () => {
   assertEquals(matchesApprovedSourceDomain("www.cbse.gov.in", ["cbse.gov.in"]), true);
@@ -17,4 +17,10 @@ Deno.test("rejects unrelated or malformed domains", () => {
   assertEquals(matchesApprovedSourceDomain("cbse.gov.in.attacker.example", ["cbse.gov.in"]), false);
   assertEquals(matchesApprovedSourceDomain("http://cbse.gov.in", ["cbse.gov.in"]), false);
   assertEquals(matchesApprovedSourceDomain("", ["cbse.gov.in"]), false);
+});
+
+Deno.test("canonicalises the AglaSem schools catalogue to its redirect host", () => {
+  assertEquals(canonicalWebsiteScanDomain("schools.aglasem.com"), "aglasem.com");
+  assertEquals(matchesApprovedSourceDomain("schools.aglasem.com", ["aglasem.com"]), true);
+  assertEquals(matchesApprovedSourceDomain("aglasem.com", ["aglasem.com"]), true);
 });
