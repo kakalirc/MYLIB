@@ -129,6 +129,7 @@
       + '</div>';
     var actions = '<div class="lib-ppd-actions"><a class="btn-small" href="' + esc(previewUrl) + '" target="_blank" rel="noopener noreferrer">Open source / PDF</a>'
       + '<button class="btn-small" type="button" onclick="libPPDSaveMetadata(\'' + esc(c.id) + '\')">Save Metadata</button>'
+      + '<label class="btn-small" for="lib-ppd-local-pdf-' + esc(c.id) + '">Use downloaded PDF<input id="lib-ppd-local-pdf-' + esc(c.id) + '" type="file" accept="application/pdf,.pdf" style="display:none" onchange="libPPDLocalVerify(\\'' + esc(c.id) + '\\',this)"></label>'
       + '<button class="btn-small" onclick="libPPDVerify(\'' + esc(c.id) + '\')" ' + (state.bulkVerifyBusy || ['verified','duplicate'].indexOf(c.verification_status) >= 0 ? 'disabled' : '') + '>' + (['inaccessible','invalid_pdf','unsafe_url'].indexOf(c.verification_status) >= 0 ? 'Retry PDF verification' : 'Verify PDF') + '</button>'
       + (c.verification_status === 'verified' && c.status !== 'imported' && c.status !== 'rejected' && c.status !== 'duplicate'
         ? '<button class="btn-small btn-primary" onclick="libPPDImport(\'' + esc(c.id) + '\')">Import to Past Papers</button>'
@@ -498,6 +499,32 @@
       state.bulkVerifyProgress = 'Finished: ' + verified + ' verified · ' + duplicates + ' duplicates · ' + failed + ' failed.';
       state.selectedCandidates = {}; state.loaded = false; await loadData(true); notify(state.bulkVerifyProgress, failed > 0);
     } finally { state.bulkVerifyBusy = false; if (typeof render === 'function') render(); }
+  };
+  window.libPPDLocalVerify = async function (id, input) {
+    var file = input && input.files && input.files[0];
+    if (!file) return;
+    input.value = '';
+    if (file.size <= 0 || file.size > 50 * 1024 * 1024) { notifyAction(id, 'Choose a non-empty PDF no larger than 50 MB.', true); return; }
+    if (file.type && file.type !== 'application/pdf' && !/\\.pdf$/i.test(file.name || '')) { notifyAction(id, 'Choose a PDF file.', true); return; }
+    var storagePath = 'source-papers/admin/discovery-local/' + id + '/' + crypto.randomUUID() + '.pdf';
+    notifyAction(id, 'Uploading downloaded PDF and validating its contents…');
+    try {
+      var upload = await sb.storage.from('qb-papers').upload(storagePath, file, { contentType:'application/pdf', upsert:false, cacheControl:'3600' });
+      if (upload.error) throw new Error('Could not upload PDF: ' + upload.error.message);
+      try {
+        var result = await invoke({ action:'verify_local', candidate_id:id, storage_path:storagePath, file_name:file.name });
+        if (result.duplicate) notifyAction(id, 'This local PDF is an exact duplicate and has been marked as a duplicate.');
+        else notifyAction(id, 'Local PDF verified (' + Math.round(result.file_size_bytes/1024) + ' KB). Remote source verification was skipped. Review metadata, then import.');
+      } catch (verifyError) {
+        await sb.storage.from('qb-papers').remove([storagePath]);
+        throw verifyError;
+      }
+      state.loaded = false; await loadData(true);
+    } catch (e) {
+      notifyAction(id, e.message || String(e), true);
+      state.loaded = false; await loadData(true);
+    }
+    if (typeof render === 'function') render();
   };
   window.libPPDVerify = async function (id) {
     notifyAction(id, 'Checking the source page and validating its PDF…');
