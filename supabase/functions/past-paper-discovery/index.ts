@@ -248,7 +248,7 @@ type DiscoveryRow = {title:string;url:string;snippet:string;domain:string;source
 function websiteUrlRelevance(url: URL, criteria: string): number {
   const value = (url.pathname + " " + url.search).toLowerCase().replace(/[^a-z0-9]+/g, " ");
   const terms = queryTerms(criteria);
-  const paper = /question paper|previous year|past paper|sample paper|specimen|exam paper|paper archive|qp/.test(value);
+  const paper = /question paper|previous year|past paper|sample paper|specimen|exam paper|paper archive|qp\\b/.test(value);
   const subjectMatches = !terms.length || terms.some((term) => value.includes(term));
   const classMatch = criteria.match(/\b(class|grade)\s*(10|12|xii|x)\b/i);
   const classMatches = !classMatch || new RegExp("(?:class|grade|std|standard)[-_/ ]*(?:" + (classMatch[2].toLowerCase() === "12" || classMatch[2].toLowerCase() === "xii" ? "12|xii" : "10|x") + ")(?:\\b|/|$)", "i").test(value);
@@ -280,12 +280,14 @@ function linkRows(html: string, baseUrl: string, source: any, terms: string[], l
     try { target = new URL(decodeEntities(href), baseUrl); } catch { continue; }
     if (!safeHost(target, [source.domain])) continue;
     const isPdf = /\.pdf(?:$|[?#])/i.test(target.href);
-    if (!matchesQuery(label + " " + context + " " + target.pathname, terms)) continue;
-    // Web pages are discovery evidence only. A candidate must point to an actual PDF.
-    if (!isPdf) continue;
-    rows.push({ title: (label || target.pathname.split("/").pop() || source.display_name).slice(0, 500),
-      url: target.href, snippet: "Official source page · " + source.display_name + (context ? " · " + context.slice(0, 260) : ""),
-      domain: target.hostname.toLowerCase().replace(/^www\./, ""), source });
+    const downloadHint = /download|pdf/i.test(anchor) || /\/(?:download|file|attachment|pdf)(?:\/|$)/i.test(target.pathname);
+    const evidence = label + " " + context + " " + target.pathname;
+    if (!matchesQuery(evidence, terms)) continue;
+    const paperSignal = /question[-_ ]paper|previous[-_ ]year|past[-_ ]paper|sample[-_ ]paper|specimen[-_ ]paper|exam[-_ ]paper|\bqp\b/i.test(evidence);
+    if (!isPdf && !(downloadHint && paperSignal)) continue;
+    rows.push({ title: (label || context || target.pathname.split("/").pop() || source.display_name).slice(0, 500),
+      url: target.href, snippet: "Official source page · " + source.display_name + (context ? " · " + context.slice(0, 500) : ""),
+      domain: target.hostname.toLowerCase().replace(/^www\./, ""), source, pdf_search_hint: !isPdf });
   }
   return rows;
 }
