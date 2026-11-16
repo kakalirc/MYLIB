@@ -247,7 +247,6 @@ async function fetchAllowed(urlText: string, domains: string[], accept: string) 
 type DiscoveryRow = {title:string;url:string;snippet:string;domain:string;source:any;archive_member?:string;pdf_search_hint?:boolean};
 function websiteUrlRelevance(url: URL, criteria: string): number {
   const value = (url.pathname + " " + url.search).toLowerCase().replace(/[^a-z0-9]+/g, " ");
-    const audit = { parent_document_links_discovered: 0, document_pages_fetched: 0, download_endpoints_extracted: 0, candidates_rejected: 0, ...(state.audit || {}) };
     const terms = queryTerms(criteria);
   const paper = /question paper|previous year|past paper|sample paper|specimen|exam paper|paper archive|qp\\b/.test(value);
   const subjectMatches = !terms.length || terms.some((term) => value.includes(term));
@@ -634,6 +633,7 @@ Deno.serve(async (req) => {
     const visited = new Set<string>(Array.isArray(state.visited) ? state.visited : []);
     const discovered = new Map<string, any>((Array.isArray(state.results) ? state.results : []).map((row: any) => [String(row.url).toLowerCase(), row]));
     const errors: string[] = Array.isArray(state.errors) ? state.errors : [];
+    const audit = { parent_document_links_discovered: 0, document_pages_fetched: 0, download_endpoints_extracted: 0, candidates_rejected: 0, ...(state.audit || {}) };
     const terms = queryTerms(criteria);
     // Explicit document-view URLs are inspected in isolation; never expand them into a domain crawl.
     let sitemapBudget = (singlePageMode || aglasemCollectionMode) ? 0 : 8;
@@ -745,8 +745,11 @@ Deno.serve(async (req) => {
             const score = websiteUrlRelevance(target, criteria);
             const shouldFollowDocument = isAglaSemDocument && pageMatchesCriteria && pageHasPaperSignal;
             const shouldFollowAglaSemCollectionDocument = aglasemCollectionMode && isAglaSemDocument;
-            if (!singlePageMode && (aglasemCollectionMode ? shouldFollowAglaSemCollectionDocument : (score >= 20 || shouldFollowDocument)) && pageQueue.length < 1000 &&
-                !visited.has(target.href) && !pageQueue.includes(target.href)) { pageQueue.push(target.href); if (shouldFollowAglaSemCollectionDocument) audit.parent_document_links_discovered++; }
+            if (!singlePageMode && (aglasemCollectionMode ? shouldFollowAglaSemCollectionDocument : (score >= 20 || shouldFollowDocument)) && pageQueue.length < 5000 &&
+                !visited.has(target.href) && !pageQueue.includes(target.href)) {
+              pageQueue.push(target.href);
+              if (shouldFollowAglaSemCollectionDocument) audit.parent_document_links_discovered++;
+            }
           } catch { /* ignore malformed links */ }
         }
       } catch (e) { errors.push(page.hostname + page.pathname + ": " + clip((e as Error)?.message || e, 180)); }
