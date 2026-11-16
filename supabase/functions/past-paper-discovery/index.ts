@@ -302,6 +302,7 @@ function linkRows(html: string, baseUrl: string, source: any, terms: string[], l
     rows.push({ title: (label || context || target.pathname.split("/").pop() || source.display_name).slice(0, 500),
       url: target.href, snippet: "Official source page · " + source.display_name + (context ? " · " + context.slice(0, 500) : ""),
       domain: target.hostname.toLowerCase().replace(/^www\./, ""), source, pdf_search_hint: !isPdf });
+  }
   return rows;
 }
 async function crawlCbseOfficial(source: any, query: string): Promise<DiscoveryRow[]> {
@@ -736,7 +737,7 @@ Deno.serve(async (req) => {
               discovered.set(target.href.toLowerCase(), {
                   title: documentTitle || (root.pathname + " Question Paper"),
                   url: target.href,
-                snippet: "Question paper PDF download endpoint linked from AglaSem collection " + root.pathname + " · " + documentTitle,
+                  snippet: "Question paper PDF download endpoint linked from AglaSem collection " + root.pathname + " · " + documentTitle,
                 domain: rootHost, source, pdf_search_hint: true,
                 source_page_url: fetched.url,
               });
