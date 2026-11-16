@@ -190,7 +190,9 @@
         + '<div class="lib-ppd-scan-track"><span class="' + (state.websiteProgress.complete ? 'complete' : 'active') + '"></span></div>'
         + '<div class="lib-ppd-scan-stats"><span><b>' + esc(state.websiteProgress.pages_remaining) + '</b> pages queued</span><span><b>' + esc(state.websiteProgress.sitemaps_remaining) + '</b> sitemaps queued</span><span><b>' + esc(state.websiteProgress.pdfs_found) + '</b> potential PDFs found</span></div>'
         + (state.websiteProgress.audit ? '<div class="lib-ppd-scan-stats"><span><b>' + esc(state.websiteProgress.audit.parent_document_links_discovered || 0) + '</b> document links found</span><span><b>' + esc(state.websiteProgress.audit.document_pages_fetched || 0) + '</b> document pages fetched</span><span><b>' + esc(state.websiteProgress.audit.download_endpoints_extracted || 0) + '</b> download links extracted</span><span><b>' + esc(state.websiteProgress.audit.candidates_rejected || 0) + '</b> candidates filtered out</span></div>' : '')
-        + '<p class="hint">' + esc(state.websiteProgress.stage || '') + '</p></div>' : '') + '</div>';
+        + '<p class="hint">' + esc(state.websiteProgress.stage || '') + '</p>'
+        + (state.websiteProgress.current_page_url ? '<div class="lib-ppd-live-preview"><div class="lib-ppd-live-preview-head"><b>Currently scanning</b><a href="' + esc(state.websiteProgress.current_page_url) + '" target="_blank" rel="noopener noreferrer">Open page ↗</a></div><div class="lib-ppd-live-preview-url">' + esc(state.websiteProgress.current_page_url) + '</div><iframe title="Live website scan preview" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms" src="' + esc(state.websiteProgress.current_page_url) + '"></iframe><p class="hint">If this website blocks embedded previews, use Open page to view it in a separate tab. The crawler continues independently.</p></div>' : '')
+        + '</div>' : '') + '</div>';
     var preview = state.previewRows.length ? '<div class="lib-ppd-section"><h3>Search results preview (' + state.previewRows.length + ' records)</h3><p class="hint">These are saved results from this search. They are not candidates or review-queue records until you choose Collect.</p>' + state.previewRows.map(function (r) { return '<div class="lib-ppd-source"><div><b>' + esc(r.title || 'Untitled PDF') + '</b><div class="hint">' + esc(r.domain) + ' · ' + esc(r.source_name || r.source_match) + ' · ' + esc(r.search_provider) + '</div>' + (r.snippet ? '<div class="hint">' + esc(r.snippet) + '</div>' : '') + '</div><a class="btn-small" href="' + esc(r.url) + '" target="_blank" rel="noopener noreferrer">Open PDF</a></div>'; }).join('') + '</div>' : '';
     var preSearchSummary = '';
     if (state.latestPreSearch) {
@@ -322,7 +324,7 @@
         state.previewRows = result.preview_results || [];
         state.websiteProgress = { pages_scanned:Number(result.pages_scanned || 0),
           pages_remaining:Number(result.pages_remaining || 0), sitemaps_remaining:Number(result.sitemaps_remaining || 0),
-          pdfs_found:Number(result.pdfs_found || 0), audit:result.audit || null, complete:!!result.complete,
+          pdfs_found:Number(result.pdfs_found || 0), audit:result.audit || null, scanned_pages:result.scanned_pages || [], current_page_url:(result.scanned_pages || []).slice(-1)[0] || "", complete:!!result.complete,
           stage:result.complete ? 'All discovered sitemap and page queues have been processed.' : 'Batch saved. Continuing automatically with the next batch…' };
         state.latestPreSearch = { run_id:result.run_id, complete:!!result.complete, pdfs_found:Number(result.pdfs_found || 0),
           discovered_source_count:1, provider_errors:result.provider_errors || [], collectionComplete:false };
