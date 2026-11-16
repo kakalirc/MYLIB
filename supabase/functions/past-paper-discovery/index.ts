@@ -711,7 +711,6 @@ Deno.serve(async (req) => {
             audit.download_endpoints_extracted++;
             const row = {
               title: documentTitle || (root.pathname + " Question Paper"),
-                  url: target.href,
               url: target.href,
               snippet: "Question paper PDF download endpoint linked from AglaSem collection " + root.pathname + " · " + documentTitle,
               domain: target.hostname.toLowerCase().replace(/^www\./, ""),
@@ -736,8 +735,8 @@ Deno.serve(async (req) => {
             const isAglaSemDownload = isAglaSemDocs && /single-doc-download/i.test(target.pathname);
             if (isAglaSemDownload && (aglasemCollectionMode || (pageMatchesCriteria && pageHasPaperSignal))) {
               discovered.set(target.href.toLowerCase(), {
-              title: documentTitle || (root.pathname + " Question Paper"),
-                url: target.href,
+                  title: documentTitle || (root.pathname + " Question Paper"),
+                  url: target.href,
                 snippet: "Question paper PDF download endpoint linked from AglaSem collection " + root.pathname + " · " + documentTitle,
                 domain: rootHost, source, pdf_search_hint: true,
                 source_page_url: fetched.url,
