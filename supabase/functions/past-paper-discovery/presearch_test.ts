@@ -81,3 +81,13 @@ Deno.test("blocks private and reserved IP ranges", () => {
   }
   if (isPrivateAddress("8.8.8.8")) throw new Error("A public resolver must not be classified as private.");
 });
+
+Deno.test("accepts AglaSem single-document download endpoints as unverified PDF candidates", () => {
+  const accepted = isQuestionPaperPdf({
+    url: "https://docs.aglasem.com/product/single-doc-download/b02eb080-930a-11f1-bf7d-0aa932765c8b?url=https%3A%2F%2Fdocs.aglasem.com%2Fview%2Fb02eb080-930a-11f1-bf7d-0aa932765c8b",
+    title: "NIOS Class 12 April 2024 Question Paper Accountancy",
+    snippet: "AglaSem document download endpoint · NIOS Class 12 April 2024 Question Paper Accountancy",
+    pdf_search_hint: true,
+  }, "question paper");
+  if (!accepted) throw new Error("AglaSem extensionless document download endpoints should be retained as PDF candidates for later verification.");
+});

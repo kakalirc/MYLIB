@@ -613,7 +613,8 @@ Deno.serve(async (req) => {
       if (!rootHost || rootHost === "localhost" || rootHost.endsWith(".local") || /^\d{1,3}(\.\d{1,3}){3}$/.test(rootHost)) return reply(400, { error: "This website host is not eligible for scanning." });
       // A document-view URL is an explicit single-page target, not a request to crawl the whole host.
       const singlePageMode = /\/view\/[0-9a-f-]{30,}\/?$/i.test(root.pathname);
-      state = { page_queue: [root.href], sitemap_queue: singlePageMode ? [] : [new URL("/sitemap.xml", root.origin).href, new URL("/sitemap_index.xml", root.origin).href], single_page_mode: singlePageMode, visited: [], results: [], errors: [] };
+      const aglasemCollectionMode = root.hostname === "docs.aglasem.com" && /\/org\/.+\/(?:question-paper|sample-paper|previous-year-question-papers?)(?:\/|$)/i.test(root.pathname);
+      state = { page_queue: [root.href], sitemap_queue: singlePageMode || aglasemCollectionMode ? [] : [new URL("/sitemap.xml", root.origin).href, new URL("/sitemap_index.xml", root.origin).href], single_page_mode: singlePageMode, aglasem_collection_mode: aglasemCollectionMode, aglasem_collection_mode: aglasemCollectionMode, visited: [], results: [], errors: [] };
     }
     const source = { id: null, display_name: rootHost, domain: rootHost, source_type: "education_portal", trust_level: "review", enabled: true };
     const normalizeQueue = (items: unknown[]) => [...new Set(items.flatMap((value) => {
@@ -621,18 +622,19 @@ Deno.serve(async (req) => {
       catch { return []; }
     }))];
     const singlePageMode = state.single_page_mode === true || /\/view\/[0-9a-f-]{30,}\/?$/i.test(root.pathname);
+    const aglasemCollectionMode = state.aglasem_collection_mode === true || (root.hostname === "docs.aglasem.com" && /\/org\/.+\/(?:question-paper|sample-paper|previous-year-question-papers?)(?:\/|$)/i.test(root.pathname));
     if (singlePageMode && state.single_page_mode !== true) {
       // Discard legacy site-wide queues for a document-view URL and start with that exact page.
       state = { page_queue: [root.href], sitemap_queue: [], single_page_mode: true, visited: [], results: [], errors: [] };
     }
     const pageQueue: string[] = normalizeQueue(Array.isArray(state.page_queue) ? state.page_queue : []);
-    const sitemapQueue: string[] = singlePageMode ? [] : normalizeQueue(Array.isArray(state.sitemap_queue) ? state.sitemap_queue : []);
+    const sitemapQueue: string[] = (singlePageMode || aglasemCollectionMode) ? [] : normalizeQueue(Array.isArray(state.sitemap_queue) ? state.sitemap_queue : []);
     const visited = new Set<string>(Array.isArray(state.visited) ? state.visited : []);
     const discovered = new Map<string, any>((Array.isArray(state.results) ? state.results : []).map((row: any) => [String(row.url).toLowerCase(), row]));
     const errors: string[] = Array.isArray(state.errors) ? state.errors : [];
     const terms = queryTerms(criteria);
     // Explicit document-view URLs are inspected in isolation; never expand them into a domain crawl.
-    let sitemapBudget = singlePageMode ? 0 : 8;
+    let sitemapBudget = (singlePageMode || aglasemCollectionMode) ? 0 : 8;
     while (sitemapQueue.length && sitemapBudget-- > 0) {
       const sitemapUrl = sitemapQueue.shift()!;
       try {
@@ -686,10 +688,35 @@ Deno.serve(async (req) => {
           discovered.set(candidate.url.toLowerCase(), candidate);
         }
         const pageText = htmlText(html);
-        const docTitle = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "";
+        const docTitle = html.match(/<h1\\b[^>]*>([\\s\\S]*?)<\\/h1>/i)?.[1] || html.match(/<title\\b[^>]*>([\\s\\S]*?)<\\/title>/i)?.[1] || "";
         const documentTitle = htmlText(docTitle) || pageText.slice(0, 240);
         const pageMatchesCriteria = matchesQuery(pageText + " " + documentTitle, terms);
         const pageHasPaperSignal = /question[-_ ]paper|previous[-_ ]year|past[-_ ]paper|sample[-_ ]paper|exam[-_ ]paper/i.test(pageText + " " + documentTitle);
+
+        // AglaSem exposes the actual PDF through a single-doc-download endpoint.
+        // Inspect embedded/data URLs as well as anchors; these links are not always
+        // present as ordinary .pdf hrefs on the document page.
+        const isAglaSemDocsPage = (rootHost === "aglasem.com" || rootHost === "docs.aglasem.com") &&
+          new URL(fetched.url).hostname === "docs.aglasem.com";
+        if (isAglaSemDocsPage && pageHasPaperSignal) {
+          for (const targetUrl of extractDocumentTargets(html, fetched.url)) {
+            let target: URL;
+            try { target = new URL(targetUrl); } catch { continue; }
+            if (!/single-doc-download/i.test(target.pathname)) continue;
+            const row = {
+              title: documentTitle,
+              url: target.href,
+              snippet: "AglaSem document download endpoint · " + documentTitle,
+              domain: target.hostname.toLowerCase().replace(/^www\\./, ""),
+              source_name: rootHost,
+              source_match: "website_scan",
+              search_provider: "Website crawler",
+              pdf_search_hint: true,
+              source_page_url: fetched.url,
+            };
+            if (isQuestionPaperPdf(row, criteria)) discovered.set(row.url.toLowerCase(), row);
+          }
+        }
         const anchors = html.match(/<a\b[^>]*>[\s\S]*?<\/a>/gi) || [];
         for (const anchor of anchors) {
           const href = anchor.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1] || "";
@@ -711,7 +738,8 @@ Deno.serve(async (req) => {
             }
             const score = websiteUrlRelevance(target, criteria);
             const shouldFollowDocument = isAglaSemDocument && pageMatchesCriteria && pageHasPaperSignal;
-            if (!singlePageMode && (score >= 20 || shouldFollowDocument) && pageQueue.length < 1000 &&
+            const shouldFollowAglaSemCollectionDocument = aglasemCollectionMode && isAglaSemDocument;
+            if (!singlePageMode && (aglasemCollectionMode ? shouldFollowAglaSemCollectionDocument : (score >= 20 || shouldFollowDocument)) && pageQueue.length < 1000 &&
                 !visited.has(target.href) && !pageQueue.includes(target.href)) pageQueue.push(target.href);
           } catch { /* ignore malformed links */ }
         }
