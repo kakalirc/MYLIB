@@ -246,9 +246,22 @@ async function fetchAllowed(urlText: string, domains: string[], accept: string) 
     let lastFetchError: unknown = null;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
+        // Some education portals serve PDFs to normal browser navigation but reset
+        // requests from generic server-side clients. Retry with browser-like navigation
+        // headers (including a same-origin Referer) before declaring the PDF unreachable.
+        const browserHeaders = {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": accept,
+          "Accept-Language": "en-US,en;q=0.9",
+          "Referer": url.origin + "/",
+          "Cache-Control": "no-cache",
+        };
+        const attemptHeaders = attempt === 0
+          ? { "User-Agent": "Mozilla/5.0 (compatible; LIBEducationPastPaperDiscovery/1.0)", Accept: accept }
+          : browserHeaders;
         const attemptResponse = await fetch(url.href, {
           redirect: "manual",
-          headers: { "User-Agent": "Mozilla/5.0 (compatible; LIBEducationPastPaperDiscovery/1.0)", Accept: accept },
+          headers: attemptHeaders,
           signal: AbortSignal.timeout(25000),
         });
         if ((attemptResponse.status === 408 || attemptResponse.status === 429 || attemptResponse.status >= 500) && attempt < 2) {
@@ -1276,7 +1289,8 @@ Deno.serve(async (req) => {
         pdf_url: pdf.url, checksum, file_size_bytes: bytes.length });
     } catch (e) {
       const message = clip((e as Error)?.message || e, 500);
-      const status = /outside|invalid url|redirect/i.test(message) ? "unsafe_url" : "inaccessible";
+      const status = /outside|invalid url|redirect/i.test(message) ? "unsafe_url"
+        : /connection failed|connection reset|timed out|timeout|peer|network/i.test(message) ? "remote_blocked" : "inaccessible";
       await admin.from("qb_paper_discovery_candidates").update({ verification_status: status, status: "needs_review", rejection_reason: message, updated_at: new Date().toISOString() }).eq("id", candidateId);
       return reply(422, { error: message });
     }
