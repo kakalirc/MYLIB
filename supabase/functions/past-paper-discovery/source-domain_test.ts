@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { canonicalWebsiteScanDomain, matchesApprovedSourceDomain } from "./source-domain.ts";
+import { canonicalWebsiteScanDomain, matchesApprovedSourceDomain, upgradeApprovedHttpRedirect } from "./source-domain.ts";
 
 Deno.test("accepts the www host of an enabled root domain", () => {
   assertEquals(matchesApprovedSourceDomain("www.cbse.gov.in", ["cbse.gov.in"]), true);
