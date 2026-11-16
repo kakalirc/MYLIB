@@ -26,7 +26,16 @@ function safeHost(url: URL, domains: string[]): boolean {
   const host = url.hostname.toLowerCase().replace(/\.$/, "");
   if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")
       || /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":")) return false;
-  return domains.some((d) => host === d || host.endsWith("." + d));
+
+  // Apply the same canonical host policy to every redirect hop as to the
+  // original website URL. AglaSem's schools catalogue is an alias of
+  // aglasem.com; its first-party subdomains (including docs.aglasem.com)
+  // remain within the explicitly approved AglaSem host family.
+  const canonicalHost = canonicalWebsiteScanDomain(host);
+  return domains.some((domain) => {
+    const approved = canonicalWebsiteScanDomain(domain);
+    return canonicalHost === approved || canonicalHost.endsWith("." + approved);
+  }) || (isAglaSemDomain(host) && domains.some((domain) => isAglaSemDomain(domain)));
 }
 async function assertPublicDns(host: string): Promise<void> {
   const addresses: string[] = [];
@@ -226,7 +235,9 @@ async function fetchAllowed(urlText: string, domains: string[], accept: string) 
   let url: URL;
   try { url = new URL(urlText); } catch { throw new Error("Invalid URL."); }
   for (let hop = 0; hop <= 5; hop++) {
-    if (!safeHost(url, domains)) throw new Error("URL or redirect is outside the approved source domains.");
+    if (!safeHost(url, domains)) {
+      throw new Error("URL or redirect host is outside the approved source domains: " + url.hostname.toLowerCase() + ".");
+    }
     await assertPublicDns(url.hostname);
     const res = await fetch(url.href, {
       redirect: "manual",
