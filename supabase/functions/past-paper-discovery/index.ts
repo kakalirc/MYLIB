@@ -688,7 +688,7 @@ Deno.serve(async (req) => {
           discovered.set(candidate.url.toLowerCase(), candidate);
         }
         const pageText = htmlText(html);
-        const docTitle = html.match(/<h1\\b[^>]*>([\\s\\S]*?)<\\/h1>/i)?.[1] || html.match(/<title\\b[^>]*>([\\s\\S]*?)<\\/title>/i)?.[1] || "";
+        const docTitle = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "";
         const documentTitle = htmlText(docTitle) || pageText.slice(0, 240);
         const pageMatchesCriteria = matchesQuery(pageText + " " + documentTitle, terms);
         const pageHasPaperSignal = /question[-_ ]paper|previous[-_ ]year|past[-_ ]paper|sample[-_ ]paper|exam[-_ ]paper/i.test(pageText + " " + documentTitle);
