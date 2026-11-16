@@ -25,8 +25,8 @@ export function isAglaSemCollectionUrl(url: URL): boolean {
 /** Canonicalise known catalogue aliases before applying same-site crawl restrictions. */
 export function canonicalWebsiteScanDomain(hostname: string): string {
   const host = String(hostname || "").trim().toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
-  // AglaSem redirects its schools subdomain catalogue to the parent host.
-  if (host === "schools.aglasem.com") return "aglasem.com";
+  // Preserve the requested hostname. The schools catalogue serves distinct
+  // paths on schools.aglasem.com; rewriting it to aglasem.com can return 404.
   return host;
 }
 

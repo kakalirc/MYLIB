@@ -19,10 +19,10 @@ Deno.test("rejects unrelated or malformed domains", () => {
   assertEquals(matchesApprovedSourceDomain("", ["cbse.gov.in"]), false);
 });
 
-Deno.test("canonicalises the AglaSem schools catalogue to its redirect host", () => {
-  assertEquals(canonicalWebsiteScanDomain("schools.aglasem.com"), "aglasem.com");
+Deno.test("preserves the AglaSem schools catalogue hostname while allowing the first-party family", () => {
+  assertEquals(canonicalWebsiteScanDomain("schools.aglasem.com"), "schools.aglasem.com");
   assertEquals(matchesApprovedSourceDomain("schools.aglasem.com", ["aglasem.com"]), true);
-  assertEquals(matchesApprovedSourceDomain("aglasem.com", ["aglasem.com"]), true);
+  assertEquals(matchesApprovedSourceDomain("docs.aglasem.com", ["aglasem.com"]), true);
 });
 
 
