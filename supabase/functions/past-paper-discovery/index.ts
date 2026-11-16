@@ -660,15 +660,34 @@ Deno.serve(async (req) => {
           const candidate = { ...row, source_page_url: fetched.url };
           discovered.set(candidate.url.toLowerCase(), candidate);
         }
-        const anchors = html.match(/<a\b[^>]*>[\s\S]*?<\/a>/gi) || [];
+        const pageText = htmlText(html);
+        const docTitle = html.match(/<h1\\b[^>]*>([\\s\\S]*?)<\\/h1>/i)?.[1] || html.match(/<title\\b[^>]*>([\\s\\S]*?)<\\/title>/i)?.[1] || "";
+        const documentTitle = htmlText(docTitle) || pageText.slice(0, 240);
+        const pageMatchesCriteria = matchesQuery(pageText + " " + documentTitle, terms);
+        const pageHasPaperSignal = /question[-_ ]paper|previous[-_ ]year|past[-_ ]paper|sample[-_ ]paper|exam[-_ ]paper/i.test(pageText + " " + documentTitle);
+        const anchors = html.match(/<a\\b[^>]*>[\\s\\S]*?<\\/a>/gi) || [];
         for (const anchor of anchors) {
-          const href = anchor.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1] || "";
+          const href = anchor.match(/\\bhref\\s*=\\s*["']([^"']+)["']/i)?.[1] || "";
           if (!href) continue;
           try {
             const target = canonicalScanUrl(new URL(decodeEntities(href), fetched.url), rootHost);
-            if (!safeHost(target, [rootHost]) || /\.(?:pdf|zip|jpg|jpeg|png|gif|svg|css|js|xml)(?:$|[?#])/i.test(target.pathname)) continue;
+            if (!safeHost(target, [rootHost]) || /\\.(?:zip|jpg|jpeg|png|gif|svg|css|js|xml)(?:$|[?#])/i.test(target.pathname)) continue;
+            const isAglaSemDocs = rootHost === "aglasem.com" && target.hostname === "docs.aglasem.com";
+            const isAglaSemDocument = isAglaSemDocs && /\\/view\\/[0-9a-f-]{30,}/i.test(target.pathname);
+            const isAglaSemDownload = isAglaSemDocs && /single-doc-download/i.test(target.pathname);
+            if (isAglaSemDownload && pageMatchesCriteria && pageHasPaperSignal) {
+              discovered.set(target.href.toLowerCase(), {
+                title: documentTitle, url: target.href,
+                snippet: "AglaSem document download endpoint · " + documentTitle,
+                domain: target.hostname.toLowerCase(), source, pdf_search_hint: true,
+                source_page_url: fetched.url,
+              });
+              continue;
+            }
             const score = websiteUrlRelevance(target, criteria);
-            if (score >= 20 && pageQueue.length < 1000 && !visited.has(target.href) && !pageQueue.includes(target.href)) pageQueue.push(target.href);
+            const shouldFollowDocument = isAglaSemDocument && pageMatchesCriteria && pageHasPaperSignal;
+            if ((score >= 20 || shouldFollowDocument) && pageQueue.length < 1000 &&
+                !visited.has(target.href) && !pageQueue.includes(target.href)) pageQueue.push(target.href);
           } catch { /* ignore malformed links */ }
         }
       } catch (e) { errors.push(page.hostname + page.pathname + ": " + clip((e as Error)?.message || e, 180)); }
