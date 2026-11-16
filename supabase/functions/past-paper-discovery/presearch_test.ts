@@ -91,6 +91,13 @@ Deno.test("accepts AglaSem single-document download endpoints as unverified PDF 
     pdf_search_hint: true,
   }, "question paper");
   if (!accepted) throw new Error("AglaSem extensionless document download endpoints should be retained as PDF candidates for later verification.");
+  const inheritedCollectionContext = isQuestionPaperPdf({
+    url: "https://docs.aglasem.com/product/single-doc-download/4e86fedc-9314-11f1-ae33-0aa932765c8b",
+    title: "Accountancy",
+    snippet: "Question paper PDF download endpoint linked from the AglaSem question-paper collection · NIOS Class 12 · Accountancy",
+    pdf_search_hint: true,
+  }, "NIOS Class 12");
+  if (!inheritedCollectionContext) throw new Error("A document download linked from a question-paper collection must retain the parent collection context even when the document title omits 'question paper'.");
 });
 
 Deno.test("recognizes AglaSem collection URLs and first-party subdomains", () => {
