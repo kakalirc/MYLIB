@@ -699,9 +699,14 @@ Deno.serve(async (req) => {
         const html = new TextDecoder().decode(await readBounded(fetched.response, 2 * 1024 * 1024));
         const isAglaSemDocumentPage = isAglaSemDomain(rootHost) && new URL(fetched.url).pathname.toLowerCase().includes("/view/");
         if (isAglaSemDocumentPage) audit.document_pages_fetched++;
-        for (const row of linkRows(html, fetched.url, source, terms, 200)) {
-          const candidate = { ...row, source_page_url: fetched.url };
-          discovered.set(candidate.url.toLowerCase(), candidate);
+        // AglaSem /view pages are document landing pages, not PDF candidates.
+        // Their related-content anchors can point to other subjects' view pages;
+        // only the dedicated single-doc-download endpoint is a valid PDF candidate.
+        if (!isAglaSemDocumentPage) {
+          for (const row of linkRows(html, fetched.url, source, terms, 200)) {
+            const candidate = { ...row, source_page_url: fetched.url };
+            discovered.set(candidate.url.toLowerCase(), candidate);
+          }
         }
         const pageText = htmlText(html);
         const docTitle = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "";
