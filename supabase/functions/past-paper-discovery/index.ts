@@ -548,6 +548,121 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { return reply(400, { error: "Invalid request." }); }
   const action = clip(body.action, 30);
 
+
+  if (action === "website_scan") {
+    const criteria = clip(body.criteria || "question paper", 300);
+    const requestedRunId = clip(body.run_id, 64);
+    let root: URL;
+    let rootHost = "";
+    let runId = "";
+    let state: any = {};
+    if (requestedRunId) {
+      if (!uuid(requestedRunId)) return reply(400, { error: "Invalid website scan run." });
+      const { data: existing, error } = await admin.from("qb_paper_discovery_runs").select("id,query_text,filters,status").eq("id", requestedRunId).single();
+      if (error || !existing || existing.filters?.search_mode !== "website_scan") return reply(404, { error: "Website scan run was not found." });
+      if (existing.status === "completed") return reply(200, { run_id: existing.id, complete: true, website_scan: true, pages_scanned: existing.filters?.pages_scanned || 0, pages_remaining: 0, pdfs_found: (existing.filters?.search_results || []).length, preview_results: existing.filters?.search_results || [], provider_errors: existing.filters?.provider_errors || [] });
+      try { root = new URL(existing.filters.website_url); } catch { return reply(400, { error: "Saved website URL is invalid." }); }
+      rootHost = root.hostname.toLowerCase().replace(/^www\./, "");
+      state = existing.filters?.website_scan_state || {};
+      runId = existing.id;
+    } else {
+      const rawUrl = clip(body.website_url, 2000);
+      try { root = new URL(rawUrl); } catch { return reply(400, { error: "Enter a valid website URL, including https://." }); }
+      if (root.protocol !== "https:" || root.username || root.password || root.port) return reply(400, { error: "Website scans require a public HTTPS URL without credentials or a custom port." });
+      rootHost = root.hostname.toLowerCase().replace(/^www\./, "");
+      if (!rootHost || rootHost === "localhost" || rootHost.endsWith(".local") || /^\d{1,3}(\.\d{1,3}){3}$/.test(rootHost)) return reply(400, { error: "This website host is not eligible for scanning." });
+      state = { page_queue: [root.href], sitemap_queue: [new URL("/sitemap.xml", root.origin).href, new URL("/sitemap_index.xml", root.origin).href], visited: [], results: [], errors: [] };
+    }
+    const source = { id: null, display_name: rootHost, domain: rootHost, source_type: "education_portal", trust_level: "review", enabled: true };
+    const pageQueue: string[] = Array.isArray(state.page_queue) ? state.page_queue : [];
+    const sitemapQueue: string[] = Array.isArray(state.sitemap_queue) ? state.sitemap_queue : [];
+    const visited = new Set<string>(Array.isArray(state.visited) ? state.visited : []);
+    const discovered = new Map<string, any>((Array.isArray(state.results) ? state.results : []).map((row: any) => [String(row.url).toLowerCase(), row]));
+    const errors: string[] = Array.isArray(state.errors) ? state.errors : [];
+    const terms = queryTerms(criteria);
+    // Process a bounded batch so large sites can resume safely without losing their queue or results.
+    let sitemapBudget = 8;
+    while (sitemapQueue.length && sitemapBudget-- > 0) {
+      const sitemapUrl = sitemapQueue.shift()!;
+      try {
+        const map = await fetchAllowed(sitemapUrl, [rootHost], "application/xml,text/xml");
+        const xml = new TextDecoder().decode(await readBounded(map.response, 2 * 1024 * 1024));
+        for (const match of xml.matchAll(/<loc>([\s\S]*?)<\/loc>/gi)) {
+          try {
+            const u = new URL(decodeEntities(match[1].trim()));
+            if (!safeHost(u, [rootHost])) continue;
+            if (/\.xml(?:$|[?#])/i.test(u.pathname)) sitemapQueue.push(u.href);
+            else if (!/\.(?:gz|zip|jpg|jpeg|png|gif|svg|css|js)(?:$|[?#])/i.test(u.pathname)) pageQueue.push(u.href);
+          } catch { /* ignore malformed sitemap entries */ }
+        }
+      } catch (e) { errors.push("Sitemap " + sitemapUrl + ": " + clip((e as Error)?.message || e, 180)); }
+    }
+    let pageBudget = 12;
+    while (pageQueue.length && pageBudget-- > 0) {
+      const pageUrl = pageQueue.shift()!;
+      let page: URL; try { page = new URL(pageUrl); } catch { continue; }
+      const canonical = page.href.split("#")[0];
+      if (visited.has(canonical) || !safeHost(page, [rootHost])) continue;
+      visited.add(canonical);
+      try {
+        const fetched = await fetchAllowed(canonical, [rootHost], "text/html,application/xhtml+xml,application/pdf,application/octet-stream");
+        const type = (fetched.response.headers.get("content-type") || "").toLowerCase();
+        const looksPdf = type.includes("application/pdf") || /\.pdf(?:$|[?#])/i.test(fetched.url);
+        if (looksPdf) {
+          const bytes = new Uint8Array(await readBounded(fetched.response, MAX_PDF_BYTES));
+          if (bytes.length >= 5 && new TextDecoder().decode(bytes.slice(0, 5)) === "%PDF-") {
+            const row = { title: page.pathname.split("/").pop() || "Question paper PDF", url: fetched.url, snippet: "PDF file discovered during website scan", domain: page.hostname.toLowerCase().replace(/^www\./, ""), source_name: rootHost, source_match: "website_scan", search_provider: "Website crawler", source_page_url: canonical };
+            if (isQuestionPaperPdf(row, criteria)) discovered.set(row.url.toLowerCase(), row);
+          }
+          continue;
+        }
+        if (type && !type.includes("html") && !type.includes("xhtml")) continue;
+        const html = new TextDecoder().decode(await readBounded(fetched.response, 2 * 1024 * 1024));
+        for (const row of linkRows(html, fetched.url, source, terms, 200)) {
+          const candidate = { ...row, source_page_url: fetched.url };
+          discovered.set(candidate.url.toLowerCase(), candidate);
+        }
+        const anchors = html.match(/<a\b[^>]*>[\s\S]*?<\/a>/gi) || [];
+        for (const anchor of anchors) {
+          const href = anchor.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1] || "";
+          if (!href) continue;
+          try {
+            const target = new URL(decodeEntities(href), fetched.url);
+            if (!safeHost(target, [rootHost]) || /\.(?:pdf|zip|jpg|jpeg|png|gif|svg|css|js|xml)(?:$|[?#])/i.test(target.pathname)) continue;
+            // Follow pagination and archive navigation as well as explicit subject/paper links.
+            const label = htmlText(anchor);
+            const pathAndLabel = label + " " + target.pathname + " " + target.search;
+            if (/question|paper|exam|download|resource|academic|subject|class|year|specimen|syllabus|archive|previous|next|page[=/-]?\d|\b\d{4}\b/i.test(pathAndLabel)) pageQueue.push(target.href);
+          } catch { /* ignore malformed links */ }
+        }
+      } catch (e) { errors.push(page.hostname + page.pathname + ": " + clip((e as Error)?.message || e, 180)); }
+    }
+    const results = [...discovered.values()].filter((row) => isQuestionPaperPdf(row, criteria)).slice(0, MAX_DISCOVERED_CANDIDATES_PER_BATCH).map((row: any) => ({
+      title: clip(row.title, 500), url: row.url, domain: row.domain, snippet: clip(row.snippet, 1200),
+      source_name: rootHost, source_match: "website_scan", search_provider: "Website crawler",
+      source_page_url: row.source_page_url || root.href,
+    }));
+    const complete = pageQueue.length === 0 && sitemapQueue.length === 0;
+    const filters = { scope: "board", search_mode: "website_scan", website_url: root.href, website_domain: rootHost,
+      pages_scanned: visited.size, pages_queued: pageQueue.length, sitemap_queue_remaining: sitemapQueue.length,
+      search_results: results, provider_errors: errors.slice(0, 100),
+      website_scan_state: complete ? null : { page_queue: pageQueue.slice(0, 5000), sitemap_queue: sitemapQueue.slice(0, 500),
+        visited: [...visited].slice(-10000), results, errors: errors.slice(-100) },
+      discovery_progress: { next_offset: visited.size, successful_queries: visited.size, provider_errors: errors.slice(0, 80), results_found: results.length, new_candidates: 0 } };
+    let run: any;
+    if (runId) {
+      const { data, error } = await admin.from("qb_paper_discovery_runs").update({ status: complete ? "completed" : "running", results_found: results.length, filters, completed_at: complete ? new Date().toISOString() : null, heartbeat_at: new Date().toISOString() }).eq("id", runId).select("id").single();
+      if (error || !data) return reply(500, { error: "Could not save website scan progress: " + (error?.message || "unknown error") });
+      run = data;
+    } else {
+      const { data, error } = await admin.from("qb_paper_discovery_runs").insert({ query_text: criteria, status: complete ? "completed" : "running", results_found: results.length, filters, started_by: auth.user.id, completed_at: complete ? new Date().toISOString() : null, heartbeat_at: new Date().toISOString() }).select("id").single();
+      if (error || !data) return reply(500, { error: "Could not save website scan progress: " + (error?.message || "unknown error") });
+      run = data;
+    }
+    return reply(200, { run_id: run.id, complete, website_scan: true, pages_scanned: visited.size,
+      pages_remaining: pageQueue.length, sitemaps_remaining: sitemapQueue.length, pdfs_found: results.length,
+      preview_results: results, provider_errors: errors, message: complete ? "Website scan complete. Results are saved for review; no PDFs were downloaded, verified, or imported." : "Website scan batch saved. Resume this run to continue scanning; results are not yet complete." });
+  }
   if (action === "collect") {
     const runId = clip(body.run_id, 64);
     if (!uuid(runId)) return reply(400, { error: "Invalid discovery run." });
@@ -577,7 +692,7 @@ Deno.serve(async (req) => {
           verification_status: "unverified", status: "discovered",
           discovery_metadata: { source_match: source ? "approved_registry" : "unregistered_domain",
             source_name: clip(row.source_name || domain, 200), search_provider: clip(row.search_provider || "Web search", 80),
-            snippet: clip(row.snippet || "", 1200), pdf_search_hint: true, collected_from_search: true },
+            snippet: clip(row.snippet || "", 1200), source_page_url: clip(row.source_page_url || "", 2000), pdf_search_hint: true, collected_from_search: true },
           discovered_at: new Date().toISOString(), updated_at: new Date().toISOString(),
         }).select("id").single();
         if (insertError) {

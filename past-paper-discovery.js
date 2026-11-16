@@ -181,6 +181,11 @@
       + '<button class="btn-small btn-primary" onclick="libPPDSearch()" ' + (state.searchBusy ? 'disabled' : '') + '>' + (state.searchBusy ? 'Searching…' : ('Search')) + '</button></div>'
       + '<p class="hint">Search runs PDF-focused queries across the selected sources and saves the results and source outcomes with this run. It does not download or verify PDFs or add papers to the review queue. Collect turns saved results into candidates; verification and import are separate steps.</p>'
       + (state.message ? '<div class="hint" style="color:' + (state.error ? 'var(--brick)' : 'var(--forest)') + ';margin:8px 0">' + esc(state.message) + '</div>' : '') + '</div>';
+    var websiteScan = '<div class="lib-ppd-section"><h3>Website-Based Question Paper Download</h3><div class="lib-ppd-search">'
+      + '<input id="ppd-website-url" type="url" placeholder="Website URL (e.g. https://schools.aglasem.com/)">'
+      + '<input id="ppd-website-criteria" placeholder="Optional criteria (e.g. ICSE Class 10 Sanskrit)">'
+      + '<button class="btn-small btn-primary" type="button" onclick="libPPDWebsiteScan()" ' + (state.searchBusy ? 'disabled' : '') + '>' + (state.searchBusy ? 'Scanning…' : 'Scan website') + '</button></div>'
+      + '<p class="hint">Scans the supplied HTTPS website, its sitemap and relevant internal pages (up to 40 pages per scan). Finds likely question-paper PDF links and saves them as search results. It does not download, verify or import PDFs. Use Collect only after reviewing the results.</p></div>';
     var preview = state.previewRows.length ? '<div class="lib-ppd-section"><h3>Search results preview (' + state.previewRows.length + ' records)</h3><p class="hint">These are saved results from this search. They are not candidates or review-queue records until you choose Collect.</p>' + state.previewRows.map(function (r) { return '<div class="lib-ppd-source"><div><b>' + esc(r.title || 'Untitled PDF') + '</b><div class="hint">' + esc(r.domain) + ' · ' + esc(r.source_name || r.source_match) + ' · ' + esc(r.search_provider) + '</div>' + (r.snippet ? '<div class="hint">' + esc(r.snippet) + '</div>' : '') + '</div><a class="btn-small" href="' + esc(r.url) + '" target="_blank" rel="noopener noreferrer">Open PDF</a></div>'; }).join('') + '</div>' : '';
     var preSearchSummary = '';
     if (state.latestPreSearch) {
@@ -195,7 +200,8 @@
         + '<div><b>' + esc(estimate.discovered_source_count || 0) + '</b><span>New domains surfaced</span></div></div>'
         + '<p class="hint">This is a search estimate, not a count of confirmed papers. No PDF is downloaded and no review-queue record is created.</p>'
         + warnings
-        + '<button class="btn-small btn-primary" type="button" onclick="libPPDCollectRun(\'' + esc(estimate.run_id) + '\')" ' + (state.searchBusy || estimate.collectionComplete ? 'disabled' : '') + '>Collect saved results</button>'
+        + (estimate.complete === false ? '<button class="btn-small" type="button" onclick="libPPDWebsiteResume(\'' + esc(estimate.run_id) + '\')" ' + (state.searchBusy ? 'disabled' : '') + '>Resume website scan</button>' : '')
+        + '<button class="btn-small btn-primary" type="button" onclick="libPPDCollectRun(\'' + esc(estimate.run_id) + '\')" ' + (state.searchBusy || estimate.collectionComplete || estimate.complete === false ? 'disabled' : '') + '>Collect saved results</button>'
         + '</div>'
     }
     var sourceAudit = '<details class="lib-ppd-section lib-ppd-recent-searches"><summary>Source Intelligence · Search history (' + state.auditRows.length + ' records)</summary>'
@@ -225,7 +231,7 @@
     return '<section class="lib-ppd"><style>'
       + '.lib-ppd{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}.lib-ppd-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:8px}.lib-ppd-metric{border:1px solid var(--line);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:3px}.lib-ppd-metric b{font-size:20px}.lib-ppd-metric span{font-size:12px;color:var(--muted)}.lib-ppd-bulk-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}.lib-ppd-select{font-size:12px;white-space:nowrap;display:flex;gap:4px;align-items:center}.lib-ppd-recent-searches{border:1px solid var(--line);border-radius:9px;padding:10px 12px}.lib-ppd-recent-searches>summary{cursor:pointer;font-weight:700;list-style:disclosure-closed}.lib-ppd-recent-searches[open]>summary{margin-bottom:10px;list-style:disclosure-open}.lib-ppd-queue-tabs{display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:14px 0 10px}.lib-ppd-queue-tab{border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;background:var(--surface);color:var(--ink);padding:9px 13px;cursor:pointer;font:inherit}.lib-ppd-queue-tab.active{background:var(--surface-2,var(--surface));font-weight:700;border-color:var(--accent,var(--line))}.lib-ppd-rejected{border-left:3px solid var(--brick,var(--line))}.lib-ppd h3{font-family:Zilla Slab,serif;margin:0 0 7px}.lib-ppd-section{margin:14px 0 20px}.lib-ppd-approved-sources{border:1px solid var(--line);border-radius:9px;padding:10px 12px}.lib-ppd-approved-sources>summary{cursor:pointer;font-weight:700;list-style:disclosure-closed}.lib-ppd-approved-sources[open]>summary{margin-bottom:10px;list-style:disclosure-open}.lib-ppd-search,.lib-ppd-source-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.lib-ppd-search input{flex:1;min-width:190px}.lib-ppd-search select,.lib-ppd-search input,.lib-ppd-source-form input,.lib-ppd-source-form select,.lib-ppd-meta input,.lib-ppd-meta select{min-height:38px;padding:7px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);box-sizing:border-box}.lib-ppd-source-form input{flex:1;min-width:170px}.lib-ppd-source{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line)}.lib-ppd-candidate{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}.lib-ppd-review-layout{display:grid;grid-template-columns:minmax(0,0.9fr) minmax(0,1.1fr);gap:16px;align-items:start}.lib-ppd-review-summary,.lib-ppd-review-fields{min-width:0}.lib-ppd-review-fields{border-left:1px solid var(--line);padding-left:16px}.lib-ppd-candidate-head,.lib-ppd-title,.lib-ppd-actions{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}.lib-ppd-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:0}.lib-ppd-meta label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);font-weight:700}.lib-ppd-meta input,.lib-ppd-meta select{width:100%}.lib-ppd-actions{justify-content:flex-start;margin-top:10px}.lib-ppd-domain-approval{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}.lib-ppd-domain-approval select{min-height:34px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink)}.lib-ppd p.hint{margin:5px 0 10px}@media(max-width:700px){.lib-ppd-review-layout{grid-template-columns:minmax(0,1fr)}.lib-ppd-review-fields{border-left:0;border-top:1px solid var(--line);padding:12px 0 0}.lib-ppd-search,.lib-ppd-source-form{align-items:stretch}.lib-ppd-search>* ,.lib-ppd-source-form>*{width:100%;min-width:0}.lib-ppd-candidate-head{align-items:flex-start}}'
       + '.lib-ppd-estimate{border:1px solid var(--line);border-radius:9px;padding:12px}.lib-ppd-estimate-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.lib-ppd-estimate-grid>div{background:var(--surface-2,var(--surface));border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:3px}.lib-ppd-estimate-grid b{font-size:22px}.lib-ppd-estimate-grid span{font-size:11px;color:var(--muted)}@media(max-width:700px){.lib-ppd-estimate-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}'
-      + '</style>' + search + preSearchSummary + preview + dashboard + renderQueueTabs() + sources + sourceAudit + runs + '</section>';
+      + '</style>' + search + websiteScan + preSearchSummary + preview + dashboard + renderQueueTabs() + sources + sourceAudit + runs + '</section>';
   }
 
   window.libPPDLoadMoreAudit = async function () {
@@ -283,6 +289,36 @@
     finally { state.searchBusy = false; if (typeof render === 'function') render(); }
   };
 
+
+  window.libPPDWebsiteScan = async function () {
+    if (state.searchBusy) return;
+    var websiteUrl = val('ppd-website-url').trim();
+    var criteria = val('ppd-website-criteria').trim() || 'question paper';
+    if (!websiteUrl.toLowerCase().startsWith('https://')) { notify('Enter a public HTTPS website URL.', true); return; }
+    state.previewRows = []; state.latestPreSearch = null;
+    return runWebsiteScan({ website_url: websiteUrl, criteria: criteria });
+  };
+  window.libPPDWebsiteResume = async function (runId) {
+    if (!runId || state.searchBusy) return;
+    return runWebsiteScan({ run_id: runId });
+  };
+  async function runWebsiteScan(payload) {
+    state.searchBusy = true; state.error = '';
+    state.message = payload.run_id ? 'Resuming website scan…' : 'Scanning website and discovering question-paper PDFs…';
+    if (typeof render === 'function') render();
+    try {
+      var result = await invoke(Object.assign({ action:'website_scan' }, payload));
+      state.previewRows = result.preview_results || [];
+      state.latestPreSearch = { run_id:result.run_id, complete:!!result.complete, pdfs_found:Number(result.pdfs_found || 0),
+        discovered_source_count:1, provider_errors:result.provider_errors || [], collectionComplete:false };
+      state.message = (result.complete ? 'Website scan complete' : 'Website scan batch saved; more pages remain') + ': '
+        + Number(result.pages_scanned || 0) + ' pages scanned; ' + state.previewRows.length
+        + ' potential question-paper PDFs found. ' + Number(result.pages_remaining || 0) + ' pages and '
+        + Number(result.sitemaps_remaining || 0) + ' sitemaps remain. No PDFs downloaded or verified.';
+      state.loaded = false; await loadData(true);
+    } catch (e) { state.message = e.message || String(e); state.error = state.message; }
+    finally { state.searchBusy = false; if (typeof render === 'function') render(); }
+  }
   window.libPPDCollectRun = async function (runId) {
     if (state.searchBusy || !runId) return;
     state.searchBusy = true; state.error = ''; state.message = 'Collecting saved search results…';
