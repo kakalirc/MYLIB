@@ -258,6 +258,20 @@ function websiteUrlRelevance(url: URL, criteria: string): number {
   if (/archive|question|paper|exam|download|resource/.test(value)) return 20;
   return 0;
 }
+function extractDocumentTargets(html: string, baseUrl: string): string[] {
+  const found = new Set<string>();
+  const add = (raw: string) => {
+    try {
+      const value = decodeEntities(raw).replace(/\\u0026/gi, "&").replace(/\\\//g, "/");
+      const url = new URL(value, baseUrl);
+      if (url.protocol === "https:" && /(?:\.pdf(?:$|[?#])|single-doc-download|download|pdf|document)/i.test(url.href)) found.add(url.href);
+    } catch { /* Ignore non-URL fragments. */ }
+  };
+  for (const match of html.matchAll(/<(?:iframe|embed|object)\b[^>]*(?:src|data)\s*=\s*["']([^"']+)["'][^>]*>/gi)) add(match[1]);
+  for (const match of html.matchAll(/(?:href|src|data-url|data-src|data-download-url)\s*=\s*["']([^"']+)["']/gi)) add(match[1]);
+  for (const match of html.matchAll(/https?:\\?[^"'\\s<>]*(?:pdf|download|single-doc-download)[^"'\\s<>]*/gi)) add(match[0]);
+  return [...found];
+}
 function canonicalScanUrl(url: URL, rootHost: string): URL {
   const copy = new URL(url.href);
   const canonical = canonicalWebsiteScanDomain(copy.hostname);
@@ -541,12 +555,16 @@ async function resolvePdf(candidate: any, domains: string[]) {
       return { response: new Response(body, { headers: result.response.headers }), url: result.url };
     }
     const html = await result.response.text();
-    const links = [...html.matchAll(/(?:href|data-url)\s*=\s*["']([^"']+\.pdf(?:\?[^"']*)?)["']/gi)].map((m) => new URL(decodeEntities(m[1]), result.url).href);
-    for (const link of links) {
+    for (const link of extractDocumentTargets(html, result.url)) {
       const u = new URL(link);
-      if (safeHost(u, domains)) {
-        const pdf = await fetchAllowed(u.href, domains, "application/pdf,application/octet-stream");
-        return pdf;
+      if (!safeHost(u, domains)) continue;
+      const pdf = await fetchAllowed(u.href, domains, "application/pdf,application/octet-stream,text/html;q=0.8,*/*;q=0.5");
+      const pdfType = (pdf.response.headers.get("content-type") || "").toLowerCase();
+      if (pdfType.includes("pdf") || /\.pdf(?:$|[?#])/i.test(pdf.url)) return pdf;
+      const bytes = await readBounded(pdf.response);
+      if (isPdf(bytes)) {
+        const body = new ArrayBuffer(bytes.byteLength); new Uint8Array(body).set(bytes);
+        return { response: new Response(body, { headers: { "Content-Type": "application/pdf", "Content-Length": String(bytes.length) } }), url: pdf.url };
       }
     }
   }
