@@ -613,7 +613,7 @@ Deno.serve(async (req) => {
       if (!rootHost || rootHost === "localhost" || rootHost.endsWith(".local") || /^\d{1,3}(\.\d{1,3}){3}$/.test(rootHost)) return reply(400, { error: "This website host is not eligible for scanning." });
       // A document-view URL is an explicit single-page target, not a request to crawl the whole host.
       const singlePageMode = /\/view\/[0-9a-f-]{30,}\/?$/i.test(root.pathname);
-      const aglasemCollectionMode = isAglaSemDomain(root.hostname) && /(?:question[-_]paper|sample[-_]paper|previous[-_]year[-_]question[-_]papers?|\\/org\\/)/i.test(root.pathname);
+      const aglasemCollectionMode = isAglaSemDomain(root.hostname) && (root.pathname.toLowerCase().includes("question-paper") || root.pathname.toLowerCase().includes("sample-paper") || root.pathname.toLowerCase().includes("/org/"));
       state = { page_queue: [root.href], sitemap_queue: singlePageMode || aglasemCollectionMode ? [] : [new URL("/sitemap.xml", root.origin).href, new URL("/sitemap_index.xml", root.origin).href], single_page_mode: singlePageMode, aglasem_collection_mode: aglasemCollectionMode, visited: [], results: [], errors: [], audit: {} };
     }
     const approvedHosts = isAglaSemDomain(rootHost) ? ["aglasem.com"] : [rootHost];
@@ -623,7 +623,7 @@ Deno.serve(async (req) => {
       catch { return []; }
     }))];
     const singlePageMode = state.single_page_mode === true || /\/view\/[0-9a-f-]{30,}\/?$/i.test(root.pathname);
-    const aglasemCollectionMode = state.aglasem_collection_mode === true || (isAglaSemDomain(root.hostname) && /(?:question[-_]paper|sample[-_]paper|previous[-_]year[-_]question[-_]papers?|\\/org\\/)/i.test(root.pathname));
+    const aglasemCollectionMode = state.aglasem_collection_mode === true || (isAglaSemDomain(root.hostname) && (root.pathname.toLowerCase().includes("question-paper") || root.pathname.toLowerCase().includes("sample-paper") || root.pathname.toLowerCase().includes("/org/")));
     if (singlePageMode && state.single_page_mode !== true) {
       // Discard legacy site-wide queues for a document-view URL and start with that exact page.
       state = { page_queue: [root.href], sitemap_queue: [], single_page_mode: true, visited: [], results: [], errors: [] };
@@ -686,7 +686,7 @@ Deno.serve(async (req) => {
         }
         if (type && !type.includes("html") && !type.includes("xhtml")) continue;
         const html = new TextDecoder().decode(await readBounded(fetched.response, 2 * 1024 * 1024));
-        const isAglaSemDocumentPage = isAglaSemDomain(rootHost) && /\\/view\\/[0-9a-f-]{30,}/i.test(new URL(fetched.url).pathname);
+        const isAglaSemDocumentPage = isAglaSemDomain(rootHost) && new URL(fetched.url).pathname.toLowerCase().includes("/view/");
         if (isAglaSemDocumentPage) audit.document_pages_fetched++;
         for (const row of linkRows(html, fetched.url, source, terms, 200)) {
           const candidate = { ...row, source_page_url: fetched.url };
