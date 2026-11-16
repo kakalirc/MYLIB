@@ -7,7 +7,8 @@ insert into public.qb_paper_discovery_candidates
   (source_type, source_domain, title, source_url)
 values ('board', 'cbseacademic.nic.in', 'CBSE Class 10 Sanskrit 2025', 'https://cbseacademic.nic.in/sample.pdf');
 
--- The migration must seed official board domains and enforce the explicit import link.
+-- The migration must seed official board domains, allow transport-block status,
+-- and enforce the explicit import link.
 do $$
 begin
   if (select count(*) from public.qb_paper_discovery_sources where trust_level = 'official') < 4 then
@@ -15,6 +16,12 @@ begin
   end if;
   if has_table_privilege('authenticated', 'public.qb_paper_discovery_candidates', 'INSERT') then
     raise exception 'Authenticated users must not insert discovery candidates directly';
+  end if;
+  update public.qb_paper_discovery_candidates
+    set verification_status = 'remote_blocked'
+    where source_url = 'https://cbseacademic.nic.in/sample.pdf';
+  if not found then
+    raise exception 'Could not persist remote_blocked verification status';
   end if;
   begin
     insert into public.qb_paper_discovery_candidates
