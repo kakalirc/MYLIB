@@ -247,7 +247,7 @@ async function fetchAllowed(urlText: string, domains: string[], accept: string) 
 type DiscoveryRow = {title:string;url:string;snippet:string;domain:string;source:any;archive_member?:string;pdf_search_hint?:boolean};
 function websiteUrlRelevance(url: URL, criteria: string): number {
   const value = (url.pathname + " " + url.search).toLowerCase().replace(/[^a-z0-9]+/g, " ");
-    const terms = queryTerms(criteria);
+  const terms = queryTerms(criteria);
   const paper = /question paper|previous year|past paper|sample paper|specimen|exam paper|paper archive|qp\\b/.test(value);
   const subjectMatches = !terms.length || terms.some((term) => value.includes(term));
   const classMatch = criteria.match(/\b(class|grade)\s*(10|12|xii|x)\b/i);
@@ -623,7 +623,7 @@ Deno.serve(async (req) => {
       catch { return []; }
     }))];
     const singlePageMode = state.single_page_mode === true || /\/view\/[0-9a-f-]{30,}\/?$/i.test(root.pathname);
-    const aglasemCollectionMode = state.aglasem_collection_mode === true || (isAglaSemDomain(root.hostname) && (root.pathname.toLowerCase().includes("question-paper") || root.pathname.toLowerCase().includes("sample-paper") || root.pathname.toLowerCase().includes("/org/")));
+    const aglasemCollectionMode = state.aglasem_collection_mode === true || isAglaSemCollectionUrl(root);
     if (singlePageMode && state.single_page_mode !== true) {
       // Discard legacy site-wide queues for a document-view URL and start with that exact page.
       state = { page_queue: [root.href], sitemap_queue: [], single_page_mode: true, visited: [], results: [], errors: [] };
