@@ -1236,7 +1236,7 @@ Deno.serve(async (req) => {
     if (!isPdf(bytes)) { await admin.storage.from("qb-papers").remove([storagePath]); return reply(422, { error: "The uploaded file is not a valid PDF (PDF signature check failed)." }); }
     const checksum = await sha256(bytes);
     const { data: duplicate } = await admin.from("qb_source_papers").select("id").eq("checksum", checksum).maybeSingle();
-    const { data: duplicateCandidate } = await admin.from("qb_paper_discovery_candidates").select("id").eq("checksum", checksum).neq("id", candidateId).limit(1).maybeSingle();
+    const duplicateCandidate: any = (await admin.from("qb_paper_discovery_candidates").select("id").eq("checksum", checksum).neq("id", candidateId).limit(1).maybeSingle()).data;
     const isDuplicate = !!duplicate || !!duplicateCandidate;
     if (isDuplicate) {
       await admin.storage.from("qb-papers").remove([storagePath]);
@@ -1273,8 +1273,8 @@ Deno.serve(async (req) => {
       }
       const checksum = await sha256(bytes);
       const { data: duplicate } = await admin.from("qb_source_papers").select("id").eq("checksum", checksum).maybeSingle();
-      const { data: duplicateCandidate } = await admin.from("qb_paper_discovery_candidates")
-        .select("id").eq("checksum", checksum).neq("id", candidateId).limit(1).maybeSingle();
+      const duplicateCandidate: any = (await admin.from("qb_paper_discovery_candidates")
+        .select("id").eq("checksum", checksum).neq("id", candidateId).limit(1).maybeSingle()).data;
       const isDuplicate = !!duplicate || !!duplicateCandidate;
       const status = isDuplicate ? "duplicate" : "verified";
       await admin.from("qb_paper_discovery_candidates").update({
