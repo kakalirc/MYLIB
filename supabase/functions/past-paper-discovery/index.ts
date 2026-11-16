@@ -3,7 +3,7 @@
 // while permanent source-registry changes remain explicit Admin actions. Imports use the existing workflow.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { getPdfZipMember, listPdfMembersFromZip } from "./archive.ts";
-import { canonicalWebsiteScanDomain, matchesApprovedSourceDomain } from "./source-domain.ts";
+import { canonicalWebsiteScanDomain, isAglaSemCollectionUrl, isAglaSemDomain, matchesApprovedSourceDomain } from "./source-domain.ts";
 import {
   buildPdfQueryVariants, filterBoardSourcesForQuery, isPrivateAddress, isQuestionPaperPdf,
   isValidDiscoveredDomain, matchesQuery, queryTerms,
@@ -613,16 +613,17 @@ Deno.serve(async (req) => {
       if (!rootHost || rootHost === "localhost" || rootHost.endsWith(".local") || /^\d{1,3}(\.\d{1,3}){3}$/.test(rootHost)) return reply(400, { error: "This website host is not eligible for scanning." });
       // A document-view URL is an explicit single-page target, not a request to crawl the whole host.
       const singlePageMode = /\/view\/[0-9a-f-]{30,}\/?$/i.test(root.pathname);
-      const aglasemCollectionMode = root.hostname === "docs.aglasem.com" && /\/org\/.+\/(?:question-paper|sample-paper|previous-year-question-papers?)(?:\/|$)/i.test(root.pathname);
-      state = { page_queue: [root.href], sitemap_queue: singlePageMode || aglasemCollectionMode ? [] : [new URL("/sitemap.xml", root.origin).href, new URL("/sitemap_index.xml", root.origin).href], single_page_mode: singlePageMode, aglasem_collection_mode: aglasemCollectionMode, aglasem_collection_mode: aglasemCollectionMode, visited: [], results: [], errors: [] };
+      const aglasemCollectionMode = isAglaSemCollectionUrl(root);
+      state = { page_queue: [root.href], sitemap_queue: singlePageMode || aglasemCollectionMode ? [] : [new URL("/sitemap.xml", root.origin).href, new URL("/sitemap_index.xml", root.origin).href], single_page_mode: singlePageMode, aglasem_collection_mode: aglasemCollectionMode, visited: [], results: [], errors: [], audit: {} };
     }
+    const approvedHosts = isAglaSemDomain(rootHost) ? ["aglasem.com"] : [rootHost];
     const source = { id: null, display_name: rootHost, domain: rootHost, source_type: "education_portal", trust_level: "review", enabled: true };
     const normalizeQueue = (items: unknown[]) => [...new Set(items.flatMap((value) => {
-      try { const u = canonicalScanUrl(new URL(String(value)), rootHost); return safeHost(u, [rootHost]) ? [u.href] : []; }
+      try { const u = canonicalScanUrl(new URL(String(value)), rootHost); return safeHost(u, approvedHosts) ? [u.href] : []; }
       catch { return []; }
     }))];
     const singlePageMode = state.single_page_mode === true || /\/view\/[0-9a-f-]{30,}\/?$/i.test(root.pathname);
-    const aglasemCollectionMode = state.aglasem_collection_mode === true || (root.hostname === "docs.aglasem.com" && /\/org\/.+\/(?:question-paper|sample-paper|previous-year-question-papers?)(?:\/|$)/i.test(root.pathname));
+    const aglasemCollectionMode = state.aglasem_collection_mode === true || isAglaSemCollectionUrl(root);
     if (singlePageMode && state.single_page_mode !== true) {
       // Discard legacy site-wide queues for a document-view URL and start with that exact page.
       state = { page_queue: [root.href], sitemap_queue: [], single_page_mode: true, visited: [], results: [], errors: [] };
@@ -632,20 +633,21 @@ Deno.serve(async (req) => {
     const visited = new Set<string>(Array.isArray(state.visited) ? state.visited : []);
     const discovered = new Map<string, any>((Array.isArray(state.results) ? state.results : []).map((row: any) => [String(row.url).toLowerCase(), row]));
     const errors: string[] = Array.isArray(state.errors) ? state.errors : [];
+    const audit = { parent_document_links_discovered: 0, document_pages_fetched: 0, download_endpoints_extracted: 0, candidates_rejected: 0, ...(state.audit || {}) };
     const terms = queryTerms(criteria);
     // Explicit document-view URLs are inspected in isolation; never expand them into a domain crawl.
     let sitemapBudget = (singlePageMode || aglasemCollectionMode) ? 0 : 8;
     while (sitemapQueue.length && sitemapBudget-- > 0) {
       const sitemapUrl = sitemapQueue.shift()!;
       try {
-        const map = await fetchAllowed(sitemapUrl, [rootHost], "application/xml,text/xml");
+        const map = await fetchAllowed(sitemapUrl, approvedHosts, "application/xml,text/xml");
         const xml = new TextDecoder().decode(await readBounded(map.response, 2 * 1024 * 1024));
         const sitemapUrls: URL[] = [];
         const pageUrls: Array<{ url: URL; score: number }> = [];
         for (const match of xml.matchAll(/<loc>([\s\S]*?)<\/loc>/gi)) {
           try {
             const u = canonicalScanUrl(new URL(decodeEntities(match[1].trim())), rootHost);
-            if (!safeHost(u, [rootHost])) continue;
+            if (!safeHost(u, approvedHosts)) continue;
             if (/\.xml(?:$|[?#])/i.test(u.pathname)) {
               if (sitemapQueue.length + sitemapUrls.length < 40) sitemapUrls.push(u);
             } else if (!/\.(?:gz|zip|jpg|jpeg|png|gif|svg|css|js|webp)(?:$|[?#])/i.test(u.pathname)) {
@@ -667,10 +669,10 @@ Deno.serve(async (req) => {
       const pageUrl = pageQueue.shift()!;
       let page: URL; try { page = new URL(pageUrl); } catch { continue; }
       const canonical = page.href.split("#")[0];
-      if (visited.has(canonical) || !safeHost(page, [rootHost])) continue;
+      if (visited.has(canonical) || !safeHost(page, approvedHosts)) continue;
       visited.add(canonical);
       try {
-        const fetched = await fetchAllowed(canonical, [rootHost], "text/html,application/xhtml+xml,application/pdf,application/octet-stream");
+        const fetched = await fetchAllowed(canonical, approvedHosts, "text/html,application/xhtml+xml,application/pdf,application/octet-stream");
         const type = (fetched.response.headers.get("content-type") || "").toLowerCase();
         const looksPdf = type.includes("application/pdf") || /\.pdf(?:$|[?#])/i.test(fetched.url);
         if (looksPdf) {
@@ -678,11 +680,14 @@ Deno.serve(async (req) => {
           if (bytes.length >= 5 && new TextDecoder().decode(bytes.slice(0, 5)) === "%PDF-") {
             const row = { title: page.pathname.split("/").pop() || "Question paper PDF", url: fetched.url, snippet: "PDF file discovered during website scan", domain: page.hostname.toLowerCase().replace(/^www\./, ""), source_name: rootHost, source_match: "website_scan", search_provider: "Website crawler", source_page_url: canonical };
             if (isQuestionPaperPdf(row, criteria)) discovered.set(row.url.toLowerCase(), row);
+            else audit.candidates_rejected++;
           }
           continue;
         }
         if (type && !type.includes("html") && !type.includes("xhtml")) continue;
         const html = new TextDecoder().decode(await readBounded(fetched.response, 2 * 1024 * 1024));
+        const isAglaSemDocumentPage = isAglaSemDomain(rootHost) && new URL(fetched.url).pathname.toLowerCase().includes("/view/");
+        if (isAglaSemDocumentPage) audit.document_pages_fetched++;
         for (const row of linkRows(html, fetched.url, source, terms, 200)) {
           const candidate = { ...row, source_page_url: fetched.url };
           discovered.set(candidate.url.toLowerCase(), candidate);
@@ -698,16 +703,17 @@ Deno.serve(async (req) => {
         // present as ordinary .pdf hrefs on the document page.
         const isAglaSemDocsPage = (rootHost === "aglasem.com" || rootHost === "docs.aglasem.com") &&
           new URL(fetched.url).hostname === "docs.aglasem.com";
-        if (isAglaSemDocsPage && pageHasPaperSignal) {
+        if (isAglaSemDocsPage && (aglasemCollectionMode || pageHasPaperSignal)) {
           for (const targetUrl of extractDocumentTargets(html, fetched.url)) {
             let target: URL;
             try { target = new URL(targetUrl); } catch { continue; }
             if (!/single-doc-download/i.test(target.pathname)) continue;
+            audit.download_endpoints_extracted++;
             const row = {
-              title: documentTitle,
+              title: documentTitle || (root.pathname + " Question Paper"),
               url: target.href,
-              snippet: "AglaSem document download endpoint · " + documentTitle,
-              domain: target.hostname.toLowerCase().replace(/^www\\./, ""),
+              snippet: "Question paper PDF download endpoint linked from AglaSem collection " + root.pathname + " · " + documentTitle,
+              domain: target.hostname.toLowerCase().replace(/^www\./, ""),
               source_name: rootHost,
               source_match: "website_scan",
               search_provider: "Website crawler",
@@ -727,10 +733,11 @@ Deno.serve(async (req) => {
             const isAglaSemDocs = (rootHost === "aglasem.com" || rootHost === "docs.aglasem.com") && target.hostname === "docs.aglasem.com";
             const isAglaSemDocument = isAglaSemDocs && /\/view\/[0-9a-f-]{30,}/i.test(target.pathname);
             const isAglaSemDownload = isAglaSemDocs && /single-doc-download/i.test(target.pathname);
-            if (isAglaSemDownload && pageMatchesCriteria && pageHasPaperSignal) {
+            if (isAglaSemDownload && (aglasemCollectionMode || (pageMatchesCriteria && pageHasPaperSignal))) {
               discovered.set(target.href.toLowerCase(), {
-                title: documentTitle, url: target.href,
-                snippet: "AglaSem document download endpoint · " + documentTitle,
+                  title: documentTitle || (root.pathname + " Question Paper"),
+                  url: target.href,
+                  snippet: "Question paper PDF download endpoint linked from AglaSem collection " + root.pathname + " · " + documentTitle,
                 domain: rootHost, source, pdf_search_hint: true,
                 source_page_url: fetched.url,
               });
@@ -739,8 +746,11 @@ Deno.serve(async (req) => {
             const score = websiteUrlRelevance(target, criteria);
             const shouldFollowDocument = isAglaSemDocument && pageMatchesCriteria && pageHasPaperSignal;
             const shouldFollowAglaSemCollectionDocument = aglasemCollectionMode && isAglaSemDocument;
-            if (!singlePageMode && (aglasemCollectionMode ? shouldFollowAglaSemCollectionDocument : (score >= 20 || shouldFollowDocument)) && pageQueue.length < 1000 &&
-                !visited.has(target.href) && !pageQueue.includes(target.href)) pageQueue.push(target.href);
+            if (!singlePageMode && (aglasemCollectionMode ? shouldFollowAglaSemCollectionDocument : (score >= 20 || shouldFollowDocument)) && pageQueue.length < 5000 &&
+                !visited.has(target.href) && !pageQueue.includes(target.href)) {
+              pageQueue.push(target.href);
+              if (shouldFollowAglaSemCollectionDocument) audit.parent_document_links_discovered++;
+            }
           } catch { /* ignore malformed links */ }
         }
       } catch (e) { errors.push(page.hostname + page.pathname + ": " + clip((e as Error)?.message || e, 180)); }
@@ -750,13 +760,14 @@ Deno.serve(async (req) => {
       source_name: rootHost, source_match: "website_scan", search_provider: "Website crawler",
       source_page_url: row.source_page_url || root.href,
     }));
+    audit.candidates_rejected += Math.max(0, discovered.size - results.length);
     const complete = pageQueue.length === 0 && sitemapQueue.length === 0;
     const filters = { scope: "board", search_mode: "website_scan", website_url: root.href, website_domain: rootHost,
       pages_scanned: visited.size, pages_queued: pageQueue.length, sitemap_queue_remaining: sitemapQueue.length,
       search_results: results, provider_errors: errors.slice(0, 100),
-      website_scan_state: complete ? null : { page_queue: pageQueue.slice(0, 5000), sitemap_queue: sitemapQueue.slice(0, 500), single_page_mode: singlePageMode,
-        visited: [...visited].slice(-10000), results, errors: errors.slice(-100) },
-      discovery_progress: { next_offset: visited.size, successful_queries: visited.size, provider_errors: errors.slice(0, 80), results_found: results.length, new_candidates: 0 } };
+      website_scan_state: complete ? null : { page_queue: pageQueue.slice(0, 5000), sitemap_queue: sitemapQueue.slice(0, 500), single_page_mode: singlePageMode, aglasem_collection_mode: aglasemCollectionMode,
+        visited: [...visited].slice(-10000), results, errors: errors.slice(-100), audit },
+      discovery_progress: { next_offset: visited.size, successful_queries: visited.size, provider_errors: errors.slice(0, 80), results_found: results.length, new_candidates: 0, audit } };
     let run: any;
     if (runId) {
       const { data, error } = await admin.from("qb_paper_discovery_runs").update({ status: complete ? "completed" : "running", results_found: results.length, filters, completed_at: complete ? new Date().toISOString() : null, heartbeat_at: new Date().toISOString() }).eq("id", runId).select("id").single();
@@ -769,7 +780,7 @@ Deno.serve(async (req) => {
     }
     return reply(200, { run_id: run.id, complete, website_scan: true, pages_scanned: visited.size,
       pages_remaining: pageQueue.length, sitemaps_remaining: sitemapQueue.length, pdfs_found: results.length,
-      preview_results: results, provider_errors: errors, message: complete ? "Website scan complete. Results are saved for review; no PDFs were downloaded, verified, or imported." : "Website scan batch saved. Resume this run to continue scanning; results are not yet complete." });
+      preview_results: results, provider_errors: errors, audit, message: complete ? "Website scan complete. Results are saved for review; no PDFs were downloaded, verified, or imported." : "Website scan batch saved. Resume this run to continue scanning; results are not yet complete." });
   }
   if (action === "collect") {
     const runId = clip(body.run_id, 64);
