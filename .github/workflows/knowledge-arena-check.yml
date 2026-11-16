@@ -75,6 +75,7 @@ jobs:
           PAPER_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/past_paper_ci
           psql "$PAPER_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/past-paper-discovery-fixture.sql
           psql "$PAPER_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261112130000_past_paper_online_discovery.sql
+          psql "$PAPER_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261116150000_past_paper_discovery_remote_blocked_status.sql
           psql "$PAPER_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/past-paper-discovery-schema-smoke.sql
       - name: Test Question Bank extraction migrations in a disposable database
         run: |
