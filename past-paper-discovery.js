@@ -183,9 +183,9 @@
       + (state.message ? '<div class="hint" style="color:' + (state.error ? 'var(--brick)' : 'var(--forest)') + ';margin:8px 0">' + esc(state.message) + '</div>' : '') + '</div>';
     var websiteScan = '<div class="lib-ppd-section"><h3>Website-Based Question Paper Download</h3><div class="lib-ppd-search">'
       + '<input id="ppd-website-url" type="url" placeholder="Website URL (e.g. https://schools.aglasem.com/)">'
-      + '<input id="ppd-website-criteria" placeholder="Paper criteria (e.g. ICSE Class 10 Sanskrit)" value="ICSE Class 10 Sanskrit">'
+      + '<input id="ppd-website-criteria" placeholder="Optional criteria (e.g. ICSE Class 10 Sanskrit)">'
       + '<button class="btn-small btn-primary" type="button" onclick="libPPDWebsiteScan()" ' + (state.searchBusy ? 'disabled' : '') + '>' + (state.searchBusy ? 'Scanning…' : 'Scan website') + '</button></div>'
-      + '<p class="hint">Scans the supplied HTTPS website, its sitemap and relevant internal pages (up to 40 pages per scan). Finds matching PDF links and saves them as search results. It does not download, verify or import PDFs. Use Collect only after reviewing the results.</p></div>';
+      + '<p class="hint">Scans the supplied HTTPS website, its sitemap and relevant internal pages (up to 40 pages per scan). Finds likely question-paper PDF links and saves them as search results. It does not download, verify or import PDFs. Use Collect only after reviewing the results.</p></div>';
     var preview = state.previewRows.length ? '<div class="lib-ppd-section"><h3>Search results preview (' + state.previewRows.length + ' records)</h3><p class="hint">These are saved results from this search. They are not candidates or review-queue records until you choose Collect.</p>' + state.previewRows.map(function (r) { return '<div class="lib-ppd-source"><div><b>' + esc(r.title || 'Untitled PDF') + '</b><div class="hint">' + esc(r.domain) + ' · ' + esc(r.source_name || r.source_match) + ' · ' + esc(r.search_provider) + '</div>' + (r.snippet ? '<div class="hint">' + esc(r.snippet) + '</div>' : '') + '</div><a class="btn-small" href="' + esc(r.url) + '" target="_blank" rel="noopener noreferrer">Open PDF</a></div>'; }).join('') + '</div>' : '';
     var preSearchSummary = '';
     if (state.latestPreSearch) {
@@ -304,7 +304,7 @@
         discovered_source_count:1, provider_errors:result.provider_errors || [], collectionComplete:false };
       state.message = 'Website scan complete: ' + Number(result.pages_scanned || 0) + ' pages scanned; '
         + state.previewRows.length + ' potential question-paper PDFs found. No PDFs downloaded or verified.'
-        + (result.pages_remaining ? ' ' + result.pages_remaining + ' additional pages were queued beyond this scan limit.' : '');
+        + (result.pages_remaining ? ' ' + result.pages_remaining + ' additional pages were not scanned because of the per-scan limit.' : '');
       state.loaded = false; await loadData(true);
     } catch (e) { state.message = e.message || String(e); state.error = state.message; }
     finally { state.searchBusy = false; if (typeof render === 'function') render(); }
