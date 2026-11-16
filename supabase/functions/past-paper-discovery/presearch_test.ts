@@ -100,6 +100,28 @@ Deno.test("accepts AglaSem single-document download endpoints as unverified PDF 
   if (!inheritedCollectionContext) throw new Error("A document download linked from a question-paper collection must retain the parent collection context even when the document title omits 'question paper'.");
 });
 
+Deno.test("retains only trusted AglaSem collection download endpoints despite generic metadata", () => {
+  const accepted = isQuestionPaperPdf({
+    url: "https://docs.aglasem.com/product/single-doc-download/4e86fedc-9314-11f1-ae33-0aa932765c8b",
+    title: "Accountancy",
+    snippet: "Question paper PDF download endpoint linked from AglaSem collection /org/nios/nios-class-12/question-paper · Accountancy",
+    aglasem_collection_candidate: true,
+  }, "question paper");
+  const wrongHost = isQuestionPaperPdf({
+    url: "https://evil.example/product/single-doc-download/4e86fedc-9314-11f1-ae33-0aa932765c8b",
+    title: "Accountancy",
+    snippet: "Question paper PDF download",
+    aglasem_collection_candidate: true,
+  }, "question paper");
+  const wrongPath = isQuestionPaperPdf({
+    url: "https://docs.aglasem.com/view/4e86fedc-9314-11f1-ae33-0aa932765c8b",
+    title: "Accountancy",
+    snippet: "Question paper PDF download",
+    aglasem_collection_candidate: true,
+  }, "question paper");
+  if (!accepted || wrongHost || wrongPath) throw new Error("Only the first-party AglaSem single-document download endpoint should bypass generic metadata filtering.");
+});
+
 Deno.test("recognizes AglaSem collection URLs and first-party subdomains", () => {
   const nios = isAglaSemCollectionUrl(new URL("https://docs.aglasem.com/org/nios/nios-class-12/question-paper"));
   const legacy = isAglaSemCollectionUrl(new URL("https://aglasem.com/cbse-class-12-question-paper-sanskrit-core/"));

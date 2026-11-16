@@ -718,6 +718,7 @@ Deno.serve(async (req) => {
               source_match: "website_scan",
               search_provider: "Website crawler",
               pdf_search_hint: true,
+              aglasem_collection_candidate: true,
               source_page_url: fetched.url,
             };
             if (isQuestionPaperPdf(row, criteria)) discovered.set(row.url.toLowerCase(), row);
@@ -738,7 +739,7 @@ Deno.serve(async (req) => {
                   title: documentTitle || (root.pathname + " Question Paper"),
                   url: target.href,
                   snippet: "Question paper PDF download endpoint linked from AglaSem collection " + root.pathname + " · " + documentTitle,
-                domain: rootHost, source, pdf_search_hint: true,
+                domain: rootHost, source, pdf_search_hint: true, aglasem_collection_candidate: true,
                 source_page_url: fetched.url,
               });
               continue;
