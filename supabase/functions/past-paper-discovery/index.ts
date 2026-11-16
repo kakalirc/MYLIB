@@ -301,7 +301,7 @@ function linkRows(html: string, baseUrl: string, source: any, terms: string[], l
     if (!isPdf && !(downloadHint && paperSignal)) continue;
     rows.push({ title: (label || context || target.pathname.split("/").pop() || source.display_name).slice(0, 500),
       url: target.href, snippet: "Official source page · " + source.display_name + (context ? " · " + context.slice(0, 500) : ""),
-      domain: target.hostname.toLowerCase().replace(/^www\./, ""), source, pdf_search_hint: !isPdf });
+              domain: target.hostname.toLowerCase().replace(/^www\./, ""),
   }
   return rows;
 }
@@ -710,10 +710,10 @@ Deno.serve(async (req) => {
             if (!/single-doc-download/i.test(target.pathname)) continue;
             audit.download_endpoints_extracted++;
             const row = {
-              title: documentTitle || (criteria + " Question Paper"),
+              title: documentTitle || (root.pathname + " Question Paper"),
               url: target.href,
               snippet: "Question paper PDF download endpoint linked from AglaSem collection " + root.pathname + " · " + documentTitle,
-              domain: target.hostname.toLowerCase().replace(/^www\\./, ""),
+              domain: target.hostname.toLowerCase().replace(/^www\./, ""),
               source_name: rootHost,
               source_match: "website_scan",
               search_provider: "Website crawler",
@@ -735,8 +735,8 @@ Deno.serve(async (req) => {
             const isAglaSemDownload = isAglaSemDocs && /single-doc-download/i.test(target.pathname);
             if (isAglaSemDownload && (aglasemCollectionMode || (pageMatchesCriteria && pageHasPaperSignal))) {
               discovered.set(target.href.toLowerCase(), {
-                title: documentTitle || (criteria + " Question Paper"), url: target.href,
-                snippet: "Question paper PDF download endpoint linked from the AglaSem question-paper collection · " + criteria + " · " + documentTitle,
+              title: documentTitle || (root.pathname + " Question Paper"),
+                snippet: "Question paper PDF download endpoint linked from AglaSem collection " + root.pathname + " · " + documentTitle,
                 domain: rootHost, source, pdf_search_hint: true,
                 source_page_url: fetched.url,
               });
