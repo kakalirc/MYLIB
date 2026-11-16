@@ -620,13 +620,17 @@ Deno.serve(async (req) => {
       try { const u = canonicalScanUrl(new URL(String(value)), rootHost); return safeHost(u, [rootHost]) ? [u.href] : []; }
       catch { return []; }
     }))];
+    const singlePageMode = state.single_page_mode === true || /\/view\/[0-9a-f-]{30,}\/?$/i.test(root.pathname);
+    if (singlePageMode && state.single_page_mode !== true) {
+      // Discard legacy site-wide queues for a document-view URL and start with that exact page.
+      state = { page_queue: [root.href], sitemap_queue: [], single_page_mode: true, visited: [], results: [], errors: [] };
+    }
     const pageQueue: string[] = normalizeQueue(Array.isArray(state.page_queue) ? state.page_queue : []);
-    const sitemapQueue: string[] = normalizeQueue(Array.isArray(state.sitemap_queue) ? state.sitemap_queue : []);
+    const sitemapQueue: string[] = singlePageMode ? [] : normalizeQueue(Array.isArray(state.sitemap_queue) ? state.sitemap_queue : []);
     const visited = new Set<string>(Array.isArray(state.visited) ? state.visited : []);
     const discovered = new Map<string, any>((Array.isArray(state.results) ? state.results : []).map((row: any) => [String(row.url).toLowerCase(), row]));
     const errors: string[] = Array.isArray(state.errors) ? state.errors : [];
     const terms = queryTerms(criteria);
-    const singlePageMode = state.single_page_mode === true || /\/view\/[0-9a-f-]{30,}\/?$/i.test(root.pathname);
     // Explicit document-view URLs are inspected in isolation; never expand them into a domain crawl.
     let sitemapBudget = singlePageMode ? 0 : 8;
     while (sitemapQueue.length && sitemapBudget-- > 0) {
