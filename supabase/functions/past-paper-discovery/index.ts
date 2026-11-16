@@ -3,7 +3,7 @@
 // while permanent source-registry changes remain explicit Admin actions. Imports use the existing workflow.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { getPdfZipMember, listPdfMembersFromZip } from "./archive.ts";
-import { matchesApprovedSourceDomain } from "./source-domain.ts";
+import { canonicalWebsiteScanDomain, matchesApprovedSourceDomain } from "./source-domain.ts";
 import {
   buildPdfQueryVariants, filterBoardSourcesForQuery, isPrivateAddress, isQuestionPaperPdf,
   isValidDiscoveredDomain, matchesQuery, queryTerms,
@@ -562,14 +562,14 @@ Deno.serve(async (req) => {
       if (error || !existing || existing.filters?.search_mode !== "website_scan") return reply(404, { error: "Website scan run was not found." });
       if (existing.status === "completed") return reply(200, { run_id: existing.id, complete: true, website_scan: true, pages_scanned: existing.filters?.pages_scanned || 0, pages_remaining: 0, pdfs_found: (existing.filters?.search_results || []).length, preview_results: existing.filters?.search_results || [], provider_errors: existing.filters?.provider_errors || [] });
       try { root = new URL(existing.filters.website_url); } catch { return reply(400, { error: "Saved website URL is invalid." }); }
-      rootHost = root.hostname.toLowerCase().replace(/^www\./, "");
+      rootHost = canonicalWebsiteScanDomain(root.hostname);
       state = existing.filters?.website_scan_state || {};
       runId = existing.id;
     } else {
       const rawUrl = clip(body.website_url, 2000);
       try { root = new URL(rawUrl); } catch { return reply(400, { error: "Enter a valid website URL, including https://." }); }
       if (root.protocol !== "https:" || root.username || root.password || root.port) return reply(400, { error: "Website scans require a public HTTPS URL without credentials or a custom port." });
-      rootHost = root.hostname.toLowerCase().replace(/^www\./, "");
+      rootHost = canonicalWebsiteScanDomain(root.hostname);
       if (!rootHost || rootHost === "localhost" || rootHost.endsWith(".local") || /^\d{1,3}(\.\d{1,3}){3}$/.test(rootHost)) return reply(400, { error: "This website host is not eligible for scanning." });
       state = { page_queue: [root.href], sitemap_queue: [new URL("/sitemap.xml", root.origin).href, new URL("/sitemap_index.xml", root.origin).href], visited: [], results: [], errors: [] };
     }
