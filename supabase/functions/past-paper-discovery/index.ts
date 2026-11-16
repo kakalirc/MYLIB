@@ -712,7 +712,7 @@ Deno.serve(async (req) => {
         // AglaSem exposes the actual PDF through a single-doc-download endpoint.
         // Inspect embedded/data URLs as well as anchors; these links are not always
         // present as ordinary .pdf hrefs on the document page.
-        const isAglaSemDocsPage = (rootHost === "aglasem.com" || rootHost === "docs.aglasem.com") &&
+        const isAglaSemDocsPage = isAglaSemDomain(rootHost) &&
           new URL(fetched.url).hostname === "docs.aglasem.com";
         if (isAglaSemDocsPage && (aglasemCollectionMode || pageHasPaperSignal)) {
           for (const targetUrl of extractDocumentTargets(html, fetched.url)) {
@@ -742,7 +742,7 @@ Deno.serve(async (req) => {
           try {
             const target = canonicalScanUrl(new URL(decodeEntities(href), fetched.url), rootHost);
             if (!safeHost(target, [rootHost]) || /\.(?:zip|jpg|jpeg|png|gif|svg|css|js|xml)(?:$|[?#])/i.test(target.pathname)) continue;
-            const isAglaSemDocs = (rootHost === "aglasem.com" || rootHost === "docs.aglasem.com") && target.hostname === "docs.aglasem.com";
+            const isAglaSemDocs = isAglaSemDomain(rootHost) && target.hostname === "docs.aglasem.com";
             const isAglaSemDocument = isAglaSemDocs && /\/view\/[0-9a-f-]{30,}/i.test(target.pathname);
             const isAglaSemDownload = isAglaSemDocs && /single-doc-download/i.test(target.pathname);
             if (isAglaSemDownload && (aglasemCollectionMode || (pageMatchesCriteria && pageHasPaperSignal))) {
