@@ -24,3 +24,12 @@ Deno.test("canonicalises the AglaSem schools catalogue to its redirect host", ()
   assertEquals(matchesApprovedSourceDomain("schools.aglasem.com", ["aglasem.com"]), true);
   assertEquals(matchesApprovedSourceDomain("aglasem.com", ["aglasem.com"]), true);
 });
+
+
+Deno.test("keeps AglaSem first-party redirect hosts in the canonical approved family", () => {
+  for (const host of ["aglasem.com", "www.aglasem.com", "schools.aglasem.com", "docs.aglasem.com"]) {
+    assertEquals(matchesApprovedSourceDomain(host, ["aglasem.com"]), true);
+  }
+  assertEquals(matchesApprovedSourceDomain("aglasem.com.attacker.example", ["aglasem.com"]), false);
+  assertEquals(matchesApprovedSourceDomain("aglasem-downloads.example", ["aglasem.com"]), false);
+});
