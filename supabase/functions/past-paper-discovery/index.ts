@@ -610,7 +610,7 @@ Deno.serve(async (req) => {
       if (!uuid(requestedRunId)) return reply(400, { error: "Invalid website scan run." });
       const { data: existing, error } = await admin.from("qb_paper_discovery_runs").select("id,query_text,filters,status").eq("id", requestedRunId).single();
       if (error || !existing || existing.filters?.search_mode !== "website_scan") return reply(404, { error: "Website scan run was not found." });
-      if (existing.status === "completed") return reply(200, { run_id: existing.id, complete: true, website_scan: true, pages_scanned: existing.filters?.pages_scanned || 0, pages_remaining: 0, pdfs_found: (existing.filters?.search_results || []).length, preview_results: existing.filters?.search_results || [], provider_errors: existing.filters?.provider_errors || [] });
+      if (existing.status === "completed") return reply(200, { run_id: existing.id, complete: true, website_scan: true, pages_scanned: existing.filters?.pages_scanned || 0, scanned_pages: existing.filters?.scanned_pages || [existing.filters?.website_url].filter(Boolean), pages_remaining: 0, pdfs_found: (existing.filters?.search_results || []).length, preview_results: existing.filters?.search_results || [], provider_errors: existing.filters?.provider_errors || [] });
       try { root = new URL(existing.filters.website_url); } catch { return reply(400, { error: "Saved website URL is invalid." }); }
       rootHost = canonicalWebsiteScanDomain(root.hostname);
       root.hostname = rootHost;
@@ -790,7 +790,7 @@ Deno.serve(async (req) => {
       if (error || !data) return reply(500, { error: "Could not save website scan progress: " + (error?.message || "unknown error") });
       run = data;
     }
-    return reply(200, { run_id: run.id, complete, website_scan: true, pages_scanned: visited.size,
+    return reply(200, { run_id: run.id, complete, website_scan: true, pages_scanned: visited.size, scanned_pages: [...visited].slice(-20),
       pages_remaining: pageQueue.length, sitemaps_remaining: sitemapQueue.length, pdfs_found: results.length,
       preview_results: results, provider_errors: errors, audit, message: complete ? "Website scan complete. Results are saved for review; no PDFs were downloaded, verified, or imported." : "Website scan batch saved. Resume this run to continue scanning; results are not yet complete." });
   }
