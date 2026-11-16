@@ -1239,7 +1239,7 @@ Deno.serve(async (req) => {
     }
     const { error: updateError } = await admin.from("qb_paper_discovery_candidates").update({
       verification_status: "verified", status: "needs_review", checksum, file_size_bytes: bytes.length,
-      duplicate_of_paper_id: null,
+      pdf_url: candidate.pdf_url || candidate.source_url, duplicate_of_paper_id: null,
       discovery_metadata: { ...(candidate.discovery_metadata || {}), verification_method: "local_upload",
         local_pdf_storage_path: storagePath, local_pdf_filename: clip(body.file_name, 240),
         local_pdf_verified_at: new Date().toISOString(), exact_duplicate_candidate_id: duplicateCandidate?.id || null },
