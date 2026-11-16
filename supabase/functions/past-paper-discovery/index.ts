@@ -712,7 +712,7 @@ Deno.serve(async (req) => {
             const row = {
               title: documentTitle || (criteria + " Question Paper"),
               url: target.href,
-              snippet: "Question paper PDF download endpoint linked from the AglaSem question-paper collection · " + criteria + " · " + documentTitle,
+              snippet: "Question paper PDF download endpoint linked from AglaSem collection " + root.pathname + " · " + documentTitle,
               domain: target.hostname.toLowerCase().replace(/^www\\./, ""),
               source_name: rootHost,
               source_match: "website_scan",
