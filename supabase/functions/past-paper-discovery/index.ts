@@ -611,13 +611,25 @@ Deno.serve(async (req) => {
       try {
         const map = await fetchAllowed(sitemapUrl, [rootHost], "application/xml,text/xml");
         const xml = new TextDecoder().decode(await readBounded(map.response, 2 * 1024 * 1024));
+        const sitemapUrls: URL[] = [];
+        const pageUrls: Array<{ url: URL; score: number }> = [];
         for (const match of xml.matchAll(/<loc>([\s\S]*?)<\/loc>/gi)) {
           try {
-            const u = new URL(decodeEntities(match[1].trim()));
+            const u = canonicalScanUrl(new URL(decodeEntities(match[1].trim())), rootHost);
             if (!safeHost(u, [rootHost])) continue;
-            if (/\.xml(?:$|[?#])/i.test(u.pathname)) sitemapQueue.push(u.href);
-            else if (!/\.(?:gz|zip|jpg|jpeg|png|gif|svg|css|js)(?:$|[?#])/i.test(u.pathname)) pageQueue.push(u.href);
+            if (/\.xml(?:$|[?#])/i.test(u.pathname)) {
+              if (sitemapQueue.length + sitemapUrls.length < 40) sitemapUrls.push(u);
+            } else if (!/\.(?:gz|zip|jpg|jpeg|png|gif|svg|css|js|webp)(?:$|[?#])/i.test(u.pathname)) {
+              const score = websiteUrlRelevance(u, criteria);
+              if (score >= 20) pageUrls.push({ url: u, score });
+            }
           } catch { /* ignore malformed sitemap entries */ }
+        }
+        sitemapQueue.push(...sitemapUrls.map((u) => u.href));
+        pageUrls.sort((a, b) => b.score - a.score);
+        const knownPages = new Set(pageQueue);
+        for (const item of pageUrls.slice(0, 250)) if (!knownPages.has(item.url.href)) {
+          pageQueue.push(item.url.href); knownPages.add(item.url.href);
         }
       } catch (e) { errors.push("Sitemap " + sitemapUrl + ": " + clip((e as Error)?.message || e, 180)); }
     }
@@ -651,12 +663,10 @@ Deno.serve(async (req) => {
           const href = anchor.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1] || "";
           if (!href) continue;
           try {
-            const target = new URL(decodeEntities(href), fetched.url);
+            const target = canonicalScanUrl(new URL(decodeEntities(href), fetched.url), rootHost);
             if (!safeHost(target, [rootHost]) || /\.(?:pdf|zip|jpg|jpeg|png|gif|svg|css|js|xml)(?:$|[?#])/i.test(target.pathname)) continue;
-            // Follow pagination and archive navigation as well as explicit subject/paper links.
-            const label = htmlText(anchor);
-            const pathAndLabel = label + " " + target.pathname + " " + target.search;
-            if (/question|paper|exam|download|resource|academic|subject|class|year|specimen|syllabus|archive|previous|next|page[=/-]?\d|\b\d{4}\b/i.test(pathAndLabel)) pageQueue.push(target.href);
+            const score = websiteUrlRelevance(target, criteria);
+            if (score >= 20 && pageQueue.length < 1000 && !visited.has(target.href) && !pageQueue.includes(target.href)) pageQueue.push(target.href);
           } catch { /* ignore malformed links */ }
         }
       } catch (e) { errors.push(page.hostname + page.pathname + ": " + clip((e as Error)?.message || e, 180)); }
