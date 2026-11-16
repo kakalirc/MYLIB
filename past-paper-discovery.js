@@ -4,7 +4,7 @@
   if (window.__libPastPaperDiscoveryInstalled) return;
   window.__libPastPaperDiscoveryInstalled = true;
 
-  var state = { loaded:false, loading:false, sources:[], candidates:[], rejectedCandidates:[], schools:[], runs:[], auditRows:[], auditLimit:120, latestPreSearch:null, previewRows:[], message:'', error:'', loadErrors:{}, actionMessages:{}, searchBusy:false, scope:'board', queueTab:'review' };
+  var state = { loaded:false, loading:false, sources:[], candidates:[], rejectedCandidates:[], schools:[], runs:[], auditRows:[], auditLimit:120, latestPreSearch:null, previewRows:[], message:'', error:'', loadErrors:{}, actionMessages:{}, selectedCandidates:{}, bulkVerifyBusy:false, bulkVerifyProgress:'', metrics:{discovered:0,verified:0,duplicates:0,imported:0,rejected:0,failed:0}, searchBusy:false, scope:'board', queueTab:'review' };
   function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
   function byId(id) { return document.getElementById(id); }
   function val(id) { return byId(id) ? byId(id).value : ''; }
@@ -46,6 +46,16 @@
         if (result && result.error) state.loadErrors[labels[index]] = result.error.message || String(result.error);
         else setters[index](result && result.data);
       });
+      var metricSpecs = [
+        ['discovered', function (q) { return q.eq('status','discovered'); }],
+        ['verified', function (q) { return q.eq('verification_status','verified'); }],
+        ['duplicates', function (q) { return q.eq('status','duplicate'); }],
+        ['imported', function (q) { return q.eq('status','imported'); }],
+        ['rejected', function (q) { return q.eq('status','rejected'); }],
+        ['failed', function (q) { return q.in('verification_status',['inaccessible','invalid_pdf','unsafe_url']); }]
+      ];
+      var metricResults = await Promise.all(metricSpecs.map(function (spec) { return spec[1](sb.from('qb_paper_discovery_candidates').select('id',{count:'exact',head:true})); }));
+      metricResults.forEach(function (result,index) { if (!result.error) state.metrics[metricSpecs[index][0]] = Number(result.count || 0); else state.loadErrors['candidate metrics'] = result.error.message || String(result.error); });
       state.loaded = true;
       state.error = '';
     } catch (e) {
@@ -119,7 +129,7 @@
       + '</div>';
     var actions = '<div class="lib-ppd-actions"><a class="btn-small" href="' + esc(previewUrl) + '" target="_blank" rel="noopener noreferrer">Open source / PDF</a>'
       + '<button class="btn-small" type="button" onclick="libPPDSaveMetadata(\'' + esc(c.id) + '\')">Save Metadata</button>'
-      + '<button class="btn-small" onclick="libPPDVerify(\'' + esc(c.id) + '\')" ' + (['verified','duplicate'].indexOf(c.verification_status) >= 0 ? 'disabled' : '') + '>Verify PDF</button>'
+      + '<button class="btn-small" onclick="libPPDVerify(\'' + esc(c.id) + '\')" ' + (state.bulkVerifyBusy || ['verified','duplicate'].indexOf(c.verification_status) >= 0 ? 'disabled' : '') + '>' + (['inaccessible','invalid_pdf','unsafe_url'].indexOf(c.verification_status) >= 0 ? 'Retry PDF verification' : 'Verify PDF') + '</button>'
       + (c.verification_status === 'verified' && c.status !== 'imported' && c.status !== 'rejected' && c.status !== 'duplicate'
         ? '<button class="btn-small btn-primary" onclick="libPPDImport(\'' + esc(c.id) + '\')">Import to Past Papers</button>'
         : '')
@@ -129,9 +139,10 @@
     var actionStatus = actionMessage && actionMessage.message
       ? '<div class="lib-ppd-action-status hint" role="status" aria-live="polite" style="color:' + (actionMessage.error ? 'var(--brick)' : 'var(--forest)') + ';margin:6px 0 0">' + esc(actionMessage.message) + '</div>'
       : '';
-    return '<article class="lib-ppd-candidate"><div class="lib-ppd-review-layout"><div class="lib-ppd-review-summary"><div class="lib-ppd-candidate-head"><div><b>' + esc(c.title) + '</b><div class="hint">' + esc(c.source_domain) + ' · ' + esc(c.source_type) + ' · ' + esc(c.status) + ' · PDF: ' + esc(c.verification_status) + '</div>'
+    return '<article class="lib-ppd-candidate"><div class="lib-ppd-review-layout"><div class="lib-ppd-review-summary"><div class="lib-ppd-candidate-head"><label class="lib-ppd-select"><input type="checkbox" ' + (state.selectedCandidates[c.id] ? 'checked' : '') + (state.bulkVerifyBusy ? ' disabled' : '') + ' onchange="libPPDSelectCandidate(\'' + esc(c.id) + '\',this.checked)"> Select</label><div><b>' + esc(c.title) + '</b><div class="hint">' + esc(c.source_domain) + ' · ' + esc(c.source_type) + ' · ' + esc(c.status) + ' · PDF: ' + esc(c.verification_status) + '</div>'
       + (meta.source_match === 'unregistered_domain' ? '<p class="hint">Newly discovered domain · eligible for this run after PDF verification; permanent registry approval is optional.</p>' : '')
       + (meta.snippet ? '<p class="hint">' + esc(meta.snippet) + '</p>' : '')
+      + (c.rejection_reason ? '<p class="hint" style="color:var(--brick)">Last verification issue: ' + esc(c.rejection_reason) + '</p>' : '')
       + (school ? '<div class="hint">School: ' + esc(school.name) + '</div>' : (c.discovered_school_name ? '<div class="hint">Possible school: ' + esc(c.discovered_school_name) + '</div>' : ''))
       + '</div></div>' + actions + actionStatus + domainAction + '</div><div class="lib-ppd-review-fields">' + metadata + '</div></div></article>';
   }
@@ -151,7 +162,9 @@
     var content = isRejected
       ? (items.length ? items.map(rejectedCandidateHtml).join('') : '<div class="empty">No rejected papers found. Rejected candidates will appear here for recovery.</div>')
       : (items.length ? items.map(candidateHtml).join('') : '<div class="empty">No candidates awaiting review. Search approved websites to begin.</div>');
-    return '<div class="lib-ppd-queue-tabs" role="tablist" aria-label="Past paper discovery queues">'
+    var selectedCount = Object.keys(state.selectedCandidates).filter(function (id) { return state.selectedCandidates[id] && state.candidates.some(function (c) { return c.id === id && ['verified','duplicate'].indexOf(c.verification_status) < 0; }); }).length;
+    var bulkTools = !isRejected ? '<div class="lib-ppd-bulk-tools"><button class="btn-small" type="button" onclick="libPPDSelectAll()" ' + (state.bulkVerifyBusy || !state.candidates.length ? 'disabled' : '') + '>Select all eligible</button><button class="btn-small btn-primary" type="button" onclick="libPPDBulkVerify()" ' + (state.bulkVerifyBusy || !selectedCount ? 'disabled' : '') + '>Verify selected (' + selectedCount + ')</button>' + (state.bulkVerifyProgress ? '<span class="hint" role="status">' + esc(state.bulkVerifyProgress) + '</span>' : '') + '</div>' : '';
+    return bulkTools + '<div class="lib-ppd-queue-tabs" role="tablist" aria-label="Past paper discovery queues">'
       + '<button type="button" role="tab" aria-selected="' + (!isRejected) + '" class="lib-ppd-queue-tab ' + (!isRejected ? 'active' : '') + '" onclick="libPPDSetQueueTab(\'review\')">Discovered papers (' + activeCount + ')</button>'
       + '<button type="button" role="tab" aria-selected="' + isRejected + '" class="lib-ppd-queue-tab ' + (isRejected ? 'active' : '') + '" onclick="libPPDSetQueueTab(\'rejected\')">Rejected papers (' + state.rejectedCandidates.length + ')</button></div>'
       + '<div class="lib-ppd-section"><div class="lib-ppd-title"><h3>' + (isRejected ? 'Rejected papers · Recovery' : 'Discovered papers · Review queue') + '</h3><button class="btn-small" type="button" onclick="libPPDRefresh()">Refresh</button></div>' + content + '</div>';
@@ -200,6 +213,7 @@
         return '<div class="lib-ppd-source"><div><b>' + esc(a.display_name || a.domain) + '</b><div class="hint">' + esc(a.domain) + ' · ' + esc(a.source_classification) + ' · ' + esc(outcomeLabel) + ' · ' + esc(a.pdf_count) + ' potential PDFs · ' + esc(new Date(a.checked_at).toLocaleString()) + '</div><div class="hint">Search: ' + esc(runLabel) + '</div>' + pdfLinks + '</div>' + promote + '</div>';
       }).join('') : '<p class="hint">Source audit records will appear after Search.</p>')
       + (state.auditRows.length >= state.auditLimit ? '<button class="btn-small" type="button" onclick="libPPDLoadMoreAudit()">Load older source history</button>' : '')) + '</details>';
+    var dashboard = '<div class="lib-ppd-section"><h3>Discovery overview</h3><div class="lib-ppd-metrics">' + [['discovered','New candidates'],['verified','PDF verified'],['duplicates','Duplicates'],['imported','Imported'],['rejected','Rejected'],['failed','Verification failures']].map(function (item) { return '<div class="lib-ppd-metric"><b>' + esc(state.metrics[item[0]]) + '</b><span>' + esc(item[1]) + '</span></div>'; }).join('') + '</div>' + (state.loadErrors['candidate metrics'] ? '<p class="hint" style="color:var(--brick)">Metrics unavailable: ' + esc(state.loadErrors['candidate metrics']) + '</p>' : '<p class="hint">Live database counts across all discovery candidates.</p>') + '</div>';
     var runs = '<details class="lib-ppd-section lib-ppd-recent-searches"><summary>Recent searches</summary>' + (state.runs.length ? state.runs.map(function (r) {
       var progress = r.filters && r.filters.discovery_progress ? r.filters.discovery_progress : {};
       var progressText = r.status === 'running' ? ' · ' + Number(progress.next_offset || 0) + ' sources processed' : '';
@@ -209,9 +223,9 @@
       return '<div class="hint">' + esc(new Date(r.started_at).toLocaleString()) + ' · ' + esc(r.query_text) + ' · ' + esc(r.status) + ' · ' + esc(r.results_found) + ' results' + esc(progressText) + resume + collect + restart + '</div>';
     }).join('') : '<p class="hint">No searches yet.</p>') + '</details>';
     return '<section class="lib-ppd"><style>'
-      + '.lib-ppd{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}.lib-ppd-recent-searches{border:1px solid var(--line);border-radius:9px;padding:10px 12px}.lib-ppd-recent-searches>summary{cursor:pointer;font-weight:700;list-style:disclosure-closed}.lib-ppd-recent-searches[open]>summary{margin-bottom:10px;list-style:disclosure-open}.lib-ppd-queue-tabs{display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:14px 0 10px}.lib-ppd-queue-tab{border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;background:var(--surface);color:var(--ink);padding:9px 13px;cursor:pointer;font:inherit}.lib-ppd-queue-tab.active{background:var(--surface-2,var(--surface));font-weight:700;border-color:var(--accent,var(--line))}.lib-ppd-rejected{border-left:3px solid var(--brick,var(--line))}.lib-ppd h3{font-family:Zilla Slab,serif;margin:0 0 7px}.lib-ppd-section{margin:14px 0 20px}.lib-ppd-approved-sources{border:1px solid var(--line);border-radius:9px;padding:10px 12px}.lib-ppd-approved-sources>summary{cursor:pointer;font-weight:700;list-style:disclosure-closed}.lib-ppd-approved-sources[open]>summary{margin-bottom:10px;list-style:disclosure-open}.lib-ppd-search,.lib-ppd-source-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.lib-ppd-search input{flex:1;min-width:190px}.lib-ppd-search select,.lib-ppd-search input,.lib-ppd-source-form input,.lib-ppd-source-form select,.lib-ppd-meta input,.lib-ppd-meta select{min-height:38px;padding:7px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);box-sizing:border-box}.lib-ppd-source-form input{flex:1;min-width:170px}.lib-ppd-source{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line)}.lib-ppd-candidate{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}.lib-ppd-review-layout{display:grid;grid-template-columns:minmax(0,0.9fr) minmax(0,1.1fr);gap:16px;align-items:start}.lib-ppd-review-summary,.lib-ppd-review-fields{min-width:0}.lib-ppd-review-fields{border-left:1px solid var(--line);padding-left:16px}.lib-ppd-candidate-head,.lib-ppd-title,.lib-ppd-actions{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}.lib-ppd-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:0}.lib-ppd-meta label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);font-weight:700}.lib-ppd-meta input,.lib-ppd-meta select{width:100%}.lib-ppd-actions{justify-content:flex-start;margin-top:10px}.lib-ppd-domain-approval{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}.lib-ppd-domain-approval select{min-height:34px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink)}.lib-ppd p.hint{margin:5px 0 10px}@media(max-width:700px){.lib-ppd-review-layout{grid-template-columns:minmax(0,1fr)}.lib-ppd-review-fields{border-left:0;border-top:1px solid var(--line);padding:12px 0 0}.lib-ppd-search,.lib-ppd-source-form{align-items:stretch}.lib-ppd-search>* ,.lib-ppd-source-form>*{width:100%;min-width:0}.lib-ppd-candidate-head{align-items:flex-start}}'
+      + '.lib-ppd{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}.lib-ppd-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:8px}.lib-ppd-metric{border:1px solid var(--line);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:3px}.lib-ppd-metric b{font-size:20px}.lib-ppd-metric span{font-size:12px;color:var(--muted)}.lib-ppd-bulk-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}.lib-ppd-select{font-size:12px;white-space:nowrap;display:flex;gap:4px;align-items:center}.lib-ppd-recent-searches{border:1px solid var(--line);border-radius:9px;padding:10px 12px}.lib-ppd-recent-searches>summary{cursor:pointer;font-weight:700;list-style:disclosure-closed}.lib-ppd-recent-searches[open]>summary{margin-bottom:10px;list-style:disclosure-open}.lib-ppd-queue-tabs{display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:14px 0 10px}.lib-ppd-queue-tab{border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;background:var(--surface);color:var(--ink);padding:9px 13px;cursor:pointer;font:inherit}.lib-ppd-queue-tab.active{background:var(--surface-2,var(--surface));font-weight:700;border-color:var(--accent,var(--line))}.lib-ppd-rejected{border-left:3px solid var(--brick,var(--line))}.lib-ppd h3{font-family:Zilla Slab,serif;margin:0 0 7px}.lib-ppd-section{margin:14px 0 20px}.lib-ppd-approved-sources{border:1px solid var(--line);border-radius:9px;padding:10px 12px}.lib-ppd-approved-sources>summary{cursor:pointer;font-weight:700;list-style:disclosure-closed}.lib-ppd-approved-sources[open]>summary{margin-bottom:10px;list-style:disclosure-open}.lib-ppd-search,.lib-ppd-source-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.lib-ppd-search input{flex:1;min-width:190px}.lib-ppd-search select,.lib-ppd-search input,.lib-ppd-source-form input,.lib-ppd-source-form select,.lib-ppd-meta input,.lib-ppd-meta select{min-height:38px;padding:7px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);box-sizing:border-box}.lib-ppd-source-form input{flex:1;min-width:170px}.lib-ppd-source{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line)}.lib-ppd-candidate{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}.lib-ppd-review-layout{display:grid;grid-template-columns:minmax(0,0.9fr) minmax(0,1.1fr);gap:16px;align-items:start}.lib-ppd-review-summary,.lib-ppd-review-fields{min-width:0}.lib-ppd-review-fields{border-left:1px solid var(--line);padding-left:16px}.lib-ppd-candidate-head,.lib-ppd-title,.lib-ppd-actions{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}.lib-ppd-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:0}.lib-ppd-meta label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);font-weight:700}.lib-ppd-meta input,.lib-ppd-meta select{width:100%}.lib-ppd-actions{justify-content:flex-start;margin-top:10px}.lib-ppd-domain-approval{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}.lib-ppd-domain-approval select{min-height:34px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink)}.lib-ppd p.hint{margin:5px 0 10px}@media(max-width:700px){.lib-ppd-review-layout{grid-template-columns:minmax(0,1fr)}.lib-ppd-review-fields{border-left:0;border-top:1px solid var(--line);padding:12px 0 0}.lib-ppd-search,.lib-ppd-source-form{align-items:stretch}.lib-ppd-search>* ,.lib-ppd-source-form>*{width:100%;min-width:0}.lib-ppd-candidate-head{align-items:flex-start}}'
       + '.lib-ppd-estimate{border:1px solid var(--line);border-radius:9px;padding:12px}.lib-ppd-estimate-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.lib-ppd-estimate-grid>div{background:var(--surface-2,var(--surface));border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:3px}.lib-ppd-estimate-grid b{font-size:22px}.lib-ppd-estimate-grid span{font-size:11px;color:var(--muted)}@media(max-width:700px){.lib-ppd-estimate-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}'
-      + '</style>' + search + preSearchSummary + preview + renderQueueTabs() + sources + sourceAudit + runs + '</section>';
+      + '</style>' + search + preSearchSummary + preview + dashboard + renderQueueTabs() + sources + sourceAudit + runs + '</section>';
   }
 
   window.libPPDLoadMoreAudit = async function () {
@@ -411,6 +425,24 @@
     notifyAction(id, 'Metadata saved. The paper remains in Discovered papers and has not been imported.');
     if (typeof render === 'function') render();
   };
+  window.libPPDSelectCandidate = function (id, checked) { if (checked) state.selectedCandidates[id] = true; else delete state.selectedCandidates[id]; if (typeof render === 'function') render(); };
+  window.libPPDSelectAll = function () { state.candidates.forEach(function (c) { if (['verified','duplicate'].indexOf(c.verification_status) < 0) state.selectedCandidates[c.id] = true; }); if (typeof render === 'function') render(); };
+  window.libPPDBulkVerify = async function () {
+    if (state.bulkVerifyBusy) return;
+    var ids = Object.keys(state.selectedCandidates).filter(function (id) { return state.selectedCandidates[id] && state.candidates.some(function (c) { return c.id === id && ['verified','duplicate'].indexOf(c.verification_status) < 0; }); });
+    if (!ids.length) return;
+    state.bulkVerifyBusy = true; var verified = 0, duplicates = 0, failed = 0;
+    try {
+      for (var i = 0; i < ids.length; i++) {
+        var id = ids[i]; state.bulkVerifyProgress = 'Verifying ' + (i + 1) + ' of ' + ids.length + '…';
+        notifyAction(id, 'Bulk verification in progress (' + (i + 1) + '/' + ids.length + ')…');
+        try { var result = await invoke({ action:'verify', candidate_id:id }); if (result.duplicate) { duplicates++; notifyAction(id, 'Exact PDF duplicate detected.'); } else if (result.verified) { verified++; notifyAction(id, 'PDF verified (' + Math.round(result.file_size_bytes/1024) + ' KB).'); } else { failed++; notifyAction(id, 'Verification returned no verified result.', true); } }
+        catch (error) { failed++; notifyAction(id, error.message || String(error), true); }
+      }
+      state.bulkVerifyProgress = 'Finished: ' + verified + ' verified · ' + duplicates + ' duplicates · ' + failed + ' failed.';
+      state.selectedCandidates = {}; state.loaded = false; await loadData(true); notify(state.bulkVerifyProgress, failed > 0);
+    } finally { state.bulkVerifyBusy = false; if (typeof render === 'function') render(); }
+  };
   window.libPPDVerify = async function (id) {
     notifyAction(id, 'Checking the source page and validating its PDF…');
     try {
@@ -453,6 +485,28 @@
       }).eq('id', id).select('id').maybeSingle();
       if (approval.error) throw new Error('Could not save review metadata: ' + approval.error.message);
       if (!approval.data) throw new Error('Review metadata was not saved. Check Admin access and refresh the candidate.');
+      // Metadata similarity is advisory only: the source-paper schema has no paper-set field,
+      // so only an exact PDF checksum can conclusively block a duplicate import.
+      var duplicateQuery = sb.from('qb_source_papers')
+        .select('id,status,subject_name,year,exam_type,medium,source_type')
+        .eq('grade_id', gradeId).eq('year', year).eq('exam_type', exam);
+      duplicateQuery = boardId ? duplicateQuery.eq('board_id', boardId) : duplicateQuery.eq('school_id', schoolId);
+      var possibleDuplicates = await duplicateQuery.limit(100);
+      if (possibleDuplicates.error) throw new Error('Could not complete the metadata duplicate check: ' + possibleDuplicates.error.message);
+      var normalized = function (value) { return String(value || '').normalize('NFKC').replace(/\\s+/g, ' ').trim().toLocaleLowerCase(); };
+      var metadataMatches = (possibleDuplicates.data || []).filter(function (paper) {
+        return normalized(paper.subject_name) === normalized(subject) && normalized(paper.medium) === normalized(medium) && paper.status !== 'rejected';
+      });
+      if (metadataMatches.length) {
+        var matchSummary = metadataMatches.slice(0, 5).map(function (paper) {
+          return '• ' + paper.subject_name + ' ' + paper.year + ' · ' + (paper.exam_type || 'exam') + ' · ' + (paper.status || 'unknown status') + ' · ID ' + String(paper.id).slice(0, 8);
+        }).join('\\n');
+        var more = metadataMatches.length > 5 ? '\\n…plus ' + (metadataMatches.length - 5) + ' more.' : '';
+        if (!window.confirm('Possible metadata matches already exist in Past Papers:\\n\\n' + matchSummary + more + '\\n\\nThese are warnings, not confirmed duplicates; the PDF checksum check remains definitive. Continue with import?')) {
+          notifyAction(id, 'Import cancelled after the possible-duplicate warning. The candidate remains approved for import.');
+          return;
+        }
+      }
       notifyAction(id, 'Importing verified PDF into the existing Past Papers review queue…');
       var result = await invoke({ action:'import', candidate_id:id, board_id:boardId, school_id:schoolId,
         grade_id:gradeId, subject_name:subject, year:year, exam_type:exam, medium:medium });
