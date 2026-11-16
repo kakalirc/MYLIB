@@ -697,7 +697,7 @@ Deno.serve(async (req) => {
           try {
             const target = canonicalScanUrl(new URL(decodeEntities(href), fetched.url), rootHost);
             if (!safeHost(target, [rootHost]) || /\.(?:zip|jpg|jpeg|png|gif|svg|css|js|xml)(?:$|[?#])/i.test(target.pathname)) continue;
-            const isAglaSemDocs = rootHost === "aglasem.com" && target.hostname === "docs.aglasem.com";
+            const isAglaSemDocs = (rootHost === "aglasem.com" || rootHost === "docs.aglasem.com") && target.hostname === "docs.aglasem.com";
             const isAglaSemDocument = isAglaSemDocs && /\/view\/[0-9a-f-]{30,}/i.test(target.pathname);
             const isAglaSemDownload = isAglaSemDocs && /single-doc-download/i.test(target.pathname);
             if (isAglaSemDownload && pageMatchesCriteria && pageHasPaperSignal) {
