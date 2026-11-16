@@ -33,3 +33,16 @@ Deno.test("keeps AglaSem first-party redirect hosts in the canonical approved fa
   assertEquals(matchesApprovedSourceDomain("aglasem.com.attacker.example", ["aglasem.com"]), false);
   assertEquals(matchesApprovedSourceDomain("aglasem-downloads.example", ["aglasem.com"]), false);
 });
+
+
+Deno.test("upgrades only approved default-port HTTP redirects to HTTPS", () => {
+  const approved = upgradeApprovedHttpRedirect(new URL("http://aglasem.com/cbse-class-12-question-paper/"), ["aglasem.com"]);
+  assertEquals(approved.href, "https://aglasem.com/cbse-class-12-question-paper/");
+  const docs = upgradeApprovedHttpRedirect(new URL("http://docs.aglasem.com/view/123"), ["aglasem.com"]);
+  assertEquals(docs.protocol, "https:");
+  assertEquals(docs.hostname, "docs.aglasem.com");
+  const unrelated = upgradeApprovedHttpRedirect(new URL("http://attacker.example/file"), ["aglasem.com"]);
+  assertEquals(unrelated.protocol, "http:");
+  const customPort = upgradeApprovedHttpRedirect(new URL("http://aglasem.com:8080/file"), ["aglasem.com"]);
+  assertEquals(customPort.protocol, "http:");
+});
