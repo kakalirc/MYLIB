@@ -755,18 +755,17 @@ Deno.serve(async (req) => {
       } catch (e) { errors.push(page.hostname + page.pathname + ": " + clip((e as Error)?.message || e, 180)); }
     }
     const results = [...discovered.values()].filter((row) => isQuestionPaperPdf(row, criteria)).slice(0, MAX_DISCOVERED_CANDIDATES_PER_BATCH).map((row: any) => ({
-    audit.candidates_rejected += Math.max(0, discovered.size - results.length);
       title: clip(row.title, 500), url: row.url, domain: row.domain, snippet: clip(row.snippet, 1200),
       source_name: rootHost, source_match: "website_scan", search_provider: "Website crawler",
       source_page_url: row.source_page_url || root.href,
     }));
+    audit.candidates_rejected += Math.max(0, discovered.size - results.length);
     const complete = pageQueue.length === 0 && sitemapQueue.length === 0;
     const filters = { scope: "board", search_mode: "website_scan", website_url: root.href, website_domain: rootHost,
       pages_scanned: visited.size, pages_queued: pageQueue.length, sitemap_queue_remaining: sitemapQueue.length,
       search_results: results, provider_errors: errors.slice(0, 100),
       website_scan_state: complete ? null : { page_queue: pageQueue.slice(0, 5000), sitemap_queue: sitemapQueue.slice(0, 500), single_page_mode: singlePageMode, aglasem_collection_mode: aglasemCollectionMode,
         visited: [...visited].slice(-10000), results, errors: errors.slice(-100), audit },
-      discovery_progress: { next_offset: visited.size, successful_queries: visited.size, provider_errors: errors.slice(0, 80), results_found: results.length, new_candidates: 0, audit } };
       discovery_progress: { next_offset: visited.size, successful_queries: visited.size, provider_errors: errors.slice(0, 80), results_found: results.length, new_candidates: 0, audit } };
     let run: any;
     if (runId) {
