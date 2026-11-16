@@ -548,6 +548,78 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { return reply(400, { error: "Invalid request." }); }
   const action = clip(body.action, 30);
 
+
+  if (action === "website_scan") {
+    const rawUrl = clip(body.website_url, 2000);
+    const criteria = clip(body.criteria || "question paper", 300);
+    let root: URL;
+    try { root = new URL(rawUrl); } catch { return reply(400, { error: "Enter a valid website URL, including https://." }); }
+    if (root.protocol !== "https:" || root.username || root.password || root.port) return reply(400, { error: "Website scans require a public HTTPS URL without credentials or a custom port." });
+    const rootHost = root.hostname.toLowerCase().replace(/^www\./, "");
+    if (!rootHost || rootHost === "localhost" || rootHost.endsWith(".local") || /^\d{1,3}(\.\d{1,3}){3}$/.test(rootHost)) return reply(400, { error: "This website host is not eligible for scanning." });
+    const source = { id: null, display_name: rootHost, domain: rootHost, source_type: "education_portal", trust_level: "review", enabled: true };
+    const pageQueue: string[] = [root.href];
+    const visited = new Set<string>();
+    const discovered = new Map<string, any>();
+    const errors: string[] = [];
+    const terms = queryTerms(criteria);
+    // Use public sitemap URLs as additional crawl entry points, but never leave the supplied site.
+    for (const sitemapPath of ["/sitemap.xml", "/sitemap_index.xml"]) {
+      try {
+        const map = await fetchAllowed(new URL(sitemapPath, root.origin).href, [rootHost], "application/xml,text/xml");
+        const xml = new TextDecoder().decode(await readBounded(map.response, 2 * 1024 * 1024));
+        for (const match of xml.matchAll(/<loc>([\\s\\S]*?)<\\/loc>/gi)) {
+          try { const u = new URL(decodeEntities(match[1].trim())); if (safeHost(u, [rootHost]) && !/\\.(?:xml|gz)(?:$|[?#])/i.test(u.pathname)) pageQueue.push(u.href); } catch { /* ignore malformed sitemap entries */ }
+        }
+      } catch (e) { errors.push("Sitemap: " + clip((e as Error)?.message || e, 180)); }
+    }
+    const maxPages = 40;
+    while (pageQueue.length && visited.size < maxPages) {
+      const pageUrl = pageQueue.shift()!;
+      let page: URL; try { page = new URL(pageUrl); } catch { continue; }
+      const canonical = page.href.split("#")[0];
+      if (visited.has(canonical) || !safeHost(page, [rootHost])) continue;
+      visited.add(canonical);
+      try {
+        const fetched = await fetchAllowed(canonical, [rootHost], "text/html,application/xhtml+xml,application/pdf,application/octet-stream");
+        const type = (fetched.response.headers.get("content-type") || "").toLowerCase();
+        if (type.includes("pdf") || /\\.pdf(?:$|[?#])/i.test(fetched.url)) {
+          const row = { title: page.pathname.split("/").pop() || "Question paper PDF", url: fetched.url, snippet: "Direct PDF linked from website scan", domain: page.hostname, source, pdf_search_hint: true };
+          if (isQuestionPaperPdf(row, criteria)) discovered.set(row.url.toLowerCase(), row);
+          continue;
+        }
+        if (type && !type.includes("html") && !type.includes("xhtml")) continue;
+        const html = new TextDecoder().decode(await readBounded(fetched.response, 2 * 1024 * 1024));
+        for (const row of linkRows(html, fetched.url, source, terms, 100)) discovered.set(row.url.toLowerCase(), row);
+        const anchors = html.match(/<a\\b[^>]*>[\\s\\S]*?<\\/a>/gi) || [];
+        for (const anchor of anchors) {
+          const href = anchor.match(/\\bhref\\s*=\\s*["']([^"']+)["']/i)?.[1] || "";
+          if (!href) continue;
+          try {
+            const target = new URL(decodeEntities(href), fetched.url);
+            if (!safeHost(target, [rootHost]) || /\\.(?:pdf|zip|jpg|jpeg|png|gif|svg|css|js|xml)(?:$|[?#])/i.test(target.pathname)) continue;
+            const label = htmlText(anchor);
+            if (/question|paper|exam|download|resource|academic|subject|class|year|specimen|syllabus/i.test(label + " " + target.pathname)) pageQueue.push(target.href);
+          } catch { /* ignore malformed links */ }
+        }
+      } catch (e) { errors.push(page.hostname + page.pathname + ": " + clip((e as Error)?.message || e, 180)); }
+    }
+    const results = [...discovered.values()].filter((row) => isQuestionPaperPdf(row, criteria)).slice(0, MAX_DISCOVERED_CANDIDATES_PER_BATCH).map((row) => ({
+      title: clip(row.title, 500), url: row.url, domain: row.domain, snippet: clip(row.snippet, 1200),
+      source_name: rootHost, source_match: "website_scan", search_provider: "Website crawler",
+    }));
+    const { data: run, error: runError } = await admin.from("qb_paper_discovery_runs").insert({
+      query_text: criteria, status: "completed", results_found: results.length,
+      filters: { scope: "board", search_mode: "website_scan", website_url: root.href, website_domain: rootHost,
+        pages_scanned: visited.size, pages_queued: pageQueue.length, search_results: results,
+        discovery_progress: { next_offset: visited.size, successful_queries: visited.size, provider_errors: errors.slice(0, 80), results_found: results.length, new_candidates: 0 } },
+      started_by: auth.user.id, completed_at: new Date().toISOString(), heartbeat_at: null,
+    }).select("id").single();
+    if (runError || !run) return reply(500, { error: "Website scan completed, but its results could not be saved: " + (runError?.message || "unknown error") });
+    return reply(200, { run_id: run.id, complete: true, website_scan: true, pages_scanned: visited.size,
+      pages_remaining: pageQueue.length, pdfs_found: results.length, preview_results: results,
+      provider_errors: errors, message: "Website scan complete. Results are saved for review; no PDFs were downloaded, verified, or imported." });
+  }
   if (action === "collect") {
     const runId = clip(body.run_id, 64);
     if (!uuid(runId)) return reply(400, { error: "Invalid discovery run." });
