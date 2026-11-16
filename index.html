@@ -16292,6 +16292,52 @@ function renderParents() {
   return block1 + searchBlock + manageBlock;
 }
 
+
+function renderLoginManagement() {
+  const students = data.users.filter(u => u.role === 'Student');
+  const parents = data.users.filter(u => u.role === 'Parent');
+  const activeStudents = students.filter(u => !u.archived).length;
+  const activeParents = parents.filter(u => !u.archived).length;
+  const studentRows = students.length
+    ? `<ul class="plain" id="loginManagementStudentRows">${userListItemsHtml(sortByUsername(students))}</ul>`
+    : '<div class="empty">No Student logins yet. Use the bulk creation preview above to identify students who need one.</div>';
+  return `
+    <div class="card">
+      <h2>Student &amp; Parent Login Management</h2>
+      <div class="hint">One place to create logins, manage family links, reset passwords and archive or restore accounts. Existing account creation and password-reset actions remain protected by the Admin-only create-login function.</div>
+      <div class="row-form" style="gap:18px;margin-top:10px">
+        <span><b>${activeStudents}</b> active Student logins <span class="hint">(${students.length-activeStudents} archived)</span></span>
+        <span><b>${activeParents}</b> active Parent logins <span class="hint">(${parents.length-activeParents} archived)</span></span>
+      </div>
+    </div>
+    ${bulkStudentCardHtml()}
+    <div class="card">
+      <h2>Student account controls</h2>
+      <div class="hint">Search by student login ID or student name. Reset or restore a Student password/account here.</div>
+      <div class="row-form">
+        <input type="search" id="loginManagementStudentSearch" placeholder="Search Student login or name…" oninput="filterLoginManagementStudents()" style="width:260px">
+      </div>
+      <div id="loginManagementStudentList">${studentRows}</div>
+    </div>
+    <div class="card">
+      <h2>Parent login management</h2>
+      <div class="hint">Create individual or bulk Parent logins, find a parent, manage linked children, send login details and reset Parent passwords.</div>
+    </div>
+    ${renderParents()}
+  `;
+}
+function filterLoginManagementStudents() {
+  const input = document.getElementById('loginManagementStudentSearch');
+  const container = document.getElementById('loginManagementStudentList');
+  if (!input || !container) return;
+  const q = input.value.trim().toLowerCase();
+  const matches = sortByUsername(data.users.filter(u => u.role === 'Student' &&
+    (!q || (u.username || '').toLowerCase().includes(q) || studentName(u.linkedId).toLowerCase().includes(q))));
+  container.innerHTML = matches.length
+    ? `<ul class="plain">${userListItemsHtml(matches)}</ul>`
+    : '<div class="empty">No Student logins match this search.</div>';
+}
+
 // ---------- Fees: Rebuild Pending Classes ----------
 function rebuildActiveStudents() { return data.students.filter(s => !s.archived).sort((a,b)=>studentLabel(a).localeCompare(studentLabel(b))); }
 function rebuildScopeStudentIds() {
@@ -27757,7 +27803,7 @@ function render() {
       ['attendancerewards', 'Attendance XP & Levels'],
       ['onboarding', 'Student Onboarding & Communication'],
       ['setup', 'Teachers & Subjects'],
-      ['parents', 'Parents'],
+      ['loginmanagement', 'Student & Parent Login Management'],
     ]},
     { label: 'Teacher Monitoring', tabs: [
       ['staradmin', 'Star Teacher'],
@@ -27840,7 +27886,7 @@ function render() {
   else if (currentTab === 'reports') body = renderReports();
   else if (currentTab === 'payroll') body = renderReports('payroll');
   else if (currentTab === 'superadmin') body = renderSuperadmin();
-  else if (currentTab === 'parents') body = renderParents();
+  else if (currentTab === 'loginmanagement') body = renderLoginManagement();
   else if (currentTab === 'users') body = renderUsers();
   else if (currentTab === 'admins') body = renderManageAdmins();
   else if (currentTab === 'staradmin') body = renderStarTeacherAdmin();
