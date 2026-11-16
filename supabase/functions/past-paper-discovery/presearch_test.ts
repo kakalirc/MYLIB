@@ -4,6 +4,7 @@ import {
   isQuestionPaperPdf,
   isValidDiscoveredDomain,
 } from "./presearch.ts";
+import { isAglaSemCollectionUrl, isAglaSemDomain } from "./source-domain.ts";
 
 Deno.test("all generated search variants require PDF results", () => {
   const variants = buildPdfQueryVariants("KSEAB Class 10 Kannada 2026");
@@ -90,4 +91,15 @@ Deno.test("accepts AglaSem single-document download endpoints as unverified PDF 
     pdf_search_hint: true,
   }, "question paper");
   if (!accepted) throw new Error("AglaSem extensionless document download endpoints should be retained as PDF candidates for later verification.");
+});
+
+Deno.test("recognizes AglaSem collection URLs and first-party subdomains", () => {
+  const nios = isAglaSemCollectionUrl(new URL("https://docs.aglasem.com/org/nios/nios-class-12/question-paper"));
+  const legacy = isAglaSemCollectionUrl(new URL("https://aglasem.com/cbse-class-12-question-paper-sanskrit-core/"));
+  const docs = isAglaSemDomain("docs.aglasem.com");
+  const cdn = isAglaSemDomain("cdn.aglasem.com");
+  const unrelated = isAglaSemDomain("aglasem.example.org");
+  if (!nios || !legacy || !docs || !cdn || unrelated) {
+    throw new Error("AglaSem collection pages and first-party subdomains must be recognized without accepting unrelated domains.");
+  }
 });
