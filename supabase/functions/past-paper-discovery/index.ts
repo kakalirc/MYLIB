@@ -1212,6 +1212,43 @@ Deno.serve(async (req) => {
     domains.push(discoveredDomain);
   }
 
+  if (action === "verify_local") {
+    const storagePath = clip(body.storage_path, 500);
+    const expectedPrefix = "source-papers/admin/discovery-local/" + candidateId + "/";
+    if (!storagePath.startsWith(expectedPrefix) || storagePath.includes("..")) return reply(400, { error: "Invalid candidate-local PDF upload path." });
+    const { data: localObject, error: localDownloadError } = await admin.storage.from("qb-papers").download(storagePath);
+    if (localDownloadError || !localObject) return reply(400, { error: "Could not read the uploaded PDF: " + (localDownloadError?.message || "file not found") });
+    const bytes = new Uint8Array(await localObject.arrayBuffer());
+    if (!bytes.length || bytes.length > MAX_PDF_BYTES) { await admin.storage.from("qb-papers").remove([storagePath]); return reply(413, { error: "The uploaded PDF is empty or exceeds the 50 MB limit." }); }
+    if (!isPdf(bytes)) { await admin.storage.from("qb-papers").remove([storagePath]); return reply(422, { error: "The uploaded file is not a valid PDF (PDF signature check failed)." }); }
+    const checksum = await sha256(bytes);
+    const { data: duplicate } = await admin.from("qb_source_papers").select("id").eq("checksum", checksum).maybeSingle();
+    const { data: duplicateCandidate } = await admin.from("qb_paper_discovery_candidates").select("id").eq("checksum", checksum).neq("id", candidateId).limit(1).maybeSingle();
+    const isDuplicate = !!duplicate || !!duplicateCandidate;
+    if (isDuplicate) {
+      await admin.storage.from("qb-papers").remove([storagePath]);
+      await admin.from("qb_paper_discovery_candidates").update({
+        verification_status: "duplicate", status: "duplicate", checksum, file_size_bytes: bytes.length,
+        duplicate_of_paper_id: duplicate?.id || null,
+        discovery_metadata: { ...(candidate.discovery_metadata || {}), verification_method: "local_upload",
+          local_pdf_storage_path: null, exact_duplicate_candidate_id: duplicateCandidate?.id || null },
+        updated_at: new Date().toISOString(),
+      }).eq("id", candidateId);
+      return reply(200, { verified: false, duplicate: true, duplicate_paper_id: duplicate?.id || null,
+        duplicate_candidate_id: duplicateCandidate?.id || null, checksum, file_size_bytes: bytes.length });
+    }
+    const { error: updateError } = await admin.from("qb_paper_discovery_candidates").update({
+      verification_status: "verified", status: "needs_review", checksum, file_size_bytes: bytes.length,
+      pdf_url: candidate.pdf_url || candidate.source_url, duplicate_of_paper_id: null,
+      discovery_metadata: { ...(candidate.discovery_metadata || {}), verification_method: "local_upload",
+        local_pdf_storage_path: storagePath, local_pdf_filename: clip(body.file_name, 240),
+        local_pdf_verified_at: new Date().toISOString(), exact_duplicate_candidate_id: duplicateCandidate?.id || null },
+      rejection_reason: null, updated_at: new Date().toISOString(),
+    }).eq("id", candidateId);
+    if (updateError) { await admin.storage.from("qb-papers").remove([storagePath]); return reply(500, { error: "PDF validated but its discovery record could not be updated: " + updateError.message }); }
+    return reply(200, { verified: true, duplicate: false, verification_method: "local_upload", checksum, file_size_bytes: bytes.length });
+  }
+
   if (action === "verify") {
     try {
       const pdf = candidate.discovery_metadata?.archive_member
@@ -1263,8 +1300,18 @@ Deno.serve(async (req) => {
       await admin.from("qb_paper_discovery_candidates").update({ status: "duplicate", duplicate_of_paper_id: duplicate.id, updated_at: new Date().toISOString() }).eq("id", candidateId);
       return reply(409, { error: "This PDF already exists in Past Papers.", duplicate_paper_id: duplicate.id });
     }
-    const pdf = await fetchCandidatePdf(candidate, domains);
-    const bytes = await readBounded(pdf.response);
+    const localPdfPath = clip(candidate.discovery_metadata?.local_pdf_storage_path, 500);
+    let bytes: Uint8Array;
+    if (localPdfPath) {
+      const expectedPrefix = "source-papers/admin/discovery-local/" + candidateId + "/";
+      if (!localPdfPath.startsWith(expectedPrefix) || localPdfPath.includes("..")) return reply(400, { error: "The locally verified PDF reference is invalid. Upload and verify it again." });
+      const { data: localObject, error: localDownloadError } = await admin.storage.from("qb-papers").download(localPdfPath);
+      if (localDownloadError || !localObject) return reply(404, { error: "The locally verified PDF is no longer available. Upload and verify it again." });
+      bytes = new Uint8Array(await localObject.arrayBuffer());
+    } else {
+      const pdf = await fetchCandidatePdf(candidate, domains);
+      bytes = await readBounded(pdf.response);
+    }
     if (!isPdf(bytes)) return reply(422, { error: "The PDF content changed after verification. Verify it again." });
     const checksum = await sha256(bytes);
     if (checksum !== candidate.checksum) return reply(409, { error: "The PDF changed after verification. Verify it again." });
@@ -1294,6 +1341,7 @@ Deno.serve(async (req) => {
       await admin.storage.from("qb-papers").remove([path]);
       return reply(500, { error: "Could not finalize the import; the temporary paper and PDF were rolled back." });
     }
+    if (localPdfPath) await admin.storage.from("qb-papers").remove([localPdfPath]);
     return reply(200, { imported: true, paper_id: inserted.id, status: "pending_review", message: "Imported into the existing Past Papers review workflow." });
   }
 
