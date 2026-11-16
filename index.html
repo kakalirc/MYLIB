@@ -11119,17 +11119,23 @@ function familyFeeMessage(studentId, short) {
   if (razorpayOn) lines.push(`Online Payment: ${razorpayFeePage}`, 'While making the online payment, please enter the following details:', `Tuition Fee: ${inrText(total)}`, `Student Name: ${names.join(', ')}`);
   lines.push('');
   if (feeContactMobile) lines.push(`After completing the payment, kindly share the payment confirmation screenshot at ${feeContactMobile} for our records.`, '');
-  // The parent login shows every child's fees, so it is given when the family has one; else each child's login.
+  // Include the family parent login and each child's individual student login when available.
+  // A parent login does not replace a student's own login; make missing student accounts explicit.
   const parentIds = new Set((data.parentStudents || []).filter(m => kids.some(s => s.id === m.studentId)).map(m => m.parentUserId));
   const parentLogin = data.users.find(u => u.role === 'Parent' && parentIds.has(u.id) && !u.archived);
-  const logins = parentLogin ? [] : kids.map(s => ({ s, u: data.users.find(u => u.role === 'Student' && u.linkedId === s.id && !u.archived) })).filter(x => x.u);
-  if (parentLogin || logins.length) {
-    lines.push('App Login');
-    if (parentLogin) lines.push(`Parent login (shows ${kids.length > 1 ? 'all your children’s' : 'your child’s'} classes and fees): ${parentLogin.username}`);
-    logins.forEach(x => lines.push(`${kids.length > 1 ? x.s.name + ' - ' : ''}Login ID: ${x.u.username}`));
-    lines.push('Password: same as the login ID, unless you have already changed it.');
-    lines.push(...APP_LINK_LINES, '');
+  const studentLogins = kids.map(s => ({
+    s,
+    u: data.users.find(u => u.role === 'Student' && u.linkedId === s.id && !u.archived)
+  }));
+  lines.push('App Login');
+  if (parentLogin) lines.push(`Parent login (shows ${kids.length > 1 ? 'all your children’s' : 'your child’s'} classes and fees): ${parentLogin.username}`);
+  studentLogins.forEach(x => lines.push(
+    x.u ? `${x.s.name} - Student login ID: ${x.u.username}` : `${x.s.name} - Student login: Not set up yet`
+  ));
+  if (parentLogin || studentLogins.some(x => x.u)) {
+    lines.push('Password: same as the respective login ID, unless you have already changed it.');
   }
+  lines.push(...APP_LINK_LINES, '');
   lines.push('Discount offers: https://www.libeducation.com/discountoffers', '', 'Thank you for choosing LIB Education. We appreciate your continued trust and support.', '');
   lines.push('Regards,', 'LIB Education');
   const out = []; let prevBlank = false;
