@@ -692,7 +692,7 @@ Deno.serve(async (req) => {
           verification_status: "unverified", status: "discovered",
           discovery_metadata: { source_match: source ? "approved_registry" : "unregistered_domain",
             source_name: clip(row.source_name || domain, 200), search_provider: clip(row.search_provider || "Web search", 80),
-            snippet: clip(row.snippet || "", 1200), pdf_search_hint: true, collected_from_search: true },
+            snippet: clip(row.snippet || "", 1200), source_page_url: clip(row.source_page_url || "", 2000), pdf_search_hint: true, collected_from_search: true },
           discovered_at: new Date().toISOString(), updated_at: new Date().toISOString(),
         }).select("id").single();
         if (insertError) {
