@@ -879,6 +879,7 @@ async function ensureParentStudentLogin(studentId) {
 let addingChildToParentId = null;
 let parentAddMsg = '';
 let selectedParentUserId = '';
+let selectedStudentLoginUserId = '';
 let loginError = '';
 let loginStep = ''; // while a login is running: the line under the 'Logging in to My LIB…' button
 // Shows the busy button + step line without a full render(), so the typed username/password stay put.
@@ -16298,9 +16299,48 @@ function renderLoginManagement() {
   const parents = data.users.filter(u => u.role === 'Parent');
   const activeStudents = students.filter(u => !u.archived).length;
   const activeParents = parents.filter(u => !u.archived).length;
-  const studentRows = students.length
-    ? `<ul class="plain" id="loginManagementStudentRows">${userListItemsHtml(sortByUsername(students))}</ul>`
-    : '<div class="empty">No Student logins yet. Use the bulk creation preview above to identify students who need one.</div>';
+  const selectedStudent = selectedStudentLoginUserId
+    ? students.find(u => u.id === selectedStudentLoginUserId)
+    : null;
+  const studentOptions = students.slice().sort((a,b)=>(a.username||'').localeCompare(b.username||''))
+    .map(u => `<option value="${u.id}" ${selectedStudentLoginUserId===u.id?'selected':''}>${esc(u.username)} — ${esc(studentName(u.linkedId))}${u.archived?' (archived)':''}</option>`).join('');
+  const isResetting = selectedStudent && resettingUserId === selectedStudent.id;
+  const studentManageBlock = selectedStudent ? `
+    <div class="card">
+      <div class="row-form" style="justify-content:space-between">
+        <div class="row-form" style="margin-bottom:0">
+          <span style="font-family:'Zilla Slab',serif;font-size:17px;font-weight:600">Managing:</span>
+          <input type="text" id="studentLoginSearch2" placeholder="Search…" oninput="filterStudentLoginPicker('studentLoginSearch2','studentLoginPicker2')" style="width:140px">
+          <select id="studentLoginPicker2" onchange="selectStudentLoginFromDropdown(this.value)"><option value="">Choose a Student…</option>${studentOptions}</select>
+        </div>
+        <div>
+          <button class="btn-small" onclick="backToStudentLoginList()">← Back to all Students</button>
+          <button class="btn-small" style="${selectedStudent.archived?'':'color:var(--brick);border-color:var(--brick)'}" onclick="toggleArchiveUserLogin('${selectedStudent.id}')">${selectedStudent.archived?'Unarchive login':'Archive login'}</button>
+        </div>
+      </div>
+      <div class="hint" style="margin-top:12px">Login ID: <b>${esc(selectedStudent.username)}</b></div>
+      <h3>Password</h3>
+      ${isResetting ? `
+        <div class="row-form">
+          <input type="password" autocomplete="new-password" id="resetPass1_${selectedStudent.id}" placeholder="New password">
+          <input type="password" autocomplete="new-password" id="resetPass2_${selectedStudent.id}" placeholder="Confirm new password">
+          <button class="btn-small btn-primary" onclick="resetUserPassword('${selectedStudent.id}')">Save</button>
+          <button class="btn-small" onclick="cancelResetUser()">Cancel</button>
+        </div>` : `<button class="btn-small" onclick="startResetUser('${selectedStudent.id}')">Reset password</button>`}
+    </div>
+  ` : '';
+  const studentSearchBlock = `
+    <div class="card">
+      <h2>Manage Student logins</h2>
+      <div class="hint">${students.length===0 ? 'No Student logins yet — use the bulk creation preview above.' : 'Search and choose a Student to view or manage their login.'}</div>
+      <div class="row-form">
+        <input type="text" id="studentLoginSearch1" placeholder="Search login ID or student name…" oninput="filterStudentLoginPicker('studentLoginSearch1','studentLoginPicker1')" style="width:240px">
+      </div>
+      <div class="row-form">
+        <select id="studentLoginPicker1" onchange="selectStudentLoginFromDropdown(this.value)"><option value="">Choose a Student…</option>${studentOptions}</select>
+      </div>
+    </div>
+  `;
   return `
     <div class="card">
       <h2>Student &amp; Parent Login Management</h2>
@@ -16311,16 +16351,8 @@ function renderLoginManagement() {
       </div>
     </div>
     ${bulkStudentCardHtml()}
-    <div class="card">
-      <details>
-        <summary style="cursor:pointer;color:var(--forest);font-size:16px;font-weight:700">Student account controls</summary>
-        <div class="hint" style="margin-top:10px">Search by student login ID or student name. Reset or restore a Student password/account here.</div>
-        <div class="row-form">
-          <input type="search" id="loginManagementStudentSearch" placeholder="Search Student login or name…" oninput="filterLoginManagementStudents()" style="width:260px">
-        </div>
-        <div id="loginManagementStudentList">${studentRows}</div>
-      </details>
-    </div>
+    ${studentSearchBlock}
+    ${studentManageBlock}
     <div class="card">
       <h2>Parent login management</h2>
       <div class="hint">Create individual or bulk Parent logins, find a parent, manage linked children, send login details and reset Parent passwords.</div>
@@ -16328,16 +16360,26 @@ function renderLoginManagement() {
     ${renderParents()}
   `;
 }
-function filterLoginManagementStudents() {
-  const input = document.getElementById('loginManagementStudentSearch');
-  const container = document.getElementById('loginManagementStudentList');
-  if (!input || !container) return;
-  const q = input.value.trim().toLowerCase();
-  const matches = sortByUsername(data.users.filter(u => u.role === 'Student' &&
-    (!q || (u.username || '').toLowerCase().includes(q) || studentName(u.linkedId).toLowerCase().includes(q))));
-  container.innerHTML = matches.length
-    ? `<ul class="plain">${userListItemsHtml(matches)}</ul>`
-    : '<div class="empty">No Student logins match this search.</div>';
+function filterStudentLoginPicker(searchId, selectId) {
+  const search = document.getElementById(searchId);
+  const select = document.getElementById(selectId);
+  if (!search || !select) return;
+  const term = search.value.trim().toLowerCase();
+  const pool = data.users.filter(u => u.role === 'Student' &&
+    (!term || (u.username||'').toLowerCase().includes(term) || studentName(u.linkedId).toLowerCase().includes(term)));
+  const options = pool.slice().sort((a,b)=>(a.username||'').localeCompare(b.username||''))
+    .map(u => `<option value="${u.id}" ${selectedStudentLoginUserId===u.id?'selected':''}>${esc(u.username)} — ${esc(studentName(u.linkedId))}${u.archived?' (archived)':''}</option>`).join('');
+  select.innerHTML = `<option value="">Choose a Student…</option>` + options;
+}
+function selectStudentLoginFromDropdown(userId) {
+  selectedStudentLoginUserId = userId;
+  resettingUserId = null;
+  render();
+}
+function backToStudentLoginList() {
+  selectedStudentLoginUserId = '';
+  resettingUserId = null;
+  render();
 }
 
 // ---------- Fees: Rebuild Pending Classes ----------
