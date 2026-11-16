@@ -129,7 +129,7 @@
       + '</div>';
     var actions = '<div class="lib-ppd-actions"><a class="btn-small" href="' + esc(previewUrl) + '" target="_blank" rel="noopener noreferrer">Open source / PDF</a>'
       + '<button class="btn-small" type="button" onclick="libPPDSaveMetadata(\'' + esc(c.id) + '\')">Save Metadata</button>'
-      + '<label class="btn-small" for="lib-ppd-local-pdf-' + esc(c.id) + '">Use downloaded PDF<input id="lib-ppd-local-pdf-' + esc(c.id) + '" type="file" accept="application/pdf,.pdf" style="display:none" onchange="libPPDLocalVerify(\\'' + esc(c.id) + '\\',this)"></label>'
+      + '<label class="btn-small" for="lib-ppd-local-pdf-' + esc(c.id) + '">Use downloaded PDF<input id="lib-ppd-local-pdf-' + esc(c.id) + '" type="file" accept="application/pdf,.pdf" style="display:none" onchange="libPPDLocalVerify(\'' + esc(c.id) + '\\',this)"></label>'
       + '<button class="btn-small" onclick="libPPDVerify(\'' + esc(c.id) + '\')" ' + (state.bulkVerifyBusy || ['verified','duplicate'].indexOf(c.verification_status) >= 0 ? 'disabled' : '') + '>' + (['inaccessible','invalid_pdf','unsafe_url'].indexOf(c.verification_status) >= 0 ? 'Retry PDF verification' : 'Verify PDF') + '</button>'
       + (c.verification_status === 'verified' && c.status !== 'imported' && c.status !== 'rejected' && c.status !== 'duplicate'
         ? '<button class="btn-small btn-primary" onclick="libPPDImport(\'' + esc(c.id) + '\')">Import to Past Papers</button>'
