@@ -239,11 +239,37 @@ async function fetchAllowed(urlText: string, domains: string[], accept: string) 
       throw new Error("URL or redirect host is outside the approved source domains: " + url.hostname.toLowerCase() + ".");
     }
     await assertPublicDns(url.hostname);
-    const res = await fetch(url.href, {
-      redirect: "manual",
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; LIBEducationPastPaperDiscovery/1.0)", Accept: accept },
-      signal: AbortSignal.timeout(25000),
-    });
+    // Some approved education sites intermittently reset server-side connections.
+    // Retry only transient transport failures / throttling / upstream 5xx responses;
+    // never retry URL-policy failures or ordinary 4xx responses.
+    let res: Response | null = null;
+    let lastFetchError: unknown = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const attemptResponse = await fetch(url.href, {
+          redirect: "manual",
+          headers: { "User-Agent": "Mozilla/5.0 (compatible; LIBEducationPastPaperDiscovery/1.0)", Accept: accept },
+          signal: AbortSignal.timeout(25000),
+        });
+        if ((attemptResponse.status === 408 || attemptResponse.status === 429 || attemptResponse.status >= 500) && attempt < 2) {
+          await attemptResponse.body?.cancel();
+          await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+          continue;
+        }
+        res = attemptResponse;
+        break;
+      } catch (error) {
+        lastFetchError = error;
+        if (attempt === 2) {
+          throw new Error("Source connection failed after 3 attempts: " + clip((error as Error)?.message || error, 300));
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+      }
+    }
+    if (!res) {
+      if (lastFetchError) throw new Error("Source connection failed after 3 attempts: " + clip((lastFetchError as Error)?.message || lastFetchError, 300));
+      throw new Error("Source connection failed after 3 attempts.");
+    }
     if ([301,302,303,307,308].includes(res.status)) {
       const location = res.headers.get("location");
       if (!location) throw new Error("Source returned an invalid redirect.");
