@@ -611,7 +611,9 @@ Deno.serve(async (req) => {
       if (root.protocol !== "https:" || root.username || root.password || root.port) return reply(400, { error: "Website scans require a public HTTPS URL without credentials or a custom port." });
       rootHost = canonicalWebsiteScanDomain(root.hostname);
       if (!rootHost || rootHost === "localhost" || rootHost.endsWith(".local") || /^\d{1,3}(\.\d{1,3}){3}$/.test(rootHost)) return reply(400, { error: "This website host is not eligible for scanning." });
-      state = { page_queue: [root.href], sitemap_queue: [new URL("/sitemap.xml", root.origin).href, new URL("/sitemap_index.xml", root.origin).href], visited: [], results: [], errors: [] };
+      // A document-view URL is an explicit single-page target, not a request to crawl the whole host.
+      const singlePageMode = /\/view\/[0-9a-f-]{30,}\/?$/i.test(root.pathname);
+      state = { page_queue: [root.href], sitemap_queue: singlePageMode ? [] : [new URL("/sitemap.xml", root.origin).href, new URL("/sitemap_index.xml", root.origin).href], single_page_mode: singlePageMode, visited: [], results: [], errors: [] };
     }
     const source = { id: null, display_name: rootHost, domain: rootHost, source_type: "education_portal", trust_level: "review", enabled: true };
     const normalizeQueue = (items: unknown[]) => [...new Set(items.flatMap((value) => {
@@ -624,8 +626,9 @@ Deno.serve(async (req) => {
     const discovered = new Map<string, any>((Array.isArray(state.results) ? state.results : []).map((row: any) => [String(row.url).toLowerCase(), row]));
     const errors: string[] = Array.isArray(state.errors) ? state.errors : [];
     const terms = queryTerms(criteria);
-    // Process a bounded batch so large sites can resume safely without losing their queue or results.
-    let sitemapBudget = 8;
+    const singlePageMode = state.single_page_mode === true || /\/view\/[0-9a-f-]{30,}\/?$/i.test(root.pathname);
+    // Explicit document-view URLs are inspected in isolation; never expand them into a domain crawl.
+    let sitemapBudget = singlePageMode ? 0 : 8;
     while (sitemapQueue.length && sitemapBudget-- > 0) {
       const sitemapUrl = sitemapQueue.shift()!;
       try {
@@ -704,7 +707,7 @@ Deno.serve(async (req) => {
             }
             const score = websiteUrlRelevance(target, criteria);
             const shouldFollowDocument = isAglaSemDocument && pageMatchesCriteria && pageHasPaperSignal;
-            if ((score >= 20 || shouldFollowDocument) && pageQueue.length < 1000 &&
+            if (!singlePageMode && (score >= 20 || shouldFollowDocument) && pageQueue.length < 1000 &&
                 !visited.has(target.href) && !pageQueue.includes(target.href)) pageQueue.push(target.href);
           } catch { /* ignore malformed links */ }
         }
@@ -719,7 +722,7 @@ Deno.serve(async (req) => {
     const filters = { scope: "board", search_mode: "website_scan", website_url: root.href, website_domain: rootHost,
       pages_scanned: visited.size, pages_queued: pageQueue.length, sitemap_queue_remaining: sitemapQueue.length,
       search_results: results, provider_errors: errors.slice(0, 100),
-      website_scan_state: complete ? null : { page_queue: pageQueue.slice(0, 5000), sitemap_queue: sitemapQueue.slice(0, 500),
+      website_scan_state: complete ? null : { page_queue: pageQueue.slice(0, 5000), sitemap_queue: sitemapQueue.slice(0, 500), single_page_mode: singlePageMode,
         visited: [...visited].slice(-10000), results, errors: errors.slice(-100) },
       discovery_progress: { next_offset: visited.size, successful_queries: visited.size, provider_errors: errors.slice(0, 80), results_found: results.length, new_candidates: 0 } };
     let run: any;
