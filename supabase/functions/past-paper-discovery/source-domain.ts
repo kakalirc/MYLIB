@@ -9,6 +9,12 @@ export function matchesApprovedSourceDomain(candidateDomain: unknown, enabledDom
   });
 }
 
+/** True for the AglaSem first-party host family, including docs and CDN subdomains. */
+export function isAglaSemDomain(hostname: string): boolean {
+  const host = String(hostname || "").trim().toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
+  return host === "aglasem.com" || host.endsWith(".aglasem.com");
+}
+
 /** Canonicalise known catalogue aliases before applying same-site crawl restrictions. */
 export function canonicalWebsiteScanDomain(hostname: string): string {
   const host = String(hostname || "").trim().toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
