@@ -293,7 +293,7 @@
     if (state.searchBusy) return;
     var websiteUrl = val('ppd-website-url').trim();
     var criteria = val('ppd-website-criteria').trim() || 'question paper';
-    if (!/^https:\\/\\//i.test(websiteUrl)) { notify('Enter a public HTTPS website URL.', true); return; }
+    if (!websiteUrl.toLowerCase().startsWith('https://')) { notify('Enter a public HTTPS website URL.', true); return; }
     state.searchBusy = true; state.previewRows = []; state.latestPreSearch = null;
     state.message = 'Scanning website pages and discovering PDF links…'; state.error = '';
     if (typeof render === 'function') render();
