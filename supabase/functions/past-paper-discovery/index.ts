@@ -3,7 +3,7 @@
 // while permanent source-registry changes remain explicit Admin actions. Imports use the existing workflow.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { getPdfZipMember, listPdfMembersFromZip } from "./archive.ts";
-import { canonicalWebsiteScanDomain, isAglaSemDomain, matchesApprovedSourceDomain } from "./source-domain.ts";
+import { canonicalWebsiteScanDomain, isAglaSemCollectionUrl, isAglaSemDomain, matchesApprovedSourceDomain } from "./source-domain.ts";
 import {
   buildPdfQueryVariants, filterBoardSourcesForQuery, isPrivateAddress, isQuestionPaperPdf,
   isValidDiscoveredDomain, matchesQuery, queryTerms,
@@ -613,7 +613,7 @@ Deno.serve(async (req) => {
       if (!rootHost || rootHost === "localhost" || rootHost.endsWith(".local") || /^\d{1,3}(\.\d{1,3}){3}$/.test(rootHost)) return reply(400, { error: "This website host is not eligible for scanning." });
       // A document-view URL is an explicit single-page target, not a request to crawl the whole host.
       const singlePageMode = /\/view\/[0-9a-f-]{30,}\/?$/i.test(root.pathname);
-      const aglasemCollectionMode = isAglaSemDomain(root.hostname) && (root.pathname.toLowerCase().includes("question-paper") || root.pathname.toLowerCase().includes("sample-paper") || root.pathname.toLowerCase().includes("/org/"));
+      const aglasemCollectionMode = isAglaSemCollectionUrl(root);
       state = { page_queue: [root.href], sitemap_queue: singlePageMode || aglasemCollectionMode ? [] : [new URL("/sitemap.xml", root.origin).href, new URL("/sitemap_index.xml", root.origin).href], single_page_mode: singlePageMode, aglasem_collection_mode: aglasemCollectionMode, visited: [], results: [], errors: [], audit: {} };
     }
     const approvedHosts = isAglaSemDomain(rootHost) ? ["aglasem.com"] : [rootHost];
