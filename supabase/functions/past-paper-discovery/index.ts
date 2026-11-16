@@ -568,8 +568,8 @@ Deno.serve(async (req) => {
       try {
         const map = await fetchAllowed(new URL(sitemapPath, root.origin).href, [rootHost], "application/xml,text/xml");
         const xml = new TextDecoder().decode(await readBounded(map.response, 2 * 1024 * 1024));
-        for (const match of xml.matchAll(/<loc>([\\s\\S]*?)<\\/loc>/gi)) {
-          try { const u = new URL(decodeEntities(match[1].trim())); if (safeHost(u, [rootHost]) && !/\\.(?:xml|gz)(?:$|[?#])/i.test(u.pathname)) pageQueue.push(u.href); } catch { /* ignore malformed sitemap entries */ }
+        for (const match of xml.matchAll(/<loc>([\s\S]*?)<\/loc>/gi)) {
+          try { const u = new URL(decodeEntities(match[1].trim())); if (safeHost(u, [rootHost]) && !/\.(?:xml|gz)(?:$|[?#])/i.test(u.pathname)) pageQueue.push(u.href); } catch { /* ignore malformed sitemap entries */ }
         }
       } catch (e) { errors.push("Sitemap: " + clip((e as Error)?.message || e, 180)); }
     }
@@ -583,7 +583,7 @@ Deno.serve(async (req) => {
       try {
         const fetched = await fetchAllowed(canonical, [rootHost], "text/html,application/xhtml+xml,application/pdf,application/octet-stream");
         const type = (fetched.response.headers.get("content-type") || "").toLowerCase();
-        if (type.includes("pdf") || /\\.pdf(?:$|[?#])/i.test(fetched.url)) {
+        if (type.includes("pdf") || /\.pdf(?:$|[?#])/i.test(fetched.url)) {
           const row = { title: page.pathname.split("/").pop() || "Question paper PDF", url: fetched.url, snippet: "Direct PDF linked from website scan", domain: page.hostname, source, pdf_search_hint: true };
           if (isQuestionPaperPdf(row, criteria)) discovered.set(row.url.toLowerCase(), row);
           continue;
@@ -591,13 +591,13 @@ Deno.serve(async (req) => {
         if (type && !type.includes("html") && !type.includes("xhtml")) continue;
         const html = new TextDecoder().decode(await readBounded(fetched.response, 2 * 1024 * 1024));
         for (const row of linkRows(html, fetched.url, source, terms, 100)) discovered.set(row.url.toLowerCase(), row);
-        const anchors = html.match(/<a\\b[^>]*>[\\s\\S]*?<\\/a>/gi) || [];
+        const anchors = html.match(/<a\b[^>]*>[\s\S]*?<\/a>/gi) || [];
         for (const anchor of anchors) {
-          const href = anchor.match(/\\bhref\\s*=\\s*["']([^"']+)["']/i)?.[1] || "";
+          const href = anchor.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1] || "";
           if (!href) continue;
           try {
             const target = new URL(decodeEntities(href), fetched.url);
-            if (!safeHost(target, [rootHost]) || /\\.(?:pdf|zip|jpg|jpeg|png|gif|svg|css|js|xml)(?:$|[?#])/i.test(target.pathname)) continue;
+            if (!safeHost(target, [rootHost]) || /\.(?:pdf|zip|jpg|jpeg|png|gif|svg|css|js|xml)(?:$|[?#])/i.test(target.pathname)) continue;
             const label = htmlText(anchor);
             if (/question|paper|exam|download|resource|academic|subject|class|year|specimen|syllabus/i.test(label + " " + target.pathname)) pageQueue.push(target.href);
           } catch { /* ignore malformed links */ }
