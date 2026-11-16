@@ -737,6 +737,7 @@ Deno.serve(async (req) => {
             if (isAglaSemDownload && (aglasemCollectionMode || (pageMatchesCriteria && pageHasPaperSignal))) {
               discovered.set(target.href.toLowerCase(), {
               title: documentTitle || (root.pathname + " Question Paper"),
+                url: target.href,
                 snippet: "Question paper PDF download endpoint linked from AglaSem collection " + root.pathname + " · " + documentTitle,
                 domain: rootHost, source, pdf_search_hint: true,
                 source_page_url: fetched.url,
