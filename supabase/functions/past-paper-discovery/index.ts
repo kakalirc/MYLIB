@@ -686,10 +686,35 @@ Deno.serve(async (req) => {
           discovered.set(candidate.url.toLowerCase(), candidate);
         }
         const pageText = htmlText(html);
-        const docTitle = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "";
+        const docTitle = html.match(/<h1\\b[^>]*>([\\s\\S]*?)<\\/h1>/i)?.[1] || html.match(/<title\\b[^>]*>([\\s\\S]*?)<\\/title>/i)?.[1] || "";
         const documentTitle = htmlText(docTitle) || pageText.slice(0, 240);
         const pageMatchesCriteria = matchesQuery(pageText + " " + documentTitle, terms);
         const pageHasPaperSignal = /question[-_ ]paper|previous[-_ ]year|past[-_ ]paper|sample[-_ ]paper|exam[-_ ]paper/i.test(pageText + " " + documentTitle);
+
+        // AglaSem exposes the actual PDF through a single-doc-download endpoint.
+        // Inspect embedded/data URLs as well as anchors; these links are not always
+        // present as ordinary .pdf hrefs on the document page.
+        const isAglaSemDocsPage = (rootHost === "aglasem.com" || rootHost === "docs.aglasem.com") &&
+          new URL(fetched.url).hostname === "docs.aglasem.com";
+        if (isAglaSemDocsPage && pageHasPaperSignal) {
+          for (const targetUrl of extractDocumentTargets(html, fetched.url)) {
+            let target: URL;
+            try { target = new URL(targetUrl); } catch { continue; }
+            if (!/single-doc-download/i.test(target.pathname)) continue;
+            const row = {
+              title: documentTitle,
+              url: target.href,
+              snippet: "AglaSem document download endpoint · " + documentTitle,
+              domain: target.hostname.toLowerCase().replace(/^www\\./, ""),
+              source_name: rootHost,
+              source_match: "website_scan",
+              search_provider: "Website crawler",
+              pdf_search_hint: true,
+              source_page_url: fetched.url,
+            };
+            if (isQuestionPaperPdf(row, criteria)) discovered.set(row.url.toLowerCase(), row);
+          }
+        }
         const anchors = html.match(/<a\b[^>]*>[\s\S]*?<\/a>/gi) || [];
         for (const anchor of anchors) {
           const href = anchor.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1] || "";
