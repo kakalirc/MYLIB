@@ -45,7 +45,7 @@ export function isQuestionPaperPdf(row: any, query: string): boolean {
       !isValidDiscoveredDomain(parsed.hostname.toLowerCase())) return false;
   if (row.archive_member) return true;
   // AglaSem collection pages explicitly enumerate question-paper documents.
-  // Their single-doc-download endpoints are extensionless and their document
+      /\/product\/single-doc-download\/[a-f0-9-]{30,}/i.test(parsed.pathname);
   // titles often contain only the subject, so retain these trusted candidates
   // for later direct-PDF verification instead of applying generic title rules.
   if (row.aglasem_collection_candidate === true) {
