@@ -15,6 +15,13 @@ export function isAglaSemDomain(hostname: string): boolean {
   return host === "aglasem.com" || host.endsWith(".aglasem.com");
 }
 
+/** Identify AglaSem question-paper collection pages, not individual document pages. */
+export function isAglaSemCollectionUrl(url: URL): boolean {
+  if (!isAglaSemDomain(url.hostname)) return false;
+  const path = url.pathname.toLowerCase();
+  return path.includes("question-paper") || path.includes("sample-paper") || path.includes("/org/");
+}
+
 /** Canonicalise known catalogue aliases before applying same-site crawl restrictions. */
 export function canonicalWebsiteScanDomain(hostname: string): string {
   const host = String(hostname || "").trim().toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
