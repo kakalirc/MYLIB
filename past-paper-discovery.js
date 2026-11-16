@@ -132,8 +132,8 @@
       + '<button class="btn-small" type="button" onclick="libPPDSaveMetadata(\'' + esc(c.id) + '\')">Save Metadata</button>'
       + '<label class="btn-small" for="lib-ppd-local-pdf-' + esc(c.id) + '">Use downloaded PDF<input id="lib-ppd-local-pdf-' + esc(c.id) + '" type="file" accept="application/pdf,.pdf" style="display:none" onchange="libPPDLocalVerify(\'' + esc(c.id) + '\',this)"></label>'
       + (hasLocalPdf
-        ? (c.verification_status === 'verified' || c.verification_status === 'duplicate' ? '<span class="hint">Local PDF verified · source check skipped</span>' : '<button class="btn-small" type="button" onclick="libPPDVerify(\\'' + esc(c.id) + '\\')" ' + (state.bulkVerifyBusy ? 'disabled' : '') + '>Revalidate local PDF</button>')
-        : '<button class="btn-small" onclick="libPPDVerify(\\'' + esc(c.id) + '\\')" ' + (state.bulkVerifyBusy || ['verified','duplicate'].indexOf(c.verification_status) >= 0 ? 'disabled' : '') + '>' + (['inaccessible','invalid_pdf','unsafe_url','remote_blocked'].indexOf(c.verification_status) >= 0 ? 'Retry PDF verification' : 'Verify PDF') + '</button>')
+        ? (c.verification_status === 'verified' || c.verification_status === 'duplicate' ? '<span class="hint">Local PDF verified · source check skipped</span>' : '<button class="btn-small" type="button" onclick="libPPDVerify(\'' + esc(c.id) + '\')" ' + (state.bulkVerifyBusy ? 'disabled' : '') + '>Revalidate local PDF</button>')
+        : '<button class="btn-small" onclick="libPPDVerify(\'' + esc(c.id) + '\')" ' + (state.bulkVerifyBusy || ['verified','duplicate'].indexOf(c.verification_status) >= 0 ? 'disabled' : '') + '>' + (['inaccessible','invalid_pdf','unsafe_url','remote_blocked'].indexOf(c.verification_status) >= 0 ? 'Retry PDF verification' : 'Verify PDF') + '</button>')
       + (c.verification_status === 'verified' && c.status !== 'imported' && c.status !== 'rejected' && c.status !== 'duplicate'
         ? '<button class="btn-small btn-primary" onclick="libPPDImport(\'' + esc(c.id) + '\')">Import to Past Papers</button>'
         : '')
