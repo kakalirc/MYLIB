@@ -94,7 +94,7 @@ Deno.test("accepts AglaSem single-document download endpoints as unverified PDF 
   const inheritedCollectionContext = isQuestionPaperPdf({
     url: "https://docs.aglasem.com/product/single-doc-download/4e86fedc-9314-11f1-ae33-0aa932765c8b",
     title: "Accountancy",
-    snippet: "Question paper PDF download endpoint linked from the AglaSem question-paper collection · NIOS Class 12 · Accountancy",
+    snippet: "Question paper PDF download endpoint linked from AglaSem collection /org/nios/nios-class-12/question-paper · Accountancy",
     pdf_search_hint: true,
   }, "NIOS Class 12");
   if (!inheritedCollectionContext) throw new Error("A document download linked from a question-paper collection must retain the parent collection context even when the document title omits 'question paper'.");
