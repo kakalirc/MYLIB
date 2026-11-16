@@ -1204,6 +1204,34 @@ Deno.serve(async (req) => {
   if (!uuid(candidateId)) return reply(400, { error: "Invalid candidate." });
   const { data: candidate, error: candidateError } = await admin.from("qb_paper_discovery_candidates").select("*").eq("id", candidateId).maybeSingle();
   if (candidateError || !candidate) return reply(404, { error: "Candidate not found." });
+  // A successfully uploaded local PDF is authoritative. Never contact its source URL again.
+  // Revalidate stored bytes locally if an earlier remote request overwrote the row state.
+  const localPdfPath = clip(candidate.discovery_metadata?.local_pdf_storage_path, 500);
+  if (action === "verify" && candidate.discovery_metadata?.verification_method === "local_upload" && localPdfPath) {
+    const expectedPrefix = "source-papers/admin/discovery-local/" + candidateId + "/";
+    if (!localPdfPath.startsWith(expectedPrefix) || localPdfPath.includes("..")) return reply(400, { error: "The locally verified PDF reference is invalid. Upload the PDF again." });
+    const { data: localObject, error: localDownloadError } = await admin.storage.from("qb-papers").download(localPdfPath);
+    if (localDownloadError || !localObject) return reply(404, { error: "The locally uploaded PDF is no longer available. Upload it again; the remote source will not be checked." });
+    const localBytes = new Uint8Array(await localObject.arrayBuffer());
+    if (!localBytes.length || localBytes.length > MAX_PDF_BYTES || !isPdf(localBytes)) return reply(422, { error: "The locally uploaded file is no longer a valid PDF. Upload it again; the remote source will not be checked." });
+    const localChecksum = await sha256(localBytes);
+    if (candidate.checksum && candidate.checksum !== localChecksum) return reply(409, { error: "The stored local PDF checksum has changed. Upload and verify the PDF again." });
+    const { data: existingPaper } = await admin.from("qb_source_papers").select("id").eq("checksum", localChecksum).maybeSingle();
+    const duplicateCandidate: any = (await admin.from("qb_paper_discovery_candidates").select("id").eq("checksum", localChecksum).neq("id", candidateId).limit(1).maybeSingle()).data;
+    const isDuplicate = !!existingPaper || !!duplicateCandidate;
+    const { error: localUpdateError } = await admin.from("qb_paper_discovery_candidates").update({
+      verification_status: isDuplicate ? "duplicate" : "verified", status: isDuplicate ? "duplicate" : "needs_review",
+      checksum: localChecksum, file_size_bytes: localBytes.length, duplicate_of_paper_id: existingPaper?.id || null,
+      rejection_reason: null,
+      discovery_metadata: { ...(candidate.discovery_metadata || {}), verification_method: "local_upload",
+        local_pdf_storage_path: localPdfPath, local_pdf_verified_at: candidate.discovery_metadata?.local_pdf_verified_at || new Date().toISOString(),
+        exact_duplicate_candidate_id: duplicateCandidate?.id || null },
+      updated_at: new Date().toISOString(),
+    }).eq("id", candidateId);
+    if (localUpdateError) return reply(500, { error: "Local PDF was validated, but its status could not be repaired: " + localUpdateError.message });
+    return reply(200, { verified: !isDuplicate, duplicate: isDuplicate, verification_method: "local_upload",
+      checksum: localChecksum, file_size_bytes: localBytes.length, message: "Stored local PDF revalidated. Original source was not contacted." });
+  }
   const { data: sourceRows } = await admin.from("qb_paper_discovery_sources").select("domain,enabled").limit(500);
   const registryRows = sourceRows || [];
   const disabledRegistryMatch = registryRows.find((source: any) =>
