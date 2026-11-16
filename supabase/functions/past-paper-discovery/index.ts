@@ -245,6 +245,39 @@ async function fetchAllowed(urlText: string, domains: string[], accept: string) 
   throw new Error("Too many redirects.");
 }
 type DiscoveryRow = {title:string;url:string;snippet:string;domain:string;source:any;archive_member?:string;pdf_search_hint?:boolean};
+function websiteUrlRelevance(url: URL, criteria: string): number {
+  const value = (url.pathname + " " + url.search).toLowerCase().replace(/[^a-z0-9]+/g, " ");
+  const terms = queryTerms(criteria);
+  const paper = /question paper|previous year|past paper|sample paper|specimen|exam paper|paper archive|qp\\b/.test(value);
+  const subjectMatches = !terms.length || terms.some((term) => value.includes(term));
+  const classMatch = criteria.match(/\b(class|grade)\s*(10|12|xii|x)\b/i);
+  const classMatches = !classMatch || new RegExp("(?:class|grade|std|standard)[-_/ ]*(?:" + (classMatch[2].toLowerCase() === "12" || classMatch[2].toLowerCase() === "xii" ? "12|xii" : "10|x") + ")(?:\\b|/|$)", "i").test(value);
+  if (subjectMatches && paper && classMatches) return 100;
+  if (paper && subjectMatches) return 70;
+  if (paper && classMatches) return 45;
+  if (/archive|question|paper|exam|download|resource/.test(value)) return 20;
+  return 0;
+}
+function extractDocumentTargets(html: string, baseUrl: string): string[] {
+  const found = new Set<string>();
+  const add = (raw: string) => {
+    try {
+      const value = decodeEntities(raw).replace(/\\u0026/gi, "&").replace(/\\\//g, "/");
+      const url = new URL(value, baseUrl);
+      if (url.protocol === "https:" && /(?:\.pdf(?:$|[?#])|single-doc-download|download|pdf|document)/i.test(url.href)) found.add(url.href);
+    } catch { /* Ignore non-URL fragments. */ }
+  };
+  for (const match of html.matchAll(/<(?:iframe|embed|object)\b[^>]*(?:src|data)\s*=\s*["']([^"']+)["'][^>]*>/gi)) add(match[1]);
+  for (const match of html.matchAll(/(?:href|src|data-url|data-src|data-download-url)\s*=\s*["']([^"']+)["']/gi)) add(match[1]);
+  for (const match of html.matchAll(/https?:\\?[^"'\\s<>]*(?:pdf|download|single-doc-download)[^"'\\s<>]*/gi)) add(match[0]);
+  return [...found];
+}
+function canonicalScanUrl(url: URL, rootHost: string): URL {
+  const copy = new URL(url.href);
+  const canonical = canonicalWebsiteScanDomain(copy.hostname);
+  if (canonical === rootHost || copy.hostname === rootHost) copy.hostname = rootHost;
+  return copy;
+}
 function linkRows(html: string, baseUrl: string, source: any, terms: string[], limit = 60): DiscoveryRow[] {
   const rows: DiscoveryRow[] = [];
   const anchors = html.match(/<a\b[^>]*>[\s\S]*?<\/a>/gi) || [];
@@ -261,12 +294,14 @@ function linkRows(html: string, baseUrl: string, source: any, terms: string[], l
     try { target = new URL(decodeEntities(href), baseUrl); } catch { continue; }
     if (!safeHost(target, [source.domain])) continue;
     const isPdf = /\.pdf(?:$|[?#])/i.test(target.href);
-    if (!matchesQuery(label + " " + context + " " + target.pathname, terms)) continue;
-    // Web pages are discovery evidence only. A candidate must point to an actual PDF.
-    if (!isPdf) continue;
-    rows.push({ title: (label || target.pathname.split("/").pop() || source.display_name).slice(0, 500),
-      url: target.href, snippet: "Official source page · " + source.display_name + (context ? " · " + context.slice(0, 260) : ""),
-      domain: target.hostname.toLowerCase().replace(/^www\./, ""), source });
+    const downloadHint = /download|pdf/i.test(anchor) || /\/(?:download|file|attachment|pdf)(?:\/|$)/i.test(target.pathname);
+    const evidence = label + " " + context + " " + target.pathname;
+    if (!matchesQuery(evidence, terms)) continue;
+    const paperSignal = /question[-_ ]paper|previous[-_ ]year|past[-_ ]paper|sample[-_ ]paper|specimen[-_ ]paper|exam[-_ ]paper|\bqp\b/i.test(evidence);
+    if (!isPdf && !(downloadHint && paperSignal)) continue;
+    rows.push({ title: (label || context || target.pathname.split("/").pop() || source.display_name).slice(0, 500),
+      url: target.href, snippet: "Official source page · " + source.display_name + (context ? " · " + context.slice(0, 500) : ""),
+      domain: target.hostname.toLowerCase().replace(/^www\./, ""), source, pdf_search_hint: !isPdf });
   }
   return rows;
 }
@@ -520,12 +555,16 @@ async function resolvePdf(candidate: any, domains: string[]) {
       return { response: new Response(body, { headers: result.response.headers }), url: result.url };
     }
     const html = await result.response.text();
-    const links = [...html.matchAll(/(?:href|data-url)\s*=\s*["']([^"']+\.pdf(?:\?[^"']*)?)["']/gi)].map((m) => new URL(decodeEntities(m[1]), result.url).href);
-    for (const link of links) {
+    for (const link of extractDocumentTargets(html, result.url)) {
       const u = new URL(link);
-      if (safeHost(u, domains)) {
-        const pdf = await fetchAllowed(u.href, domains, "application/pdf,application/octet-stream");
-        return pdf;
+      if (!safeHost(u, domains)) continue;
+      const pdf = await fetchAllowed(u.href, domains, "application/pdf,application/octet-stream,text/html;q=0.8,*/*;q=0.5");
+      const pdfType = (pdf.response.headers.get("content-type") || "").toLowerCase();
+      if (pdfType.includes("pdf") || /\.pdf(?:$|[?#])/i.test(pdf.url)) return pdf;
+      const bytes = await readBounded(pdf.response);
+      if (isPdf(bytes)) {
+        const body = new ArrayBuffer(bytes.byteLength); new Uint8Array(body).set(bytes);
+        return { response: new Response(body, { headers: { "Content-Type": "application/pdf", "Content-Length": String(bytes.length) } }), url: pdf.url };
       }
     }
   }
@@ -563,6 +602,7 @@ Deno.serve(async (req) => {
       if (existing.status === "completed") return reply(200, { run_id: existing.id, complete: true, website_scan: true, pages_scanned: existing.filters?.pages_scanned || 0, pages_remaining: 0, pdfs_found: (existing.filters?.search_results || []).length, preview_results: existing.filters?.search_results || [], provider_errors: existing.filters?.provider_errors || [] });
       try { root = new URL(existing.filters.website_url); } catch { return reply(400, { error: "Saved website URL is invalid." }); }
       rootHost = canonicalWebsiteScanDomain(root.hostname);
+      root.hostname = rootHost;
       state = existing.filters?.website_scan_state || {};
       runId = existing.id;
     } else {
@@ -571,29 +611,52 @@ Deno.serve(async (req) => {
       if (root.protocol !== "https:" || root.username || root.password || root.port) return reply(400, { error: "Website scans require a public HTTPS URL without credentials or a custom port." });
       rootHost = canonicalWebsiteScanDomain(root.hostname);
       if (!rootHost || rootHost === "localhost" || rootHost.endsWith(".local") || /^\d{1,3}(\.\d{1,3}){3}$/.test(rootHost)) return reply(400, { error: "This website host is not eligible for scanning." });
-      state = { page_queue: [root.href], sitemap_queue: [new URL("/sitemap.xml", root.origin).href, new URL("/sitemap_index.xml", root.origin).href], visited: [], results: [], errors: [] };
+      // A document-view URL is an explicit single-page target, not a request to crawl the whole host.
+      const singlePageMode = /\/view\/[0-9a-f-]{30,}\/?$/i.test(root.pathname);
+      state = { page_queue: [root.href], sitemap_queue: singlePageMode ? [] : [new URL("/sitemap.xml", root.origin).href, new URL("/sitemap_index.xml", root.origin).href], single_page_mode: singlePageMode, visited: [], results: [], errors: [] };
     }
     const source = { id: null, display_name: rootHost, domain: rootHost, source_type: "education_portal", trust_level: "review", enabled: true };
-    const pageQueue: string[] = Array.isArray(state.page_queue) ? state.page_queue : [];
-    const sitemapQueue: string[] = Array.isArray(state.sitemap_queue) ? state.sitemap_queue : [];
+    const normalizeQueue = (items: unknown[]) => [...new Set(items.flatMap((value) => {
+      try { const u = canonicalScanUrl(new URL(String(value)), rootHost); return safeHost(u, [rootHost]) ? [u.href] : []; }
+      catch { return []; }
+    }))];
+    const singlePageMode = state.single_page_mode === true || /\/view\/[0-9a-f-]{30,}\/?$/i.test(root.pathname);
+    if (singlePageMode && state.single_page_mode !== true) {
+      // Discard legacy site-wide queues for a document-view URL and start with that exact page.
+      state = { page_queue: [root.href], sitemap_queue: [], single_page_mode: true, visited: [], results: [], errors: [] };
+    }
+    const pageQueue: string[] = normalizeQueue(Array.isArray(state.page_queue) ? state.page_queue : []);
+    const sitemapQueue: string[] = singlePageMode ? [] : normalizeQueue(Array.isArray(state.sitemap_queue) ? state.sitemap_queue : []);
     const visited = new Set<string>(Array.isArray(state.visited) ? state.visited : []);
     const discovered = new Map<string, any>((Array.isArray(state.results) ? state.results : []).map((row: any) => [String(row.url).toLowerCase(), row]));
     const errors: string[] = Array.isArray(state.errors) ? state.errors : [];
     const terms = queryTerms(criteria);
-    // Process a bounded batch so large sites can resume safely without losing their queue or results.
-    let sitemapBudget = 8;
+    // Explicit document-view URLs are inspected in isolation; never expand them into a domain crawl.
+    let sitemapBudget = singlePageMode ? 0 : 8;
     while (sitemapQueue.length && sitemapBudget-- > 0) {
       const sitemapUrl = sitemapQueue.shift()!;
       try {
         const map = await fetchAllowed(sitemapUrl, [rootHost], "application/xml,text/xml");
         const xml = new TextDecoder().decode(await readBounded(map.response, 2 * 1024 * 1024));
+        const sitemapUrls: URL[] = [];
+        const pageUrls: Array<{ url: URL; score: number }> = [];
         for (const match of xml.matchAll(/<loc>([\s\S]*?)<\/loc>/gi)) {
           try {
-            const u = new URL(decodeEntities(match[1].trim()));
+            const u = canonicalScanUrl(new URL(decodeEntities(match[1].trim())), rootHost);
             if (!safeHost(u, [rootHost])) continue;
-            if (/\.xml(?:$|[?#])/i.test(u.pathname)) sitemapQueue.push(u.href);
-            else if (!/\.(?:gz|zip|jpg|jpeg|png|gif|svg|css|js)(?:$|[?#])/i.test(u.pathname)) pageQueue.push(u.href);
+            if (/\.xml(?:$|[?#])/i.test(u.pathname)) {
+              if (sitemapQueue.length + sitemapUrls.length < 40) sitemapUrls.push(u);
+            } else if (!/\.(?:gz|zip|jpg|jpeg|png|gif|svg|css|js|webp)(?:$|[?#])/i.test(u.pathname)) {
+              const score = websiteUrlRelevance(u, criteria);
+              if (score >= 20) pageUrls.push({ url: u, score });
+            }
           } catch { /* ignore malformed sitemap entries */ }
+        }
+        sitemapQueue.push(...sitemapUrls.map((u) => u.href));
+        pageUrls.sort((a, b) => b.score - a.score);
+        const knownPages = new Set(pageQueue);
+        for (const item of pageUrls.slice(0, 250)) if (!knownPages.has(item.url.href)) {
+          pageQueue.push(item.url.href); knownPages.add(item.url.href);
         }
       } catch (e) { errors.push("Sitemap " + sitemapUrl + ": " + clip((e as Error)?.message || e, 180)); }
     }
@@ -622,17 +685,34 @@ Deno.serve(async (req) => {
           const candidate = { ...row, source_page_url: fetched.url };
           discovered.set(candidate.url.toLowerCase(), candidate);
         }
+        const pageText = htmlText(html);
+        const docTitle = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "";
+        const documentTitle = htmlText(docTitle) || pageText.slice(0, 240);
+        const pageMatchesCriteria = matchesQuery(pageText + " " + documentTitle, terms);
+        const pageHasPaperSignal = /question[-_ ]paper|previous[-_ ]year|past[-_ ]paper|sample[-_ ]paper|exam[-_ ]paper/i.test(pageText + " " + documentTitle);
         const anchors = html.match(/<a\b[^>]*>[\s\S]*?<\/a>/gi) || [];
         for (const anchor of anchors) {
           const href = anchor.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1] || "";
           if (!href) continue;
           try {
-            const target = new URL(decodeEntities(href), fetched.url);
-            if (!safeHost(target, [rootHost]) || /\.(?:pdf|zip|jpg|jpeg|png|gif|svg|css|js|xml)(?:$|[?#])/i.test(target.pathname)) continue;
-            // Follow pagination and archive navigation as well as explicit subject/paper links.
-            const label = htmlText(anchor);
-            const pathAndLabel = label + " " + target.pathname + " " + target.search;
-            if (/question|paper|exam|download|resource|academic|subject|class|year|specimen|syllabus|archive|previous|next|page[=/-]?\d|\b\d{4}\b/i.test(pathAndLabel)) pageQueue.push(target.href);
+            const target = canonicalScanUrl(new URL(decodeEntities(href), fetched.url), rootHost);
+            if (!safeHost(target, [rootHost]) || /\.(?:zip|jpg|jpeg|png|gif|svg|css|js|xml)(?:$|[?#])/i.test(target.pathname)) continue;
+            const isAglaSemDocs = (rootHost === "aglasem.com" || rootHost === "docs.aglasem.com") && target.hostname === "docs.aglasem.com";
+            const isAglaSemDocument = isAglaSemDocs && /\/view\/[0-9a-f-]{30,}/i.test(target.pathname);
+            const isAglaSemDownload = isAglaSemDocs && /single-doc-download/i.test(target.pathname);
+            if (isAglaSemDownload && pageMatchesCriteria && pageHasPaperSignal) {
+              discovered.set(target.href.toLowerCase(), {
+                title: documentTitle, url: target.href,
+                snippet: "AglaSem document download endpoint · " + documentTitle,
+                domain: rootHost, source, pdf_search_hint: true,
+                source_page_url: fetched.url,
+              });
+              continue;
+            }
+            const score = websiteUrlRelevance(target, criteria);
+            const shouldFollowDocument = isAglaSemDocument && pageMatchesCriteria && pageHasPaperSignal;
+            if (!singlePageMode && (score >= 20 || shouldFollowDocument) && pageQueue.length < 1000 &&
+                !visited.has(target.href) && !pageQueue.includes(target.href)) pageQueue.push(target.href);
           } catch { /* ignore malformed links */ }
         }
       } catch (e) { errors.push(page.hostname + page.pathname + ": " + clip((e as Error)?.message || e, 180)); }
@@ -646,7 +726,7 @@ Deno.serve(async (req) => {
     const filters = { scope: "board", search_mode: "website_scan", website_url: root.href, website_domain: rootHost,
       pages_scanned: visited.size, pages_queued: pageQueue.length, sitemap_queue_remaining: sitemapQueue.length,
       search_results: results, provider_errors: errors.slice(0, 100),
-      website_scan_state: complete ? null : { page_queue: pageQueue.slice(0, 5000), sitemap_queue: sitemapQueue.slice(0, 500),
+      website_scan_state: complete ? null : { page_queue: pageQueue.slice(0, 5000), sitemap_queue: sitemapQueue.slice(0, 500), single_page_mode: singlePageMode,
         visited: [...visited].slice(-10000), results, errors: errors.slice(-100) },
       discovery_progress: { next_offset: visited.size, successful_queries: visited.size, provider_errors: errors.slice(0, 80), results_found: results.length, new_candidates: 0 } };
     let run: any;

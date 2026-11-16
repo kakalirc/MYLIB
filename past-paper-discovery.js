@@ -4,7 +4,7 @@
   if (window.__libPastPaperDiscoveryInstalled) return;
   window.__libPastPaperDiscoveryInstalled = true;
 
-  var state = { loaded:false, loading:false, sources:[], candidates:[], rejectedCandidates:[], schools:[], runs:[], auditRows:[], auditLimit:120, latestPreSearch:null, previewRows:[], message:'', error:'', loadErrors:{}, actionMessages:{}, selectedCandidates:{}, bulkVerifyBusy:false, bulkVerifyProgress:'', metrics:{discovered:0,verified:0,duplicates:0,imported:0,rejected:0,failed:0}, searchBusy:false, scope:'board', queueTab:'review' };
+  var state = { loaded:false, loading:false, sources:[], candidates:[], rejectedCandidates:[], schools:[], runs:[], auditRows:[], auditLimit:120, latestPreSearch:null, previewRows:[], message:'', error:'', loadErrors:{}, actionMessages:{}, selectedCandidates:{}, bulkVerifyBusy:false, bulkVerifyProgress:'', metrics:{discovered:0,verified:0,duplicates:0,imported:0,rejected:0,failed:0}, searchBusy:false, websiteProgress:null, scope:'board', queueTab:'review' };
   function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
   function byId(id) { return document.getElementById(id); }
   function val(id) { return byId(id) ? byId(id).value : ''; }
@@ -185,7 +185,11 @@
       + '<input id="ppd-website-url" type="url" placeholder="Website URL (e.g. https://schools.aglasem.com/)">'
       + '<input id="ppd-website-criteria" placeholder="Optional criteria (e.g. ICSE Class 10 Sanskrit)">'
       + '<button class="btn-small btn-primary" type="button" onclick="libPPDWebsiteScan()" ' + (state.searchBusy ? 'disabled' : '') + '>' + (state.searchBusy ? 'Scanning…' : 'Scan website') + '</button></div>'
-      + '<p class="hint">Scans the supplied HTTPS website, its sitemap and relevant internal pages (up to 40 pages per scan). Finds likely question-paper PDF links and saves them as search results. It does not download, verify or import PDFs. Use Collect only after reviewing the results.</p></div>';
+      + '<p class="hint">Scans the supplied HTTPS website, its sitemap and relevant internal pages. Progress updates after each batch. Finds likely question-paper PDF links and saves them as search results. It does not download, verify or import PDFs. Use Collect only after reviewing the results.</p>'
+      + (state.websiteProgress ? '<div class="lib-ppd-scan-progress" role="status" aria-live="polite"><div class="lib-ppd-scan-progress-head"><b>' + esc(state.websiteProgress.complete ? 'Scan complete' : 'Scanning website…') + '</b><span>' + esc(state.websiteProgress.pages_scanned) + ' pages scanned</span></div>'
+        + '<div class="lib-ppd-scan-track"><span class="' + (state.websiteProgress.complete ? 'complete' : 'active') + '"></span></div>'
+        + '<div class="lib-ppd-scan-stats"><span><b>' + esc(state.websiteProgress.pages_remaining) + '</b> pages queued</span><span><b>' + esc(state.websiteProgress.sitemaps_remaining) + '</b> sitemaps queued</span><span><b>' + esc(state.websiteProgress.pdfs_found) + '</b> potential PDFs found</span></div>'
+        + '<p class="hint">' + esc(state.websiteProgress.stage || '') + '</p></div>' : '') + '</div>';
     var preview = state.previewRows.length ? '<div class="lib-ppd-section"><h3>Search results preview (' + state.previewRows.length + ' records)</h3><p class="hint">These are saved results from this search. They are not candidates or review-queue records until you choose Collect.</p>' + state.previewRows.map(function (r) { return '<div class="lib-ppd-source"><div><b>' + esc(r.title || 'Untitled PDF') + '</b><div class="hint">' + esc(r.domain) + ' · ' + esc(r.source_name || r.source_match) + ' · ' + esc(r.search_provider) + '</div>' + (r.snippet ? '<div class="hint">' + esc(r.snippet) + '</div>' : '') + '</div><a class="btn-small" href="' + esc(r.url) + '" target="_blank" rel="noopener noreferrer">Open PDF</a></div>'; }).join('') + '</div>' : '';
     var preSearchSummary = '';
     if (state.latestPreSearch) {
@@ -229,6 +233,7 @@
       return '<div class="hint">' + esc(new Date(r.started_at).toLocaleString()) + ' · ' + esc(r.query_text) + ' · ' + esc(r.status) + ' · ' + esc(r.results_found) + ' results' + esc(progressText) + resume + collect + restart + '</div>';
     }).join('') : '<p class="hint">No searches yet.</p>') + '</details>';
     return '<section class="lib-ppd"><style>'
+      + '.lib-ppd-scan-progress{margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:9px;background:var(--paper)}.lib-ppd-scan-progress-head,.lib-ppd-scan-stats{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}.lib-ppd-scan-track{height:7px;background:var(--line);border-radius:99px;overflow:hidden;margin:10px 0}.lib-ppd-scan-track span{display:block;height:100%;width:35%;border-radius:99px;background:var(--brick)}.lib-ppd-scan-track span.active{animation:libPpdScanPulse 1.2s ease-in-out infinite alternate}.lib-ppd-scan-track span.complete{width:100%;background:var(--forest)}.lib-ppd-scan-stats{font-size:12px;color:var(--muted)}@keyframes libPpdScanPulse{from{transform:translateX(-15%);opacity:.55}to{transform:translateX(185%);opacity:1}}'
       + '.lib-ppd{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}.lib-ppd-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:8px}.lib-ppd-metric{border:1px solid var(--line);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:3px}.lib-ppd-metric b{font-size:20px}.lib-ppd-metric span{font-size:12px;color:var(--muted)}.lib-ppd-bulk-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}.lib-ppd-select{font-size:12px;white-space:nowrap;display:flex;gap:4px;align-items:center}.lib-ppd-recent-searches{border:1px solid var(--line);border-radius:9px;padding:10px 12px}.lib-ppd-recent-searches>summary{cursor:pointer;font-weight:700;list-style:disclosure-closed}.lib-ppd-recent-searches[open]>summary{margin-bottom:10px;list-style:disclosure-open}.lib-ppd-queue-tabs{display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:14px 0 10px}.lib-ppd-queue-tab{border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;background:var(--surface);color:var(--ink);padding:9px 13px;cursor:pointer;font:inherit}.lib-ppd-queue-tab.active{background:var(--surface-2,var(--surface));font-weight:700;border-color:var(--accent,var(--line))}.lib-ppd-rejected{border-left:3px solid var(--brick,var(--line))}.lib-ppd h3{font-family:Zilla Slab,serif;margin:0 0 7px}.lib-ppd-section{margin:14px 0 20px}.lib-ppd-approved-sources{border:1px solid var(--line);border-radius:9px;padding:10px 12px}.lib-ppd-approved-sources>summary{cursor:pointer;font-weight:700;list-style:disclosure-closed}.lib-ppd-approved-sources[open]>summary{margin-bottom:10px;list-style:disclosure-open}.lib-ppd-search,.lib-ppd-source-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.lib-ppd-search input{flex:1;min-width:190px}.lib-ppd-search select,.lib-ppd-search input,.lib-ppd-source-form input,.lib-ppd-source-form select,.lib-ppd-meta input,.lib-ppd-meta select{min-height:38px;padding:7px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);box-sizing:border-box}.lib-ppd-source-form input{flex:1;min-width:170px}.lib-ppd-source{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line)}.lib-ppd-candidate{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}.lib-ppd-review-layout{display:grid;grid-template-columns:minmax(0,0.9fr) minmax(0,1.1fr);gap:16px;align-items:start}.lib-ppd-review-summary,.lib-ppd-review-fields{min-width:0}.lib-ppd-review-fields{border-left:1px solid var(--line);padding-left:16px}.lib-ppd-candidate-head,.lib-ppd-title,.lib-ppd-actions{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}.lib-ppd-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:0}.lib-ppd-meta label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);font-weight:700}.lib-ppd-meta input,.lib-ppd-meta select{width:100%}.lib-ppd-actions{justify-content:flex-start;margin-top:10px}.lib-ppd-domain-approval{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}.lib-ppd-domain-approval select{min-height:34px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink)}.lib-ppd p.hint{margin:5px 0 10px}@media(max-width:700px){.lib-ppd-review-layout{grid-template-columns:minmax(0,1fr)}.lib-ppd-review-fields{border-left:0;border-top:1px solid var(--line);padding:12px 0 0}.lib-ppd-search,.lib-ppd-source-form{align-items:stretch}.lib-ppd-search>* ,.lib-ppd-source-form>*{width:100%;min-width:0}.lib-ppd-candidate-head{align-items:flex-start}}'
       + '.lib-ppd-estimate{border:1px solid var(--line);border-radius:9px;padding:12px}.lib-ppd-estimate-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.lib-ppd-estimate-grid>div{background:var(--surface-2,var(--surface));border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:3px}.lib-ppd-estimate-grid b{font-size:22px}.lib-ppd-estimate-grid span{font-size:11px;color:var(--muted)}@media(max-width:700px){.lib-ppd-estimate-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}'
       + '</style>' + search + websiteScan + preSearchSummary + preview + dashboard + renderQueueTabs() + sources + sourceAudit + runs + '</section>';
@@ -304,19 +309,31 @@
   };
   async function runWebsiteScan(payload) {
     state.searchBusy = true; state.error = '';
-    state.message = payload.run_id ? 'Resuming website scan…' : 'Scanning website and discovering question-paper PDFs…';
+    state.message = payload.run_id ? 'Resuming website scan…' : 'Starting website scan…';
+    state.websiteProgress = { pages_scanned:0, pages_remaining:0, sitemaps_remaining:0, pdfs_found:0, complete:false, stage:'Connecting to website and preparing sitemap scan…' };
     if (typeof render === 'function') render();
     try {
-      var result = await invoke(Object.assign({ action:'website_scan' }, payload));
-      state.previewRows = result.preview_results || [];
-      state.latestPreSearch = { run_id:result.run_id, complete:!!result.complete, pdfs_found:Number(result.pdfs_found || 0),
-        discovered_source_count:1, provider_errors:result.provider_errors || [], collectionComplete:false };
-      state.message = (result.complete ? 'Website scan complete' : 'Website scan batch saved; more pages remain') + ': '
-        + Number(result.pages_scanned || 0) + ' pages scanned; ' + state.previewRows.length
-        + ' potential question-paper PDFs found. ' + Number(result.pages_remaining || 0) + ' pages and '
-        + Number(result.sitemaps_remaining || 0) + ' sitemaps remain. No PDFs downloaded or verified.';
+      var request = Object.assign({ action:'website_scan' }, payload);
+      var result;
+      do {
+        result = await invoke(request);
+        request = { action:'website_scan', run_id:result.run_id };
+        state.previewRows = result.preview_results || [];
+        state.websiteProgress = { pages_scanned:Number(result.pages_scanned || 0),
+          pages_remaining:Number(result.pages_remaining || 0), sitemaps_remaining:Number(result.sitemaps_remaining || 0),
+          pdfs_found:Number(result.pdfs_found || 0), complete:!!result.complete,
+          stage:result.complete ? 'All discovered sitemap and page queues have been processed.' : 'Batch saved. Continuing automatically with the next batch…' };
+        state.latestPreSearch = { run_id:result.run_id, complete:!!result.complete, pdfs_found:Number(result.pdfs_found || 0),
+          discovered_source_count:1, provider_errors:result.provider_errors || [], collectionComplete:false };
+        state.message = (result.complete ? 'Website scan complete' : 'Website scan in progress') + ': '
+          + state.websiteProgress.pages_scanned + ' pages scanned; ' + state.websiteProgress.pdfs_found
+          + ' potential question-paper PDFs found. No PDFs downloaded or verified.';
+        if (typeof render === 'function') render();
+      } while (!result.complete);
       state.loaded = false; await loadData(true);
-    } catch (e) { state.message = e.message || String(e); state.error = state.message; }
+    } catch (e) { state.message = e.message || String(e); state.error = state.message;
+      if (state.websiteProgress) state.websiteProgress.stage = 'Scan paused. You can resume it from the saved search summary.';
+    }
     finally { state.searchBusy = false; if (typeof render === 'function') render(); }
   }
   window.libPPDCollectRun = async function (runId) {
