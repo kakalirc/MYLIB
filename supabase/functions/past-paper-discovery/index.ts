@@ -3,7 +3,7 @@
 // while permanent source-registry changes remain explicit Admin actions. Imports use the existing workflow.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { getPdfZipMember, listPdfMembersFromZip } from "./archive.ts";
-import { canonicalWebsiteScanDomain, isAglaSemCollectionUrl, isAglaSemDomain, matchesApprovedSourceDomain } from "./source-domain.ts";
+import { canonicalWebsiteScanDomain, isAglaSemCollectionUrl, isAglaSemDomain, matchesApprovedSourceDomain, upgradeApprovedHttpRedirect } from "./source-domain.ts";
 import {
   buildPdfQueryVariants, filterBoardSourcesForQuery, isPrivateAddress, isQuestionPaperPdf,
   isValidDiscoveredDomain, matchesQuery, queryTerms,
@@ -247,7 +247,7 @@ async function fetchAllowed(urlText: string, domains: string[], accept: string) 
     if ([301,302,303,307,308].includes(res.status)) {
       const location = res.headers.get("location");
       if (!location) throw new Error("Source returned an invalid redirect.");
-      url = new URL(location, url);
+      url = upgradeApprovedHttpRedirect(new URL(location, url), domains);
       continue;
     }
     if (!res.ok) throw new Error("Source returned HTTP " + res.status + ".");
