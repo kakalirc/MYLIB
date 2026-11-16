@@ -3,7 +3,7 @@
 // while permanent source-registry changes remain explicit Admin actions. Imports use the existing workflow.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { getPdfZipMember, listPdfMembersFromZip } from "./archive.ts";
-import { matchesApprovedSourceDomain } from "./source-domain.ts";
+import { canonicalWebsiteScanDomain, matchesApprovedSourceDomain } from "./source-domain.ts";
 import {
   buildPdfQueryVariants, filterBoardSourcesForQuery, isPrivateAddress, isQuestionPaperPdf,
   isValidDiscoveredDomain, matchesQuery, queryTerms,
