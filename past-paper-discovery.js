@@ -96,6 +96,7 @@
       ? '<div class="lib-ppd-domain-approval">' + (!registeredSource ? '<select id="ppd-domaintype-' + esc(c.id) + '"><option value="school">School website</option><option value="education_portal">Education portal</option></select>' : '') + '<button class="btn-small" onclick="libPPDApproveDomain(' + "'" + esc(c.id) + "'" + ')">' + (registeredSource && !registeredSource.enabled ? 'Enable and link source domain' : 'Add to permanent source registry') + '</button></div>'
       : '';
     var meta = c.discovery_metadata || {};
+    var hasLocalPdf = meta.verification_method === 'local_upload' && !!meta.local_pdf_storage_path;
     var previewUrl = c.pdf_url || c.source_url;
     var isSchool = c.source_type === 'school';
     // Derive review defaults from the title and approved source; persist only on explicit import.
@@ -130,7 +131,9 @@
     var actions = '<div class="lib-ppd-actions"><a class="btn-small" href="' + esc(previewUrl) + '" target="_blank" rel="noopener noreferrer">Open source / PDF</a>'
       + '<button class="btn-small" type="button" onclick="libPPDSaveMetadata(\'' + esc(c.id) + '\')">Save Metadata</button>'
       + '<label class="btn-small" for="lib-ppd-local-pdf-' + esc(c.id) + '">Use downloaded PDF<input id="lib-ppd-local-pdf-' + esc(c.id) + '" type="file" accept="application/pdf,.pdf" style="display:none" onchange="libPPDLocalVerify(\'' + esc(c.id) + '\',this)"></label>'
-      + '<button class="btn-small" onclick="libPPDVerify(\'' + esc(c.id) + '\')" ' + (state.bulkVerifyBusy || ['verified','duplicate'].indexOf(c.verification_status) >= 0 ? 'disabled' : '') + '>' + (['inaccessible','invalid_pdf','unsafe_url'].indexOf(c.verification_status) >= 0 ? 'Retry PDF verification' : 'Verify PDF') + '</button>'
+      + (hasLocalPdf
+        ? (c.verification_status === 'verified' || c.verification_status === 'duplicate' ? '<span class="hint">Local PDF verified · source check skipped</span>' : '<button class="btn-small" type="button" onclick="libPPDVerify(\\'' + esc(c.id) + '\\')" ' + (state.bulkVerifyBusy ? 'disabled' : '') + '>Revalidate local PDF</button>')
+        : '<button class="btn-small" onclick="libPPDVerify(\\'' + esc(c.id) + '\\')" ' + (state.bulkVerifyBusy || ['verified','duplicate'].indexOf(c.verification_status) >= 0 ? 'disabled' : '') + '>' + (['inaccessible','invalid_pdf','unsafe_url','remote_blocked'].indexOf(c.verification_status) >= 0 ? 'Retry PDF verification' : 'Verify PDF') + '</button>')
       + (c.verification_status === 'verified' && c.status !== 'imported' && c.status !== 'rejected' && c.status !== 'duplicate'
         ? '<button class="btn-small btn-primary" onclick="libPPDImport(\'' + esc(c.id) + '\')">Import to Past Papers</button>'
         : '')
@@ -143,7 +146,8 @@
     return '<article class="lib-ppd-candidate"><div class="lib-ppd-review-layout"><div class="lib-ppd-review-summary"><div class="lib-ppd-candidate-head"><label class="lib-ppd-select"><input type="checkbox" ' + (state.selectedCandidates[c.id] ? 'checked' : '') + (state.bulkVerifyBusy ? ' disabled' : '') + ' onchange="libPPDSelectCandidate(\'' + esc(c.id) + '\',this.checked)"> Select</label><div><b>' + esc(c.title) + '</b><div class="hint">' + esc(c.source_domain) + ' · ' + esc(c.source_type) + ' · ' + esc(c.status) + ' · PDF: ' + esc(c.verification_status) + '</div>'
       + (meta.source_match === 'unregistered_domain' ? '<p class="hint">Newly discovered domain · eligible for this run after PDF verification; permanent registry approval is optional.</p>' : '')
       + (meta.snippet ? '<p class="hint">' + esc(meta.snippet) + '</p>' : '')
-      + (c.rejection_reason ? '<p class="hint" style="color:var(--brick)">Last verification issue: ' + esc(c.rejection_reason) + '</p>' : '')
+      + (c.rejection_reason && !hasLocalPdf ? '<p class="hint" style="color:var(--brick)">Last verification issue: ' + esc(c.rejection_reason) + '</p>' : '')
+      + (hasLocalPdf && c.verification_status !== 'verified' && c.verification_status !== 'duplicate' ? '<p class="hint">A local PDF is already uploaded. Revalidate it locally; the original source will not be contacted.</p>' : '')
       + (school ? '<div class="hint">School: ' + esc(school.name) + '</div>' : (c.discovered_school_name ? '<div class="hint">Possible school: ' + esc(c.discovered_school_name) + '</div>' : ''))
       + '</div></div>' + actions + actionStatus + domainAction + '</div><div class="lib-ppd-review-fields">' + metadata + '</div></div></article>';
   }
