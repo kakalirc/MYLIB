@@ -775,6 +775,9 @@ Deno.serve(async (req) => {
     const results = [...discovered.values()].filter((row) => isQuestionPaperPdf(row, criteria)).slice(0, MAX_DISCOVERED_CANDIDATES_PER_BATCH).map((row: any) => ({
       title: clip(row.title, 500), url: row.url, domain: row.domain, snippet: clip(row.snippet, 1200),
       source_name: rootHost, source_match: "website_scan", search_provider: "Website crawler",
+      // Preserve trusted AglaSem endpoint evidence through the saved-run boundary.
+      // Collect re-applies isQuestionPaperPdf and needs this marker for extensionless URLs.
+      ...(row.aglasem_collection_candidate === true ? { aglasem_collection_candidate: true, pdf_search_hint: true } : {}),
       source_page_url: row.source_page_url || root.href,
     }));
     audit.candidates_rejected += Math.max(0, discovered.size - results.length);
