@@ -16312,12 +16312,14 @@ function renderLoginManagement() {
     </div>
     ${bulkStudentCardHtml()}
     <div class="card">
-      <h2>Student account controls</h2>
-      <div class="hint">Search by student login ID or student name. Reset or restore a Student password/account here.</div>
-      <div class="row-form">
-        <input type="search" id="loginManagementStudentSearch" placeholder="Search Student login or name…" oninput="filterLoginManagementStudents()" style="width:260px">
-      </div>
-      <div id="loginManagementStudentList">${studentRows}</div>
+      <details>
+        <summary style="cursor:pointer;color:var(--forest);font-size:16px;font-weight:700">Student account controls</summary>
+        <div class="hint" style="margin-top:10px">Search by student login ID or student name. Reset or restore a Student password/account here.</div>
+        <div class="row-form">
+          <input type="search" id="loginManagementStudentSearch" placeholder="Search Student login or name…" oninput="filterLoginManagementStudents()" style="width:260px">
+        </div>
+        <div id="loginManagementStudentList">${studentRows}</div>
+      </details>
     </div>
     <div class="card">
       <h2>Parent login management</h2>
