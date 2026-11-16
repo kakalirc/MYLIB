@@ -200,7 +200,8 @@
         + '<div><b>' + esc(estimate.discovered_source_count || 0) + '</b><span>New domains surfaced</span></div></div>'
         + '<p class="hint">This is a search estimate, not a count of confirmed papers. No PDF is downloaded and no review-queue record is created.</p>'
         + warnings
-        + '<button class="btn-small btn-primary" type="button" onclick="libPPDCollectRun(\'' + esc(estimate.run_id) + '\')" ' + (state.searchBusy || estimate.collectionComplete ? 'disabled' : '') + '>Collect saved results</button>'
+        + (estimate.complete === false ? '<button class="btn-small" type="button" onclick="libPPDWebsiteResume(\'' + esc(estimate.run_id) + '\')" ' + (state.searchBusy ? 'disabled' : '') + '>Resume website scan</button>' : '')
+        + '<button class="btn-small btn-primary" type="button" onclick="libPPDCollectRun(\'' + esc(estimate.run_id) + '\')" ' + (state.searchBusy || estimate.collectionComplete || estimate.complete === false ? 'disabled' : '') + '>Collect saved results</button>'
         + '</div>'
     }
     var sourceAudit = '<details class="lib-ppd-section lib-ppd-recent-searches"><summary>Source Intelligence · Search history (' + state.auditRows.length + ' records)</summary>'
@@ -294,21 +295,30 @@
     var websiteUrl = val('ppd-website-url').trim();
     var criteria = val('ppd-website-criteria').trim() || 'question paper';
     if (!websiteUrl.toLowerCase().startsWith('https://')) { notify('Enter a public HTTPS website URL.', true); return; }
-    state.searchBusy = true; state.previewRows = []; state.latestPreSearch = null;
-    state.message = 'Scanning website pages and discovering PDF links…'; state.error = '';
+    state.previewRows = []; state.latestPreSearch = null;
+    return runWebsiteScan({ website_url: websiteUrl, criteria: criteria });
+  };
+  window.libPPDWebsiteResume = async function (runId) {
+    if (!runId || state.searchBusy) return;
+    return runWebsiteScan({ run_id: runId });
+  };
+  async function runWebsiteScan(payload) {
+    state.searchBusy = true; state.error = '';
+    state.message = payload.run_id ? 'Resuming website scan…' : 'Scanning website and discovering question-paper PDFs…';
     if (typeof render === 'function') render();
     try {
-      var result = await invoke({ action:'website_scan', website_url:websiteUrl, criteria:criteria });
+      var result = await invoke(Object.assign({ action:'website_scan' }, payload));
       state.previewRows = result.preview_results || [];
-      state.latestPreSearch = { run_id:result.run_id, complete:true, pdfs_found:Number(result.pdfs_found || 0),
+      state.latestPreSearch = { run_id:result.run_id, complete:!!result.complete, pdfs_found:Number(result.pdfs_found || 0),
         discovered_source_count:1, provider_errors:result.provider_errors || [], collectionComplete:false };
-      state.message = 'Website scan complete: ' + Number(result.pages_scanned || 0) + ' pages scanned; '
-        + state.previewRows.length + ' potential question-paper PDFs found. No PDFs downloaded or verified.'
-        + (result.pages_remaining ? ' ' + result.pages_remaining + ' additional pages were not scanned because of the per-scan limit.' : '');
+      state.message = (result.complete ? 'Website scan complete' : 'Website scan batch saved; more pages remain') + ': '
+        + Number(result.pages_scanned || 0) + ' pages scanned; ' + state.previewRows.length
+        + ' potential question-paper PDFs found. ' + Number(result.pages_remaining || 0) + ' pages and '
+        + Number(result.sitemaps_remaining || 0) + ' sitemaps remain. No PDFs downloaded or verified.';
       state.loaded = false; await loadData(true);
     } catch (e) { state.message = e.message || String(e); state.error = state.message; }
     finally { state.searchBusy = false; if (typeof render === 'function') render(); }
-  };
+  }
   window.libPPDCollectRun = async function (runId) {
     if (state.searchBusy || !runId) return;
     state.searchBusy = true; state.error = ''; state.message = 'Collecting saved search results…';
