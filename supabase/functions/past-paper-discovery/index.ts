@@ -703,16 +703,16 @@ Deno.serve(async (req) => {
         // present as ordinary .pdf hrefs on the document page.
         const isAglaSemDocsPage = (rootHost === "aglasem.com" || rootHost === "docs.aglasem.com") &&
           new URL(fetched.url).hostname === "docs.aglasem.com";
-        if (isAglaSemDocsPage && pageHasPaperSignal) {
+        if (isAglaSemDocsPage && (aglasemCollectionMode || pageHasPaperSignal)) {
           for (const targetUrl of extractDocumentTargets(html, fetched.url)) {
             let target: URL;
             try { target = new URL(targetUrl); } catch { continue; }
             if (!/single-doc-download/i.test(target.pathname)) continue;
             audit.download_endpoints_extracted++;
             const row = {
-              title: documentTitle,
+              title: documentTitle || (criteria + " Question Paper"),
               url: target.href,
-              snippet: "AglaSem document download endpoint · " + documentTitle,
+              snippet: "Question paper PDF download endpoint linked from the AglaSem question-paper collection · " + criteria + " · " + documentTitle,
               domain: target.hostname.toLowerCase().replace(/^www\\./, ""),
               source_name: rootHost,
               source_match: "website_scan",
@@ -733,10 +733,10 @@ Deno.serve(async (req) => {
             const isAglaSemDocs = (rootHost === "aglasem.com" || rootHost === "docs.aglasem.com") && target.hostname === "docs.aglasem.com";
             const isAglaSemDocument = isAglaSemDocs && /\/view\/[0-9a-f-]{30,}/i.test(target.pathname);
             const isAglaSemDownload = isAglaSemDocs && /single-doc-download/i.test(target.pathname);
-            if (isAglaSemDownload && pageMatchesCriteria && pageHasPaperSignal) {
+            if (isAglaSemDownload && (aglasemCollectionMode || (pageMatchesCriteria && pageHasPaperSignal))) {
               discovered.set(target.href.toLowerCase(), {
-                title: documentTitle, url: target.href,
-                snippet: "AglaSem document download endpoint · " + documentTitle,
+                title: documentTitle || (criteria + " Question Paper"), url: target.href,
+                snippet: "Question paper PDF download endpoint linked from the AglaSem question-paper collection · " + criteria + " · " + documentTitle,
                 domain: rootHost, source, pdf_search_hint: true,
                 source_page_url: fetched.url,
               });
