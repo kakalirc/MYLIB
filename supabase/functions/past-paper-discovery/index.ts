@@ -301,8 +301,7 @@ function linkRows(html: string, baseUrl: string, source: any, terms: string[], l
     if (!isPdf && !(downloadHint && paperSignal)) continue;
     rows.push({ title: (label || context || target.pathname.split("/").pop() || source.display_name).slice(0, 500),
       url: target.href, snippet: "Official source page · " + source.display_name + (context ? " · " + context.slice(0, 500) : ""),
-              domain: target.hostname.toLowerCase().replace(/^www\./, ""),
-  }
+      domain: target.hostname.toLowerCase().replace(/^www\./, ""), source, pdf_search_hint: !isPdf });
   return rows;
 }
 async function crawlCbseOfficial(source: any, query: string): Promise<DiscoveryRow[]> {
