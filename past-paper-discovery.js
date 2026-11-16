@@ -505,7 +505,7 @@
     if (!file) return;
     input.value = '';
     if (file.size <= 0 || file.size > 50 * 1024 * 1024) { notifyAction(id, 'Choose a non-empty PDF no larger than 50 MB.', true); return; }
-    if (file.type && file.type !== 'application/pdf' && !/\\.pdf$/i.test(file.name || '')) { notifyAction(id, 'Choose a PDF file.', true); return; }
+    if (file.type && file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name || '')) { notifyAction(id, 'Choose a PDF file.', true); return; }
     var storagePath = 'source-papers/admin/discovery-local/' + id + '/' + crypto.randomUUID() + '.pdf';
     notifyAction(id, 'Uploading downloaded PDF and validating its contents…');
     try {
