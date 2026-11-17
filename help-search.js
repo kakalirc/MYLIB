@@ -173,6 +173,13 @@
       return Array.from(document.querySelectorAll('#app h2'))
         .find(node => (node.textContent || '').trim().startsWith('Raise fee requests —')) || null;
     }
+    if (target.startsWith('text:')) {
+      const wanted = normal(target.slice(5));
+      const headings = Array.from(document.querySelectorAll('#app h1, #app h2, #app h3, #app h4, #app summary, #app [role="heading"]'))
+        .filter(isVisibleInCurrentPortal);
+      return headings.find(node => normal(node.textContent) === wanted) ||
+        headings.find(node => normal(node.textContent).includes(wanted)) || null;
+    }
     return document.querySelector(target);
   }
   function scrollToSectionAfterNavigation(key, target, trigger) {
@@ -298,7 +305,32 @@
         'Manage fee requests and payments': '#pendingFeeRequestsSection',
         'Review pending fee requests': '#pendingFeeRequestsSection',
         'Use the fee calculator': '#feeCalculatorSection',
-        // Admin Demo workflow — verified anchor in index.html
+        // Teacher pages — resolve against visible, rendered section headings.
+        'Manage my class schedule': 'text:Class Schedule',
+        'Update class frequency for a student': 'text:Class Frequency Setup',
+        'View my students’ class frequency': 'text:My Students Class Frequency',
+        'Find a student and check class balance': 'text:My Students',
+        'Create or update a student study plan': 'text:Study Plans',
+        'Assign homework or review submissions': 'text:Homework',
+        'Use Question Bank and practice papers': 'text:Past Papers',
+        'Prepare lessons and share teaching resources': 'text:Lesson Preparation',
+        'Give attendance for a class': 'text:Give Attendance',
+        'View my attendance report': 'text:My Attendance Report',
+        'Set my availability and leave dates': 'text:Availability',
+        'Review my demo analysis': 'text:My Demo Analysis',
+        'Review class delivery performance': 'text:Class Delivery Intelligence',
+        'Review my teaching performance': 'text:Teacher Performance Intelligence',
+        // Admin pages — target actual page headings where they are rendered.
+        'Find a prospect or new registration': 'text:New registrations',
+        'Student onboarding and communication': 'text:Student Onboarding',
+        'Find a student or subscription': 'text:Students & Subscriptions',
+        'Find parent details': 'text:Parents',
+        'View teacher payroll': 'text:Payroll',
+        'View or export reports': 'text:Reports & Export',
+        'Open the Question Bank': 'text:Question Bank',
+        'Record a class in Class Log': 'text:Class Log',
+        'Review pending fee requests': '#pendingFeeRequestsSection',
+        'Use the fee calculator': '#feeCalculatorSection',
         'Manage demo bookings and conversions': '#demo-register-heading'
       };
       const sectionTarget = sectionTargets[task.title] || null;
