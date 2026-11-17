@@ -22,7 +22,7 @@
   const QUICK_BY_ROLE = {
     Admin: ['Send a fee request', 'Find a prospect', 'Create a student login'],
     Student: ['Open My Learning', 'Open Fun Zone', 'Open Account Settings'],
-    Teacher: [],
+    Teacher: ['View my classes', 'Mark attendance', 'Find a student'],
     Parent: []
   };
 
@@ -37,7 +37,8 @@
   function tasksForRole() {
     const role = getRole();
     if (role === 'Student') return TASKS.filter(task => ['academics', 'fun', 'settings'].includes(task.key));
-    if (role === 'Teacher' || role === 'Parent') return [];
+    if (role === 'Teacher') return TASKS.filter(task => ['log', 'students', 'reports'].includes(task.key));
+    if (role === 'Parent') return [];
     return TASKS.filter(task => !['academics', 'fun', 'settings'].includes(task.key));
   }
 
@@ -63,7 +64,7 @@
     const role = getRole();
     let selector = '';
     if (role === 'Student') selector = '.student-portal-section-switcher [onclick*="setStudentPortalSection("]';
-    else if (role === 'Teacher') selector = '.teacher-sidebar .sidebar-item[onclick], .teacher-portal [onclick]';
+    else if (role === 'Teacher') selector = '#app [onclick]';
     else if (role === 'Parent') selector = '.parent-sidebar .sidebar-item[onclick], .parent-portal [onclick]';
     else selector = '.sidebar-nav .sidebar-item[onclick], .mobile-tab-dropdown .mobile-tab-item[onclick]';
     const nodes = Array.from(document.querySelectorAll(selector)).filter(isVisibleInCurrentPortal);
@@ -72,7 +73,8 @@
       const handler = node.getAttribute('onclick') || '';
       let match = handler.match(/setTab\(['"]([^'"]+)['"]\)/) ||
                   handler.match(/setTeacherPortalTab\(['"]([^'"]+)['"]\)/) ||
-                  handler.match(/setStudentPortalSection\(['"]([^'"]+)['"]\)/);
+                  handler.match(/setStudentPortalSection\(['"]([^'"]+)['"]\)/) ||
+                  handler.match(/set[A-Za-z0-9_]*(?:Tab|Section)\(['"]([^'"]+)['"]\)/);
       if (!match) return;
       const key = match[1];
       const label = (node.textContent || '').replace(/\s+/g, ' ').trim();
@@ -146,7 +148,7 @@
     const quick = root && root.querySelector("[data-help-quick]");
     if (!quick) return;
     const nav = getNavItems();
-    const available = (QUICK_BY_ROLE[getRole()] || []).filter(query => tasksForRole().some(task => nav.some(item => item.key === task.key) && rank(query, task) > 0));
+    const available = (QUICK_BY_ROLE[getRole()] || []).filter(query => getRole() === 'Teacher' || tasksForRole().some(task => nav.some(item => item.key === task.key) && rank(query, task) > 0));
     quick.innerHTML = available.map(query => '<button type="button" data-help-query="' + esc(query) + '">' + esc(query) + '</button>').join("");
     const input = root.querySelector("[data-help-input]");
     quick.hidden = !!(input && input.value.trim());
