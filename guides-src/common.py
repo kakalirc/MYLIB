@@ -1,5 +1,5 @@
 """Sections every guide shares: getting started and getting help."""
-from guide import CONTACT, steps, note, g2, box, h3
+from guide import CONTACT, steps, note, g2, box, h3, screen, bullets
 
 
 def getting_started(g, chat_who):
@@ -9,10 +9,19 @@ def getting_started(g, chat_who):
         ('Set a new password', 'Change it after your first login so only you know it.'),
         ('Add it to your home screen', '<b>Android:</b> tap Install. <b>iPhone:</b> tap Share, then Add to Home Screen.'),
     ]) + note('Forgot your password?', f'Call or WhatsApp LIB on {CONTACT["phone"]} and we will reset it.', 'tip') + h3('Getting help anywhere in MY LIB') + g2(
-        box('Help & Search', ['Use the Help button in the app header for how-to guidance.', 'Use the Help & Search panel to describe the task in everyday words. Try a feature name or a phrase such as “classes left”, “send a fee request” or “submit homework”.', 'The suggestions are based on your login role. Choose a result to open the relevant section when it is available to your account.']),
-        box('Contextual help', ['Look for a <b>?</b> beside a page, section or card heading. It explains that part of the screen and the steps available there.', 'Read any notes or warnings before confirming a payment, changing a record or submitting work.']),
+        box('Help & Search', ['The Help & Search panel sits immediately below the app header. Describe the task in everyday words or search for a feature name.', 'Suggestions are filtered for your login role. Select a menu result to open that section, or select a how-to result to read its instructions here.', 'If the article includes an Open this section action, use it to go to the relevant screen.']),
+        box('Contextual help', ['Where a <b>?</b> help icon appears beside a page, section or card heading, tap it for guidance about that part of the screen.', 'Read any notes or warnings before confirming a payment, changing a record or submitting work.']),
+    ) + screen(
+        '<div class="m-h">MY LIB Help &amp; Search</div><div class="m-input" style="display:block">What would you like to do? e.g. send a fee request</div><div class="m-card" style="margin-top:2mm"><b>Manage fee requests and payments</b><div class="m-meta">HELP · ADMIN</div><p>Guidance for the fee workflow appears in the article view.</p><span class="m-btn p">Open this section</span></div>',
+        'Illustration of the Help & Search panel and a how-to result. Exact results depend on your role and access.',
+        'MY LIB · HELP & SEARCH'
     ) + h3('Chat, Support and direct contact') + g2(
         box('Inside the app', ['<b>Support</b>: report a problem and follow its status (Open, In Progress or Resolved). LIB can reply with a note.',
                                f'<b>Chat</b>: message {chat_who}']),
         box('Contact LIB', [f'WhatsApp / phone: {CONTACT["phone"]}', f'Email: {CONTACT["email"]}', f'Website: {CONTACT["web"]}']),
-    ) + '<p style="font-size:8.6pt;color:#6b6a66;margin-top:1mm">You only see information permitted for your login. If a menu or action is not available, your role or account permissions may not include it. Do not share your password in Chat or Support.</p>')
+    ) + h3('When reporting a problem') + bullets([
+        'Name the page or screen and the action you were trying to complete.',
+        'Describe what you expected and what actually happened. Copy the exact error message if one appeared.',
+        'Include when it happened and the steps that led to it. Attach a screenshot if the Support form offers an attachment option.',
+        '<b>Never include your password, OTP, full payment credentials or other secret information.</b>',
+    ]) + '<p style="font-size:8.6pt;color:#6b6a66;margin-top:1mm">You only see information permitted for your login. If a menu or action is not available, your role or account permissions may not include it. Do not share your password in Chat or Support.</p>')
