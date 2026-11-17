@@ -27559,7 +27559,7 @@ function regOriginalFormHtml(r) {
   const hasSnapshot = !!(r.original_submission && typeof r.original_submission === 'object');
   const p = hasSnapshot ? r.original_submission : {};
   const field = (key, fallback) => hasSnapshot ? p[key] : fallback;
-  const display = (v, emptyText = '— left blank —') => {
+  const display = (v, emptyText = (hasSnapshot ? '— left blank —' : '— not captured in this older record —')) => {
     if (Array.isArray(v)) return v.length ? v.join(', ') : '— none selected —';
     if (v === true) return 'Yes';
     if (v === false || v == null || String(v) === '') return emptyText;
