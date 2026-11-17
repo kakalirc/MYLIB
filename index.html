@@ -27567,11 +27567,11 @@ function regOriginalFormHtml(r) {
   };
   const gradeValue = field('grade_id', r.grade_id);
   const boardValue = field('board_id', r.board_id);
-  const gradeText = gradeValue === 'NA' ? 'Not Applicable / Not Available in list here' : (regGradeName(gradeValue) || gradeValue);
-  const boardText = regBoardName(boardValue) || boardValue;
+  const gradeText = hasSnapshot ? p.grade : (gradeValue === 'NA' ? 'Not Applicable / Not Available in list here' : (regGradeName(gradeValue) || gradeValue));
+  const boardText = hasSnapshot ? p.board : (regBoardName(boardValue) || boardValue);
   const subjects = field('subjects', r.subjects || []);
-  const mode = field('mode_preference', r.mode_preference);
-  const classType = field('class_type_preference', r.class_type_preference);
+  const mode = hasSnapshot ? field('mode_preference', '') : (r.mode_preference === 'Offline' ? 'At the centre (Offline)' : r.mode_preference === 'Both' ? 'Either' : r.mode_preference);
+  const classType = hasSnapshot ? field('class_type_preference', '') : (r.class_type_preference === 'Both' ? 'Not sure' : r.class_type_preference);
   const consent = field('consent', !!r.consent_at);
   const rows = [
     ["Student's full name", field('student_name', r.student_name)],
