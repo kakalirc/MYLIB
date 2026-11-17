@@ -27541,6 +27541,7 @@ function regGuessAcademicYear(kids) {
 }
 // Student page: what the family wrote on the registration form that has no place on the student record.
 let regOriginalOpenFor = '';
+let regProspectOriginalOpenFor = '';
 function regFromFormHtml(studentId) {
   const r = (data.registrations || []).find(x => x.student_id === studentId);
   if (!r) return '';
@@ -27741,6 +27742,7 @@ function regCardHtml(r) {
   const st = r.student_id ? data.students.find(s => s.id === r.student_id) : null;
   const when = r.created_at ? new Date(r.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
   const prefs = [r.mode_preference, r.class_type_preference].filter(Boolean).join(' · ');
+  const originalOpen = regProspectOriginalOpenFor === r.id;
   const line = (label, v) => v ? `<div><span class="hint">${label}:</span> ${v}</div>` : '';
   let action = '';
   if (r.status === 'New' && regAcceptId === r.id) {
@@ -27815,6 +27817,8 @@ function regCardHtml(r) {
         ${line('Address', esc(r.address || ''))}
         ${line('Heard from', esc(r.heard_from || ''))}
         ${r.note ? `<div style="margin-top:4px;border-left:3px solid var(--line);padding-left:8px">${esc(r.note)}</div>` : ''}
+        <div style="margin-top:8px"><button class="btn-small" onclick="regProspectOriginalOpenFor=regProspectOriginalOpenFor==='${r.id}'?'':'${r.id}';render()">${originalOpen ? 'Hide original registration form' : 'View original registration form'}</button></div>
+        ${originalOpen ? `<div style="margin-top:8px;padding:8px 10px;background:#f6f3ea;border:1px solid var(--line);border-radius:8px">${regOriginalFormHtml(r)}</div>` : ''}
         ${flags.length ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">${flags.map(f => `<span class="tag" style="background:#fdf3dc;color:#7a5a12">⚑ ${esc(f)}</span>`).join('')}</div>` : ''}
         ${action}
       </div>
