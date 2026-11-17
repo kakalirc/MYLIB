@@ -222,7 +222,18 @@ el('regForm').addEventListener('submit', function (e) {
     subjects: subjects, subject_other: subjectOther, mode_preference: picked('mode'), class_type_preference: picked('ctype'),
     parent_name: parent, parent_mobile: mobile, second_mobile: digits(el('second_mobile').value),
     email: el('email').value, address: el('address').value, heard_from: el('heard_from').value, note: el('note').value,
-    consent: el('consent').checked, website: el('website').value, elapsed_ms: Date.now() - openedAt
+    consent: el('consent').checked, website: el('website').value, elapsed_ms: Date.now() - openedAt,
+    original_form: {
+      student_name: el('student_name').value, grade: el('grade_id').selectedOptions[0] ? el('grade_id').selectedOptions[0].textContent : '',
+      board: el('board_id').selectedOptions[0] ? el('board_id').selectedOptions[0].textContent : '',
+      student_mobile: el('student_mobile').value, school: el('school').value, subjects: subjects, subject_other: subjectOther,
+      mode_preference: picked('mode') === 'Offline' ? 'At the centre (Offline)' : picked('mode') === 'Both' ? 'Either' : picked('mode'),
+      class_type_preference: picked('ctype') === 'Both' ? 'Not sure' : picked('ctype'),
+      parent_name: el('parent_name').value, parent_mobile: el('parent_mobile').value, second_mobile: el('second_mobile').value,
+      email: el('email').value, address: el('address').value,
+      heard_from: el('heard_from').selectedOptions[0] ? el('heard_from').selectedOptions[0].textContent : '',
+      note: el('note').value, consent: el('consent').checked
+    }
   } }).then(function (r) {
     if (!r || !r.ok) throw new Error((r && r.error) || 'Could not send the form.');
     if (r.already) el('doneText').textContent = 'We already have a form for ' + student + ' from this number. We will call or WhatsApp you soon.';
