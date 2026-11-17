@@ -2176,6 +2176,8 @@ let qbSourceEditId = '';
 let qbSourceMetaMsg = '';
 let qbSourceReviews = [];       // Admin-visible status history across all submissions
 let qbSourceLoading = false;
+let qbSourceLoaded = false;
+let qbSourceLoadPromise = null;
 let qbExtractionBusyIds = new Set();
 let qbExtractionResults = {};
 let qbExtractionReviewRows = {};
@@ -24458,6 +24460,11 @@ function renderAdminQuestionBank() {
 // ─────────────────────────────────────────────────────────────
 function renderTeacherQuestionBank(teacher) {
   if (qbLoading) return `<div class="card"><div class="empty">Loading question bank…</div></div>`;
+  // Past Papers is the teacher's first tab. Load its catalogue on first entry,
+  // not only after the teacher clicks the tab a second time.
+  if (qbSubTab === 'past' && !qbSourceLoaded && !qbSourceLoading) {
+    void loadQbSourcePapers(false);
+  }
 
   const pending = qbQuestions.filter(q => !q.archived && !q.approved);
   const approved = qbQuestions.filter(q => !q.archived && q.approved);
@@ -26077,18 +26084,71 @@ function qbExtractionReviewHtml(id) {
     + (state.stage === 'finished' ? '<div class="hint">This run has already been published.</div>' : '<button class="btn-small btn-primary" ' + (pending ? 'disabled' : '') + ' onclick="qbPublishExtractionRun(\'' + id + '\')">Publish approved items</button>')
     + '</div>';
 }
-async function loadQbSourcePapers() {
+async function loadQbSourcePapers(force = true) {
   if (!sb) return;
-  qbSourceLoading = true; render();
-  const { data: rows, error } = await sb.from('qb_source_papers').select('id, source_type, school_id, board_id, grade_id, subject_name, year, exam_type, medium, question_count, checksum, stored_pdf_url, source_url, status, uploaded_by, uploader_name, reviewed_by, reviewed_at, duplicate_override, duplicate_override_by, duplicate_override_at').order('year', { ascending: false });
-  qbSourceLoading = false;
-  if (error) { qbMsg = 'Could not load past papers: ' + error.message; qbSourcePapers = []; }
-  else qbSourcePapers = rows || [];
-  if (currentRole === 'Admin') {
-    const { data: history, error: historyError } = await sb.from('qb_source_paper_reviews').select('id,source_paper_id,from_status,to_status,reviewed_by,reviewer_name,reviewed_at').order('reviewed_at', { ascending: false }).limit(200);
-    qbSourceReviews = historyError ? [] : (history || []);
-  } else qbSourceReviews = [];
+  if (qbSourceLoadPromise) return qbSourceLoadPromise;
+  if (!force && qbSourceLoaded) return;
+
+  qbSourceLoading = true;
+  qbMsg = '';
   render();
+
+  qbSourceLoadPromise = (async () => {
+    let timeoutId = null;
+    try {
+      const request = sb.from('qb_source_papers')
+        .select('id, source_type, school_id, board_id, grade_id, subject_name, year, exam_type, medium, question_count, checksum, stored_pdf_url, source_url, status, uploaded_by, uploader_name, reviewed_by, reviewed_at, duplicate_override, duplicate_override_by, duplicate_override_at')
+        .order('year', { ascending: false });
+      const result = await Promise.race([
+        request,
+        new Promise((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error('Loading past papers timed out. Please try again.')), 15000);
+        })
+      ]);
+      if (result.error) throw result.error;
+      qbSourcePapers = result.data || [];
+      qbSourceLoaded = true;
+
+      if (currentRole === 'Admin') {
+        try {
+          const history = await Promise.race([
+            sb.from('qb_source_paper_reviews')
+              .select('id,source_paper_id,from_status,to_status,reviewed_by,reviewer_name,reviewed_at')
+              .order('reviewed_at', { ascending: false })
+              .limit(200),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Review history timed out.')), 15000))
+          ]);
+          qbSourceReviews = history.error ? [] : (history.data || []);
+        } catch (historyError) {
+          qbSourceReviews = [];
+        }
+      } else {
+        qbSourceReviews = [];
+      }
+    } catch (error) {
+      qbSourceLoaded = false;
+      qbSourcePapers = [];
+      qbMsg = 'Could not load past papers: ' + (error && error.message ? error.message : String(error));
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+      qbSourceLoading = false;
+      qbSourceLoadPromise = null;
+      try {
+        render();
+      } catch (renderError) {
+        console.error('Past Papers render failed after catalogue load', renderError);
+        const loadingNode = Array.from(document.querySelectorAll('.empty'))
+          .find(node => (node.textContent || '').trim() === 'Loading past papers…');
+        if (loadingNode) {
+          loadingNode.textContent = 'The papers loaded, but the list could not be displayed: '
+            + (renderError && renderError.message ? renderError.message : String(renderError));
+          loadingNode.setAttribute('role', 'alert');
+        }
+      }
+    }
+  })();
+
+  return qbSourceLoadPromise;
 }
 // stored_pdf_url may be a full Supabase storage URL (public or signed) or "bucket/path"; private files need a fresh signed link.
 function qbStorageRef(url) {
@@ -26444,18 +26504,14 @@ function qbSourcePaperEditHtml(p) {
 function qbSourcePapersHtml() {
   if (qbSourceLoading) return `<div class="empty">Loading past papers…</div>`;
   if (!qbSourcePapers.length) return `<div class="empty">No published past papers or your own submissions are available yet.</div>`;
-  if (currentRole === 'Teacher' && qbSourceApplied === null && !qbSourceFilter.subject) qbSourceFilter.subject = '__my_subjects__';
   const f = qbSourceFilter;
-  const teacherSubjectNames = currentRole === 'Teacher'
-    ? (data.subjects || []).filter(subject => String(subject.teacherId || '') === String(currentLinkedId || ''))
-      .map(subject => String(subject.name || '').trim().toLocaleLowerCase()).filter(Boolean)
-    : [];
-  const a = qbSourceApplied || (currentRole === 'Teacher'
-    ? { boardId: '', schoolId: '', gradeId: '', subject: '__my_subjects__', year: '' } : null);
+  // Teachers should see the published catalogue on first load. Do not silently
+  // filter it by a possibly incomplete teacher-subject mapping.
+  const a = qbSourceApplied || { boardId: '', schoolId: '', gradeId: '', subject: currentRole === 'Teacher' ? '__my_subjects__' : '', year: '' };
   const opts = (key, val, label) => [...new Map(qbSourcePapers.map(sp => [String(val(sp) ?? ''), label(sp)])).entries()]
     .filter(([v]) => v).sort((x, y) => key === 'year' ? y[0].localeCompare(x[0]) : String(x[1]).localeCompare(String(y[1]), undefined, { numeric: true }));
   const sel = (key, all, val, label) => `<select onchange="qbSourceFilter.${key}=this.value;${key === 'boardId' ? "qbSourceFilter.schoolId=''" : key === 'schoolId' ? "qbSourceFilter.boardId=''" : ''}"><option value="">${all}</option>
-    ${key === 'subject' && currentRole === 'Teacher' ? `<option value="__my_subjects__" ${f.subject === '__my_subjects__' ? 'selected' : ''}>My Subjects</option>` : ''}
+    ${key === 'subject' && currentRole === 'Teacher' ? `<option value="__my_subjects__" ${(f.subject || (currentRole === 'Teacher' ? '__my_subjects__' : '')) === '__my_subjects__' ? 'selected' : ''}>My Subjects</option>` : ''}
     ${opts(key, val, label).map(([v, l]) => `<option value="${escAttr(v)}" ${f[key] === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
   const filtersHtml = `<div class="row-form" style="flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center">
     ${sel('boardId', 'All boards', sp => sp.source_type === 'board' ? sp.board_id : '', sp => qbByName(boards, sp.board_id) || 'Unknown board')}
@@ -26464,15 +26520,27 @@ function qbSourcePapersHtml() {
     ${sel('subject', 'All subjects', sp => sp.subject_name, sp => sp.subject_name)}
     ${sel('year', 'All years', sp => sp.year, sp => String(sp.year))}
     <button class="btn-small" onclick="qbSourceApplied={...qbSourceFilter};render()">Apply filter</button>
-    ${a ? `<button class="btn-small" onclick="qbSourceFilter={boardId:'',schoolId:'',gradeId:'',subject:'',year:''};qbSourceApplied=null;render()">Clear</button>` : ''}
+    ${a ? `<button class="btn-small" onclick="qbSourceFilter={boardId:'',schoolId:'',gradeId:'',subject:currentRole==='Teacher'?'__my_subjects__':'',year:''};qbSourceApplied=null;render()">Clear</button>` : ''}
   </div>`;
   if (!a) return `<p class="hint" style="margin-bottom:12px">Published papers across all subjects, plus your own submissions awaiting review or rejected.</p>
     ${filtersHtml}<div class="empty">Choose filters and press Apply filter to see the papers.</div>`;
+  // Resolve the logged-in teacher's assigned subjects from the canonical subjects
+  // dataset (subjects.teacherId), not from a removed/undefined global variable.
+  const teacherSubjectNames = new Set(
+    (currentRole === 'Teacher' ? (data.subjects || []).filter(subjectRow =>
+      subjectRow.teacherId === currentLinkedId && !subjectRow.archived
+    ) : []).map(subjectRow =>
+      String(subjectRow.name || '').trim().toLocaleLowerCase()
+    ).filter(Boolean)
+  );
+  if (a.subject === '__my_subjects__' && !teacherSubjectNames.size) {
+    return filtersHtml + '<div class="empty">No subjects are currently assigned to your teacher profile. Please ask Admin to check your subject assignments.</div>';
+  }
   const match = sp => (!a.boardId || (sp.source_type === 'board' && sp.board_id === a.boardId))
     && (!a.schoolId || (sp.source_type === 'school' && sp.school_id === a.schoolId))
     && (!a.gradeId || sp.grade_id === a.gradeId)
     && (!a.subject || (a.subject === '__my_subjects__'
-      ? teacherSubjectNames.indexOf(String(sp.subject_name || '').trim().toLocaleLowerCase()) !== -1
+      ? teacherSubjectNames.has(String(sp.subject_name || '').trim().toLocaleLowerCase())
       : sp.subject_name === a.subject))
     && (!a.year || String(sp.year) === a.year);
   const list = qbSourcePapers.filter(match);
@@ -26499,9 +26567,9 @@ function qbSourcePapersHtml() {
       ].filter(Boolean).join(' · '));
     }
   });
-  const duplicateWarning = duplicateNotices.length
+  const duplicateWarning = currentRole === 'Teacher' ? '' : (duplicateNotices.length
     ? '<div style="padding:10px 12px;margin:0 0 12px;border:1px solid #d6a34a;border-radius:9px;background:rgba(214,163,74,.10)"><b>Possible duplicate papers grouped together</b><div class="hint" style="margin-top:4px">' + duplicateNotices.map(esc).join('<br>') + '</div><div class="hint" style="margin-top:4px">Papers with matching details are candidates for comparison, not confirmed duplicates. Matching file checksums identify exact file copies. Review the PDFs before deleting anything.</div></div>'
-    : '';
+    : '');
   const groups = new Map();
   list.forEach(sp => {
     const sourceName = sp.source_type === 'school' ? (qbByName(qbSchools, sp.school_id) || 'Unknown school') : (qbByName(boards, sp.board_id) || 'Unknown board');
@@ -26538,13 +26606,13 @@ function qbSourcePapersHtml() {
         const reference = duplicateReferenceById.get(sp.id);
         const referenceNumber = reference ? rows.findIndex(item => item.id === reference.id) + 1 : 0;
         const checksumMatch = !!(reference && sp.checksum && reference.checksum && String(sp.checksum) === String(reference.checksum));
-        const relationBadge = sp.duplicate_override
+        const relationBadge = currentRole === 'Teacher' ? '' : (sp.duplicate_override
           ? ' <span class="badge" style="background:rgba(75,155,112,.12);color:var(--forest)">Not a Duplicate</span>'
           : reference
             ? ' <span class="badge" style="background:rgba(214,163,74,.16);color:#805b16">' + (checksumMatch ? 'Exact file duplicate of Paper ' : 'Possible duplicate of Paper ') + referenceNumber + '</span>'
             : duplicateIds.has(sp.id)
               ? ' <span class="badge" style="background:rgba(75,155,112,.12);color:var(--forest)">Comparison reference · Paper ' + (index + 1) + '</span>'
-              : '';
+              : '');
         return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px">
         <span><b>Paper ${index + 1} · ${esc(String(sp.year || ''))}</b> ${esc(sp.exam_type || '')}${relationBadge}${sp.medium ? ` <span style="color:var(--muted);font-size:12px">· ${esc(sp.medium)}</span>` : ''}${sp.question_count ? ` <span style="color:var(--muted);font-size:12px">· ${esc(String(sp.question_count))} questions</span>` : ''}<br><span class="hint">${esc(sp.source_type === 'school' ? 'School: ' + (qbByName(qbSchools, sp.school_id) || 'Unknown school') : 'Board: ' + (qbByName(boards, sp.board_id) || 'Unknown board'))} · ${esc(sp.subject_name || '')} · ${esc(sp.uploader_name || 'Legacy upload')} · ${esc(sp.status || 'published')}</span></span>
         <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${sp.stored_pdf_url || sp.source_url ? `${currentRole === 'Admin' ? `<button type="button" class="btn-small" onclick="qbToggleSourcePaperPreview('${sp.id}')">${qbSourcePreviewOpenIds.has(sp.id) ? 'Hide preview' : 'Preview first page'}</button>` : ''}<button class="btn-small" onclick="qbOpenSourcePdf('${sp.id}')">⬇ Open PDF</button>` : '<span class="hint">No PDF</span>'}

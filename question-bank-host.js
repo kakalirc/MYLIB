@@ -7,9 +7,15 @@
   'use strict';
 
   const PREVIEW_LABEL = 'Preview new Question Bank module';
+  const DUPLICATE_SUMMARY_TITLE = 'possible duplicate papers grouped together';
+  const DUPLICATE_SUMMARY_EXPLANATION = 'papers with matching details are candidates for comparison';
 
   function isTeacher() {
     return typeof currentRole !== 'undefined' && String(currentRole).toLowerCase() === 'teacher';
+  }
+
+  function normaliseText(value) {
+    return String(value || '').replace(/\\s+/g, ' ').trim().toLowerCase();
   }
 
   function removePreviewLauncher(root) {
@@ -24,15 +30,18 @@
 
   function suppressTeacherDuplicateSummary(root) {
     if (!isTeacher() || !root || typeof root.querySelectorAll !== 'function') return;
-    root.querySelectorAll('h1,h2,h3,h4,strong,b').forEach((heading) => {
-      if ((heading.textContent || '').trim().toLowerCase() !== 'possible duplicate papers grouped together') return;
+
+    // Do not depend on the heading being a particular HTML tag. The live Question
+    // Bank renders this notice through generated markup, which can vary by view.
+    const candidates = Array.from(root.querySelectorAll('h1,h2,h3,h4,strong,b,[role="heading"],div,p,section,article'));
+    candidates.forEach((heading) => {
+      if (normaliseText(heading.textContent) !== DUPLICATE_SUMMARY_TITLE) return;
+
       let target = heading;
-      for (let depth = 0; depth < 7 && target.parentElement; depth += 1) {
+      for (let depth = 0; depth < 9 && target.parentElement; depth += 1) {
         target = target.parentElement;
-        const content = target.textContent || '';
-        if (content.includes('Papers with matching details are candidates for comparison')
-            && content.length < 1800
-            && target.querySelectorAll('button').length === 0) {
+        const content = normaliseText(target.textContent);
+        if (content.includes(DUPLICATE_SUMMARY_EXPLANATION) && content.length < 1800) {
           target.style.setProperty('display', 'none', 'important');
           target.setAttribute('aria-hidden', 'true');
           break;
@@ -42,35 +51,52 @@
   }
 
   let teacherQuestionBankWasVisible = false;
+
+  function isElementVisible(element) {
+    if (!element || !element.isConnected) return false;
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden'
+      && element.getClientRects().length > 0;
+  }
+
+  function findTeacherQuestionBank() {
+    const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4,[role="heading"]'))
+      .filter((node) => normaliseText(node.textContent) === 'question bank');
+
+    for (const heading of headings) {
+      let node = heading;
+      for (let depth = 0; depth < 9 && node; depth += 1, node = node.parentElement) {
+        if (!isElementVisible(node)) continue;
+        const tabs = Array.from(node.querySelectorAll('button,[role="tab"]'));
+        const pastPapersTab = tabs.find((tab) =>
+          normaliseText(tab.textContent) === 'past papers'
+        );
+        if (pastPapersTab) return { root: node, tabs, pastPapersTab };
+      }
+    }
+    return null;
+  }
+
   function selectTeacherPastPapersOnEntry() {
     if (!isTeacher()) {
       teacherQuestionBankWasVisible = false;
       return;
     }
-    const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4'))
-      .filter((node) => (node.textContent || '').trim().toLowerCase() === 'question bank');
-    let questionBankRoot = null;
-    for (const heading of headings) {
-      let node = heading;
-      for (let depth = 0; depth < 8 && node; depth += 1, node = node.parentElement) {
-        if ((node.textContent || '').toLowerCase().includes('past papers')) {
-          questionBankRoot = node;
-          break;
-        }
-      }
-      if (questionBankRoot) break;
-    }
-    if (!questionBankRoot) {
+
+    const questionBank = findTeacherQuestionBank();
+    if (!questionBank) {
       teacherQuestionBankWasVisible = false;
       return;
     }
-    const tabs = Array.from(questionBankRoot.querySelectorAll('button,[role="tab"]'));
-    const pastPapersTab = tabs.find((tab) => (tab.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase() === 'past papers');
-    if (!pastPapersTab || teacherQuestionBankWasVisible) return;
-    teacherQuestionBankWasVisible = true;
+
+    // Only choose the default when entering the Question Bank. Do not override a
+    // teacher's subsequent manual tab selection while they remain in this view.
+    if (teacherQuestionBankWasVisible) return;
+    const { pastPapersTab } = questionBank;
     const selected = pastPapersTab.getAttribute('aria-selected') === 'true'
       || pastPapersTab.classList.contains('active')
       || pastPapersTab.classList.contains('selected');
+    teacherQuestionBankWasVisible = true;
     if (!selected) pastPapersTab.click();
   }
 
