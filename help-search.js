@@ -265,9 +265,15 @@
     const candidates = [];
     nav.forEach(item => candidates.push({ key: item.key, title: item.label, label: 'Menu', help: 'Open this section of MY LIB.', terms: [] }));
     tasksForRole().forEach(task => {
-      const sectionTarget = task.title === 'Raise or send a fee request' ? 'raise-fees' : task.title === 'Manage demo bookings and conversions' ? '#demo-register-heading'
-        : task.title === 'Manage fee requests and payments' ? '#pendingFeeRequestsSection'
-        : null;
+      // Route help articles to the actual control/section, not just the parent tab.
+      // Keep these selectors tied to stable IDs in index.html.
+      const sectionTargets = {
+        'View earnings or download my salary slip': '#earningsReveal',
+        'Raise or send a fee request': 'raise-fees',
+        'Manage demo bookings and conversions': '#demo-register-heading',
+        'Manage fee requests and payments': '#pendingFeeRequestsSection'
+      };
+      const sectionTarget = sectionTargets[task.title] || null;
       if (task.helpOnly) candidates.push({ ...task, sectionTarget, label: 'Help', menuLabel: nav.find(item => item.key === task.key)?.label });
       else if (nav.some(item => item.key === task.key)) candidates.push({ ...task, sectionTarget, label: 'How to', menuLabel: nav.find(item => item.key === task.key).label });
     });
