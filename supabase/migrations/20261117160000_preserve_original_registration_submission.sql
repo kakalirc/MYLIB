@@ -82,7 +82,7 @@ begin
   end if;
 
   v_original := p->'original_form';
-  if jsonb_typeof(v_original) <> 'object' then
+  if coalesce(jsonb_typeof(v_original), '') <> 'object' then
     v_original := jsonb_build_object(
       'student_name', p->'student_name',
       'grade', p->'grade_id',
