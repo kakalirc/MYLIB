@@ -26507,11 +26507,11 @@ function qbSourcePapersHtml() {
   const f = qbSourceFilter;
   // Teachers should see the published catalogue on first load. Do not silently
   // filter it by a possibly incomplete teacher-subject mapping.
-  const a = qbSourceApplied || { boardId: '', schoolId: '', gradeId: '', subject: '', year: '' };
+  const a = qbSourceApplied || { boardId: '', schoolId: '', gradeId: '', subject: currentRole === 'Teacher' ? '__my_subjects__' : '', year: '' };
   const opts = (key, val, label) => [...new Map(qbSourcePapers.map(sp => [String(val(sp) ?? ''), label(sp)])).entries()]
     .filter(([v]) => v).sort((x, y) => key === 'year' ? y[0].localeCompare(x[0]) : String(x[1]).localeCompare(String(y[1]), undefined, { numeric: true }));
   const sel = (key, all, val, label) => `<select onchange="qbSourceFilter.${key}=this.value;${key === 'boardId' ? "qbSourceFilter.schoolId=''" : key === 'schoolId' ? "qbSourceFilter.boardId=''" : ''}"><option value="">${all}</option>
-    ${key === 'subject' && currentRole === 'Teacher' ? `<option value="__my_subjects__" ${f.subject === '__my_subjects__' ? 'selected' : ''}>My Subjects</option>` : ''}
+    ${key === 'subject' && currentRole === 'Teacher' ? `<option value="__my_subjects__" ${(f.subject || (currentRole === 'Teacher' ? '__my_subjects__' : '')) === '__my_subjects__' ? 'selected' : ''}>My Subjects</option>` : ''}
     ${opts(key, val, label).map(([v, l]) => `<option value="${escAttr(v)}" ${f[key] === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
   const filtersHtml = `<div class="row-form" style="flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center">
     ${sel('boardId', 'All boards', sp => sp.source_type === 'board' ? sp.board_id : '', sp => qbByName(boards, sp.board_id) || 'Unknown board')}
@@ -26520,7 +26520,7 @@ function qbSourcePapersHtml() {
     ${sel('subject', 'All subjects', sp => sp.subject_name, sp => sp.subject_name)}
     ${sel('year', 'All years', sp => sp.year, sp => String(sp.year))}
     <button class="btn-small" onclick="qbSourceApplied={...qbSourceFilter};render()">Apply filter</button>
-    ${a ? `<button class="btn-small" onclick="qbSourceFilter={boardId:'',schoolId:'',gradeId:'',subject:'',year:''};qbSourceApplied=null;render()">Clear</button>` : ''}
+    ${a ? `<button class="btn-small" onclick="qbSourceFilter={boardId:'',schoolId:'',gradeId:'',subject:currentRole==='Teacher'?'__my_subjects__':'',year:''};qbSourceApplied=null;render()">Clear</button>` : ''}
   </div>`;
   if (!a) return `<p class="hint" style="margin-bottom:12px">Published papers across all subjects, plus your own submissions awaiting review or rejected.</p>
     ${filtersHtml}<div class="empty">Choose filters and press Apply filter to see the papers.</div>`;
