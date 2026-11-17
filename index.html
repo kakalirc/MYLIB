@@ -26524,11 +26524,23 @@ function qbSourcePapersHtml() {
   </div>`;
   if (!a) return `<p class="hint" style="margin-bottom:12px">Published papers across all subjects, plus your own submissions awaiting review or rejected.</p>
     ${filtersHtml}<div class="empty">Choose filters and press Apply filter to see the papers.</div>`;
+  // Resolve the logged-in teacher's assigned subjects from the canonical subjects
+  // dataset (subjects.teacherId), not from a removed/undefined global variable.
+  const teacherSubjectNames = new Set(
+    (currentRole === 'Teacher' ? (data.subjects || []).filter(subjectRow =>
+      subjectRow.teacherId === currentLinkedId && !subjectRow.archived
+    ) : []).map(subjectRow =>
+      String(subjectRow.name || '').trim().toLocaleLowerCase()
+    ).filter(Boolean)
+  );
+  if (a.subject === '__my_subjects__' && !teacherSubjectNames.size) {
+    return filtersHtml + '<div class="empty">No subjects are currently assigned to your teacher profile. Please ask Admin to check your subject assignments.</div>';
+  }
   const match = sp => (!a.boardId || (sp.source_type === 'board' && sp.board_id === a.boardId))
     && (!a.schoolId || (sp.source_type === 'school' && sp.school_id === a.schoolId))
     && (!a.gradeId || sp.grade_id === a.gradeId)
     && (!a.subject || (a.subject === '__my_subjects__'
-      ? teacherSubjectNames.indexOf(String(sp.subject_name || '').trim().toLocaleLowerCase()) !== -1
+      ? teacherSubjectNames.has(String(sp.subject_name || '').trim().toLocaleLowerCase())
       : sp.subject_name === a.subject))
     && (!a.year || String(sp.year) === a.year);
   const list = qbSourcePapers.filter(match);
