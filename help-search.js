@@ -161,22 +161,28 @@
     return Array.from(found.values());
   }
   // Explicit in-page destinations for sections with stable IDs in the app.
-  const SECTION_TARGETS = { fees: '#pendingFeeRequestsSection' };
-  function scrollToSectionAfterNavigation(key) {
-    const selector = SECTION_TARGETS[key];
-    if (!selector) return;
+  function findHelpSectionTarget(target) {
+    if (!target) return null;
+    if (target === 'raise-fees') {
+      return Array.from(document.querySelectorAll('#app h2'))
+        .find(node => (node.textContent || '').trim().startsWith('Raise fee requests —')) || null;
+    }
+    return document.querySelector(target);
+  }
+  function scrollToSectionAfterNavigation(key, target) {
+    if (!target) return;
     let attempts = 0;
     const seek = () => {
-      const target = document.querySelector(selector);
-      if (target && isVisibleInCurrentPortal(target)) {
-        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const section = findHelpSectionTarget(target);
+      if (section && isVisibleInCurrentPortal(section)) {
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
       }
       if (++attempts < 20) window.setTimeout(seek, 100);
     };
     window.setTimeout(seek, 100);
   }
-  function navigate(key) {
+  function navigate(key, target) {
     if (key === 'chat' || key === 'support') {
       const label = key === 'chat' ? 'Chat' : 'Support';
       const button = Array.from(document.querySelectorAll('#app button, #app [role="button"]')).find(node => (node.textContent || '').trim().toLowerCase() === label.toLowerCase() && isVisibleInCurrentPortal(node));
@@ -194,7 +200,7 @@
     else if (/setTeacherPortalTab\(/.test(item.handler) && typeof window.setTeacherPortalTab === 'function') window.setTeacherPortalTab(key);
     else if (/setStudentPortalSection\(/.test(item.handler) && typeof window.setStudentPortalSection === 'function') window.setStudentPortalSection(key);
     else return;
-    scrollToSectionAfterNavigation(key);
+    scrollToSectionAfterNavigation(key, target);
   }
   const SEARCH_SYNONYMS = {
     fee: ['payment', 'pay', 'dues', 'tuition', 'invoice', 'charge'],
@@ -259,8 +265,11 @@
     const candidates = [];
     nav.forEach(item => candidates.push({ key: item.key, title: item.label, label: 'Menu', help: 'Open this section of MY LIB.', terms: [] }));
     tasksForRole().forEach(task => {
-      if (task.helpOnly) candidates.push({ ...task, label: 'Help', menuLabel: nav.find(item => item.key === task.key)?.label });
-      else if (nav.some(item => item.key === task.key)) candidates.push({ ...task, label: 'How to', menuLabel: nav.find(item => item.key === task.key).label });
+      const sectionTarget = task.title === 'Raise or send a fee request' ? 'raise-fees'
+        : task.title === 'Manage fee requests and payments' ? '#pendingFeeRequestsSection'
+        : null;
+      if (task.helpOnly) candidates.push({ ...task, sectionTarget, label: 'Help', menuLabel: nav.find(item => item.key === task.key)?.label });
+      else if (nav.some(item => item.key === task.key)) candidates.push({ ...task, sectionTarget, label: 'How to', menuLabel: nav.find(item => item.key === task.key).label });
     });
     const ranked = candidates.map(item => ({ item, score: rank(q, item) }))
       .filter(entry => entry.score > 0)
@@ -331,7 +340,7 @@
       const item = root.__helpRanked && root.__helpRanked[Number(button.getAttribute('data-help-index'))];
       if (!item) return;
       const article = root.querySelector('[data-help-article]');
-      const destination = item.menuLabel ? '<p class="lib-help-destination">Open section: <b>' + esc(item.menuLabel) + '</b></p><button type="button" class="lib-help-open" data-help-open="' + esc(key) + '">Open this section</button>' : '';
+      const destination = item.menuLabel ? '<p class="lib-help-destination">Open section: <b>' + esc(item.menuLabel) + '</b></p><button type="button" class="lib-help-open" data-help-open="' + esc(key) + '" data-help-target="' + esc(item.sectionTarget || '') + '">Open this section</button>' : '';
       article.innerHTML = '<div class="lib-help-article-head"><div><span class="lib-help-kicker">HELP ARTICLE · ' + esc(item.label || 'Help') + '</span><h3>' + esc(item.title) + '</h3></div><button type="button" class="lib-help-close" data-help-close aria-label="Close help article">×</button></div><p>' + esc(item.help || 'Follow the instructions on the relevant page.') + '</p>' + destination + '<div class="lib-help-feedback"><span>Was this guidance helpful?</span><button type="button" data-help-vote="yes">Yes</button><button type="button" data-help-vote="no">Not quite</button></div><p class="lib-help-feedback-note" data-help-feedback-note hidden></p><button type="button" class="lib-help-report" data-help-report>Report inaccurate guidance</button>';
       article.hidden = false;
       article.scrollIntoView({behavior:'smooth',block:'nearest'});
@@ -340,7 +349,7 @@
       const close = event.target.closest('[data-help-close]');
       if (close) { root.querySelector('[data-help-article]').hidden = true; return; }
       const open = event.target.closest('[data-help-open]');
-      if (open) { navigate(open.getAttribute('data-help-open')); return; }
+      if (open) { navigate(open.getAttribute('data-help-open'), open.getAttribute('data-help-target')); return; }
       const vote = event.target.closest('[data-help-vote]');
       if (vote) {
         const note = root.querySelector('[data-help-feedback-note]');
