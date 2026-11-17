@@ -15996,12 +15996,55 @@ function renderAttendanceRewardsMonitor() {
   </div>`;
 }
 
+// Admin Dashboard: live counts for records created or converted during the current India calendar day.
+let dashboardTodayStats = { date: '', loading: false, loaded: false, loadedAt: 0, students: null, registrations: null, demoConversions: null };
+function loadDashboardTodayStats() {
+  if (currentRole !== 'Admin') return;
+  if (dashboardTodayStats.date === todayStr && (dashboardTodayStats.loading || (dashboardTodayStats.loaded && Date.now() - dashboardTodayStats.loadedAt < 60000))) return;
+  dashboardTodayStats = { date: todayStr, loading: true, loaded: false, loadedAt: 0, students: null, registrations: null, demoConversions: null };
+  const dayStart = todayStr + 'T00:00:00+05:30';
+  const dayEnd = new Date(Date.parse(dayStart) + 86400000).toISOString();
+  Promise.all([
+    sb.from('students').select('id', { count: 'exact', head: true })
+      .gte('created_at', dayStart).lt('created_at', dayEnd).or('archived.is.null,archived.eq.false'),
+    sb.from('registrations').select('id', { count: 'exact', head: true })
+      .gte('created_at', dayStart).lt('created_at', dayEnd).or('archived.is.null,archived.eq.false'),
+    sb.from('demo_logs').select('id', { count: 'exact', head: true })
+      .eq('status', 'Converted').eq('converted_at', todayStr)
+  ]).then(([students, registrations, demos]) => {
+    if (dashboardTodayStats.date !== todayStr) return;
+    dashboardTodayStats.students = students.error ? null : (students.count || 0);
+    dashboardTodayStats.registrations = registrations.error ? null : (registrations.count || 0);
+    dashboardTodayStats.demoConversions = demos.error ? null : (demos.count || 0);
+    dashboardTodayStats.loading = false;
+    dashboardTodayStats.loaded = true;
+    dashboardTodayStats.loadedAt = Date.now();
+    if (students.error) console.warn('Dashboard new-student count unavailable:', students.error.message);
+    if (registrations.error) console.warn('Dashboard new-registration count unavailable:', registrations.error.message);
+    if (demos.error) console.warn('Dashboard demo-conversion count unavailable:', demos.error.message);
+    if (currentRole === 'Admin' && currentTab === 'dashboard') render();
+  }).catch(error => {
+    dashboardTodayStats.loading = false;
+    dashboardTodayStats.loaded = true;
+    dashboardTodayStats.loadedAt = Date.now();
+    console.warn('Dashboard today counts unavailable:', error && error.message ? error.message : error);
+    if (currentRole === 'Admin' && currentTab === 'dashboard') render();
+  });
+}
+
 function renderDashboard() {
   const todaysClasses = data.sessions.filter(s=>s.date===todayStr).reduce((a,s)=>a+s.count,0);
   const pendingFeeRequests = data.subscriptions.filter(s=>s.kind==='Request').length;
   const needingRenewal = countStudentsNeedingRenewal();
   const unreadChats = chatTotalUnread();
+  if (currentRole === 'Admin') loadDashboardTodayStats();
+  const todayStats = dashboardTodayStats.date === todayStr ? dashboardTodayStats : {};
   const cards = [
+    ...(currentRole === 'Admin' ? [
+      { num: todayStats.students == null ? '…' : todayStats.students, label: 'New students today', tab: 'students' },
+      { num: todayStats.registrations == null ? '…' : todayStats.registrations, label: 'New registrations today', tab: 'registrations' },
+      { num: todayStats.demoConversions == null ? '…' : todayStats.demoConversions, label: 'Demo conversions today', action: "wixBookingsFilter='Converted'; setTab('wixbookings')" },
+    ] : []),
     { num: todaysClasses, label: `Class${todaysClasses===1?'':'es'} logged today`, tab: 'log' },
     { num: pendingFeeRequests, label: `Pending fee request${pendingFeeRequests===1?'':'s'}`, action: "rptPendingOpen=true; setTab('fees'); setTimeout(()=>{ const el=document.getElementById('pendingFeeRequestsSection'); if(el) el.scrollIntoView({behavior:'smooth'}); },120)" },
     { num: needingRenewal, label: `Student${needingRenewal===1?'':'s'} needing renewal`, action: "rptRenewalOpen=true; setTab('fees'); setTimeout(()=>{ const el=document.getElementById('studentsNeedingRenewalSection'); if(el) el.scrollIntoView({behavior:'smooth'}); },120)" },
