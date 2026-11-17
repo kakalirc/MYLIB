@@ -341,4 +341,9 @@ def guide():
         ['Print my salary slip', 'My Attendance Report'],
         ['Report a problem', 'Support button'],
     ]))
+    g.add('visualwalkthrough', 'Quick reference', 'Pending actions at a glance', 'Illustrative screen layout showing how a teacher can start from work waiting for attention.', screen(
+        '<div class="m-h">Pending Action Items</div><div class="m-card l-gold"><b>Class timings to correct</b><div class="m-meta">PLACEHOLDER TIMES</div><span class="m-btn p">Open class</span></div><div class="m-card"><b>Homework and papers to review</b><div class="m-meta">STUDENT SUBMISSIONS</div><span class="m-btn">Review</span></div><div class="m-card"><b>Study plans to create</b><div class="m-meta">STUDENTS WITHOUT A PLAN</div><span class="m-btn">Open Study Plans</span></div>',
+        'Illustrative workflow diagram, not a live screenshot. The actual list depends on your assignments and pending work.',
+        'MY LIB · TEACHER'
+    ))
     return g
