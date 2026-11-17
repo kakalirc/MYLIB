@@ -109,6 +109,12 @@
     return Array.from(found.values());
   }
   function navigate(key) {
+    if (key === 'chat' || key === 'support') {
+      const label = key === 'chat' ? 'Chat' : 'Support';
+      const button = Array.from(document.querySelectorAll('#app button, #app [role="button"]')).find(node => (node.textContent || '').trim().toLowerCase() === label.toLowerCase() && isVisibleInCurrentPortal(node));
+      if (button) button.click();
+      return;
+    }
     const items = getNavItems();
     const item = items.find(entry => entry.key === key);
     if (!item) return;
