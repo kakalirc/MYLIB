@@ -27409,7 +27409,7 @@ function regFlags(r) {
   const same = data.students.find(s => !s.archived && s.name.trim().toLowerCase() === (r.student_name || '').trim().toLowerCase() && kids.includes(s));
   if (same) flags.push(`${same.name} is already a student (${same.code || 'no code'})`);
   const keys = new Set(regPhones(r));
-  (data.wixBookings || []).filter(b => keys.has(phoneKey(b.phone))).forEach(b => flags.push(`Had a demo booking on ${dayDate((b.submittedAt || '').slice(0, 10))} (${b.status})`));
+  (data.wixBookings || []).filter(b => keys.has(phoneKey(b.phone))).forEach(b => flags.push(`Had a demo booking on ${dayDate(b.scheduledDate || (b.submittedAt || '').slice(0, 10))} (${b.status})`));
   const n = (data.registrations || []).filter(x => x.parent_mobile === r.parent_mobile).length;
   if (n > 1) flags.push(`${n} forms from this mobile`);
   return flags;
