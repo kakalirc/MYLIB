@@ -181,10 +181,20 @@
     mount();
     const app = document.getElementById('app');
     if (!app || window.__libHelpSearchObserver) return;
-    window.__libHelpSearchObserver = new MutationObserver(() => {
-      if (!app.querySelector('#lib-help-search')) mount();
+    window.__libHelpSearchObserver = new MutationObserver(records => {
+      if (!app.querySelector('#lib-help-search')) { mount(); return; }
+      const root = app.querySelector('#lib-help-search');
+      const portalChanged = records.some(record => {
+        const target = record.target && (record.target.nodeType === 1 ? record.target : record.target.parentElement);
+        return target && !root.contains(target) && !(target.closest && target.closest('#lib-help-search'));
+      });
+      if (portalChanged) {
+        refreshQuickActions(root);
+        const input = root.querySelector('[data-help-input]');
+        if (input && input.value.trim()) renderResults(root, input.value);
+      }
     });
-    window.__libHelpSearchObserver.observe(app, { childList: true, subtree: true });
+    window.__libHelpSearchObserver.observe(app, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'aria-hidden'] });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
   else start();
