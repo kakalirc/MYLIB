@@ -215,11 +215,11 @@ el('regForm').addEventListener('submit', function (e) {
     : !el('consent').checked ? 'Please tick the box to agree to the Terms and Privacy Policy.' : '';
   if (problem) { err.textContent = problem; return; }
   var subjects = [].map.call(document.querySelectorAll('input[name="subject"]:checked'), function (c) { return c.value; });
-  if (el('subject_other').value.trim()) subjects.push(el('subject_other').value.trim());
+  var subjectOther = el('subject_other').value;
   var btn = el('sendBtn'); btn.disabled = true; btn.textContent = 'Sending…';
   rpc('submit_registration', { p: {
     student_name: student, grade_id: el('grade_id').value, board_id: el('board_id').value, school: el('school').value, student_mobile: digits(el('student_mobile').value),
-    subjects: subjects, mode_preference: picked('mode'), class_type_preference: picked('ctype'),
+    subjects: subjects, subject_other: subjectOther, mode_preference: picked('mode'), class_type_preference: picked('ctype'),
     parent_name: parent, parent_mobile: mobile, second_mobile: digits(el('second_mobile').value),
     email: el('email').value, address: el('address').value, heard_from: el('heard_from').value, note: el('note').value,
     consent: el('consent').checked, website: el('website').value, elapsed_ms: Date.now() - openedAt
