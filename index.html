@@ -24468,7 +24468,7 @@ function renderTeacherQuestionBank(teacher) {
     <div class="stat-card"><div class="num ${approved.length===0?'zero':''}">${approved.length}</div><div class="label">Approved for use</div></div>
   </div>`;
 
-  const subTabsHtml = `<div class="tabs" style="margin-bottom:16px">
+  const subTabsHtml = `<div class="tabs qb-sub-tabs" style="margin-bottom:16px">
     <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Review Queue ${pending.length?`<span style="background:var(--brick);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${pending.length}</span>`:''}
     </div>
