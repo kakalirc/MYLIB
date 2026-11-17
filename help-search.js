@@ -163,7 +163,7 @@
     root.id = 'lib-help-search';
     root.setAttribute('aria-label', 'MY LIB Help and Search');
     root.innerHTML = `
-      <div class="lib-help-head"><div><strong>MY LIB Help &amp; Search</strong><span>Find a feature or learn how to do something</span></div><span class="lib-help-free">No AI · No API cost</span></div>
+      <div class="lib-help-head"><div><strong>MY LIB Help &amp; Search</strong><span>Find a feature or learn how to do something</span></div></div>
       <div class="lib-help-input-wrap"><span aria-hidden="true">⌕</span><input type="search" autocomplete="off" placeholder="What would you like to do? e.g. send a fee request" aria-label="Search MY LIB features and help" data-help-input><button type="button" data-help-clear aria-label="Clear search">×</button></div>
       <div class="lib-help-quick" data-help-quick></div>
       <div class="lib-help-results" data-help-results><div class="lib-help-hint">Search menu options or describe what you want to do.</div></div>`;
@@ -197,11 +197,11 @@
     style.textContent = `
       #lib-help-search{margin:0 0 16px;padding:13px 16px 12px;background:var(--paper,#fbf9f3);border:1px solid var(--line,#ded5bd);border-radius:10px;box-shadow:var(--card-shadow,0 1px 2px rgba(0,0,0,.05));}
       .lib-help-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:9px}.lib-help-head strong{display:block;font-family:'Zilla Slab',serif;font-size:17px;color:var(--forest,#3c5e42)}.lib-help-head span{display:block;font-size:12px;color:var(--muted,#7c7461);margin-top:2px}
-      .lib-help-free{flex-shrink:0;padding:4px 8px;border-radius:20px;background:#e7eee5;color:#385c3f!important;font-size:10px!important;font-weight:700;white-space:nowrap}
+      
       .lib-help-input-wrap{display:flex;align-items:center;gap:9px;border:1px solid var(--line,#ded5bd);border-radius:8px;background:#fff;padding:0 10px;min-height:43px}.lib-help-input-wrap>span{font-size:23px;color:var(--muted,#7c7461)}.lib-help-input-wrap input{flex:1;min-width:0;border:0!important;outline:none!important;box-shadow:none!important;background:transparent!important;color:var(--ink,#232a24)!important;font:14px 'Work Sans',sans-serif!important;padding:10px 0!important}.lib-help-input-wrap button{border:0;background:transparent;color:var(--muted,#7c7461);font-size:22px;cursor:pointer}
       .lib-help-quick{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}.lib-help-quick button{border:1px solid var(--line,#ded5bd);background:transparent;color:var(--forest,#3c5e42);border-radius:20px;padding:5px 9px;font:600 11px 'Work Sans',sans-serif;cursor:pointer}.lib-help-quick button:hover{background:#e7eee5}
       .lib-help-results{display:grid;gap:6px;margin-top:9px}.lib-help-hint,.lib-help-empty{font-size:12px;color:var(--muted,#7c7461);padding:4px 1px}.lib-help-result{width:100%;display:flex;align-items:center;gap:10px;text-align:left;padding:10px 11px;border:1px solid var(--line,#ded5bd);border-radius:8px;background:#fff;color:var(--ink,#232a24);cursor:pointer}.lib-help-result:hover{border-color:var(--forest,#3c5e42);background:#f8faf6}.lib-help-result-main{display:block;min-width:0;flex:1}.lib-help-result-main strong{display:block;font-size:13px}.lib-help-result-main small{display:block;font-size:11px;line-height:1.45;color:var(--muted,#7c7461);margin-top:3px}.lib-help-result-type{font-size:10px;font-weight:700;color:var(--forest,#3c5e42);white-space:nowrap}.lib-help-arrow{font-size:17px;color:var(--forest,#3c5e42)}
-      @media(max-width:600px){#lib-help-search{padding:11px 10px}.lib-help-head strong{font-size:15px}.lib-help-free{font-size:9px!important}.lib-help-result{align-items:flex-start}.lib-help-result-type{font-size:9px}}
+      @media(max-width:600px){#lib-help-search{padding:11px 10px}.lib-help-head strong{font-size:15px}.lib-help-result{align-items:flex-start}.lib-help-result-type{font-size:9px}}
     `;
     document.head.appendChild(style);
   }
