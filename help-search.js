@@ -139,6 +139,7 @@
       <div class="lib-help-quick" data-help-quick></div>
       <div class="lib-help-results" data-help-results><div class="lib-help-hint">Search menu options or describe what you want to do.</div></div>`;
     topbar.insertAdjacentElement('afterend', root);
+    refreshQuickActions(root);
     const input = root.querySelector('[data-help-input]');
     input.addEventListener('input', () => {
       root.querySelector('[data-help-quick]').hidden = !!input.value.trim();
