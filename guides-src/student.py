@@ -1,5 +1,5 @@
 """Student guide wording."""
-from guide import Guide, steps, note, table, chips, box, g2, g3, h3, bullets
+from guide import Guide, steps, note, table, chips, box, g2, g3, h3, bullets, screen
 import common, practice
 
 
@@ -174,4 +174,9 @@ def guide():
         ['Change colours', 'Theme dots on the welcome banner'],
         ['Report a problem', 'Support button'],
     ]))
+    g.add('visualwalkthrough', 'Quick reference', 'Practice paper at a glance', 'Illustrative screen layout for opening, completing and submitting a teacher-assigned paper.', screen(
+        '<div class="m-h">Practice Papers</div><div class="m-card"><b>Kannada · Class 10 · Paper 1</b><div class="m-meta">DUE DATE · STATUS</div><span class="m-btn p">Start / Continue</span></div><div class="m-card"><b>Section 1 · Multiple choice</b><div class="m-opt on">A. Example answer</div><div class="m-opt">B. Another answer</div><div class="m-btns"><span class="m-btn">Previous</span><span class="m-btn p">Next section →</span></div></div><div class="m-card"><b>Final section</b><span class="m-btn g">Submit paper</span></div>',
+        'Illustrative workflow diagram, not a live screenshot. The real paper content and sections are set by the teacher.',
+        'MY LIB · STUDENT'
+    ))
     return g

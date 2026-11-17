@@ -16668,7 +16668,7 @@ function renderFees() {
             : '';
         const dMonthLabel=monthLabelOf(dMonth);
         const ord=n=>n+(n===1?'st':n===2?'nd':n===3?'rd':'th');
-        return `<h2>Raise fee requests — ${dMonthLabel} ${helpBtn('raise-fees')}</h2>
+        return `<h2 id="raiseFeeRequestsSection">Raise fee requests — ${dMonthLabel} ${helpBtn('raise-fees')}</h2>
           <div class="hint" style="margin-bottom:6px">Raises one fee request per student, subject and class type (Group / Individual) for the selected month. How many classes depends on the saved class frequency, the last valid payment, current balance, and teacher-leave adjustments. Amount is from Fee setup less the bulk discount (best tier of the request, the child's subjects added up, or the whole family added up). Every request keeps its working, so you can answer any question about it later.</div>
           <details style="margin:8px 0;padding:8px 10px;border:1px solid var(--line);border-radius:8px"><summary style="cursor:pointer;font-weight:700">Rules (click to expand)</summary><div class="hint"><ul style="margin:8px 0 0 16px;padding:0">
             <li><b>Preview</b> works any day and saves nothing. <b>Confirm</b> works from the <b>25th of the month before to the 7th</b> of the month (e.g. November's requests: 25 Oct – 7 Nov). Raised before the 1st, the classes the student will still use this month are taken off what is left. Can only be run <b>once per month</b>; use Reset to remove and re-run.</li>

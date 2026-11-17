@@ -1,5 +1,5 @@
 """Parent guide wording."""
-from guide import Guide, steps, note, table, chips, box, g2, g3, h3, bullets
+from guide import Guide, steps, note, table, chips, box, g2, g3, h3, bullets, screen
 import common, practice
 
 
@@ -123,4 +123,9 @@ def guide():
         ['Switch child', 'Selector at the top'],
         ['Report a problem', 'Support button'],
     ]))
+    g.add('visualwalkthrough', 'Quick reference', 'Family fee view at a glance', 'Illustrative screen layout for checking a child’s fee request and payment history.', screen(
+        '<div class="m-h">Fee Requests</div><div class="m-card"><b>Viewing: Your child</b><div class="m-meta">SELECT CHILD IF MORE THAN ONE IS LINKED</div></div><div class="m-card"><b>Monthly fee request</b><div class="m-meta">SUBJECT · CLASSES · AMOUNT</div><div class="m-btns"><span class="m-btn p">Pay ₹…</span><span class="m-btn">Payment details</span></div></div><div class="m-card"><b>Payment history</b><div class="m-meta">CONFIRMED PAYMENTS</div><span class="m-btn">Receipt</span></div>',
+        'Illustrative workflow diagram, not a live screenshot. Your family’s actual requests and payment status appear in the app.',
+        'MY LIB · PARENT'
+    ))
     return g
