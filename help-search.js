@@ -241,7 +241,7 @@
     const candidates = [];
     nav.forEach(item => candidates.push({ key: item.key, title: item.label, label: 'Menu', help: 'Open this section of MY LIB.', terms: [] }));
     tasksForRole().forEach(task => {
-      if (task.helpOnly) candidates.push({ ...task, label: 'Help' });
+      if (task.helpOnly) candidates.push({ ...task, label: 'Help', menuLabel: nav.find(item => item.key === task.key)?.label });
       else if (nav.some(item => item.key === task.key)) candidates.push({ ...task, label: 'How to', menuLabel: nav.find(item => item.key === task.key).label });
     });
     const ranked = candidates.map(item => ({ item, score: rank(q, item) }))
