@@ -178,21 +178,54 @@
     else if (/setTeacherPortalTab\(/.test(item.handler) && typeof window.setTeacherPortalTab === 'function') window.setTeacherPortalTab(key);
     else if (/setStudentPortalSection\(/.test(item.handler) && typeof window.setStudentPortalSection === 'function') window.setStudentPortalSection(key);
   }
+  const SEARCH_SYNONYMS = {
+    fee: ['payment', 'pay', 'dues', 'tuition', 'invoice', 'charge'],
+    payment: ['fee', 'pay', 'razorpay', 'upi', 'receipt'],
+    attendance: ['present', 'absent', 'class log', 'register'],
+    schedule: ['timetable', 'calendar', 'class time', 'timing'],
+    homework: ['assignment', 'work', 'submission'],
+    question: ['paper', 'exam', 'worksheet', 'practice'],
+    login: ['sign in', 'password', 'account', 'access'],
+    problem: ['issue', 'error', 'bug', 'not working', 'failed'],
+    support: ['help', 'complaint', 'report', 'ticket'],
+    registration: ['admission', 'enquiry', 'prospect', 'application'],
+    teacher: ['tutor', 'faculty', 'instructor'],
+    student: ['learner', 'child', 'pupil'],
+    parent: ['guardian', 'family'],
+    salary: ['payroll', 'earnings', 'payslip'],
+    report: ['export', 'download', 'excel', 'statement']
+  };
+  function editDistance(a, b) {
+    if (Math.abs(a.length - b.length) > 2) return 3;
+    let prev = Array.from({length:b.length + 1}, (_,i) => i);
+    for (let i=1;i<=a.length;i++) {
+      const row=[i];
+      for (let j=1;j<=b.length;j++) row[j]=Math.min(row[j-1]+1,prev[j]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));
+      prev=row;
+    }
+    return prev[b.length];
+  }
   function rank(query, item) {
     const q = normal(query);
     const title = normal(item.title);
     const label = normal(item.label || '');
     const terms = [title, label].concat(item.terms || []).map(normal);
     if (!q) return 0;
+    const queryTokens = q.split(' ').filter(Boolean);
+    const expanded = queryTokens.concat(queryTokens.flatMap(token => SEARCH_SYNONYMS[token] || []));
     let score = 0;
     terms.forEach(term => {
       if (!term) return;
-      if (term === q) score = Math.max(score, 100);
-      else if (term.includes(q)) score = Math.max(score, 80);
-      else if (q.includes(term) && term.length > 3) score = Math.max(score, 65);
-      const tokens = q.split(' ').filter(Boolean);
-      const hits = tokens.filter(token => term.includes(token)).length;
-      if (tokens.length && hits) score = Math.max(score, Math.round(45 * hits / tokens.length));
+      if (term === q) score = Math.max(score, 110);
+      else if (term.includes(q)) score = Math.max(score, 90);
+      else if (q.includes(term) && term.length > 3) score = Math.max(score, 70);
+      const tokens = term.split(' ').filter(Boolean);
+      const hits = expanded.filter(token => tokens.some(word => word === token || (token.length > 3 && word.startsWith(token))));
+      if (expanded.length && hits.length) score = Math.max(score, Math.round(58 * hits.length / expanded.length));
+      if (queryTokens.length === 1 && q.length >= 4) {
+        const near = tokens.some(word => word.length >= 4 && editDistance(q, word) <= 1);
+        if (near) score = Math.max(score, 42);
+      }
     });
     return score;
   }
@@ -219,15 +252,16 @@
       results.innerHTML = '<div class="lib-help-empty">No matching menu or task found. Try a shorter term, such as “fees”, “attendance” or “student”.</div>';
       return;
     }
-    results.innerHTML = ranked.map(({item}) => `
-      <button type="button" class="lib-help-result" data-help-key="${esc(item.key)}">
+    results.innerHTML = ranked.map(({item}, index) => `
+      <button type="button" class="lib-help-result" data-help-action="${item.label === 'Menu' ? 'navigate' : 'article'}" data-help-key="${esc(item.key)}" data-help-index="${index}">
         <span class="lib-help-result-main">
           <strong>${esc(item.title)}</strong>
           <small>${esc(item.help)}${item.menuLabel ? ' Destination: ' + esc(item.menuLabel) + '.' : ''}</small>
         </span>
         <span class="lib-help-result-type">${esc(item.label)}</span>
-        <span class="lib-help-arrow" aria-hidden="true">→</span>
+        <span class="lib-help-arrow" aria-hidden="true">${item.label === 'Menu' ? '→' : '›'}</span>
       </button>`).join('');
+    root.__helpRanked = ranked.map(entry => entry.item);
   }
   function refreshQuickActions(root) {
     const quick = root && root.querySelector("[data-help-quick]");
@@ -251,7 +285,8 @@
       <div class="lib-help-head"><div><strong>MY LIB Help &amp; Search</strong><span>Find a feature or learn how to do something</span></div></div>
       <div class="lib-help-input-wrap"><span aria-hidden="true">⌕</span><input type="search" autocomplete="off" placeholder="What would you like to do? e.g. send a fee request" aria-label="Search MY LIB features and help" data-help-input><button type="button" data-help-clear aria-label="Clear search">×</button></div>
       <div class="lib-help-quick" data-help-quick></div>
-      <div class="lib-help-results" data-help-results><div class="lib-help-hint">Search menu options or describe what you want to do.</div></div>`;
+      <div class="lib-help-results" data-help-results><div class="lib-help-hint">Search menu options or describe what you want to do.</div></div>
+      <section class="lib-help-article" data-help-article hidden aria-live="polite"></section>`;
     topbar.insertAdjacentElement('afterend', root);
     refreshQuickActions(root);
     const input = root.querySelector('[data-help-input]');
@@ -271,8 +306,32 @@
       renderResults(root, input.value);
     });
     root.querySelector('[data-help-results]').addEventListener('click', event => {
-      const button = event.target.closest('[data-help-key]');
-      if (button) navigate(button.getAttribute('data-help-key'));
+      const button = event.target.closest('[data-help-action]');
+      if (!button) return;
+      const key = button.getAttribute('data-help-key');
+      if (button.getAttribute('data-help-action') === 'navigate') { navigate(key); return; }
+      const item = root.__helpRanked && root.__helpRanked[Number(button.getAttribute('data-help-index'))];
+      if (!item) return;
+      const article = root.querySelector('[data-help-article]');
+      const destination = item.menuLabel ? '<p class="lib-help-destination">Open section: <b>' + esc(item.menuLabel) + '</b></p><button type="button" class="lib-help-open" data-help-open="' + esc(key) + '">Open this section</button>' : '';
+      article.innerHTML = '<div class="lib-help-article-head"><div><span class="lib-help-kicker">HELP ARTICLE · ' + esc(item.label || 'Help') + '</span><h3>' + esc(item.title) + '</h3></div><button type="button" class="lib-help-close" data-help-close aria-label="Close help article">×</button></div><p>' + esc(item.help || 'Follow the instructions on the relevant page.') + '</p>' + destination + '<div class="lib-help-feedback"><span>Was this guidance helpful?</span><button type="button" data-help-vote="yes">Yes</button><button type="button" data-help-vote="no">Not quite</button></div><p class="lib-help-feedback-note" data-help-feedback-note hidden></p><button type="button" class="lib-help-report" data-help-report>Report inaccurate guidance</button>';
+      article.hidden = false;
+      article.scrollIntoView({behavior:'smooth',block:'nearest'});
+    });
+    root.querySelector('[data-help-article]').addEventListener('click', event => {
+      const close = event.target.closest('[data-help-close]');
+      if (close) { root.querySelector('[data-help-article]').hidden = true; return; }
+      const open = event.target.closest('[data-help-open]');
+      if (open) { navigate(open.getAttribute('data-help-open')); return; }
+      const vote = event.target.closest('[data-help-vote]');
+      if (vote) {
+        const note = root.querySelector('[data-help-feedback-note]');
+        note.textContent = vote.getAttribute('data-help-vote') === 'yes' ? 'Thank you for your feedback.' : 'Thank you. Please use Support to tell us what needs correcting.';
+        note.hidden = false;
+        return;
+      }
+      const report = event.target.closest('[data-help-report]');
+      if (report) navigate('support');
     });
   }
   function addStyles() {
@@ -286,6 +345,7 @@
       .lib-help-input-wrap{display:flex;align-items:center;gap:9px;border:1px solid var(--line,#ded5bd);border-radius:8px;background:#fff;padding:0 10px;min-height:43px}.lib-help-input-wrap>span{font-size:23px;color:var(--muted,#7c7461)}.lib-help-input-wrap input{flex:1;min-width:0;border:0!important;outline:none!important;box-shadow:none!important;background:transparent!important;color:var(--ink,#232a24)!important;font:14px 'Work Sans',sans-serif!important;padding:10px 0!important}.lib-help-input-wrap button{border:0;background:transparent;color:var(--muted,#7c7461);font-size:22px;cursor:pointer}
       .lib-help-quick{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}.lib-help-quick button{border:1px solid var(--line,#ded5bd);background:transparent;color:var(--forest,#3c5e42);border-radius:20px;padding:5px 9px;font:600 11px 'Work Sans',sans-serif;cursor:pointer}.lib-help-quick button:hover{background:#e7eee5}
       .lib-help-results{display:grid;gap:6px;margin-top:9px}.lib-help-hint,.lib-help-empty{font-size:12px;color:var(--muted,#7c7461);padding:4px 1px}.lib-help-result{width:100%;display:flex;align-items:center;gap:10px;text-align:left;padding:10px 11px;border:1px solid var(--line,#ded5bd);border-radius:8px;background:#fff;color:var(--ink,#232a24);cursor:pointer}.lib-help-result:hover{border-color:var(--forest,#3c5e42);background:#f8faf6}.lib-help-result-main{display:block;min-width:0;flex:1}.lib-help-result-main strong{display:block;font-size:13px}.lib-help-result-main small{display:block;font-size:11px;line-height:1.45;color:var(--muted,#7c7461);margin-top:3px}.lib-help-result-type{font-size:10px;font-weight:700;color:var(--forest,#3c5e42);white-space:nowrap}.lib-help-arrow{font-size:17px;color:var(--forest,#3c5e42)}
+      .lib-help-article{margin-top:10px;padding:13px;border:1px solid var(--forest,#3c5e42);border-radius:9px;background:#fff}.lib-help-article-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.lib-help-kicker{font-size:9px;font-weight:700;letter-spacing:.08em;color:var(--forest,#3c5e42)}.lib-help-article h3{margin:3px 0 8px;font-size:15px;color:var(--ink,#232a24)}.lib-help-article p{font-size:13px;line-height:1.55;color:var(--ink,#232a24);margin:0 0 10px}.lib-help-close{border:0;background:transparent;font-size:22px;cursor:pointer;color:var(--muted,#7c7461)}.lib-help-destination{font-size:12px!important;color:var(--muted,#7c7461)!important}.lib-help-open,.lib-help-report{border:1px solid var(--forest,#3c5e42);background:var(--forest,#3c5e42);color:#fff;border-radius:6px;padding:7px 11px;font-weight:600;cursor:pointer}.lib-help-report{background:transparent;color:var(--forest,#3c5e42);margin-top:8px}.lib-help-feedback{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding-top:9px;border-top:1px solid var(--line,#ded5bd);font-size:11px;color:var(--muted,#7c7461)}.lib-help-feedback button{border:1px solid var(--line,#ded5bd);background:#fff;border-radius:16px;padding:4px 9px;cursor:pointer}.lib-help-article .lib-help-feedback-note{margin:8px 0 0;font-size:11px;color:var(--forest,#3c5e42)}
       @media(max-width:600px){#lib-help-search{padding:11px 10px}.lib-help-head strong{font-size:15px}.lib-help-result{align-items:flex-start}.lib-help-result-type{font-size:9px}}
     `;
     document.head.appendChild(style);
