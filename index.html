@@ -169,6 +169,16 @@ if (location.hostname !== 'app.libeducation.com') {
   .stat-card .num { font-family: 'Zilla Slab', serif; font-size: 32px; font-weight: 700; color: var(--ink); line-height: 1; }
   .stat-card .num.zero { color: var(--muted); }
   .stat-card .label { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .stat-card .period-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 12px; }
+  .stat-card .period-metric { min-width: 0; padding: 9px 5px 8px; text-align: center; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; }
+  .stat-card .period-value { font-family: 'Zilla Slab', serif; font-size: 23px; font-weight: 700; line-height: 1.1; color: var(--ink); }
+  .stat-card .period-name { margin-top: 4px; font-size: 10px; line-height: 1.2; color: var(--muted); text-transform: uppercase; letter-spacing: .035em; }
+  @media (max-width: 420px) {
+    .stat-card .period-metrics { gap: 4px; }
+    .stat-card .period-metric { padding: 8px 2px 7px; }
+    .stat-card .period-value { font-size: 20px; }
+    .stat-card .period-name { font-size: 9px; }
+  }
   /* Reusable copy-to-clipboard button */
   .btn-copy { background: transparent; border: 1px solid var(--line); color: var(--muted); font-size: 11.5px; padding: 3px 8px; border-radius: 5px; cursor: pointer; }
   .btn-copy:hover { border-color: var(--brick); color: var(--brick); }
@@ -16068,9 +16078,9 @@ function renderDashboard() {
   const todayStats = dashboardTodayStats.date === todayStr ? dashboardTodayStats : {};
   const cards = [
     ...(currentRole === 'Admin' ? [
-      { num: todayStats.students == null ? '…' : todayStats.students, detail: `This week: ${todayStats.studentsWeek == null ? '…' : todayStats.studentsWeek} · This month: ${todayStats.studentsMonth == null ? '…' : todayStats.studentsMonth}`, label: 'New students', tab: 'students' },
-      { num: todayStats.registrations == null ? '…' : todayStats.registrations, detail: `This week: ${todayStats.registrationsWeek == null ? '…' : todayStats.registrationsWeek} · This month: ${todayStats.registrationsMonth == null ? '…' : todayStats.registrationsMonth}`, label: 'New registrations', tab: 'registrations' },
-      { num: todayStats.demoConversions == null ? '…' : todayStats.demoConversions, detail: `This week: ${todayStats.demoConversionsWeek == null ? '…' : todayStats.demoConversionsWeek} · This month: ${todayStats.demoConversionsMonth == null ? '…' : todayStats.demoConversionsMonth}`, label: 'Demo conversions', action: "wixBookingsFilter='Converted'; setTab('wixbookings')" },
+      { label: 'New Students Today', periods: [['Today', todayStats.students], ['This Week', todayStats.studentsWeek], ['This Month', todayStats.studentsMonth]], tab: 'students' },
+      { label: 'New Registrations Today', periods: [['Today', todayStats.registrations], ['This Week', todayStats.registrationsWeek], ['This Month', todayStats.registrationsMonth]], tab: 'registrations' },
+      { label: 'Demo Conversions Today', periods: [['Today', todayStats.demoConversions], ['This Week', todayStats.demoConversionsWeek], ['This Month', todayStats.demoConversionsMonth]], action: "wixBookingsFilter='Converted'; setTab('wixbookings')" },
     ] : []),
     { num: todaysClasses, label: `Class${todaysClasses===1?'':'es'} logged today`, tab: 'log' },
     { num: pendingFeeRequests, label: `Pending fee request${pendingFeeRequests===1?'':'s'}`, action: "rptPendingOpen=true; setTab('fees'); setTimeout(()=>{ const el=document.getElementById('pendingFeeRequestsSection'); if(el) el.scrollIntoView({behavior:'smooth'}); },120)" },
@@ -16126,9 +16136,7 @@ function renderDashboard() {
     <div class="stat-grid">
       ${cards.map(c=>`
         <div class="stat-card" onclick="${c.action ? c.action : `setTab('${c.tab}')`}">
-          <div class="num ${c.num===0?'zero':''}">${c.num}</div>
-          <div class="label">${c.label}</div>
-          ${c.detail ? `<div class="hint" style="font-size:11px;line-height:1.4;margin-top:5px">${c.detail}</div>` : ''}
+          ${c.periods ? `<div class="label" style="margin-top:0;font-size:13px;font-weight:600;color:var(--ink)">${c.label}</div><div class="period-metrics">${c.periods.map(([period, value]) => `<div class="period-metric"><div class="period-value ${value===0?'zero':''}">${value == null ? '…' : value}</div><div class="period-name">${period}</div></div>`).join('')}</div>` : `<div class="num ${c.num===0?'zero':''}">${c.num}</div><div class="label">${c.label}</div>`}
         </div>
       `).join('')}
     </div>
