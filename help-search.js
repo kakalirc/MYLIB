@@ -13,10 +13,33 @@
     { key: 'parents', title: 'Find parent details', terms: ['parent details', 'parent record', 'family details'], help: 'Open Parents to find parent records.' },
     { key: 'payroll', title: 'View teacher payroll', terms: ['teacher salary', 'salary', 'payroll', 'teacher payment'], help: 'Open Payroll to review teacher payment calculations.' },
     { key: 'reports', title: 'View or export reports', terms: ['report', 'reports', 'export', 'excel', 'download report'], help: 'Open Reports & Export to access the available reporting and export tools.' },
-    { key: 'questionbank', title: 'Open the Question Bank', terms: ['question bank', 'questions', 'question paper', 'papers', 'exam questions'], help: 'Open Question Bank to work with the question and paper library.' }
+    { key: 'questionbank', title: 'Open the Question Bank', terms: ['question bank', 'questions', 'question paper', 'papers', 'exam questions'], help: 'Open Question Bank to work with the question and paper library.' },
+    { key: 'academics', title: 'Open My Learning', terms: ['my learning', 'attendance', 'classes', 'class schedule', 'subscription', 'learning'], help: 'Open My Learning to view your classes, attendance and subscription details.' },
+    { key: 'fun', title: 'Open Fun Zone', terms: ['fun zone', 'games', 'daily challenges', 'brain teasers', 'knowledge arena'], help: 'Open Fun Zone to access Knowledge Arena games and challenges.' },
+    { key: 'settings', title: 'Open Account Settings', terms: ['account settings', 'change password', 'password', 'profile settings'], help: 'Open Settings to manage your account and change your password.' }
   ];
 
-  const QUICK = ['Send a fee request', 'Find a prospect', 'Mark attendance', 'Create a student login'];
+  const QUICK_BY_ROLE = {
+    Admin: ['Send a fee request', 'Find a prospect', 'Create a student login'],
+    Student: ['Open My Learning', 'Open Fun Zone', 'Open Account Settings'],
+    Teacher: [],
+    Parent: []
+  };
+
+  function getRole() {
+    try { if (typeof currentRole !== 'undefined' && currentRole) return String(currentRole); } catch (e) {}
+    const topbar = document.querySelector('#app .topbar');
+    const text = topbar ? (topbar.textContent || '') : '';
+    const match = text.match(/\((Admin|Teacher|Student|Parent)\)/i);
+    return match ? match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase() : '';
+  }
+
+  function tasksForRole() {
+    const role = getRole();
+    if (role === 'Student') return TASKS.filter(task => ['academics', 'fun', 'settings'].includes(task.key));
+    if (role === 'Teacher' || role === 'Parent') return [];
+    return TASKS.filter(task => !['academics', 'fun', 'settings'].includes(task.key));
+  }
 
   function esc(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -37,9 +60,13 @@
     return true;
   }
   function getNavItems() {
-    const nodes = Array.from(document.querySelectorAll(
-      '.sidebar-nav .sidebar-item[onclick], .teacher-sidebar .sidebar-item[onclick], .mobile-tab-dropdown .mobile-tab-item[onclick], [onclick*="setStudentPortalSection("]'
-    )).filter(isVisibleInCurrentPortal);
+    const role = getRole();
+    let selector = '';
+    if (role === 'Student') selector = '.student-portal-section-switcher [onclick*="setStudentPortalSection("]';
+    else if (role === 'Teacher') selector = '.teacher-sidebar .sidebar-item[onclick], .teacher-portal [onclick]';
+    else if (role === 'Parent') selector = '.parent-sidebar .sidebar-item[onclick], .parent-portal [onclick]';
+    else selector = '.sidebar-nav .sidebar-item[onclick], .mobile-tab-dropdown .mobile-tab-item[onclick]';
+    const nodes = Array.from(document.querySelectorAll(selector)).filter(isVisibleInCurrentPortal);
     const found = new Map();
     nodes.forEach(node => {
       const handler = node.getAttribute('onclick') || '';
@@ -58,7 +85,7 @@
     const item = items.find(entry => entry.key === key);
     if (!item) return;
     const node = Array.from(document.querySelectorAll(
-      '.sidebar-nav .sidebar-item[onclick], .teacher-sidebar .sidebar-item[onclick], .mobile-tab-dropdown .mobile-tab-item[onclick]'
+      '.sidebar-nav .sidebar-item[onclick], .teacher-sidebar .sidebar-item[onclick], .parent-sidebar .sidebar-item[onclick], .mobile-tab-dropdown .mobile-tab-item[onclick], [onclick*="setStudentPortalSection("]'
     )).find(el => (el.getAttribute('onclick') || '') === item.handler);
     if (node) { node.click(); return; }
     if (/setTab\(/.test(item.handler) && typeof window.setTab === 'function') window.setTab(key);
@@ -94,7 +121,7 @@
     }
     const candidates = [];
     nav.forEach(item => candidates.push({ key: item.key, title: item.label, label: 'Menu', help: 'Open this section of MY LIB.', terms: [] }));
-    TASKS.forEach(task => {
+    tasksForRole().forEach(task => {
       if (nav.some(item => item.key === task.key)) candidates.push({ ...task, label: 'How to', menuLabel: nav.find(item => item.key === task.key).label });
     });
     const ranked = candidates.map(item => ({ item, score: rank(q, item) }))
@@ -119,7 +146,7 @@
     const quick = root && root.querySelector("[data-help-quick]");
     if (!quick) return;
     const nav = getNavItems();
-    const available = QUICK.filter(query => TASKS.some(task => nav.some(item => item.key === task.key) && rank(query, task) > 0));
+    const available = (QUICK_BY_ROLE[getRole()] || []).filter(query => tasksForRole().some(task => nav.some(item => item.key === task.key) && rank(query, task) > 0));
     quick.innerHTML = available.map(query => '<button type="button" data-help-query="' + esc(query) + '">' + esc(query) + '</button>').join("");
     const input = root.querySelector("[data-help-input]");
     quick.hidden = !!(input && input.value.trim());
