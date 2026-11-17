@@ -265,7 +265,7 @@
     const candidates = [];
     nav.forEach(item => candidates.push({ key: item.key, title: item.label, label: 'Menu', help: 'Open this section of MY LIB.', terms: [] }));
     tasksForRole().forEach(task => {
-      const sectionTarget = task.title === 'Raise or send a fee request' ? 'raise-fees'
+      const sectionTarget = task.title === 'Raise or send a fee request' ? 'raise-fees' : task.title === 'Manage demo bookings and conversions' ? '#demo-register-heading'
         : task.title === 'Manage fee requests and payments' ? '#pendingFeeRequestsSection'
         : null;
       if (task.helpOnly) candidates.push({ ...task, sectionTarget, label: 'Help', menuLabel: nav.find(item => item.key === task.key)?.label });
