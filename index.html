@@ -24469,31 +24469,19 @@ function renderTeacherQuestionBank(teacher) {
   </div>`;
 
   const subTabsHtml = `<div class="tabs qb-sub-tabs" style="margin-bottom:16px">
-    <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
-      Review Queue ${pending.length?`<span style="background:var(--brick);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${pending.length}</span>`:''}
-    </div>
-    <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
-      Full Question Bank ${approved.length?`<span style="background:var(--forest);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${approved.length}</span>`:''}
-    </div>
-    <div class="tab ${qbSubTab==='archived'?'active':''}" onclick="qbSubTab='archived';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
-      Archived ${archivedN?`<span style="background:var(--muted);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${archivedN}</span>`:''}
-    </div>
-    <div class="tab ${qbSubTab==='papers'?'active':''}" onclick="qbSubTab='papers';qbPaperView='list';qbPaperId=null;qbPicker=null;loadQbPapers()">
-      Practice Papers ${(() => { const n = Object.values(qbPaperCounts).reduce((t, c) => t + (c.submitted || 0), 0); return n ? `<span style="background:var(--gold);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px" title="Submitted papers waiting for marking">${n}</span>` : ''; })()}
-    </div>bTabsHtml = `<div class="tabs qb-sub-tabs" style="margin-bottom:16px">
-    <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
-      Review Queue ${pending.length?`<span style="background:var(--brick);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${pending.length}</span>`:''}
-    </div>
-    <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
-      Full Question Bank ${approved.length?`<span style="background:var(--forest);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${approved.length}</span>`:''}
-    </div>
-    <div class="tab ${qbSubTab==='archived'?'active':''}" onclick="qbSubTab='archived';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
-      Archived ${archivedN?`<span style="background:var(--muted);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${archivedN}</span>`:''}
-    </div>
-    <div class="tab ${qbSubTab==='papers'?'active':''}" onclick="qbSubTab='papers';qbPaperView='list';qbPaperId=null;qbPicker=null;loadQbPapers()">
-      Practice Papers ${(() => { const n = Object.values(qbPaperCounts).reduce((t, c) => t + (c.submitted || 0), 0); return n ? `<span style="background:var(--gold);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px" title="Submitted papers waiting for marking">${n}</span>` : ''; })()}
-    </div>
     <div class="tab ${qbSubTab==='past'?'active':''}" onclick="qbSubTab='past';loadQbSourcePapers()">Past Papers</div>
+    <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
+      Review Queue ${pending.length?`<span style="background:var(--brick);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${pending.length}</span>`:''}
+    </div>
+    <div class="tab ${qbSubTab==='bank'?'active':''}" onclick="qbSubTab='bank';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
+      Full Question Bank ${approved.length?`<span style="background:var(--forest);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${approved.length}</span>`:''}
+    </div>
+    <div class="tab ${qbSubTab==='archived'?'active':''}" onclick="qbSubTab='archived';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
+      Archived ${archivedN?`<span style="background:var(--muted);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${archivedN}</span>`:''}
+    </div>
+    <div class="tab ${qbSubTab==='papers'?'active':''}" onclick="qbSubTab='papers';qbPaperView='list';qbPaperId=null;qbPicker=null;loadQbPapers()">
+      Practice Papers ${(() => { const n = Object.values(qbPaperCounts).reduce((t, c) => t + (c.submitted || 0), 0); return n ? `<span style="background:var(--gold);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px" title="Submitted papers waiting for marking">${n}</span>` : ''; })()}
+    </div>
   </div>`;
 
   if (qbSubTab === 'past') return `<div class="card">
