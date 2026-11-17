@@ -20,6 +20,9 @@
 
     // Teacher portal help topics. These map to the real Teacher tab keys in index.html.
     { key: 'dashboard', title: 'View earnings or download my salary slip', terms: ['salary slip', 'payslip', 'pay slip', 'earnings', 'my salary', 'teacher salary', 'payment received', 'paid status', 'demo bonus'], roles: ['Teacher'], help: 'On your Dashboard, find Earnings and unlock it with your password. It shows classes × your rate, demo bonuses, adjustments and paid status. The Salary Slip button appears once payment is marked paid.' },
+    { key: 'dashboard', title: 'Review students needing renewal', terms: ['students needing renewal', 'low class balance', 'zero balance', 'renewal students'], roles: ['Teacher'], help: 'The Dashboard shows students whose remaining classes have reached zero, or who have not subscribed to a subject you teach.' },
+    { key: 'dashboard', title: 'Review my demo classes and bonus', terms: ['my demo classes', 'demo bonus', 'demo bonus earned'], roles: ['Teacher'], help: 'The Dashboard lists your demo classes and any converted-demo bonus included in monthly earnings.' },
+    { key: 'dashboard', title: 'Find or add a student note', terms: ['student notes', 'add student note', 'search student notes'], roles: ['Teacher'], help: 'Use Student Notes on your Dashboard to find a student and add or review the note saved to your account.' },
     { key: 'dashboard', title: 'View my daily teaching dashboard', terms: ['dashboard', 'today classes', 'today s classes', 'student notes', 'low balance', 'renewal', 'demo classes'], roles: ['Teacher'], help: 'Your Dashboard shows today’s classes, students needing renewal, low balances, students not seen recently, demo classes and student notes.' },
     { key: 'pendingactions', title: 'Review pending action items', terms: ['pending action', 'pending tasks', 'what should i do', 'tasks waiting', 'overdue', 'to do list', 'action items'], roles: ['Teacher'], help: 'Pending Action Items collects work waiting for you: overdue classes, timings to correct, missing Class Frequency, demos to mark done, homework or papers to review, missing study plans, unread chats and availability.' },
     { key: 'starteacher', title: 'View Star Teacher points and badges', terms: ['star teacher', 'points', 'badges', 'trophy', 'leaderboard', 'levels', 'earn points'], roles: ['Teacher'], help: 'Star Teacher is a monthly points game when enabled by the office. Open it to see your points, level, badges and activities that can earn points.' },
@@ -52,6 +55,9 @@
     { key: 'demos', title: 'Manage demo bookings and conversions', terms: ['demo booking','schedule demo','confirm demo','reschedule demo','cancel demo','mark demo done','convert demo','demo lost','demo register'], help: 'Open Demo Bookings to follow a booking from New to Scheduled, Done, Converted or Lost. Confirm a teacher and time, mark the demo done, then Convert to Student or Mark lost. Demo Register shows teacher demos and conversion results.', roles: ['Admin'], helpOnly: true },
     { key: 'comms', title: 'Use Communication, Chat and Support Inbox', terms: ['communication','chat with parent','chat with student','chat with teacher','announcement','support inbox','reply to support','support ticket'], help: 'Communication supports one-to-one and group messages and announcements for everyone, a role or one person. Support Inbox collects issues raised by teachers, students and parents; filter by status, reply and update the status.', roles: ['Admin'], helpOnly: true },
     { key: 'rebuild', title: 'Rebuild pending classes and schedules', terms: ['rebuild classes','rebuild schedule','pending classes','class frequency schedule','new subscription schedule','missing classes','placeholder times'], help: 'Open Rebuild Pending Classes. Preview the scope and proposed changes first. Rebuild removes only future Pending classes and creates new ones; Done classes, overdue Pending classes and other statuses remain untouched. New placeholder times must be corrected by the teacher.', roles: ['Admin'], helpOnly: true },
+    { key: 'fees', title: 'Review students needing renewal', terms: ['students needing renewal', 'zero balance students', 'renewal list'], roles: ['Admin'], help: 'Open the Students needing renewal section on the Fees page to review students with zero or negative class balance, or no subscription.' },
+    { key: 'fees', title: 'Review pending fee requests', terms: ['pending fee requests', 'requests waiting payment', 'unpaid fee requests'], roles: ['Admin'], help: 'Open Pending fee requests on the Fees page to review requests waiting to be marked Paid.' },
+    { key: 'fees', title: 'Use the fee calculator', terms: ['fee calculator', 'calculate tuition fee', 'calculate student fees'], roles: ['Admin'], help: 'Use Fee calculator on the Fees page to calculate the amount for a student and subject using the configured rate and discount structure.' },
     { key: 'fees', title: 'Manage fee requests and payments', terms: ['fee requests','raise fees','fee calculator','pending fee requests','mark fee paid','part payment','razorpay payment','upi payment','bulk discount','fee message'], help: 'The Fees page covers students needing renewal, Razorpay payments to confirm, pending requests, monthly fee-request generation, fee-message settings, subscription payments, fee setup, discounts and the fee calculator. Preview fee requests before confirming; confirm only during the 1st–7th of the month.', roles: ['Admin'], helpOnly: true },
     { key: 'payroll', title: 'Process teacher payroll and salary slips', terms: ['payroll','teacher salary','salary slip','payslip','mark teacher paid','demo bonus','payroll adjustment','teacher payment'], help: 'Payroll calculates classes × the teacher’s configured rate, plus converted-demo bonuses and any adjustment. Review the month, record adjustments with a note, mark payment and print an individual or all salary slips.', roles: ['Admin'], helpOnly: true },
     { key: 'expenses', title: 'Record expenses and review net profit', terms: ['expenses','rent','electricity','internet bill','net profit','profit calculation'], help: 'Use Expenses for operating costs such as rent, electricity and internet. Reports calculate net profit as fee collection minus teacher payroll and expenses; payroll is counted separately from general expenses.', roles: ['Admin'], helpOnly: true },
@@ -167,10 +173,23 @@
       return Array.from(document.querySelectorAll('#app h2'))
         .find(node => (node.textContent || '').trim().startsWith('Raise fee requests —')) || null;
     }
+    if (target.startsWith('text:')) {
+      const wanted = normal(target.slice(5));
+      const headings = Array.from(document.querySelectorAll('#app h1, #app h2, #app h3, #app h4, #app summary, #app [role="heading"]'))
+        .filter(isVisibleInCurrentPortal);
+      return headings.find(node => normal(node.textContent) === wanted) ||
+        headings.find(node => normal(node.textContent).includes(wanted)) || null;
+    }
     return document.querySelector(target);
   }
-  function scrollToSectionAfterNavigation(key, target) {
-    if (!target) return;
+  function scrollToSectionAfterNavigation(key, target, trigger) {
+    if (!target) {
+      if (trigger) {
+        trigger.textContent = 'Open tab (no subsection link yet)';
+        trigger.title = 'This help topic opens the correct tab; an exact subsection link is not yet configured.';
+      }
+      return;
+    }
     let attempts = 0;
     const seek = () => {
       const section = findHelpSectionTarget(target);
@@ -178,9 +197,17 @@
         section.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
       }
-      if (++attempts < 20) window.setTimeout(seek, 100);
+      if (++attempts < 30) {
+        window.setTimeout(seek, 120);
+        return;
+      }
+      if (trigger) {
+        trigger.textContent = 'Section unavailable — tab opened';
+        trigger.title = 'The destination section did not appear. You are on the correct tab; use its page headings to continue.';
+        trigger.disabled = true;
+      }
     };
-    window.setTimeout(seek, 100);
+    window.setTimeout(seek, 120);
   }
   function navigate(key, target) {
     if (key === 'chat' || key === 'support') {
@@ -200,7 +227,7 @@
     else if (/setTeacherPortalTab\(/.test(item.handler) && typeof window.setTeacherPortalTab === 'function') window.setTeacherPortalTab(key);
     else if (/setStudentPortalSection\(/.test(item.handler) && typeof window.setStudentPortalSection === 'function') window.setStudentPortalSection(key);
     else return;
-    scrollToSectionAfterNavigation(key, target);
+    scrollToSectionAfterNavigation(key, target, window.__libHelpActiveTrigger || null);
   }
   const SEARCH_SYNONYMS = {
     fee: ['payment', 'pay', 'dues', 'tuition', 'invoice', 'charge'],
@@ -265,9 +292,75 @@
     const candidates = [];
     nav.forEach(item => candidates.push({ key: item.key, title: item.label, label: 'Menu', help: 'Open this section of MY LIB.', terms: [] }));
     tasksForRole().forEach(task => {
-      const sectionTarget = task.title === 'Raise or send a fee request' ? 'raise-fees' : task.title === 'Manage demo bookings and conversions' ? '#demo-register-heading'
-        : task.title === 'Manage fee requests and payments' ? '#pendingFeeRequestsSection'
-        : null;
+      // Route help articles to the actual control/section, not just the parent tab.
+      // Keep these selectors tied to stable IDs in index.html.
+      const sectionTargets = {
+        // Teacher Dashboard — verified anchors in index.html
+        'View earnings or download my salary slip': '#earningsReveal',
+        'Review students needing renewal': getRole() === 'Teacher' ? '#teacherRenewalSection' : '#studentsNeedingRenewalSection',
+        'Review my demo classes and bonus': '#teacherDemoSection',
+        'Find or add a student note': '#teacherNoteSearchBox',
+        // Admin Fees — verified anchors in index.html
+        'Raise or send a fee request': '#raiseFeeRequestsSection',
+        'Manage fee requests and payments': '#pendingFeeRequestsSection',
+        'Review pending fee requests': '#pendingFeeRequestsSection',
+        'Use the fee calculator': '#feeCalculatorSection',
+        // Teacher pages — resolve against visible, rendered section headings.
+        'Manage my class schedule': 'text:Class Schedule',
+        'Update class frequency for a student': 'text:Class Frequency Setup',
+        'View my students’ class frequency': 'text:My Students Class Frequency',
+        'Find a student and check class balance': 'text:My Students',
+        'Create or update a student study plan': 'text:Study Plans',
+        'Assign homework or review submissions': 'text:Homework',
+        'Use Question Bank and practice papers': 'text:Past Papers',
+        'Prepare lessons and share teaching resources': 'text:Lesson Preparation',
+        'Give attendance for a class': 'text:Give Attendance',
+        'View my attendance report': 'text:My Attendance Report',
+        'Set my availability and leave dates': 'text:Availability',
+        'Review my demo analysis': 'text:My Demo Analysis',
+        'Review class delivery performance': 'text:Class Delivery Intelligence',
+        'Review my teaching performance': 'text:Teacher Performance Intelligence',
+        // Admin pages — target actual page headings where they are rendered.
+        'Find a prospect or new registration': 'text:New registrations',
+        'Student onboarding and communication': 'text:Student Onboarding',
+        'Find a student or subscription': 'text:Students & Subscriptions',
+        'Find parent details': 'text:Parents',
+        'View teacher payroll': 'text:Payroll',
+        'View or export reports': 'text:Reports & Export',
+        'Open the Question Bank': 'text:Question Bank',
+        'Record a class in Class Log': 'text:Class Log',
+        'Manage student records and subscriptions': 'text:Students & Subscriptions',
+        'Manage teachers, subjects and class frequency': 'text:Teachers & Subjects',
+        'Manage parent accounts and family links': 'text:Parents',
+        'Monitor Study Plans, Homework and Question Bank': 'text:Teaching',
+        'Review Teacher Monitoring tools': 'text:Teacher Monitoring',
+        'Review centre analytics and performance': 'text:Analytics',
+        'Record expenses and review net profit': 'text:Expenses',
+        'Run reports and export data': 'text:Reports & Export',
+        'Review new registrations and create logins': 'text:New registrations',
+        'Rebuild pending classes and schedules': 'text:Rebuild Pending Classes',
+        // Student and Parent portal areas
+        'Understand my Student home screen': 'text:Home',
+        'Check my attendance and class history': 'text:My Attendance',
+        'Check my class schedule and remaining balance': 'text:Classes',
+        'View my Study Plans': 'text:Study Plans',
+        'Submit homework and check marks': 'text:Homework',
+        'Complete a practice paper and view results': 'text:Practice Papers',
+        'Find notes and worksheets from my teachers': 'text:From your teachers',
+        'Pay my fees and download receipts': 'text:Fee Requests',
+        'Use Parent Login and switch between children': 'text:Viewing',
+        'Review my child’s attendance and schedule': 'text:Attendance',
+        'Follow my child’s Study Plans': 'text:Study Plans',
+        'Check homework, due dates and teacher feedback': 'text:Homework',
+        'View practice papers and results': 'text:Practice Papers',
+        'Open notes and resources shared by teachers': 'text:From your teachers',
+        'Pay family fees and download receipts': 'text:Fees',
+        'Understand my child’s home screen and progress': 'text:Home',
+        'Review pending fee requests': '#pendingFeeRequestsSection',
+        'Use the fee calculator': '#feeCalculatorSection',
+        'Manage demo bookings and conversions': '#demo-register-heading'
+      };
+      const sectionTarget = sectionTargets[task.title] || null;
       if (task.helpOnly) candidates.push({ ...task, sectionTarget, label: 'Help', menuLabel: nav.find(item => item.key === task.key)?.label });
       else if (nav.some(item => item.key === task.key)) candidates.push({ ...task, sectionTarget, label: 'How to', menuLabel: nav.find(item => item.key === task.key).label });
     });
@@ -349,7 +442,7 @@
       const close = event.target.closest('[data-help-close]');
       if (close) { root.querySelector('[data-help-article]').hidden = true; return; }
       const open = event.target.closest('[data-help-open]');
-      if (open) { navigate(open.getAttribute('data-help-open'), open.getAttribute('data-help-target')); return; }
+      if (open) { window.__libHelpActiveTrigger = open; navigate(open.getAttribute('data-help-open'), open.getAttribute('data-help-target')); window.__libHelpActiveTrigger = null; return; }
       const vote = event.target.closest('[data-help-vote]');
       if (vote) {
         const note = root.querySelector('[data-help-feedback-note]');
