@@ -169,8 +169,14 @@
     }
     return document.querySelector(target);
   }
-  function scrollToSectionAfterNavigation(key, target) {
-    if (!target) return;
+  function scrollToSectionAfterNavigation(key, target, trigger) {
+    if (!target) {
+      if (trigger) {
+        trigger.textContent = 'Open tab (no subsection link yet)';
+        trigger.title = 'This help topic opens the correct tab; an exact subsection link is not yet configured.';
+      }
+      return;
+    }
     let attempts = 0;
     const seek = () => {
       const section = findHelpSectionTarget(target);
@@ -178,9 +184,17 @@
         section.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
       }
-      if (++attempts < 20) window.setTimeout(seek, 100);
+      if (++attempts < 30) {
+        window.setTimeout(seek, 120);
+        return;
+      }
+      if (trigger) {
+        trigger.textContent = 'Section unavailable — tab opened';
+        trigger.title = 'The destination section did not appear. You are on the correct tab; use its page headings to continue.';
+        trigger.disabled = true;
+      }
     };
-    window.setTimeout(seek, 100);
+    window.setTimeout(seek, 120);
   }
   function navigate(key, target) {
     if (key === 'chat' || key === 'support') {
@@ -200,7 +214,7 @@
     else if (/setTeacherPortalTab\(/.test(item.handler) && typeof window.setTeacherPortalTab === 'function') window.setTeacherPortalTab(key);
     else if (/setStudentPortalSection\(/.test(item.handler) && typeof window.setStudentPortalSection === 'function') window.setStudentPortalSection(key);
     else return;
-    scrollToSectionAfterNavigation(key, target);
+    scrollToSectionAfterNavigation(key, target, window.__libHelpActiveTrigger || null);
   }
   const SEARCH_SYNONYMS = {
     fee: ['payment', 'pay', 'dues', 'tuition', 'invoice', 'charge'],
@@ -268,10 +282,13 @@
       // Route help articles to the actual control/section, not just the parent tab.
       // Keep these selectors tied to stable IDs in index.html.
       const sectionTargets = {
+        // Teacher Dashboard — verified anchors in index.html
         'View earnings or download my salary slip': '#earningsReveal',
-        'Raise or send a fee request': 'raise-fees',
-        'Manage demo bookings and conversions': '#demo-register-heading',
-        'Manage fee requests and payments': '#pendingFeeRequestsSection'
+        // Admin Fees — verified anchors in index.html
+        'Raise or send a fee request': '#raiseFeeRequestsSection',
+        'Manage fee requests and payments': '#pendingFeeRequestsSection',
+        // Admin Demo workflow — verified anchor in index.html
+        'Manage demo bookings and conversions': '#demo-register-heading'
       };
       const sectionTarget = sectionTargets[task.title] || null;
       if (task.helpOnly) candidates.push({ ...task, sectionTarget, label: 'Help', menuLabel: nav.find(item => item.key === task.key)?.label });
@@ -355,7 +372,7 @@
       const close = event.target.closest('[data-help-close]');
       if (close) { root.querySelector('[data-help-article]').hidden = true; return; }
       const open = event.target.closest('[data-help-open]');
-      if (open) { navigate(open.getAttribute('data-help-open'), open.getAttribute('data-help-target')); return; }
+      if (open) { window.__libHelpActiveTrigger = open; navigate(open.getAttribute('data-help-open'), open.getAttribute('data-help-target')); window.__libHelpActiveTrigger = null; return; }
       const vote = event.target.closest('[data-help-vote]');
       if (vote) {
         const note = root.querySelector('[data-help-feedback-note]');
