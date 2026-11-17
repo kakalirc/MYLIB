@@ -1,5 +1,5 @@
 """Admin guide wording."""
-from guide import Guide, steps, note, table, chips, box, g2, g3, h3, bullets
+from guide import Guide, steps, note, table, chips, box, g2, g3, h3, bullets, screen
 import common
 
 
@@ -288,4 +288,9 @@ def guide():
         ['Turn on QB or Research', 'Settings'],
         ['Turn AI on or off', 'AI'],
     ]))
+    g.add('visualwalkthrough', 'Quick reference', 'Fee request workflow at a glance', 'Illustrative screen layout for the existing Fees workflow; labels and available actions depend on your access.', screen(
+        '<div class="m-h">Fees</div><div class="m-card"><b>Raise fee requests</b><div class="m-meta">TARGET MONTH · PREVIEW BEFORE CONFIRMING</div><div class="m-btns"><span class="m-btn">Target month</span><span class="m-btn p">Preview Fee Requests</span></div></div><div class="m-card"><b>Preview by family</b><div class="m-meta">CHECK CLASSES · AMOUNTS · NOT RAISED</div><div class="m-btns"><span class="m-btn">Edit / untick rows</span><span class="m-btn g">Confirm</span></div></div>',
+        'Illustrative workflow diagram, not a live screenshot. Use the actual Fees page as the source of truth.',
+        'MY LIB · ADMIN'
+    ))
     return g
