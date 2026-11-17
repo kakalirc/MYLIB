@@ -16008,7 +16008,7 @@ function loadDashboardTodayStats() {
     sb.from('students').select('id', { count: 'exact', head: true })
       .gte('created_at', dayStart).lt('created_at', dayEnd).or('archived.is.null,archived.eq.false'),
     sb.from('registrations').select('id', { count: 'exact', head: true })
-      .gte('created_at', dayStart).lt('created_at', dayEnd).eq('archived', false),
+      .gte('created_at', dayStart).lt('created_at', dayEnd).or('archived.is.null,archived.eq.false'),
     sb.from('demo_logs').select('id', { count: 'exact', head: true })
       .eq('status', 'Converted').eq('converted_at', todayStr)
   ]).then(([students, registrations, demos]) => {
