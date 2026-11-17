@@ -30,7 +30,7 @@
     try { if (typeof currentRole !== 'undefined' && currentRole) return String(currentRole); } catch (e) {}
     const topbar = document.querySelector('#app .topbar');
     const text = topbar ? (topbar.textContent || '') : '';
-    const match = text.match(/\\((Admin|Teacher|Student|Parent)\\)/i);
+    const match = text.match(/\((Admin|Teacher|Student|Parent)\)/i);
     return match ? match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase() : '';
   }
 
