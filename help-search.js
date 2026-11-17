@@ -26,7 +26,7 @@
   }
   function getNavItems() {
     const nodes = Array.from(document.querySelectorAll(
-      '.sidebar-nav .sidebar-item[onclick], .teacher-sidebar .sidebar-item[onclick], .mobile-tab-dropdown .mobile-tab-item[onclick]'
+      '.sidebar-nav .sidebar-item[onclick], .teacher-sidebar .sidebar-item[onclick], .mobile-tab-dropdown .mobile-tab-item[onclick], [onclick*="setStudentPortalSection("]'
     ));
     const found = new Map();
     nodes.forEach(node => {
@@ -115,7 +115,7 @@
     root.innerHTML = `
       <div class="lib-help-head"><div><strong>MY LIB Help &amp; Search</strong><span>Find a feature or learn how to do something</span></div><span class="lib-help-free">No AI · No API cost</span></div>
       <div class="lib-help-input-wrap"><span aria-hidden="true">⌕</span><input type="search" autocomplete="off" placeholder="What would you like to do? e.g. send a fee request" aria-label="Search MY LIB features and help" data-help-input><button type="button" data-help-clear aria-label="Clear search">×</button></div>
-      <div class="lib-help-quick" data-help-quick>${QUICK.map(q => '<button type="button" data-help-query="' + esc(q) + '">' + esc(q) + '</button>').join('')}</div>
+      <div class="lib-help-quick" data-help-quick>${QUICK.filter(q => TASKS.some(task => getNavItems().some(item => item.key === task.key) && rank(q, task) > 0)).map(q => '<button type="button" data-help-query="' + esc(q) + '">' + esc(q) + '</button>').join('')}</div>
       <div class="lib-help-results" data-help-results><div class="lib-help-hint">Search menu options or describe what you want to do.</div></div>`;
     topbar.insertAdjacentElement('afterend', root);
     const input = root.querySelector('[data-help-input]');
