@@ -169,6 +169,16 @@ if (location.hostname !== 'app.libeducation.com') {
   .stat-card .num { font-family: 'Zilla Slab', serif; font-size: 32px; font-weight: 700; color: var(--ink); line-height: 1; }
   .stat-card .num.zero { color: var(--muted); }
   .stat-card .label { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .stat-card .period-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 12px; }
+  .stat-card .period-metric { min-width: 0; padding: 9px 5px 8px; text-align: center; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; }
+  .stat-card .period-value { font-family: 'Zilla Slab', serif; font-size: 23px; font-weight: 700; line-height: 1.1; color: var(--ink); }
+  .stat-card .period-name { margin-top: 4px; font-size: 10px; line-height: 1.2; color: var(--muted); text-transform: uppercase; letter-spacing: .035em; }
+  @media (max-width: 420px) {
+    .stat-card .period-metrics { gap: 4px; }
+    .stat-card .period-metric { padding: 8px 2px 7px; }
+    .stat-card .period-value { font-size: 20px; }
+    .stat-card .period-name { font-size: 9px; }
+  }
   /* Reusable copy-to-clipboard button */
   .btn-copy { background: transparent; border: 1px solid var(--line); color: var(--muted); font-size: 11.5px; padding: 3px 8px; border-radius: 5px; cursor: pointer; }
   .btn-copy:hover { border-color: var(--brick); color: var(--brick); }
@@ -15996,38 +16006,65 @@ function renderAttendanceRewardsMonitor() {
   </div>`;
 }
 
-// Admin Dashboard: live counts for records created or converted during the current India calendar day.
-let dashboardTodayStats = { date: '', loading: false, loaded: false, loadedAt: 0, students: null, registrations: null, demoConversions: null };
+// Admin Dashboard: live admissions and demo-conversion counts for India calendar periods.
+let dashboardTodayStats = { date: '', loading: false, loaded: false, loadedAt: 0 };
 function loadDashboardTodayStats() {
   if (currentRole !== 'Admin') return;
   if (dashboardTodayStats.date === todayStr && (dashboardTodayStats.loading || (dashboardTodayStats.loaded && Date.now() - dashboardTodayStats.loadedAt < 60000))) return;
-  dashboardTodayStats = { date: todayStr, loading: true, loaded: false, loadedAt: 0, students: null, registrations: null, demoConversions: null };
-  const dayStart = todayStr + 'T00:00:00+05:30';
-  const dayEnd = new Date(Date.parse(dayStart) + 86400000).toISOString();
+
+  // Use Monday as the start of the week; all date boundaries are India-local (UTC+05:30).
+  const todayDate = new Date(todayStr + 'T00:00:00Z');
+  const weekStartDate = new Date(todayDate);
+  weekStartDate.setUTCDate(weekStartDate.getUTCDate() - ((weekStartDate.getUTCDay() + 6) % 7));
+  const nextWeekDate = new Date(weekStartDate);
+  nextWeekDate.setUTCDate(nextWeekDate.getUTCDate() + 7);
+  const monthStart = todayStr.slice(0, 7) + '-01';
+  const nextMonthDate = new Date(monthStart + 'T00:00:00Z');
+  nextMonthDate.setUTCMonth(nextMonthDate.getUTCMonth() + 1);
+  const dateOnly = date => date.toISOString().slice(0, 10);
+  const weekStart = dateOnly(weekStartDate);
+  const nextWeek = dateOnly(nextWeekDate);
+  const nextMonth = dateOnly(nextMonthDate);
+  const timestampStart = date => date + 'T00:00:00+05:30';
+  const timestampEnd = date => new Date(Date.parse(timestampStart(date))).toISOString();
+
+  dashboardTodayStats = { date: todayStr, loading: true, loaded: false, loadedAt: 0 };
+  const countCreated = (table, start, end) => sb.from(table).select('id', { count: 'exact', head: true })
+    .gte('created_at', timestampStart(start)).lt('created_at', timestampEnd(end))
+    .or('archived.is.null,archived.eq.false');
+  const countConversions = (start, end) => sb.from('demo_logs').select('id', { count: 'exact', head: true })
+    .eq('status', 'Converted').gte('converted_at', start).lt('converted_at', end);
+
   Promise.all([
-    sb.from('students').select('id', { count: 'exact', head: true })
-      .gte('created_at', dayStart).lt('created_at', dayEnd).or('archived.is.null,archived.eq.false'),
-    sb.from('registrations').select('id', { count: 'exact', head: true })
-      .gte('created_at', dayStart).lt('created_at', dayEnd).or('archived.is.null,archived.eq.false'),
-    sb.from('demo_logs').select('id', { count: 'exact', head: true })
-      .eq('status', 'Converted').eq('converted_at', todayStr)
-  ]).then(([students, registrations, demos]) => {
+    countCreated('students', todayStr, dateOnly(new Date(todayDate.getTime() + 86400000))),
+    countCreated('students', weekStart, nextWeek),
+    countCreated('students', monthStart, nextMonth),
+    countCreated('registrations', todayStr, dateOnly(new Date(todayDate.getTime() + 86400000))),
+    countCreated('registrations', weekStart, nextWeek),
+    countCreated('registrations', monthStart, nextMonth),
+    countConversions(todayStr, dateOnly(new Date(todayDate.getTime() + 86400000))),
+    countConversions(weekStart, nextWeek),
+    countConversions(monthStart, nextMonth)
+  ]).then(results => {
     if (dashboardTodayStats.date !== todayStr) return;
-    dashboardTodayStats.students = students.error ? null : (students.count || 0);
-    dashboardTodayStats.registrations = registrations.error ? null : (registrations.count || 0);
-    dashboardTodayStats.demoConversions = demos.error ? null : (demos.count || 0);
+    const keys = [
+      'students', 'studentsWeek', 'studentsMonth',
+      'registrations', 'registrationsWeek', 'registrationsMonth',
+      'demoConversions', 'demoConversionsWeek', 'demoConversionsMonth'
+    ];
+    results.forEach((result, index) => {
+      dashboardTodayStats[keys[index]] = result.error ? null : (result.count || 0);
+      if (result.error) console.warn('Dashboard ' + keys[index] + ' count unavailable:', result.error.message);
+    });
     dashboardTodayStats.loading = false;
     dashboardTodayStats.loaded = true;
     dashboardTodayStats.loadedAt = Date.now();
-    if (students.error) console.warn('Dashboard new-student count unavailable:', students.error.message);
-    if (registrations.error) console.warn('Dashboard new-registration count unavailable:', registrations.error.message);
-    if (demos.error) console.warn('Dashboard demo-conversion count unavailable:', demos.error.message);
     if (currentRole === 'Admin' && currentTab === 'dashboard') render();
   }).catch(error => {
     dashboardTodayStats.loading = false;
     dashboardTodayStats.loaded = true;
     dashboardTodayStats.loadedAt = Date.now();
-    console.warn('Dashboard today counts unavailable:', error && error.message ? error.message : error);
+    console.warn('Dashboard admissions counts unavailable:', error && error.message ? error.message : error);
     if (currentRole === 'Admin' && currentTab === 'dashboard') render();
   });
 }
@@ -16041,9 +16078,9 @@ function renderDashboard() {
   const todayStats = dashboardTodayStats.date === todayStr ? dashboardTodayStats : {};
   const cards = [
     ...(currentRole === 'Admin' ? [
-      { num: todayStats.students == null ? '…' : todayStats.students, label: 'New students today', tab: 'students' },
-      { num: todayStats.registrations == null ? '…' : todayStats.registrations, label: 'New registrations today', tab: 'registrations' },
-      { num: todayStats.demoConversions == null ? '…' : todayStats.demoConversions, label: 'Demo conversions today', action: "wixBookingsFilter='Converted'; setTab('wixbookings')" },
+      { label: 'New Students Today', periods: [['Today', todayStats.students], ['This Week', todayStats.studentsWeek], ['This Month', todayStats.studentsMonth]], tab: 'students' },
+      { label: 'New Registrations Today', periods: [['Today', todayStats.registrations], ['This Week', todayStats.registrationsWeek], ['This Month', todayStats.registrationsMonth]], tab: 'registrations' },
+      { label: 'Demo Conversions Today', periods: [['Today', todayStats.demoConversions], ['This Week', todayStats.demoConversionsWeek], ['This Month', todayStats.demoConversionsMonth]], action: "wixBookingsFilter='Converted'; setTab('wixbookings')" },
     ] : []),
     { num: todaysClasses, label: `Class${todaysClasses===1?'':'es'} logged today`, tab: 'log' },
     { num: pendingFeeRequests, label: `Pending fee request${pendingFeeRequests===1?'':'s'}`, action: "rptPendingOpen=true; setTab('fees'); setTimeout(()=>{ const el=document.getElementById('pendingFeeRequestsSection'); if(el) el.scrollIntoView({behavior:'smooth'}); },120)" },
@@ -16099,8 +16136,7 @@ function renderDashboard() {
     <div class="stat-grid">
       ${cards.map(c=>`
         <div class="stat-card" onclick="${c.action ? c.action : `setTab('${c.tab}')`}">
-          <div class="num ${c.num===0?'zero':''}">${c.num}</div>
-          <div class="label">${c.label}</div>
+          ${c.periods ? `<div class="label" style="margin-top:0;font-size:13px;font-weight:600;color:var(--ink)">${c.label}</div><div class="period-metrics">${c.periods.map(([period, value]) => `<div class="period-metric"><div class="period-value ${value===0?'zero':''}">${value == null ? '…' : value}</div><div class="period-name">${period}</div></div>`).join('')}</div>` : `<div class="num ${c.num===0?'zero':''}">${c.num}</div><div class="label">${c.label}</div>`}
         </div>
       `).join('')}
     </div>
