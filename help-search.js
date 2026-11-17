@@ -24,10 +24,22 @@
   function normal(value) {
     return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   }
+  function isVisibleInCurrentPortal(node) {
+    if (!node || node.hidden || node.getAttribute("aria-hidden") === "true") return false;
+    if (typeof node.getClientRects === "function" && node.getClientRects().length === 0) return false;
+    let current = node;
+    while (current && current !== document.body) {
+      if (current.hidden || current.getAttribute("aria-hidden") === "true") return false;
+      const style = window.getComputedStyle ? window.getComputedStyle(current) : null;
+      if (style && (style.display === "none" || style.visibility === "hidden")) return false;
+      current = current.parentElement;
+    }
+    return true;
+  }
   function getNavItems() {
     const nodes = Array.from(document.querySelectorAll(
       '.sidebar-nav .sidebar-item[onclick], .teacher-sidebar .sidebar-item[onclick], .mobile-tab-dropdown .mobile-tab-item[onclick], [onclick*="setStudentPortalSection("]'
-    ));
+    )).filter(isVisibleInCurrentPortal);
     const found = new Map();
     nodes.forEach(node => {
       const handler = node.getAttribute('onclick') || '';
@@ -103,6 +115,15 @@
         <span class="lib-help-arrow" aria-hidden="true">→</span>
       </button>`).join('');
   }
+  function refreshQuickActions(root) {
+    const quick = root && root.querySelector("[data-help-quick]");
+    if (!quick) return;
+    const nav = getNavItems();
+    const available = QUICK.filter(query => TASKS.some(task => nav.some(item => item.key === task.key) && rank(query, task) > 0));
+    quick.innerHTML = available.map(query => '<button type="button" data-help-query="' + esc(query) + '">' + esc(query) + '</button>').join("");
+    const input = root.querySelector("[data-help-input]");
+    quick.hidden = !!(input && input.value.trim());
+  }
   function mount() {
     const app = document.getElementById('app');
     const topbar = app && app.querySelector('.topbar');
@@ -115,9 +136,10 @@
     root.innerHTML = `
       <div class="lib-help-head"><div><strong>MY LIB Help &amp; Search</strong><span>Find a feature or learn how to do something</span></div><span class="lib-help-free">No AI · No API cost</span></div>
       <div class="lib-help-input-wrap"><span aria-hidden="true">⌕</span><input type="search" autocomplete="off" placeholder="What would you like to do? e.g. send a fee request" aria-label="Search MY LIB features and help" data-help-input><button type="button" data-help-clear aria-label="Clear search">×</button></div>
-      <div class="lib-help-quick" data-help-quick>${QUICK.filter(q => TASKS.some(task => getNavItems().some(item => item.key === task.key) && rank(q, task) > 0)).map(q => '<button type="button" data-help-query="' + esc(q) + '">' + esc(q) + '</button>').join('')}</div>
+      <div class="lib-help-quick" data-help-quick></div>
       <div class="lib-help-results" data-help-results><div class="lib-help-hint">Search menu options or describe what you want to do.</div></div>`;
     topbar.insertAdjacentElement('afterend', root);
+    refreshQuickActions(root);
     const input = root.querySelector('[data-help-input]');
     input.addEventListener('input', () => {
       root.querySelector('[data-help-quick]').hidden = !!input.value.trim();
@@ -159,10 +181,20 @@
     mount();
     const app = document.getElementById('app');
     if (!app || window.__libHelpSearchObserver) return;
-    window.__libHelpSearchObserver = new MutationObserver(() => {
-      if (!app.querySelector('#lib-help-search')) mount();
+    window.__libHelpSearchObserver = new MutationObserver(records => {
+      if (!app.querySelector('#lib-help-search')) { mount(); return; }
+      const root = app.querySelector('#lib-help-search');
+      const portalChanged = records.some(record => {
+        const target = record.target && (record.target.nodeType === 1 ? record.target : record.target.parentElement);
+        return target && !root.contains(target) && !(target.closest && target.closest('#lib-help-search'));
+      });
+      if (portalChanged) {
+        refreshQuickActions(root);
+        const input = root.querySelector('[data-help-input]');
+        if (input && input.value.trim()) renderResults(root, input.value);
+      }
     });
-    window.__libHelpSearchObserver.observe(app, { childList: true, subtree: true });
+    window.__libHelpSearchObserver.observe(app, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'aria-hidden'] });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
   else start();
