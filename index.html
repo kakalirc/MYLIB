@@ -15997,16 +15997,16 @@ function renderAttendanceRewardsMonitor() {
 }
 
 // Admin Dashboard: live counts for records created or converted during the current India calendar day.
-let dashboardTodayStats = { date: '', loading: false, loaded: false, students: null, registrations: null, demoConversions: null };
+let dashboardTodayStats = { date: '', loading: false, loaded: false, loadedAt: 0, students: null, registrations: null, demoConversions: null };
 function loadDashboardTodayStats() {
   if (currentRole !== 'Admin') return;
-  if (dashboardTodayStats.date === todayStr && (dashboardTodayStats.loading || dashboardTodayStats.loaded)) return;
-  dashboardTodayStats = { date: todayStr, loading: true, loaded: false, students: null, registrations: null, demoConversions: null };
+  if (dashboardTodayStats.date === todayStr && (dashboardTodayStats.loading || (dashboardTodayStats.loaded && Date.now() - dashboardTodayStats.loadedAt < 60000))) return;
+  dashboardTodayStats = { date: todayStr, loading: true, loaded: false, loadedAt: 0, students: null, registrations: null, demoConversions: null };
   const dayStart = todayStr + 'T00:00:00+05:30';
   const dayEnd = new Date(Date.parse(dayStart) + 86400000).toISOString();
   Promise.all([
     sb.from('students').select('id', { count: 'exact', head: true })
-      .gte('created_at', dayStart).lt('created_at', dayEnd).eq('archived', false),
+      .gte('created_at', dayStart).lt('created_at', dayEnd).or('archived.is.null,archived.eq.false'),
     sb.from('registrations').select('id', { count: 'exact', head: true })
       .gte('created_at', dayStart).lt('created_at', dayEnd).eq('archived', false),
     sb.from('demo_logs').select('id', { count: 'exact', head: true })
@@ -16018,6 +16018,7 @@ function loadDashboardTodayStats() {
     dashboardTodayStats.demoConversions = demos.error ? null : (demos.count || 0);
     dashboardTodayStats.loading = false;
     dashboardTodayStats.loaded = true;
+    dashboardTodayStats.loadedAt = Date.now();
     if (students.error) console.warn('Dashboard new-student count unavailable:', students.error.message);
     if (registrations.error) console.warn('Dashboard new-registration count unavailable:', registrations.error.message);
     if (demos.error) console.warn('Dashboard demo-conversion count unavailable:', demos.error.message);
@@ -16025,6 +16026,7 @@ function loadDashboardTodayStats() {
   }).catch(error => {
     dashboardTodayStats.loading = false;
     dashboardTodayStats.loaded = true;
+    dashboardTodayStats.loadedAt = Date.now();
     console.warn('Dashboard today counts unavailable:', error && error.message ? error.message : error);
     if (currentRole === 'Admin' && currentTab === 'dashboard') render();
   });
