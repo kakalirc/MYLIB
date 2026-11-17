@@ -2176,6 +2176,8 @@ let qbSourceEditId = '';
 let qbSourceMetaMsg = '';
 let qbSourceReviews = [];       // Admin-visible status history across all submissions
 let qbSourceLoading = false;
+let qbSourceLoaded = false;
+let qbSourceLoadPromise = null;
 let qbExtractionBusyIds = new Set();
 let qbExtractionResults = {};
 let qbExtractionReviewRows = {};
@@ -24458,6 +24460,11 @@ function renderAdminQuestionBank() {
 // ─────────────────────────────────────────────────────────────
 function renderTeacherQuestionBank(teacher) {
   if (qbLoading) return `<div class="card"><div class="empty">Loading question bank…</div></div>`;
+  // Past Papers is the teacher's first tab. Load its catalogue on first entry,
+  // not only after the teacher clicks the tab a second time.
+  if (qbSubTab === 'past' && !qbSourceLoaded && !qbSourceLoading) {
+    void loadQbSourcePapers(false);
+  }
 
   const pending = qbQuestions.filter(q => !q.archived && !q.approved);
   const approved = qbQuestions.filter(q => !q.archived && q.approved);
@@ -26077,18 +26084,60 @@ function qbExtractionReviewHtml(id) {
     + (state.stage === 'finished' ? '<div class="hint">This run has already been published.</div>' : '<button class="btn-small btn-primary" ' + (pending ? 'disabled' : '') + ' onclick="qbPublishExtractionRun(\'' + id + '\')">Publish approved items</button>')
     + '</div>';
 }
-async function loadQbSourcePapers() {
+async function loadQbSourcePapers(force = true) {
   if (!sb) return;
-  qbSourceLoading = true; render();
-  const { data: rows, error } = await sb.from('qb_source_papers').select('id, source_type, school_id, board_id, grade_id, subject_name, year, exam_type, medium, question_count, checksum, stored_pdf_url, source_url, status, uploaded_by, uploader_name, reviewed_by, reviewed_at, duplicate_override, duplicate_override_by, duplicate_override_at').order('year', { ascending: false });
-  qbSourceLoading = false;
-  if (error) { qbMsg = 'Could not load past papers: ' + error.message; qbSourcePapers = []; }
-  else qbSourcePapers = rows || [];
-  if (currentRole === 'Admin') {
-    const { data: history, error: historyError } = await sb.from('qb_source_paper_reviews').select('id,source_paper_id,from_status,to_status,reviewed_by,reviewer_name,reviewed_at').order('reviewed_at', { ascending: false }).limit(200);
-    qbSourceReviews = historyError ? [] : (history || []);
-  } else qbSourceReviews = [];
+  if (qbSourceLoadPromise) return qbSourceLoadPromise;
+  if (!force && qbSourceLoaded) return;
+
+  qbSourceLoading = true;
+  qbMsg = '';
   render();
+
+  qbSourceLoadPromise = (async () => {
+    let timeoutId = null;
+    try {
+      const request = sb.from('qb_source_papers')
+        .select('id, source_type, school_id, board_id, grade_id, subject_name, year, exam_type, medium, question_count, checksum, stored_pdf_url, source_url, status, uploaded_by, uploader_name, reviewed_by, reviewed_at, duplicate_override, duplicate_override_by, duplicate_override_at')
+        .order('year', { ascending: false });
+      const result = await Promise.race([
+        request,
+        new Promise((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error('Loading past papers timed out. Please try again.')), 15000);
+        })
+      ]);
+      if (result.error) throw result.error;
+      qbSourcePapers = result.data || [];
+      qbSourceLoaded = true;
+
+      if (currentRole === 'Admin') {
+        try {
+          const history = await Promise.race([
+            sb.from('qb_source_paper_reviews')
+              .select('id,source_paper_id,from_status,to_status,reviewed_by,reviewer_name,reviewed_at')
+              .order('reviewed_at', { ascending: false })
+              .limit(200),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Review history timed out.')), 15000))
+          ]);
+          qbSourceReviews = history.error ? [] : (history.data || []);
+        } catch (historyError) {
+          qbSourceReviews = [];
+        }
+      } else {
+        qbSourceReviews = [];
+      }
+    } catch (error) {
+      qbSourceLoaded = false;
+      qbSourcePapers = [];
+      qbMsg = 'Could not load past papers: ' + (error && error.message ? error.message : String(error));
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+      qbSourceLoading = false;
+      qbSourceLoadPromise = null;
+      render();
+    }
+  })();
+
+  return qbSourceLoadPromise;
 }
 // stored_pdf_url may be a full Supabase storage URL (public or signed) or "bucket/path"; private files need a fresh signed link.
 function qbStorageRef(url) {
