@@ -160,6 +160,22 @@
     });
     return Array.from(found.values());
   }
+  // Explicit in-page destinations for sections with stable IDs in the app.
+  const SECTION_TARGETS = { fees: '#pendingFeeRequestsSection' };
+  function scrollToSectionAfterNavigation(key) {
+    const selector = SECTION_TARGETS[key];
+    if (!selector) return;
+    let attempts = 0;
+    const seek = () => {
+      const target = document.querySelector(selector);
+      if (target && isVisibleInCurrentPortal(target)) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+      if (++attempts < 20) window.setTimeout(seek, 100);
+    };
+    window.setTimeout(seek, 100);
+  }
   function navigate(key) {
     if (key === 'chat' || key === 'support') {
       const label = key === 'chat' ? 'Chat' : 'Support';
@@ -173,10 +189,12 @@
     const node = Array.from(document.querySelectorAll(
       '.sidebar-nav .sidebar-item[onclick], .teacher-sidebar .sidebar-item[onclick], .parent-sidebar .sidebar-item[onclick], .mobile-tab-dropdown .mobile-tab-item[onclick], [onclick*="setStudentPortalSection("]'
     )).find(el => (el.getAttribute('onclick') || '') === item.handler);
-    if (node) { node.click(); return; }
-    if (/setTab\(/.test(item.handler) && typeof window.setTab === 'function') window.setTab(key);
+    if (node) node.click();
+    else if (/setTab\(/.test(item.handler) && typeof window.setTab === 'function') window.setTab(key);
     else if (/setTeacherPortalTab\(/.test(item.handler) && typeof window.setTeacherPortalTab === 'function') window.setTeacherPortalTab(key);
     else if (/setStudentPortalSection\(/.test(item.handler) && typeof window.setStudentPortalSection === 'function') window.setStudentPortalSection(key);
+    else return;
+    scrollToSectionAfterNavigation(key);
   }
   const SEARCH_SYNONYMS = {
     fee: ['payment', 'pay', 'dues', 'tuition', 'invoice', 'charge'],
