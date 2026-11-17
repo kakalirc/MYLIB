@@ -114,6 +114,11 @@ if (location.hostname !== 'app.libeducation.com') {
   .student-section h3 { margin-top: 0; margin-bottom: 10px; }
   .tab { padding: 9px 14px; font-size: 14px; font-weight: 500; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; white-space: nowrap; }
   .tab.active { color: var(--ink); border-bottom-color: var(--brick); font-weight: 600; }
+  /* Question Bank section tabs wrap into a compact grid on phones instead of scrolling horizontally. */
+  @media (max-width: 600px) {
+    .qb-sub-tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 135px), 1fr)); gap: 4px; overflow: visible; }
+    .qb-sub-tabs .tab { min-width: 0; margin-bottom: 0; padding: 10px 8px; white-space: normal; text-align: center; line-height: 1.3; }
+  }
   .mobile-tab-bar { display: none; }
   /* Grouped sidebar nav (Admin, desktop) */
   .admin-layout { display: flex; gap: 24px; align-items: flex-start; }
@@ -24350,7 +24355,7 @@ function renderAdminQuestionBank() {
     <div class="stat-card"><div class="num">${qbQuestions.length}</div><div class="label">Total extracted</div></div>
   </div>`;
 
-  const subTabsHtml = `<div class="tabs" style="margin-bottom:16px">
+  const subTabsHtml = `<div class="tabs qb-sub-tabs" style="margin-bottom:16px">
     <div class="tab ${qbSubTab==='review'?'active':''}" onclick="qbSubTab='review';qbFilterType='';qbFilterDifficulty='';qbFilterChapter='';qbFilterSearch='';qbFilterDup=false;qbFilterZero=false;qbFilterOld=false;qbFilterTopic='';qbFilterBoard='';qbFilterSubject='';qbFilterGrade='';qbEditId=null;render()">
       Review Queue ${pending.length?`<span style="background:var(--brick);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${pending.length}</span>`:''}
     </div>
