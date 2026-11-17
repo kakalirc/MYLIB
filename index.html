@@ -27476,16 +27476,41 @@ function regExistingStudentCandidates(r) {
   }));
 }
 function regDemoCandidates(r, studentId) {
-  const name = (r.student_name || '').trim().toLocaleLowerCase();
-  const phones = new Set([r.parent_mobile, r.second_mobile].map(phoneKey).filter(Boolean));
-  const studentMobile = phoneKey(r.student_mobile);
+  // A Wix booking's demo_log_id is the authoritative relationship to the demo log.
+  // The registration card already recognises bookings by any supplied contact number,
+  // so conversion must also follow that FK instead of re-matching the two records by
+  // exact name/mobile (which can differ after manual entry or formatting changes).
+  const name = String(r.student_name || '').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
+  const phones = new Set([r.parent_mobile, r.second_mobile, r.student_mobile].map(phoneKey).filter(Boolean));
+  const matchingBookings = (data.wixBookings || []).filter(b =>
+    phones.has(phoneKey(b.phone)) && String(b.status || '').toLocaleLowerCase() !== 'cancelled'
+  );
+  const bookingDemoIds = [...new Set(matchingBookings.map(b => b.demoLogId).filter(Boolean))];
+  // If a booking-linked demo has a different name, accept that FK as a secondary
+  // match only when the phone identifies exactly one booking/demo. With siblings or
+  // multiple bookings, retain the stricter name+contact match and require a choice.
+  const uniqueBookingDemoId = matchingBookings.length === 1 && bookingDemoIds.length === 1
+    ? bookingDemoIds[0] : '';
+  const linkedByBooking = new Set(bookingDemoIds);
   return (data.demoLogs || []).filter(d => {
-    if (d.status === 'Cancelled' || (d.studentName || '').trim().toLocaleLowerCase() !== name) return false;
+    if (d.status === 'Cancelled') return false;
     if (d.linkedStudentId && d.linkedStudentId !== studentId) return false;
+    const demoName = String(d.studentName || '').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
     const parentMatch = !!phoneKey(d.parentMobile) && phones.has(phoneKey(d.parentMobile));
-    const studentMatch = !!studentMobile && (phoneKey(d.studentMobile) === studentMobile);
-    return parentMatch || studentMatch;
+    const exactContactMatch = demoName === name && parentMatch;
+    const bookingForeignKeyMatch = linkedByBooking.has(d.id) &&
+      (demoName === name || d.id === uniqueBookingDemoId);
+    return exactContactMatch || bookingForeignKeyMatch;
   }).sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+function regDemoMatchHint(r, studentId) {
+  const phones = new Set([r.parent_mobile, r.second_mobile, r.student_mobile].map(phoneKey).filter(Boolean));
+  const bookings = (data.wixBookings || []).filter(b =>
+    phones.has(phoneKey(b.phone)) && String(b.status || '').toLocaleLowerCase() !== 'cancelled'
+  );
+  if (!bookings.length) return 'No matching demo found from the registration name and contact numbers. You can accept without conversion.';
+  if (bookings.some(b => !b.demoLogId)) return 'A matching website demo booking exists, but it is not linked to a demo log yet. Link or schedule it in Demo Bookings before converting.';
+  return 'A matching website demo booking exists, but its linked demo record is unavailable or ambiguous. Refresh and review Demo Bookings before converting.';
 }
 async function regLinkDemo(registrationId, demoId) {
   const r = (data.registrations || []).find(x => x.id === registrationId);
@@ -27705,7 +27730,7 @@ function regCardHtml(r) {
       <div class="row-form"><label><input type="checkbox" ${d.parentLogin ? 'checked' : ''} onchange="regDraftSet('parentLogin',this.checked)"> Parent login (ID and password = parent mobile${kids.length ? ', or the family\'s login' : ''})</label>
         <label><input type="checkbox" ${d.studentLogin ? 'checked' : ''} onchange="regDraftSet('studentLogin',this.checked)"> Student login (ID and password = student code)</label></div>
       ${regDemoCandidates(r, r.student_id || d.existingStudentId || 'new-registration-student').length ? `<div style="margin:8px 0;padding:9px;background:#fff8e6;border:1px solid var(--line);border-radius:7px"><b style="font-size:12px">Matching demo records</b><div class="hint" style="font-size:11px">Choose one exact demo to convert with this acceptance, or accept without conversion. Only one demo can be converted here.</div>
-        <select onchange="regDraftSet('demoId',this.value)" style="max-width:100%;margin:6px 0"><option value="">Select a demo…</option>${regDemoCandidates(r, r.student_id || d.existingStudentId || 'new-registration-student').map(dl=>`<option value="${escAttr(dl.id)}" ${d.demoId===dl.id?'selected':''}>${esc(dayDate(dl.date))} · ${esc(dl.studentName)} · ${esc(dl.status)}</option>`).join('')}</select></div>` : '<div class="hint" style="margin:8px 0">No matching demo found from the registration name and contact numbers. You can accept without conversion.</div>'}
+        <select onchange="regDraftSet('demoId',this.value)" style="max-width:100%;margin:6px 0"><option value="">Select a demo…</option>${regDemoCandidates(r, r.student_id || d.existingStudentId || 'new-registration-student').map(dl=>`<option value="${escAttr(dl.id)}" ${d.demoId===dl.id?'selected':''}>${esc(dayDate(dl.date))} · ${esc(dl.studentName)} · ${esc(dl.status)}</option>`).join('')}</select></div>` : `<div class="hint" style="margin:8px 0">${esc(regDemoMatchHint(r, r.student_id || d.existingStudentId || 'new-registration-student'))}</div>`}
       <div class="row-form"><button class="btn-primary" ${regBusy ? 'disabled' : ''} onclick="regAccept('${r.id}','convert')" ${!d.demoId || !regDemoCandidates(r, r.student_id || d.existingStudentId || 'new-registration-student').some(x=>x.id===d.demoId) ? 'disabled' : ''}>${regBusy ? 'Adding…' : 'Accept &amp; Link &amp; Convert'}</button><button class="btn-small" ${regBusy ? 'disabled' : ''} onclick="regAccept('${r.id}','without')">${regBusy ? 'Adding…' : 'Accept Without Conversion'}</button><button class="btn-small" onclick="regAcceptId='';render()">Cancel</button></div>
       <div class="hint">Subjects are not added here: enrol the student with a teacher on their page afterwards.</div></div>`;
   } else if (r.status === 'New' && regRejectId === r.id) {
