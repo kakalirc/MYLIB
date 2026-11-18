@@ -2205,6 +2205,7 @@ let qbExtractionBusyIds = new Set();
 let qbExtractionResults = {};
 let qbExtractionReviewRows = {};
 let qbSourceFilter = { boardId: '', schoolId: '', gradeId: '', subject: '', year: '' };
+let qbSourceSearch = '';
 let qbSchools = [];
 let qbSourceType = 'board';
 let qbSourceSchoolSearch = '';
@@ -26766,7 +26767,8 @@ function qbSourcePapersHtml() {
     ${sel('subject', 'All subjects', sp => sp.subject_name, sp => sp.subject_name)}
     ${sel('year', 'All years', sp => sp.year, sp => String(sp.year))}
     <button class="btn-small" onclick="qbSourceApplied={...qbSourceFilter};render()">Apply filter</button>
-    ${a ? `<button class="btn-small" onclick="qbSourceFilter={boardId:'',schoolId:'',gradeId:'',subject:currentRole==='Teacher'?'__my_subjects__':'',year:''};qbSourceApplied=null;render()">Clear</button>` : ''}
+    <input type="search" placeholder="Search year, exam, uploader…" value="${escAttr(qbSourceSearch)}" onchange="qbSourceSearch=this.value;render()" style="min-width:min(240px,100%);flex:1">
+    <button class="btn-small" onclick="qbSourceSearch='';qbSourceFilter={boardId:'',schoolId:'',gradeId:'',subject:currentRole==='Teacher'?'__my_subjects__':'',year:''};qbSourceApplied=null;render()">Clear all</button>
   </div>`;
   if (!a) return `<p class="hint" style="margin-bottom:12px">Published papers across all subjects, plus your own submissions awaiting review or rejected.</p>
     ${filtersHtml}<div class="empty">Choose filters and press Apply filter to see the papers.</div>`;
@@ -26789,7 +26791,11 @@ function qbSourcePapersHtml() {
       ? teacherSubjectNames.has(String(sp.subject_name || '').trim().toLocaleLowerCase())
       : sp.subject_name === a.subject))
     && (!a.year || String(sp.year) === a.year);
-  const list = qbSourcePapers.filter(match);
+  const list = qbSourcePapers.filter(sp => match(sp) && (!qbSourceSearch.trim() || [
+    sp.year, sp.exam_type, sp.subject_name, sp.medium, sp.uploader_name, sp.status,
+    sp.source_type === 'school' ? qbByName(qbSchools, sp.school_id) : qbByName(boards, sp.board_id),
+    qbByName(grades, sp.grade_id)
+  ].join(' ').toLocaleLowerCase().includes(qbSourceSearch.trim().toLocaleLowerCase())));
   if (!list.length) return filtersHtml + '<div class="empty">No past papers match these filters.</div>';
   const duplicateKey = sp => [sp.source_type, sp.source_type === 'school' ? sp.school_id : sp.board_id, sp.grade_id,
     String(sp.subject_name || '').trim().toLocaleLowerCase(), sp.year, String(sp.exam_type || '').trim().toLocaleLowerCase(),
