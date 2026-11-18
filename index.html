@@ -20567,6 +20567,7 @@ function teacherPendingItems(teacher) {
     prep, hwLate, papersLate, support, counts, total, extrasLoading: teacherPendingExtra.loading };
 }
 function teacherPendingGo(id) { const el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: 'smooth' }); }
+function teacherDashboardOpenStudent(studentId) { const st = data.students.find(s => s.id === studentId); teacherStudentSearch = st ? (st.name || '') : ''; setTeacherPortalTab('students'); render(); }
 function teacherPendingHomework() { setTeacherPortalTab('homework'); hwFilterStatus = 'submitted'; render(); }
 function teacherPendingLateHomework() { setTeacherPortalTab('homework'); hwFilterStatus = 'late'; render(); }
 function teacherPendingPapers() {
@@ -21506,6 +21507,18 @@ function renderTeacherDashboard(teacher) {
 
   return `
     ${todaySchedHtml}
+    <div class="card" style="margin-bottom:12px">
+      <h2 style="margin-top:0">⚡ Quick Actions</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn-primary" onclick="setTeacherPortalTab('attendance')">Give Attendance</button>
+        <button class="btn-small" onclick="setTeacherPortalTab('schedule')">Class Schedule</button>
+        <button class="btn-small" onclick="setTeacherPortalTab('students')">My Students</button>
+        <button class="btn-small" onclick="setTeacherPortalTab('studyplans')">Study Plans</button>
+        <button class="btn-small" onclick="setTeacherPortalTab('homework')">Homework Review</button>
+        ${teacherQbAccess ? `<button class="btn-small" onclick="setTeacherPortalTab('questionbank')">Question Bank</button>` : ''}
+        ${teacherResearchAccess && aiMasterEnabled ? `<button class="btn-small" onclick="setTeacherPortalTab('research')">Lesson Preparation</button>` : ''}
+      </div>
+    </div>
     ${teacherPendingBannerHtml(pend)}
     ${starSafe(() => starDashLineHtml(teacher), 'dashboard')}
     ${celebHtml}
