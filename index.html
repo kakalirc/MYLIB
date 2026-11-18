@@ -193,6 +193,16 @@ if (location.hostname !== 'app.libeducation.com') {
     .sidebar-nav { display: none; }
     .admin-layout { display: block; }
     .mobile-tab-bar { display: block; margin-bottom: 20px; position: relative; }
+    .teacher-bottom-nav { display:flex; position:fixed; left:0; right:0; bottom:0; z-index:997; justify-content:space-around; gap:2px; padding:8px 6px calc(8px + env(safe-area-inset-bottom)); background:var(--paper); border-top:1px solid var(--line); box-shadow:0 -3px 12px rgba(20,30,25,.08); }
+    .teacher-bottom-nav button { flex:1; border:0; background:transparent; color:var(--muted); padding:6px 2px; border-radius:8px; display:flex; flex-direction:column; align-items:center; gap:3px; font-size:11px; font-weight:600; cursor:pointer; }
+    .teacher-bottom-nav button.active { color:var(--primary); background:var(--soft); }
+    .teacher-bottom-nav .nav-icon { font-size:20px; line-height:1; }
+    body:has(.teacher-bottom-nav) { padding-bottom:82px; }
+    .mobile-tab-bar { display:contents; }
+    .mobile-tab-toggle { display:none !important; }
+    .mobile-tab-dropdown { position:fixed; top:auto; bottom:calc(72px + env(safe-area-inset-bottom)); left:10px; right:10px; max-height:70vh; overflow-y:auto; z-index:999; }
+    .mobile-tab-overlay { position:fixed; inset:0; z-index:998; }
+
     .mobile-tab-toggle { display: flex; align-items: center; gap: 10px; padding: 11px 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-family: 'Zilla Slab', serif; font-weight: 600; font-size: 15px; color: var(--ink); }
     .mobile-tab-toggle .burger { font-size: 18px; line-height: 1; }
     .mobile-tab-overlay { position: fixed; inset: 0; z-index: 998; }
@@ -22019,12 +22029,20 @@ function renderTeacherPortal() {
         </div>
       ` : ''}
     </div>`;
+  const teacherBottomNavHtml = `
+    <nav class="teacher-bottom-nav" aria-label="Teacher navigation">
+      <button class="${teacherPortalTab==='dashboard'?'active':''}" onclick="setTeacherPortalTab('dashboard')"><span class="nav-icon">⌂</span><span>Home</span></button>
+      <button class="${teacherPortalTab==='schedule'?'active':''}" onclick="setTeacherPortalTab('schedule')"><span class="nav-icon">▦</span><span>Classes</span></button>
+      <button class="${teacherPortalTab==='students'?'active':''}" onclick="setTeacherPortalTab('students')"><span class="nav-icon">♙</span><span>Students</span></button>
+      <button class="${teacherMobileTabMenuOpen?'active':''}" onclick="toggleTeacherMobileTabMenu()"><span class="nav-icon">☰</span><span>More</span></button>
+    </nav>`;
   return `
     ${mobileTabBarHtml}
     <div class="admin-layout ${isDesktopSidebarCollapsed('teacher') ? 'is-sidebar-collapsed' : ''}">
       ${sidebarHtml}
       <div class="sidebar-content">${teacherPortalBodyHtml(teacher)}</div>
-    </div>`;
+    </div>
+    ${teacherBottomNavHtml}`;
 }
 // The page for the selected teacher tab, without the menu (renderTeacherPortal wraps it in the sidebar layout).
 function teacherPortalBodyHtml(teacher) {
