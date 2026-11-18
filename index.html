@@ -18929,7 +18929,7 @@ function renderTeacherStudentWorkspace(teacher) {
       ${remainingHtml ? `<div style="margin-top:8px"><b style="font-size:12px">Class balance</b><div>${remainingHtml}</div></div>` : ''}
     </div>
     ${subject ? `
-    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-bottom:12px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-bottom:12px">
       <div class="card" style="margin:0"><div class="hint">Study Plan</div><div style="font-size:24px;font-weight:700">${planItems.length?planProgress+'%':'—'}</div><div class="hint">${planDone}/${planItems.length} topics complete</div></div>
       <div class="card" style="margin:0"><div class="hint">Homework</div><div style="font-size:24px;font-weight:700">${myHw.length}</div><div class="hint">${awaitingReview} awaiting review</div></div>
       <div class="card" style="margin:0"><div class="hint">Upcoming classes</div><div style="font-size:24px;font-weight:700">${upcoming.length}</div><div class="hint">Next scheduled</div></div>
