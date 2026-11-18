@@ -3,6 +3,8 @@
   if (window.adminExperienceV2Loaded) return;
   window.adminExperienceV2Loaded=true;
   const originalDashboard=renderDashboard;
+  const ALL_KEYS=['dashboard','log','registrations','chat','wixbookings','democontrol','support','rebuildclasses','questionbank','fees','payroll','expenses','reports','students','attendancerewards','onboarding','setup','parents','staradmin','researchmonitor','appusage','aiusage','studyplans','homework','qbmonitoring','teacherappraisal','knowledgearena','users','admins','ai','audit','superadmin','admissionsintelligence','classdelivery','studentengagement','revenueintelligence','teacherperformance','teachers','subjects','schedule','settings'];
+  const LABELS={wixbookings:'Demo Bookings',democontrol:'Demo Control Centre',rebuildclasses:'Rebuild Classes',questionbank:'Question Bank',attendancerewards:'Attendance Rewards',staradmin:'Star Admin',researchmonitor:'Research Monitor',appusage:'App Usage',aiusage:'AI Usage',qbmonitoring:'Question Bank Monitoring',teacherappraisal:'Teacher Appraisal',knowledgearena:'Knowledge Arena',admissionsintelligence:'Admissions Intelligence',classdelivery:'Class Delivery',studentengagement:'Student Engagement',revenueintelligence:'Revenue Intelligence',teacherperformance:'Teacher Performance',superadmin:'Super Admin'};
   const QUICK=[['registrations','New Registrations','＋'],['wixbookings','Demo Bookings','▣'],['students','Students','♙'],['fees','Fees','₹'],['log','Class Log','▤'],['questionbank','Question Bank','?'],['support','Support','✉'],['payroll','Payroll','▥']];
   const STORE_RECENT='lib_admin_v2_recent_tabs',STORE_FAV='lib_admin_v2_favorite_tabs';
   let menuQuery='',paletteOpen=false,paletteQuery='',recent=[],favorites=[];
@@ -18,6 +20,7 @@
       seen.add(m[1]);const label=el.textContent.trim().replace(/\s+/g,' ');
       items.push({key:m[1],label:label||m[1]});
     });
+    ALL_KEYS.forEach(key=>{if(!seen.has(key)){seen.add(key);items.push({key,label:LABELS[key]||key.replace(/([a-z])([A-Z])/g,'$1 $2').replace(/\b\w/g,c=>c.toUpperCase())});}});
     return items;
   }
   function pendingItems(){
