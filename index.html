@@ -608,6 +608,7 @@ if (location.hostname !== 'app.libeducation.com') {
   overflow-wrap: anywhere;
 }
 </style>
+<link rel="stylesheet" href="admin-experience-v2.css?v=20261118-adminv2">
 </head>
 <body>
 <div id="cdnStatus" style="display:none; max-width:1040px; margin:16px auto; padding:14px 16px; border-radius:8px; background:#f5e2de; color:#a6432e; font-family:'Work Sans',sans-serif; font-size:14px;"></div>
@@ -28542,7 +28543,12 @@ window.addEventListener('hashchange', function () {
   }
 });
 
-initApp();
+// Load Admin Experience V2 before app startup so its dashboard/menu enhancements are ready.
+const adminV2Loader = document.createElement('script');
+adminV2Loader.src = 'admin-experience-v2.js?v=20261118-adminv2';
+adminV2Loader.onload = () => initApp();
+adminV2Loader.onerror = () => initApp(); // Existing app remains available if the enhancement asset fails.
+document.head.appendChild(adminV2Loader);
 </script>
 <script src="demo-control-centre.js"></script>
 <script src="student-portal-tabs.js"></script>\n<script src="student-experience-v2.js?v=20261118-v2"></script>
