@@ -28244,8 +28244,31 @@ async function regAccept(id, conversionMode = 'without') {
   regMsg = row.name + (row.student_code || row.code ? ' (' + (row.student_code || row.code) + ')' : '') + (isNewStudent ? ' created' : ' linked to the existing student record') + '. Registration accepted.' + (conversionMode === 'convert' ? (conversionResult && conversionResult.ok ? ' Demo converted; ₹100 bonus will appear in payroll.' + conversionResult.message : ' Demo conversion did not complete; see the note on this registration and retry after review.') : ' No demo conversion was performed.');
   trackUse('registration-accept');
   await loadRegistrations();
+  const cacheRefresh = await regRefreshStudentCache(studentId);
+  if (!cacheRefresh.ok) notes.push('Student created/linked, but the local student list could not be refreshed: ' + cacheRefresh.error + '. Refresh the page to verify.');
   if (conversionResult && conversionResult.ok) { regOpenStudent(studentId); addConfirmMsg.student = 'Registration accepted and matching demo converted. ₹100 bonus will appear in payroll.' + conversionResult.message; render(); } else render();
 }
+async function regRefreshStudentCache(studentId) {
+  // Acceptance can complete while the page's student list is stale. Fetch this linked
+  // student directly and upsert the local cache so the accepted registration card
+  // immediately resolves its "Open student" action without a manual page refresh.
+  const { data: fresh, error } = await sb.from('students').select('*').eq('id', studentId).maybeSingle();
+  if (error || !fresh) return { ok: false, error: error ? error.message : 'Student record was not returned.' };
+  const existing = data.students.find(s => s.id === fresh.id);
+  const cached = {
+    id: fresh.id, name: fresh.name, archived: !!fresh.archived, code: fresh.student_code || '',
+    parentName: fresh.parent_name || '', mobileNumber: fresh.mobile_number || '',
+    email: fresh.email || '', address: fresh.address || '', photo: existing ? existing.photo : '',
+    gradeId: fresh.grade_id || '', boardId: fresh.board_id || '', academicYear: fresh.academic_year || '',
+    modePreference: fresh.mode_preference || '', classTypePreference: fresh.class_type_preference || '',
+    billSeparately: !!fresh.bill_separately, noBulkDiscount: !!fresh.no_bulk_discount
+  };
+  const index = data.students.findIndex(s => s.id === fresh.id);
+  if (index >= 0) data.students[index] = cached;
+  else data.students.push(cached);
+  return { ok: true, student: cached };
+}
+
 
 function regWelcomeMessage(r, name, parentLine, studentLine) {
   const lines = [`Dear ${r.parent_name || 'Parent'},`, '', `Welcome to LIB Education! ${name} is now registered with us. We will call you to set up the classes.`];
