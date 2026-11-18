@@ -21643,7 +21643,7 @@ function renderTeacherDashboard(teacher) {
         <button class="btn-small" onclick="setTeacherPortalTab('students')">My Students</button>
         <button class="btn-small" onclick="setTeacherPortalTab('studentworkspace')">Student Workspace</button>
         <button class="btn-small" onclick="setTeacherPortalTab('studyplans')">Study Plans</button>
-        <button class="btn-small" onclick="teacherOpenHomeworkReview()">Homework Review</button>
+        <button class="btn-small" onclick="teacherOpenHomeworkReview()">Homework Review ${awaitingReview ? '· '+awaitingReview+' pending' : ''}</button>
         ${teacherQbAccess ? `<button class="btn-small" onclick="setTeacherPortalTab('questionbank')">Question Bank</button>` : ''}
         ${teacherResearchAccess && aiMasterEnabled ? `<button class="btn-small" onclick="setTeacherPortalTab('research')">Research</button>` : ''}
       </div>
@@ -23083,7 +23083,14 @@ function renderTeacherHomework(teacher) {
 
   if (!hw.length && !hwShowForm) return `<div class="card">${statsHtml}${filtersHtml}<div class="empty">No homework${hwFilterStudentId||hwFilterStatus?' matches these filters':'s assigned yet'}.</div><button class="btn-primary" onclick="hwShowForm=true;hwTeacherStudentId='';hwTeacherSubjectId='';hwDraft={title:'',description:'',due_date:'',study_plan_topic:'',marks:'',teacher_feedback:'',teacher_file_url:''};render()">+ Assign first homework</button></div>`;
 
-  const rows2 = hw.map(h => {
+  // Review queue prioritises submitted work, oldest submission first.
+  const reviewQueue = hw.slice().sort((a,b) => {
+    if (hwFilterStatus === 'submitted') return (a.submittedAt||a.updatedAt||a.createdAt||'').localeCompare(b.submittedAt||b.updatedAt||b.createdAt||'');
+    if (a.status === 'submitted' && b.status !== 'submitted') return -1;
+    if (b.status === 'submitted' && a.status !== 'submitted') return 1;
+    return (b.dueDate||'').localeCompare(a.dueDate||'');
+  });
+  const rows2 = reviewQueue.map(h => {
     const student = data.students.find(s=>s.id===h.studentId);
     const subj = data.subjects.find(s=>s.id===h.subjectId);
     const statusColor = hwStatusColor(h);
@@ -23099,6 +23106,8 @@ function renderTeacherHomework(teacher) {
           <div style="font-size:12.5px;color:var(--muted);margin-top:2px">
             ${student?esc(student.name):'?'} · ${subj?esc(subj.name):'?'}
             ${h.assignedDate ? ' · Assigned '+dayDate(h.assignedDate) : ''}
+            ${h.submittedAt && h.status==='submitted' ? ' · <b>Submitted '+dayDate(h.submittedAt)+'</b>' : ''}
+            ${h.reviewedAt && h.status==='reviewed' ? ' · Reviewed '+dayDate(h.reviewedAt) : ''}
             ${h.dueDate ? ' · <b>Due '+dayDate(h.dueDate)+'</b>' : ''}
           </div>
           ${h.description ? `<div style="font-size:13px;color:var(--ink);margin-top:4px">${esc(h.description)}</div>` : ''}
