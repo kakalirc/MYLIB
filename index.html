@@ -382,6 +382,30 @@ if (location.hostname !== 'app.libeducation.com') {
   }
 
 
+  /* Compact the content below the login button so the complete footer fits in view. */
+  .login-step { margin-top:4px; min-height:0; }
+  .login-footer-links { margin:8px 0 6px; gap:6px; }
+  .login-footer-links a { padding:7px 4px; }
+  .login-help-box { margin-top:6px; padding:7px 10px; line-height:1.4; }
+  .login-guest-link { margin-top:6px; padding:7px 11px; }
+  .footer-note { margin-top:6px; line-height:1.4; }
+  .footer-note #app-release-attribution { margin-bottom:4px; padding:3px 8px; }
+  @media (min-width:701px) {
+    .login-main-panel { padding:12px clamp(18px,2.5vw,32px); overflow-y:auto; }
+    .login-card img { margin-bottom:8px; }
+    .login-card .hint { margin-bottom:10px; }
+    .login-card input,.login-card .btn-primary { min-height:42px; }
+  }
+  @media (max-width:700px) {
+    .login-main-panel { padding:10px 12px 8px; }
+    .login-card img { margin-bottom:6px; }
+    .login-card .hint { margin-bottom:8px; }
+    .login-footer-links { margin:7px 0 5px; }
+    .login-help-box { margin-top:5px; padding:6px 8px; }
+    .login-guest-link { margin-top:5px; padding:6px 9px; }
+    .footer-note { margin-top:5px; font-size:10px; }
+  }
+
   /* Branding panel balance: use the available height and reduce dead space. */
   @media (min-width:701px) {
     .login-brand-panel { justify-content:flex-start; gap:clamp(18px,3vh,34px); }
