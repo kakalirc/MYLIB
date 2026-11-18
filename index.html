@@ -201,7 +201,7 @@ if (location.hostname !== 'app.libeducation.com') {
     body:has(.teacher-bottom-nav) { padding-bottom:82px; }
     .mobile-tab-bar { display:contents; }
     .mobile-tab-toggle { display:none !important; }
-    .mobile-tab-dropdown { position:fixed; top:auto; bottom:calc(72px + env(safe-area-inset-bottom)); left:10px; right:10px; max-height:70vh; overflow-y:auto; z-index:999; }
+    .mobile-tab-dropdown { position:fixed !important; top:auto !important; bottom:calc(72px + env(safe-area-inset-bottom)) !important; left:10px !important; right:10px !important; max-height:70vh !important; overflow-y:auto !important; z-index:999; }
     .mobile-tab-overlay { position:fixed; inset:0; z-index:998; }
 
     .mobile-tab-toggle { display: flex; align-items: center; gap: 10px; padding: 11px 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-family: 'Zilla Slab', serif; font-weight: 600; font-size: 15px; color: var(--ink); }
