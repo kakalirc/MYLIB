@@ -291,22 +291,50 @@ if (location.hostname !== 'app.libeducation.com') {
   .btn-logout { background: transparent; border: 1px solid #55504a; color: #ede7d3; }
   .btn-logout:hover { border-color: #8a8378; }
 
-  .login-wrap { min-height: 80vh; display: flex; align-items: center; justify-content: center; }
-  .login-card { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 32px 28px; width: 100%; max-width: 340px; box-shadow: 0 4px 18px rgba(0,0,0,0.12); text-align: center; }
-  .login-card img { max-width: 220px; margin-bottom: 18px; }
-  .login-card h2 { font-family: 'Zilla Slab', serif; margin: 0 0 4px; font-size: 19px; }
-  .login-card .hint { margin-bottom: 18px; }
-  .login-card input { width: 100%; margin-bottom: 10px; text-align: left; }
-  .login-card button { width: 100%; }
-  .login-error { color: var(--brick); font-size: 12.5px; margin-bottom: 10px; }
-  .login-busy-spin { display:inline-block; width:14px; height:14px; border:2px solid rgba(255,255,255,0.45); border-top-color:#fff; border-radius:50%; animation:spin 0.8s linear infinite; vertical-align:-2px; margin-right:8px; }
-  .login-card button:disabled { opacity:0.75; cursor:wait; }
-  .login-step { font-size: 12.5px; color: var(--muted); margin-top: 8px; min-height: 1.2em; }
-  .footer-note { text-align: center; font-size: 11px; color: var(--muted); margin-top: 22px; line-height: 1.6; }
-  .security-banner { background: rgba(166,67,46,0.08); border: 1px solid var(--brick); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; font-size: 13px; color: var(--ink); }
-  .security-banner b { color: var(--brick); }
-  .login-success { color: var(--forest); font-size: 12.5px; margin-bottom: 10px; }
-  .narrow-form input { display: block; width: 100%; max-width: 280px; margin-bottom: 8px; }
+  .login-wrap { min-height:calc(100vh - 24px); display:flex; align-items:center; justify-content:center; padding:24px; }
+  .login-shell { width:min(1080px,100%); display:grid; grid-template-columns:minmax(0,0.92fr) minmax(380px,1.08fr); background:var(--paper); border:1px solid var(--line); border-radius:24px; overflow:hidden; box-shadow:0 18px 50px rgba(0,0,0,.13); }
+  .login-brand-panel { position:relative; overflow:hidden; padding:clamp(28px,4vw,54px); display:flex; flex-direction:column; justify-content:space-between; color:#fff; background:linear-gradient(145deg,#123f31,#1c6544 58%,#347e49); min-height:610px; }
+  .login-brand-panel:before,.login-brand-panel:after { content:""; position:absolute; border-radius:50%; background:rgba(142,201,91,.18); pointer-events:none; }
+  .login-brand-panel:before { width:420px;height:420px;right:-180px;bottom:-170px; }
+  .login-brand-panel:after { width:240px;height:240px;right:-80px;top:-100px;background:rgba(255,255,255,.07); }
+  .login-brand-content,.login-brand-bottom { position:relative;z-index:1; }
+  .login-brand-panel img { width:min(260px,100%);max-height:90px;object-fit:contain;object-position:left center;filter:brightness(0) invert(1); }
+  .login-brand-panel h1 { font-family:'Zilla Slab',serif; font-size:clamp(30px,3.5vw,44px);line-height:1.12;margin:44px 0 14px;color:#fff; }
+  .login-brand-panel p { max-width:360px;font-size:16px;line-height:1.65;color:rgba(255,255,255,.88);margin:0; }
+  .login-brand-pill { display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:9px 13px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.9); }
+  .login-brand-bottom { font-size:12px;color:rgba(255,255,255,.75);line-height:1.6;margin-top:32px; }
+  .login-main-panel { padding:clamp(24px,4vw,52px);display:flex;align-items:center;justify-content:center; }
+  .login-content { width:100%;max-width:430px; }
+  .login-card { background:transparent;border:0;border-radius:0;padding:0;width:100%;max-width:none;box-shadow:none;text-align:center; }
+  .login-card img { max-width:min(190px,70%);max-height:65px;object-fit:contain;margin:0 auto 22px; }
+  .login-card h2 { font-family:'Zilla Slab',serif;margin:0 0 5px;font-size:clamp(25px,2.5vw,31px);color:var(--ink); }
+  .login-card .hint { margin-bottom:24px;color:var(--muted);font-size:14px; }
+  .login-card input { width:100%;margin-bottom:12px;text-align:left;min-height:48px;box-sizing:border-box; }
+  .login-card button { width:100%; }
+  .login-password-row { position:relative;display:flex;align-items:center;margin-bottom:12px; }
+  .login-password-row input { flex:1;padding-right:48px;margin-bottom:0; }
+  .login-card #loginPassToggle { position:absolute;right:7px;width:auto!important;background:transparent;border:0;padding:8px;cursor:pointer;font-size:17px;color:var(--muted); }
+  .login-card .btn-primary { min-height:48px;border-radius:10px;font-size:15px;font-weight:700; }
+  .login-error { color:var(--brick);font-size:12.5px;margin-bottom:12px; }
+  .login-busy-spin { display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px;margin-right:8px; }
+  .login-card button:disabled { opacity:.75;cursor:wait; }
+  .login-step { font-size:12.5px;color:var(--muted);margin-top:8px;min-height:1.2em; }
+  .login-footer-links { display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:18px 0 12px; }
+  .login-footer-links a { display:flex;align-items:center;justify-content:center;gap:6px;text-decoration:none;color:var(--forest);font-weight:650;font-size:12.5px;padding:10px 6px;border:1px solid var(--line);border-radius:9px;background:var(--soft,#f1eee6); }
+  .login-help-box { margin-top:16px;padding:12px 14px;background:var(--soft,#f1eee6);border-radius:10px;font-size:12.5px;color:var(--muted);line-height:1.6;text-align:center; }
+  .login-help-box a { color:var(--forest);font-weight:750;font-size:14px;text-decoration:none; }
+  .login-register-line { margin-top:14px;text-align:center;font-size:13px;color:var(--muted); }
+  .login-register-line a { color:var(--forest);font-weight:700;text-decoration:underline;text-underline-offset:3px; }
+  .login-guest-link { display:inline-block;margin-top:14px;padding:10px 14px;border:1px solid var(--forest);border-radius:9px;background:rgba(60,94,66,.08);color:var(--forest);font-weight:700;font-size:13px;text-decoration:none; }
+  .footer-note { text-align:center;font-size:11px;color:var(--muted);margin-top:20px;line-height:1.6; }
+  .security-banner { background:rgba(166,67,46,.08);border:1px solid var(--brick);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:var(--ink); }
+  .security-banner b { color:var(--brick); }
+  .login-success { color:var(--forest);font-size:12.5px;margin-bottom:10px; }
+  .narrow-form input { display:block;width:100%;max-width:280px;margin-bottom:8px; }
+  @media (max-width:900px) { .login-shell { grid-template-columns:minmax(240px,.75fr) minmax(360px,1.25fr); } .login-brand-panel { min-height:540px;padding:28px; } .login-brand-panel h1 { margin-top:30px;font-size:32px; } }
+  @media (max-width:700px) { .login-wrap { min-height:100dvh;padding:12px;align-items:flex-start; } .login-shell { display:block;max-width:500px;border-radius:18px; } .login-brand-panel { min-height:0;padding:18px 20px 16px; } .login-brand-panel img { width:180px;max-height:54px; } .login-brand-panel h1 { font-size:23px;margin:15px 0 5px; } .login-brand-panel p { font-size:13px;line-height:1.45; } .login-brand-bottom { display:none; } .login-brand-pill { margin-top:12px;font-size:10px;padding:6px 9px; } .login-main-panel { padding:22px 20px 20px; } .login-card img { max-width:155px;margin-bottom:16px; } .login-card h2 { font-size:25px; } .login-card .hint { margin-bottom:18px; } .login-card input { min-height:48px;font-size:16px; } .login-footer-links { gap:6px;margin:15px 0 10px; } .login-footer-links a { font-size:11.5px;padding:9px 4px;min-height:40px; } .login-help-box { margin-top:12px;padding:10px; } .login-guest-link { margin-top:10px; } .footer-note { margin-top:14px;font-size:10.5px; } }
+  @media (max-width:380px) { .login-brand-panel h1 { font-size:21px; } .login-main-panel { padding:18px 15px; } .login-footer-links a { font-size:10.5px; } }
+  @media (max-height:700px) and (min-width:701px) { .login-wrap { min-height:auto;padding:12px; } .login-brand-panel { min-height:500px; } }
 
   /* ── Student portal colourful theme ──────────────────────────────────── */
   .s-welcome { background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 55%, #a855f7 100%); border-radius: 10px; padding: 16px 18px 20px; margin-bottom: 14px; position: relative; overflow: hidden; }
@@ -17991,46 +18019,64 @@ function renderLogin() {
   const busy = loginStep && !loginError ? loginStep : ''; // an error ends the busy state
   app.innerHTML = `
     <div class="login-wrap">
-      <div style="display:flex; flex-direction:column; align-items:center;">
-        <div class="login-card">
-          <img src="${LOGO_SRC}" alt="LIB Education">
-          <h2>Login</h2>
-          <div class="hint">Welcome to My LIB by LIB Education</div>
-          ${loginError ? `<div class="login-error">${esc(loginError)}</div>` : ''}
-          <input type="text" id="loginUser" placeholder="Username" autocomplete="username" onkeydown="if(event.key==='Enter') document.getElementById('loginPass').focus()">
-          <div style="position:relative;display:flex;align-items:center;">
-            <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter') attemptLogin()" style="flex:1;padding-right:40px;">
-            <button onclick="(function(){var e=document.getElementById('loginPass');var b=document.getElementById('loginPassToggle');if(e.type==='password'){e.type='text';b.textContent='🙈';}else{e.type='password';b.textContent='👁';}e.focus();})()" id="loginPassToggle" title="Show/hide password" style="position:absolute;right:6px;background:none;border:none;cursor:pointer;font-size:17px;padding:4px;color:var(--text-muted,#888);user-select:none;">👁</button>
+      <div class="login-shell">
+        <section class="login-brand-panel" aria-label="LIB Education">
+          <div class="login-brand-content">
+            <img src="${LOGO_SRC}" alt="LIB Education">
+            <h1>Learning made personal.</h1>
+            <p>Personalized tuition, language learning and academic support to help every learner learn, practice and progress.</p>
           </div>
-          <button class="btn-primary" id="loginBtn" onclick="attemptLogin()" ${busy ? 'disabled' : ''}>${busy ? '<span class="login-busy-spin"></span>Logging in to My LIB…' : 'Log in'}</button>
-          <div class="login-step" id="loginStepLine" aria-live="polite">${esc(busy)}</div>
-          ${biometricLockActive ? `
-          <div class="bio-or">or</div>
-          <button class="bio-btn" id="bioLoginBtn" onclick="loginWithBiometric()" type="button" ${busy ? 'disabled' : ''}>
-            <span style="font-size:22px;line-height:1;flex-shrink:0">👆</span>
-            <span style="flex:1;min-width:0">
-              <div class="bio-btn-main">Login as ${esc(bioGetUsername())}</div>
-              <div class="bio-btn-sub">Quick login · ${bioLabel()}</div>
-            </span>
-          </button>
-          ${/iPhone|iPad|iPod/i.test(navigator.userAgent) ? `<div style="text-align:center;font-size:11.5px;color:var(--muted);margin-top:-4px;line-height:1.4">Your device will show a prompt — select your saved passkey to continue.</div>` : ''}
-          ` : ''}
-          <div style="margin-top:14px;padding:10px 12px;background:var(--soft,#f1eee6);border-radius:7px;font-size:12.5px;color:var(--muted,#7c7461);line-height:1.6;text-align:center">
-            For your login and password, please call<br>
-            <a href="tel:9845393178" style="color:var(--forest,#3c5e42);font-weight:700;font-size:14px;text-decoration:none">9845393178</a><br>
-            <span style="font-size:12px">Please change your password after your first login.</span>
+          <div class="login-brand-bottom">
+            <span class="login-brand-pill">✦ Learn&nbsp; · &nbsp;Practice&nbsp; · &nbsp;Progress</span>
+            <div style="margin-top:16px">A connected learning experience for students, parents, teachers and administrators.</div>
           </div>
-          <div style="margin-top:14px;text-align:center"><a href="#" onclick="openGuideChooser();return false" style="color:var(--forest);font-weight:600;font-size:13.5px;text-decoration:underline;text-underline-offset:3px">📖 User Guide</a></div>
-          <div style="margin-top:10px;text-align:center;font-size:13.5px;color:var(--muted)">New student? <a href="register.html" style="color:var(--forest);font-weight:600;text-decoration:underline;text-underline-offset:3px">📝 Register here</a></div>
-          <div style="margin-top:12px;text-align:center">
-            <a href="knowledge-arena/knowledge-arena.html" style="display:inline-block;padding:9px 16px;border:1px solid var(--forest);border-radius:7px;background:rgba(60,94,66,0.08);color:var(--forest);font-weight:700;font-size:13.5px;text-decoration:none">🎮 Play Knowledge Arena as Guest</a>
+        </section>
+        <section class="login-main-panel">
+          <div class="login-content">
+            <div class="login-card">
+              <img src="${LOGO_SRC}" alt="LIB Education">
+              <h2>Welcome back</h2>
+              <div class="hint">Sign in to your My LIB account</div>
+              ${loginError ? `<div class="login-error">${esc(loginError)}</div>` : ''}
+              <input type="text" id="loginUser" placeholder="Username" autocomplete="username" onkeydown="if(event.key==='Enter') document.getElementById('loginPass').focus()">
+              <div class="login-password-row">
+                <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter') attemptLogin()">
+                <button onclick="(function(){var e=document.getElementById('loginPass');var b=document.getElementById('loginPassToggle');if(e.type==='password'){e.type='text';b.textContent='🙈';}else{e.type='password';b.textContent='👁';}e.focus();})()" id="loginPassToggle" title="Show/hide password" type="button" aria-label="Show or hide password">👁</button>
+              </div>
+              <button class="btn-primary" id="loginBtn" onclick="attemptLogin()" ${busy ? 'disabled' : ''}>${busy ? '<span class="login-busy-spin"></span>Logging in to My LIB…' : 'Log in'}</button>
+              <div class="login-step" id="loginStepLine" aria-live="polite">${esc(busy)}</div>
+              ${biometricLockActive ? `
+              <div class="bio-or">or</div>
+              <button class="bio-btn" id="bioLoginBtn" onclick="loginWithBiometric()" type="button" ${busy ? 'disabled' : ''}>
+                <span style="font-size:22px;line-height:1;flex-shrink:0">👆</span>
+                <span style="flex:1;min-width:0">
+                  <div class="bio-btn-main">Login as ${esc(bioGetUsername())}</div>
+                  <div class="bio-btn-sub">Quick login · ${bioLabel()}</div>
+                </span>
+              </button>
+              ${/iPhone|iPad|iPod/i.test(navigator.userAgent) ? `<div style="text-align:center;font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.4">Your device will show a prompt — select your saved passkey to continue.</div>` : ''}
+              ` : ''}
+              <div class="login-footer-links">
+                <a href="#" onclick="openGuideChooser();return false">📖 User Guide</a>
+                <a href="register.html">📝 Register</a>
+                <a href="knowledge-arena/knowledge-arena.html">🎮 Guest Arena</a>
+              </div>
+              <div class="login-help-box">
+                Need login credentials? Call<br>
+                <a href="tel:9845393178">9845393178</a><br>
+                <span style="font-size:12px">Please change your password after your first login.</span>
+              </div>
+              <div style="text-align:center">
+                <a class="login-guest-link" href="knowledge-arena/knowledge-arena.html">Play Knowledge Arena as Guest</a>
+              </div>
+            </div>
+            <div class="footer-note">
+              © LIBXL-Education Private Limited. All rights reserved.<br>
+              By logging in you accept our <a href="terms.html" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">Terms and Conditions</a> and <a href="https://www.libeducation.com/privacypolicy" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">Privacy Policy</a>.<br>
+              <span id="app-release-attribution">Version ${APP_VERSION} · Build ${BUILD_TIMESTAMP}</span>
+            </div>
           </div>
-        </div>
-        <div class="footer-note">
-          © LIBXL-Education Private Limited. All rights reserved.<br>
-          By logging in you accept our <a href="terms.html" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">Terms and Conditions</a> and <a href="https://www.libeducation.com/privacypolicy" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">Privacy Policy</a>.<br>
-          <span id="app-release-attribution">Version ${APP_VERSION} · Build ${BUILD_TIMESTAMP}</span>
-        </div>
+        </section>
       </div>
     </div>
   `;
