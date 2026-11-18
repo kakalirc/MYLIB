@@ -18985,6 +18985,13 @@ function teacherWorkspaceGo(tab, action) {
   }
   render();
 }
+function teacherOpenHomeworkReview(studentId) {
+  setTeacherPortalTab('homework');
+  hwShowForm = false;
+  hwFilterStudentId = studentId || '';
+  hwFilterStatus = 'submitted';
+  render();
+}
 function renderTeacherStudents(teacher) {
   const list = byName(studentsForTeacher(teacher.id).filter(s=>!s.archived));
   if (!list.length) return `<div class="card"><h2>My Students</h2><div class="empty">No students are enrolled in your subjects yet.</div></div>`;
@@ -21636,7 +21643,7 @@ function renderTeacherDashboard(teacher) {
         <button class="btn-small" onclick="setTeacherPortalTab('students')">My Students</button>
         <button class="btn-small" onclick="setTeacherPortalTab('studentworkspace')">Student Workspace</button>
         <button class="btn-small" onclick="setTeacherPortalTab('studyplans')">Study Plans</button>
-        <button class="btn-small" onclick="setTeacherPortalTab('homework')">Homework Review</button>
+        <button class="btn-small" onclick="teacherOpenHomeworkReview()">Homework Review</button>
         ${teacherQbAccess ? `<button class="btn-small" onclick="setTeacherPortalTab('questionbank')">Question Bank</button>` : ''}
         ${teacherResearchAccess && aiMasterEnabled ? `<button class="btn-small" onclick="setTeacherPortalTab('research')">Research</button>` : ''}
       </div>
