@@ -186,6 +186,7 @@ if (location.hostname !== 'app.libeducation.com') {
   /* Shared destructive-action button (replaces repeated inline overrides) */
   .btn-danger, .btn-primary.btn-danger { background: var(--brick); color: #fff; }   /* the 2-class form must out-rank .btn-primary's green, which is defined later */
   .nav-hint-mobile { display: none; }
+  .teacher-bottom-nav { display:none; }
   @media (max-width: 700px) {
     .desktop-tabs { display: none; }
     .nav-hint-desktop { display: none; }
@@ -193,6 +194,16 @@ if (location.hostname !== 'app.libeducation.com') {
     .sidebar-nav { display: none; }
     .admin-layout { display: block; }
     .mobile-tab-bar { display: block; margin-bottom: 20px; position: relative; }
+    .teacher-bottom-nav { display:flex; position:fixed; left:0; right:0; bottom:0; z-index:997; justify-content:space-around; gap:2px; padding:8px 6px calc(8px + env(safe-area-inset-bottom)); background:var(--paper); border-top:1px solid var(--line); box-shadow:0 -3px 12px rgba(20,30,25,.08); }
+    .teacher-bottom-nav button { flex:1; border:0; background:transparent; color:var(--muted); padding:6px 2px; border-radius:8px; display:flex; flex-direction:column; align-items:center; gap:3px; font-size:11px; font-weight:600; cursor:pointer; }
+    .teacher-bottom-nav button.active { color:var(--primary); background:var(--soft); }
+    .teacher-bottom-nav .nav-icon { font-size:20px; line-height:1; }
+    body:has(.teacher-bottom-nav) { padding-bottom:82px; }
+    .mobile-tab-bar { display:contents; }
+    .mobile-tab-toggle { display:none !important; }
+    .mobile-tab-dropdown { position:fixed !important; top:auto !important; bottom:calc(72px + env(safe-area-inset-bottom)) !important; left:10px !important; right:10px !important; max-height:70vh !important; overflow-y:auto !important; z-index:999; }
+    .mobile-tab-overlay { position:fixed; inset:0; z-index:998; }
+
     .mobile-tab-toggle { display: flex; align-items: center; gap: 10px; padding: 11px 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-family: 'Zilla Slab', serif; font-weight: 600; font-size: 15px; color: var(--ink); }
     .mobile-tab-toggle .burger { font-size: 18px; line-height: 1; }
     .mobile-tab-overlay { position: fixed; inset: 0; z-index: 998; }
@@ -1060,7 +1071,7 @@ const APP_USAGE_ACTIONS = [
   ['chat.send', 'Chat message sent'], ['ai.use', 'AI button used'],
 ];
 const APP_USAGE_SCREENS = {
-  schedule: 'Class Schedule', students: 'Students', studyplans: 'Study Plans', homework: 'Homework', questionbank: 'Question Bank', qbmonitoring: 'Question Bank Monitoring',
+  schedule: 'Class Schedule', students: 'Students', studentworkspace: 'Student Workspace', studyplans: 'Study Plans', homework: 'Homework', questionbank: 'Question Bank', qbmonitoring: 'Question Bank Monitoring',
   research: 'Research', researchmonitor: 'Research Monitoring', staradmin: 'Star Teacher Monitoring', appusage: 'App Usage', aiusage: 'AI Usage', attendance: 'Give Attendance', report: 'Attendance Report', availability: 'Availability', profile: 'My Profile',
   setup: 'Setup / Teachers & Subjects', dashboard: 'Dashboard', log: 'Class Log', chat: 'Communication', wixbookings: 'Demo Bookings',
   fees: 'Fees', rebuildclasses: 'Rebuild Pending Classes', expenses: 'Expenses', reports: 'Reports & Export', payroll: 'Payroll', parents: 'Parents', admins: 'Manage Admins', users: 'Settings', superadmin: 'Superadmin tools',
@@ -2084,6 +2095,8 @@ async function loadTeacherFrameworkAccess() {
   }
 }
 let teacherStudentSearch = '';
+let teacherWorkspaceStudentId = '';
+let teacherWorkspaceSubjectId = '';
 let studyPlanTeacherStudentId = '';
 let studyPlanTeacherSubjectId = '';
 let studyPlanMsg = '';
@@ -2192,6 +2205,7 @@ let qbExtractionBusyIds = new Set();
 let qbExtractionResults = {};
 let qbExtractionReviewRows = {};
 let qbSourceFilter = { boardId: '', schoolId: '', gradeId: '', subject: '', year: '' };
+let qbSourceSearch = '';
 let qbSchools = [];
 let qbSourceType = 'board';
 let qbSourceSchoolSearch = '';
@@ -2586,6 +2600,7 @@ function setTeacherPortalTab(t) {
   if (t === 'report') { loadTeacherPayrollRecords().then(() => render()); return; }
   if (t === 'studyplans') { studyPlanTeacherStudentId = ''; studyPlanTeacherSubjectId = ''; studyPlanDraftItems = []; studyPlanMsg = ''; studyPlanViewMode = 'report'; studyPlanFilterStatus = 'all'; studyPlanFilterSubjectId = ''; studyPlanFilterStudent = ''; studyPlanPendingSubjectId = ''; loadStudyPlans().then(() => render()); return; }
   if (t === 'homework') { hwShowForm = false; hwMsg = ''; hwFilterStudentId = ''; hwFilterStatus = 'assigned'; loadHomework().then(() => render()); return; }
+  if (t === 'studentworkspace') { Promise.all([loadStudyPlans(), loadHomework(), loadScheduledClasses()]).then(() => { if (teacherPortalTab === 'studentworkspace') render(); }); }
   if (t === 'questionbank' && !teacherQbAccess) { teacherPortalTab = 'dashboard'; render(); return; }
   if (t === 'research' && !teacherResearchAccess) { teacherPortalTab = 'dashboard'; render(); return; }
   if (t === 'starteacher') { if (!starOn) { teacherPortalTab = 'dashboard'; render(); return; } loadTeacherPendingExtras(true); loadStarExtras(); }
@@ -18863,6 +18878,128 @@ function teacherNewSubsHtml(teacher) {
       </table></div>` : `<div class="hint">No new subscriptions in your subjects in the last ${NEW_SUBS_DAYS} days.</div>`}
     </div>`;
 }
+function renderTeacherStudentWorkspace(teacher) {
+  const myStudents = byName(studentsForTeacher(teacher.id).filter(s => !s.archived));
+  if (!myStudents.length) return `<div class="card"><h2>Student Workspace</h2><div class="empty">No students are enrolled in your subjects yet.</div></div>`;
+  const student = myStudents.find(s => s.id === teacherWorkspaceStudentId) || myStudents[0];
+  if (teacherWorkspaceStudentId !== student.id) teacherWorkspaceStudentId = student.id;
+  const mySubjects = byName(subjectsForStudentAndTeacher(student.id, teacher.id));
+  const subject = mySubjects.find(s => s.id === teacherWorkspaceSubjectId) || mySubjects[0] || null;
+  if (subject && teacherWorkspaceSubjectId !== subject.id) teacherWorkspaceSubjectId = subject.id;
+  const gradeName = student.gradeId ? (grades.find(g => g.id === student.gradeId) || {}).name || '' : '';
+  const boardName = student.boardId ? (boards.find(b => b.id === student.boardId) || {}).name || '' : '';
+  const plan = subject ? (data.studyPlans || []).find(p => p.studentId === student.id && p.subjectId === subject.id) : null;
+  const planItems = plan && Array.isArray(plan.items) ? plan.items : [];
+  const planDone = planItems.filter(i => i.status === 'done').length;
+  const planProgress = planItems.length ? Math.round(planDone / planItems.length * 100) : 0;
+  const myHw = homeworkData.filter(h => h.teacherId === teacher.id && h.studentId === student.id && (!subject || h.subjectId === subject.id));
+  const awaitingReview = myHw.filter(h => h.status === 'submitted').length;
+  const overdueHw = myHw.filter(h => hwIsLate(h)).length;
+  const upcoming = (scheduledClasses || []).filter(sc => sc.teacherId === teacher.id && sc.studentId === student.id && (!subject || sc.subjectId === subject.id) && sc.date >= todayStr && sc.status !== 'Cancelled').sort((a,b) => (a.date + (a.time||'')).localeCompare(b.date + (b.time||''))).slice(0,5);
+  const nextClass = upcoming[0] || null;
+  const sessions = data.sessions.filter(s => s.teacherId === teacher.id && s.studentId === student.id && (!subject || s.subjectId === subject.id)).sort((a,b) => b.date.localeCompare(a.date)).slice(0,5);
+  const remainingHtml = subject ? TYPES.map(ty => {
+    const paid = studentSubscribed(student.id, subject.id, ty);
+    const used = studentUsed(student.id, subject.id, ty);
+    return `<span style="display:inline-block;padding:4px 8px;border:1px solid var(--line);border-radius:7px;margin:2px;font-size:12px">${ty}: <b style="color:${paid-used<=1?'var(--brick)':'var(--ink)'}">${paid-used}</b> left</span>`;
+  }).join('') : '';
+  const nextTopics = planItems.filter(i => i.status !== 'done').slice(0,4);
+  const savedBriefs = Array.isArray(researchNotes) && subject ? researchNotes.filter(n => n.student_id === student.id && String(n.subject_name||'').toLowerCase() === String(subject.name||'').toLowerCase()) : [];
+  const subjOptions = mySubjects.map(s => `<option value="${escAttr(s.id)}" ${subject && s.id===subject.id?'selected':''}>${esc(s.name)}</option>`).join('');
+  const studentOptions = myStudents.map(s => `<option value="${escAttr(s.id)}" ${s.id===student.id?'selected':''}>${esc(studentLabel(s))}</option>`).join('');
+  const progress = planItems.length ? `<div style="margin:8px 0"><div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:4px"><span>${planDone} of ${planItems.length} topics complete</span><b>${planProgress}%</b></div><div style="height:7px;background:var(--line);border-radius:8px;overflow:hidden"><div style="width:${planProgress}%;height:100%;background:var(--forest);border-radius:8px"></div></div></div>` : '<div class="hint">No study plan created for this subject yet.</div>';
+  const topicHtml = nextTopics.length ? `<ul style="margin:6px 0 0 18px;padding:0">${nextTopics.map(i=>`<li style="margin:4px 0">${esc(i.topic)} <span class="hint">· ${i.status==='in_progress'?'In progress':'Not started'}</span></li>`).join('')}</ul>` : (planItems.length ? '<div class="hint">All study-plan topics are marked complete 🎉</div>' : '');
+  const hwSummary = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><span class="tag">${myHw.length} assigned</span><span class="tag" style="${awaitingReview?'background:rgba(201,154,60,.15);color:var(--ink)':''}">${awaitingReview} awaiting review</span><span class="tag" style="${overdueHw?'background:rgba(166,67,46,.12);color:var(--brick)':''}">${overdueHw} overdue</span></div>`;
+  const prioritizedHw = [...myHw].sort((a,b) => (a.status === 'submitted' ? 0 : hwIsLate(a) ? 1 : 2) - (b.status === 'submitted' ? 0 : hwIsLate(b) ? 1 : 2) || String(a.dueDate||'9999-12-31').localeCompare(String(b.dueDate||'9999-12-31')));
+  const actionTitle = awaitingReview ? `${awaitingReview} homework submission${awaitingReview===1?'':'s'} waiting for review` : overdueHw ? `${overdueHw} overdue homework item${overdueHw===1?'':'s'}` : nextClass && nextClass.date === todayStr ? 'Class scheduled for today' : !planItems.length ? 'Study plan not created yet' : nextTopics.length ? 'Continue the study plan' : 'Student is on track';
+  const actionDetail = awaitingReview ? 'Review submitted work before the next lesson.' : overdueHw ? 'Follow up on overdue homework and agree on a completion date.' : nextClass && nextClass.date === todayStr ? `Next class ${nextClass.time ? 'at '+esc(nextClass.time) : ''} · prepare the lesson and attendance.` : !planItems.length ? 'Create a topic sequence and define the next learning milestones.' : nextTopics.length ? `Next topic: ${esc(nextTopics[0].topic)}.` : 'No immediate action is flagged from the available records.';
+  const actionButton = awaitingReview ? `<button class="btn-small btn-primary" onclick="teacherWorkspaceGo('homework','review')">Review submissions</button>` : overdueHw ? `<button class="btn-small btn-primary" onclick="teacherWorkspaceGo('homework')">Open homework</button>` : nextClass && nextClass.date === todayStr ? `<button class="btn-small btn-primary" onclick="teacherWorkspaceGo('attendance')">Take attendance</button>` : !planItems.length || nextTopics.length ? `<button class="btn-small btn-primary" onclick="teacherWorkspaceGo('studyplans')">Open study plan</button>` : `<button class="btn-small btn-primary" onclick="teacherWorkspaceGo('research')">Prepare next lesson</button>`;
+  const actionCard = `<div class="card" style="border-left:4px solid ${awaitingReview||overdueHw?'var(--brick)':'var(--gold)'}"><div class="hint" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em">Teacher action</div><h3 style="margin:4px 0">${esc(actionTitle)}</h3><div class="hint">${actionDetail}</div><div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px">${actionButton}<button class="btn-small" onclick="teacherWorkspaceGo('homework','assign')">Assign homework</button><button class="btn-small" onclick="teacherWorkspaceGo('attendance')">Attendance</button></div></div>`;
+  return `
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <h2 style="margin:0;flex:1">👩‍🎓 Student Workspace</h2>
+        <button class="btn-small" onclick="setTeacherPortalTab('students')">My Students list</button>
+      </div>
+      <div class="row-form" style="margin-top:12px">
+        <label>Student</label><select onchange="teacherWorkspaceStudentId=this.value;teacherWorkspaceSubjectId='';render()">${studentOptions}</select>
+      </div>
+      <div class="row-form">
+        <label>Subject</label><select onchange="teacherWorkspaceSubjectId=this.value;render()" ${!mySubjects.length?'disabled':''}><option value="">Select subject…</option>${subjOptions}</select>
+      </div>
+      <h3 style="margin:10px 0 2px">${esc(studentLabel(student))}</h3>
+      <div class="hint">${[gradeName,boardName].filter(Boolean).map(esc).join(' · ') || 'Student details'}</div>
+      <div style="font-size:13px;margin-top:6px;line-height:1.7">
+        ${student.parentName?'<b>Parent:</b> '+esc(student.parentName)+' · ':''}
+        ${student.mobileNumber?'<b>Contact:</b> '+esc(student.mobileNumber):''}
+      </div>
+      ${remainingHtml ? `<div style="margin-top:8px"><b style="font-size:12px">Class balance</b><div>${remainingHtml}</div></div>` : ''}
+    </div>
+    ${subject ? `
+    ${actionCard}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-bottom:12px">
+      <div class="card" style="margin:0"><div class="hint">Study Plan</div><div style="font-size:24px;font-weight:700">${planItems.length?planProgress+'%':'—'}</div><div class="hint">${planDone}/${planItems.length} topics complete</div></div>
+      <div class="card" style="margin:0"><div class="hint">Homework</div><div style="font-size:24px;font-weight:700">${myHw.length}</div><div class="hint">${awaitingReview} awaiting review</div></div>
+      <div class="card" style="margin:0"><div class="hint">Upcoming classes</div><div style="font-size:24px;font-weight:700">${upcoming.length}</div><div class="hint">Next scheduled</div></div>
+      <div class="card" style="margin:0"><div class="hint">Recent classes</div><div style="font-size:24px;font-weight:700">${sessions.length}</div><div class="hint">Latest records</div></div>
+    </div>
+    <div class="card">
+      <h3 style="margin:0 0 6px">📚 Study Plan</h3>${progress}${topicHtml}
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px"><button class="btn-small btn-primary" onclick="teacherWorkspaceGo('studyplans')">Open / Update Study Plan</button><button class="btn-small" onclick="teacherWorkspaceGo('research')">✨ Lesson Prep</button></div>
+    </div>
+    <div class="card">
+      <h3 style="margin:0 0 6px">✍️ Homework</h3>${hwSummary}
+      ${myHw.length ? `<div style="margin-top:8px;font-size:13px">${prioritizedHw.slice(0,4).map(h=>`<div style="padding:7px 0;border-top:1px solid var(--line)"><b>${esc(h.title||'Homework')}</b> · <span style="color:${h.status==='submitted'?'var(--gold)':hwIsLate(h)?'var(--brick)':'var(--muted)'}">${esc(h.status||'')}</span> ${h.dueDate?'· Due '+esc(dayDate(h.dueDate)):''} ${h.status==='submitted'?'<span class="tag">Review</span>':hwIsLate(h)?'<span class="tag">Overdue</span>':''}</div>`).join('')}</div>` : '<div class="hint" style="margin-top:8px">No homework for this student in this subject yet.</div>'}
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px"><button class="btn-small btn-primary" onclick="teacherWorkspaceGo('homework','assign')">Assign Homework</button><button class="btn-small" onclick="teacherWorkspaceGo('homework','review')">Review Homework</button></div>
+    </div>
+    <div class="card">
+      <h3 style="margin:0 0 6px">🗓️ Upcoming Classes</h3>
+      ${nextClass ? `<div style="padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--soft);margin-bottom:8px"><b>${nextClass.date===todayStr?'Today':esc(dayDate(nextClass.date))}</b> ${esc(nextClass.time||'Time not set')}<div class="hint">${esc(nextClass.status||'Scheduled')} ${nextClass.classType?'· '+esc(nextClass.classType):''}</div></div>` : '<div class="hint">No upcoming classes found for this student and subject.</div>'}${upcoming.length>1 ? `<div>${upcoming.slice(1).map(sc=>`<div style="padding:7px 0;border-top:1px solid var(--line);font-size:13px"><b>${esc(dayDate(sc.date))}</b> ${esc(sc.time||'')} · ${esc(sc.status||'Scheduled')} ${sc.classType?'· '+esc(sc.classType):''}</div>`).join('')}</div>` : ''}
+      <button class="btn-small" style="margin-top:8px" onclick="teacherWorkspaceGo('schedule')">Open Class Schedule</button>
+    </div>
+    <div class="card">
+      <h3 style="margin:0 0 6px">📋 Recent Class History</h3>
+      ${sessions.length ? `<div class="table-scroll"><table><tr><th>Date</th><th>Status</th><th>Class</th><th>Mode</th><th>Count</th></tr>${sessions.map(s=>`<tr><td>${esc(dayDate(s.date))}</td><td>${esc(s.status||'')}</td><td>${esc(s.classType||'')}</td><td>${esc(s.mode||'')}</td><td>${s.count}</td></tr>`).join('')}</table></div>` : '<div class="hint">No class records found for this student and subject.</div>'}
+      <button class="btn-small" style="margin-top:8px" onclick="teacherWorkspaceGo('attendance')">Give Attendance / View Records</button>
+    </div>
+    <div class="card">
+      <h3 style="margin:0 0 6px">📝 Lesson Prep</h3>
+      ${teacherResearchAccess && aiMasterEnabled ? `<div class="hint">${savedBriefs.length? savedBriefs.length+' saved brief(s) for this student and subject.':'Prepare a lesson brief using the student, subject and study-plan topics.'}</div><button class="btn-small btn-primary" style="margin-top:8px" onclick="teacherWorkspaceGo('research')">Open Lesson Prep</button>` : '<div class="hint">Lesson Prep is not enabled for this teacher account.</div>'}
+    </div>` : '<div class="card"><div class="empty">This student has no subject mapped to you. Select another student.</div></div>'}
+  `;
+}
+function teacherWorkspaceGo(tab, action) {
+  const student = data.students.find(s => s.id === teacherWorkspaceStudentId);
+  const subject = student ? subjectsForStudentAndTeacher(student.id, currentLinkedId).find(s => s.id === teacherWorkspaceSubjectId) : null;
+  setTeacherPortalTab(tab);
+  if (!student) return;
+  if (tab === 'studyplans') {
+    studyPlanFilterStudent = student.name || studentLabel(student);
+    studyPlanFilterSubjectId = subject ? subject.id : '';
+  } else if (tab === 'homework') {
+    hwFilterStudentId = student.id;
+    hwFilterStatus = action === 'review' ? 'submitted' : '';
+    if (action === 'assign') {
+      hwShowForm = true; hwTeacherStudentId = student.id; hwTeacherSubjectId = subject ? subject.id : '';
+      hwEditId = null; hwMsg = ''; hwDraft = { title:'', description:'', study_plan_topic:'', due_date:'', teacher_file_url:'' };
+    }
+  } else if (tab === 'attendance') {
+    logDraft.studentId = student.id; logDraft.subjectId = subject ? subject.id : ''; logDraft.date = todayStr; logDraft.teacherId = currentLinkedId;
+  } else if (tab === 'research') {
+    researchDraft.studentId = student.id; researchDraft.subjectId = subject ? subject.id : '';
+    researchDraft.gradeId = student.gradeId || ''; researchDraft.boardId = student.boardId || '';
+    researchDraft.chapter = ''; researchDraft.focus = '';
+    researchBrief = { loading:false, text:'', error:'', savedId:'', ask:null }; researchBankQs = [];
+  }
+  render();
+}
+function teacherOpenHomeworkReview(studentId) {
+  setTeacherPortalTab('homework');
+  hwShowForm = false;
+  hwFilterStudentId = studentId || '';
+  hwFilterStatus = 'submitted';
+  render();
+}
 function renderTeacherStudents(teacher) {
   const list = byName(studentsForTeacher(teacher.id).filter(s=>!s.archived));
   if (!list.length) return `<div class="card"><h2>My Students</h2><div class="empty">No students are enrolled in your subjects yet.</div></div>`;
@@ -20582,11 +20719,26 @@ function teacherPendingPrep(subjectId, studentId) {
 // Gold strip at the top of the teacher Dashboard; hidden when nothing is counted.
 function teacherPendingBannerHtml(p) {
   if (!p.total) return '';
+  const primary = p.counts[0];
   const named = p.counts.slice(0, 3).map(c => c.n + ' ' + c.label).join(', ') + (p.counts.length > 3 ? ' and more' : '');
+  const priorityLabels = {
+    pendToday: 'Classes due for attendance',
+    pendTimings: 'Class timings need correction',
+    pendSetup: 'Schedule setup needs attention',
+    pendDemos: 'Demo outcomes need updating',
+    pendHomework: 'Homework waiting for review',
+    pendPapers: 'Practice papers waiting for review',
+    pendNoPlan: 'Students need study plans',
+    pendChats: 'Unread chats need a response',
+    pendNotifs: 'Unread notifications',
+    pendAnnouncements: 'Unread announcements',
+    pendAvailability: 'Weekly availability is not set'
+  };
   return '<div class="card" style="border-left:4px solid var(--gold);background:var(--soft);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
-    + '<div style="flex:1;min-width:220px"><b style="font-size:15px">⚠ You have ' + p.total + ' pending action item' + (p.total === 1 ? '' : 's') + '</b>'
+    + '<div style="flex:1;min-width:220px"><b style="font-size:15px">⚡ Start here: ' + esc(priorityLabels[primary.id] || primary.label) + '</b>'
+    + '<div class="hint" style="margin-top:2px">' + primary.n + ' ' + esc(primary.label) + ' · ' + p.total + ' total pending items</div>'
     + '<div class="hint" style="margin-top:2px">' + esc(named) + '</div></div>'
-    + '<button class="btn-primary" onclick="setTeacherPortalTab(\'pendingactions\')">Go to Pending Action Items</button></div>';
+    + '<button class="btn-primary" onclick="setTeacherPortalTab(\'pendingactions\')">Review priorities</button></div>';
 }
 
 // ================= Star Teacher =================
@@ -21188,6 +21340,7 @@ function renderAiUsageAdmin() {
 }
 
 function renderTeacherDashboard(teacher) {
+  const awaitingReview = homeworkData.filter(h => h.teacherId === teacher.id && h.status === 'submitted').length;
   const classesToday = data.sessions.filter(s=>s.teacherId===teacher.id && s.date===todayStr).reduce((a,s)=>a+s.count,0);
 
   // This month's earnings so far: classes given this month x this teacher's rate for that category, class type and mode.
@@ -21506,6 +21659,19 @@ function renderTeacherDashboard(teacher) {
 
   return `
     ${todaySchedHtml}
+    <div class="card" style="margin-bottom:12px">
+      <h2 style="margin-top:0">⚡ Quick Actions</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn-primary" onclick="setTeacherPortalTab('attendance')">Give Attendance</button>
+        <button class="btn-small" onclick="setTeacherPortalTab('schedule')">Class Schedule</button>
+        <button class="btn-small" onclick="setTeacherPortalTab('students')">My Students</button>
+        <button class="btn-small" onclick="setTeacherPortalTab('studentworkspace')">Student Workspace</button>
+        <button class="btn-small" onclick="setTeacherPortalTab('studyplans')">Study Plans</button>
+        <button class="btn-small" onclick="teacherOpenHomeworkReview()">Homework Review ${awaitingReview ? '· '+awaitingReview+' pending' : ''}</button>
+        ${teacherQbAccess ? `<button class="btn-small" onclick="setTeacherPortalTab('questionbank')">Question Bank</button>` : ''}
+        ${teacherResearchAccess && aiMasterEnabled ? `<button class="btn-small" onclick="setTeacherPortalTab('research')">Research</button>` : ''}
+      </div>
+    </div>
     ${teacherPendingBannerHtml(pend)}
     ${starSafe(() => starDashLineHtml(teacher), 'dashboard')}
     ${celebHtml}
@@ -21922,6 +22088,7 @@ function renderTeacherPortal() {
       ['schedule', 'Class Schedule'],
       ['frequency', 'Class Frequency Setup'],
       ['students', 'My Students'],
+      ['studentworkspace', 'Student Workspace'],
       ['studyplans', 'Study Plans'],
       ['homework', 'Homework'],
       ...(teacherQbAccess ? [['questionbank', 'Question Bank']] : []),
@@ -21956,6 +22123,7 @@ function renderTeacherPortal() {
     ['schedule', 'Class Schedule'],
     ['frequency', 'Class Frequency Setup'],
     ['students', 'My Students'],
+    ['studentworkspace', 'Student Workspace'],
     ['studyplans', 'Study Plans'],
     ['homework', 'Homework'],
     ...(teacherQbAccess ? [['questionbank', 'Question Bank']] : []),
@@ -22007,12 +22175,20 @@ function renderTeacherPortal() {
         </div>
       ` : ''}
     </div>`;
+  const teacherBottomNavHtml = `
+    <nav class="teacher-bottom-nav" aria-label="Teacher navigation">
+      <button class="${teacherPortalTab==='dashboard'?'active':''}" onclick="setTeacherPortalTab('dashboard')"><span class="nav-icon">⌂</span><span>Home</span></button>
+      <button class="${teacherPortalTab==='schedule'?'active':''}" onclick="setTeacherPortalTab('schedule')"><span class="nav-icon">▦</span><span>Classes</span></button>
+      <button class="${teacherPortalTab==='students'?'active':''}" onclick="setTeacherPortalTab('students')"><span class="nav-icon">♙</span><span>Students</span></button>
+      <button class="${teacherMobileTabMenuOpen?'active':''}" onclick="toggleTeacherMobileTabMenu()"><span class="nav-icon">☰</span><span>More</span></button>
+    </nav>`;
   return `
     ${mobileTabBarHtml}
     <div class="admin-layout ${isDesktopSidebarCollapsed('teacher') ? 'is-sidebar-collapsed' : ''}">
       ${sidebarHtml}
       <div class="sidebar-content">${teacherPortalBodyHtml(teacher)}</div>
-    </div>`;
+    </div>
+    ${teacherBottomNavHtml}`;
 }
 // The page for the selected teacher tab, without the menu (renderTeacherPortal wraps it in the sidebar layout).
 function teacherPortalBodyHtml(teacher) {
@@ -22042,6 +22218,9 @@ function teacherPortalBodyHtml(teacher) {
   }
   if (teacherPortalTab === 'students') {
     return renderTeacherStudents(teacher);
+  }
+  if (teacherPortalTab === 'studentworkspace') {
+    return renderTeacherStudentWorkspace(teacher);
   }
   if (teacherPortalTab === 'studyplans') {
     return renderTeacherStudyPlans(teacher);
@@ -22928,7 +23107,14 @@ function renderTeacherHomework(teacher) {
 
   if (!hw.length && !hwShowForm) return `<div class="card">${statsHtml}${filtersHtml}<div class="empty">No homework${hwFilterStudentId||hwFilterStatus?' matches these filters':'s assigned yet'}.</div><button class="btn-primary" onclick="hwShowForm=true;hwTeacherStudentId='';hwTeacherSubjectId='';hwDraft={title:'',description:'',due_date:'',study_plan_topic:'',marks:'',teacher_feedback:'',teacher_file_url:''};render()">+ Assign first homework</button></div>`;
 
-  const rows2 = hw.map(h => {
+  // Review queue prioritises submitted work, oldest submission first.
+  const reviewQueue = hw.slice().sort((a,b) => {
+    if (hwFilterStatus === 'submitted') return (a.submittedAt||a.updatedAt||a.createdAt||'').localeCompare(b.submittedAt||b.updatedAt||b.createdAt||'');
+    if (a.status === 'submitted' && b.status !== 'submitted') return -1;
+    if (b.status === 'submitted' && a.status !== 'submitted') return 1;
+    return (b.dueDate||'').localeCompare(a.dueDate||'');
+  });
+  const rows2 = reviewQueue.map(h => {
     const student = data.students.find(s=>s.id===h.studentId);
     const subj = data.subjects.find(s=>s.id===h.subjectId);
     const statusColor = hwStatusColor(h);
@@ -22944,6 +23130,8 @@ function renderTeacherHomework(teacher) {
           <div style="font-size:12.5px;color:var(--muted);margin-top:2px">
             ${student?esc(student.name):'?'} · ${subj?esc(subj.name):'?'}
             ${h.assignedDate ? ' · Assigned '+dayDate(h.assignedDate) : ''}
+            ${h.submittedAt && h.status==='submitted' ? ' · <b>Submitted '+dayDate(h.submittedAt)+'</b>' : ''}
+            ${h.reviewedAt && h.status==='reviewed' ? ' · Reviewed '+dayDate(h.reviewedAt) : ''}
             ${h.dueDate ? ' · <b>Due '+dayDate(h.dueDate)+'</b>' : ''}
           </div>
           ${h.description ? `<div style="font-size:13px;color:var(--ink);margin-top:4px">${esc(h.description)}</div>` : ''}
@@ -26602,7 +26790,8 @@ function qbSourcePapersHtml() {
     ${sel('subject', 'All subjects', sp => sp.subject_name, sp => sp.subject_name)}
     ${sel('year', 'All years', sp => sp.year, sp => String(sp.year))}
     <button class="btn-small" onclick="qbSourceApplied={...qbSourceFilter};render()">Apply filter</button>
-    ${a ? `<button class="btn-small" onclick="qbSourceFilter={boardId:'',schoolId:'',gradeId:'',subject:currentRole==='Teacher'?'__my_subjects__':'',year:''};qbSourceApplied=null;render()">Clear</button>` : ''}
+    <input type="search" placeholder="Search year, exam, uploader…" value="${escAttr(qbSourceSearch)}" onchange="qbSourceSearch=this.value;render()" style="min-width:min(240px,100%);flex:1">
+    <button class="btn-small" onclick="qbSourceSearch='';qbSourceFilter={boardId:'',schoolId:'',gradeId:'',subject:currentRole==='Teacher'?'__my_subjects__':'',year:''};qbSourceApplied=null;render()">Clear all</button>
   </div>`;
   if (!a) return `<p class="hint" style="margin-bottom:12px">Published papers across all subjects, plus your own submissions awaiting review or rejected.</p>
     ${filtersHtml}<div class="empty">Choose filters and press Apply filter to see the papers.</div>`;
@@ -26625,7 +26814,11 @@ function qbSourcePapersHtml() {
       ? teacherSubjectNames.has(String(sp.subject_name || '').trim().toLocaleLowerCase())
       : sp.subject_name === a.subject))
     && (!a.year || String(sp.year) === a.year);
-  const list = qbSourcePapers.filter(match);
+  const list = qbSourcePapers.filter(sp => match(sp) && (!qbSourceSearch.trim() || [
+    sp.year, sp.exam_type, sp.subject_name, sp.medium, sp.uploader_name, sp.status,
+    sp.source_type === 'school' ? qbByName(qbSchools, sp.school_id) : qbByName(boards, sp.board_id),
+    qbByName(grades, sp.grade_id)
+  ].join(' ').toLocaleLowerCase().includes(qbSourceSearch.trim().toLocaleLowerCase())));
   if (!list.length) return filtersHtml + '<div class="empty">No past papers match these filters.</div>';
   const duplicateKey = sp => [sp.source_type, sp.source_type === 'school' ? sp.school_id : sp.board_id, sp.grade_id,
     String(sp.subject_name || '').trim().toLocaleLowerCase(), sp.year, String(sp.exam_type || '').trim().toLocaleLowerCase(),
