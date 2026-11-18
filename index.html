@@ -20712,11 +20712,26 @@ function teacherPendingPrep(subjectId, studentId) {
 // Gold strip at the top of the teacher Dashboard; hidden when nothing is counted.
 function teacherPendingBannerHtml(p) {
   if (!p.total) return '';
+  const primary = p.counts[0];
   const named = p.counts.slice(0, 3).map(c => c.n + ' ' + c.label).join(', ') + (p.counts.length > 3 ? ' and more' : '');
+  const priorityLabels = {
+    pendToday: 'Classes due for attendance',
+    pendTimings: 'Class timings need correction',
+    pendSetup: 'Schedule setup needs attention',
+    pendDemos: 'Demo outcomes need updating',
+    pendHomework: 'Homework waiting for review',
+    pendPapers: 'Practice papers waiting for review',
+    pendNoPlan: 'Students need study plans',
+    pendChats: 'Unread chats need a response',
+    pendNotifs: 'Unread notifications',
+    pendAnnouncements: 'Unread announcements',
+    pendAvailability: 'Weekly availability is not set'
+  };
   return '<div class="card" style="border-left:4px solid var(--gold);background:var(--soft);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
-    + '<div style="flex:1;min-width:220px"><b style="font-size:15px">⚠ You have ' + p.total + ' pending action item' + (p.total === 1 ? '' : 's') + '</b>'
+    + '<div style="flex:1;min-width:220px"><b style="font-size:15px">⚡ Start here: ' + esc(priorityLabels[primary.id] || primary.label) + '</b>'
+    + '<div class="hint" style="margin-top:2px">' + primary.n + ' ' + esc(primary.label) + ' · ' + p.total + ' total pending items</div>'
     + '<div class="hint" style="margin-top:2px">' + esc(named) + '</div></div>'
-    + '<button class="btn-primary" onclick="setTeacherPortalTab(\'pendingactions\')">Go to Pending Action Items</button></div>';
+    + '<button class="btn-primary" onclick="setTeacherPortalTab(\'pendingactions\')">Review priorities</button></div>';
 }
 
 // ================= Star Teacher =================
