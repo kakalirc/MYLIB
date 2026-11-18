@@ -21340,6 +21340,7 @@ function renderAiUsageAdmin() {
 }
 
 function renderTeacherDashboard(teacher) {
+  const awaitingReview = homeworkData.filter(h => h.teacherId === teacher.id && h.status === 'submitted').length;
   const classesToday = data.sessions.filter(s=>s.teacherId===teacher.id && s.date===todayStr).reduce((a,s)=>a+s.count,0);
 
   // This month's earnings so far: classes given this month x this teacher's rate for that category, class type and mode.
