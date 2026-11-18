@@ -27737,7 +27737,8 @@ function regOriginalFormHtml(r) {
   const gradeValue = field('grade_id', r.grade_id);
   const boardValue = field('board_id', r.board_id);
   const gradeText = hasSnapshot ? p.grade : (gradeValue === 'NA' ? 'Not Applicable / Not Available in list here' : (regGradeName(gradeValue) || gradeValue));
-  const boardText = hasSnapshot ? p.board : (regBoardName(boardValue) || boardValue);
+  const boardRaw = hasSnapshot ? p.board : boardValue;
+  const boardText = regBoardName(boardRaw) || regBoardName(boardValue) || (boardRaw && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(boardRaw)) ? 'Unknown board' : boardRaw) || boardValue;
   const subjects = field('subjects', r.subjects || []);
   const mode = hasSnapshot ? field('mode_preference', '') : (r.mode_preference === 'Offline' ? 'At the centre (Offline)' : r.mode_preference === 'Both' ? 'Either' : r.mode_preference);
   const classType = hasSnapshot ? field('class_type_preference', '') : (r.class_type_preference === 'Both' ? 'Not sure' : r.class_type_preference);
