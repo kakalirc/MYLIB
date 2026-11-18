@@ -18896,6 +18896,7 @@ function renderTeacherStudentWorkspace(teacher) {
   const awaitingReview = myHw.filter(h => h.status === 'submitted').length;
   const overdueHw = myHw.filter(h => hwIsLate(h)).length;
   const upcoming = (scheduledClasses || []).filter(sc => sc.teacherId === teacher.id && sc.studentId === student.id && (!subject || sc.subjectId === subject.id) && sc.date >= todayStr && sc.status !== 'Cancelled').sort((a,b) => (a.date + (a.time||'')).localeCompare(b.date + (b.time||''))).slice(0,5);
+  const nextClass = upcoming[0] || null;
   const sessions = data.sessions.filter(s => s.teacherId === teacher.id && s.studentId === student.id && (!subject || s.subjectId === subject.id)).sort((a,b) => b.date.localeCompare(a.date)).slice(0,5);
   const remainingHtml = subject ? TYPES.map(ty => {
     const paid = studentSubscribed(student.id, subject.id, ty);
@@ -18909,6 +18910,11 @@ function renderTeacherStudentWorkspace(teacher) {
   const progress = planItems.length ? `<div style="margin:8px 0"><div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:4px"><span>${planDone} of ${planItems.length} topics complete</span><b>${planProgress}%</b></div><div style="height:7px;background:var(--line);border-radius:8px;overflow:hidden"><div style="width:${planProgress}%;height:100%;background:var(--forest);border-radius:8px"></div></div></div>` : '<div class="hint">No study plan created for this subject yet.</div>';
   const topicHtml = nextTopics.length ? `<ul style="margin:6px 0 0 18px;padding:0">${nextTopics.map(i=>`<li style="margin:4px 0">${esc(i.topic)} <span class="hint">· ${i.status==='in_progress'?'In progress':'Not started'}</span></li>`).join('')}</ul>` : (planItems.length ? '<div class="hint">All study-plan topics are marked complete 🎉</div>' : '');
   const hwSummary = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><span class="tag">${myHw.length} assigned</span><span class="tag" style="${awaitingReview?'background:rgba(201,154,60,.15);color:var(--ink)':''}">${awaitingReview} awaiting review</span><span class="tag" style="${overdueHw?'background:rgba(166,67,46,.12);color:var(--brick)':''}">${overdueHw} overdue</span></div>`;
+  const prioritizedHw = [...myHw].sort((a,b) => (a.status === 'submitted' ? 0 : hwIsLate(a) ? 1 : 2) - (b.status === 'submitted' ? 0 : hwIsLate(b) ? 1 : 2) || String(a.dueDate||'9999-12-31').localeCompare(String(b.dueDate||'9999-12-31')));
+  const actionTitle = awaitingReview ? `${awaitingReview} homework submission${awaitingReview===1?'':'s'} waiting for review` : overdueHw ? `${overdueHw} overdue homework item${overdueHw===1?'':'s'}` : nextClass && nextClass.date === todayStr ? 'Class scheduled for today' : !planItems.length ? 'Study plan not created yet' : nextTopics.length ? 'Continue the study plan' : 'Student is on track';
+  const actionDetail = awaitingReview ? 'Review submitted work before the next lesson.' : overdueHw ? 'Follow up on overdue homework and agree on a completion date.' : nextClass && nextClass.date === todayStr ? `Next class ${nextClass.time ? 'at '+esc(nextClass.time) : ''} · prepare the lesson and attendance.` : !planItems.length ? 'Create a topic sequence and define the next learning milestones.' : nextTopics.length ? `Next topic: ${esc(nextTopics[0].topic)}.` : 'No immediate action is flagged from the available records.';
+  const actionButton = awaitingReview ? `<button class="btn-small btn-primary" onclick="teacherWorkspaceGo('homework','review')">Review submissions</button>` : overdueHw ? `<button class="btn-small btn-primary" onclick="teacherWorkspaceGo('homework')">Open homework</button>` : !planItems.length || nextTopics.length ? `<button class="btn-small btn-primary" onclick="teacherWorkspaceGo('studyplans')">Open study plan</button>` : `<button class="btn-small btn-primary" onclick="teacherWorkspaceGo('research')">Prepare next lesson</button>`;
+  const actionCard = `<div class="card" style="border-left:4px solid ${awaitingReview||overdueHw?'var(--brick)':'var(--gold)'}"><div class="hint" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em">Teacher action</div><h3 style="margin:4px 0">${esc(actionTitle)}</h3><div class="hint">${actionDetail}</div><div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px">${actionButton}<button class="btn-small" onclick="teacherWorkspaceGo('homework','assign')">Assign homework</button><button class="btn-small" onclick="teacherWorkspaceGo('attendance')">Attendance</button></div></div>`;
   return `
     <div class="card">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -18930,6 +18936,7 @@ function renderTeacherStudentWorkspace(teacher) {
       ${remainingHtml ? `<div style="margin-top:8px"><b style="font-size:12px">Class balance</b><div>${remainingHtml}</div></div>` : ''}
     </div>
     ${subject ? `
+    ${actionCard}
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-bottom:12px">
       <div class="card" style="margin:0"><div class="hint">Study Plan</div><div style="font-size:24px;font-weight:700">${planItems.length?planProgress+'%':'—'}</div><div class="hint">${planDone}/${planItems.length} topics complete</div></div>
       <div class="card" style="margin:0"><div class="hint">Homework</div><div style="font-size:24px;font-weight:700">${myHw.length}</div><div class="hint">${awaitingReview} awaiting review</div></div>
@@ -18942,12 +18949,12 @@ function renderTeacherStudentWorkspace(teacher) {
     </div>
     <div class="card">
       <h3 style="margin:0 0 6px">✍️ Homework</h3>${hwSummary}
-      ${myHw.length ? `<div style="margin-top:8px;font-size:13px">${myHw.slice(0,4).map(h=>`<div style="padding:6px 0;border-top:1px solid var(--line)"><b>${esc(h.title||'Homework')}</b> · ${esc(h.status||'')} ${h.dueDate?'· Due '+esc(dayDate(h.dueDate)):''}</div>`).join('')}</div>` : '<div class="hint" style="margin-top:8px">No homework for this student in this subject yet.</div>'}
+      ${myHw.length ? `<div style="margin-top:8px;font-size:13px">${prioritizedHw.slice(0,4).map(h=>`<div style="padding:7px 0;border-top:1px solid var(--line)"><b>${esc(h.title||'Homework')}</b> · <span style="color:${h.status==='submitted'?'var(--gold)':hwIsLate(h)?'var(--brick)':'var(--muted)'}">${esc(h.status||'')}</span> ${h.dueDate?'· Due '+esc(dayDate(h.dueDate)):''} ${h.status==='submitted'?'<span class="tag">Review</span>':hwIsLate(h)?'<span class="tag">Overdue</span>':''}</div>`).join('')}</div>` : '<div class="hint" style="margin-top:8px">No homework for this student in this subject yet.</div>'}
       <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px"><button class="btn-small btn-primary" onclick="teacherWorkspaceGo('homework','assign')">Assign Homework</button><button class="btn-small" onclick="teacherWorkspaceGo('homework','review')">Review Homework</button></div>
     </div>
     <div class="card">
       <h3 style="margin:0 0 6px">🗓️ Upcoming Classes</h3>
-      ${upcoming.length ? `<div>${upcoming.map(sc=>`<div style="padding:7px 0;border-top:1px solid var(--line);font-size:13px"><b>${esc(dayDate(sc.date))}</b> ${esc(sc.time||'')} · ${esc(sc.status||'Scheduled')} ${sc.classType?'· '+esc(sc.classType):''}</div>`).join('')}</div>` : '<div class="hint">No upcoming classes found for this student and subject.</div>'}
+      ${nextClass ? `<div style="padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--soft);margin-bottom:8px"><b>${nextClass.date===todayStr?'Today':esc(dayDate(nextClass.date))}</b> ${esc(nextClass.time||'Time not set')}<div class="hint">${esc(nextClass.status||'Scheduled')} ${nextClass.classType?'· '+esc(nextClass.classType):''}</div></div>` : '<div class="hint">No upcoming classes found for this student and subject.</div>'}${upcoming.length>1 ? `<div>${upcoming.slice(1).map(sc=>`<div style="padding:7px 0;border-top:1px solid var(--line);font-size:13px"><b>${esc(dayDate(sc.date))}</b> ${esc(sc.time||'')} · ${esc(sc.status||'Scheduled')} ${sc.classType?'· '+esc(sc.classType):''}</div>`).join('')}</div>` : ''}
       <button class="btn-small" style="margin-top:8px" onclick="teacherWorkspaceGo('schedule')">Open Class Schedule</button>
     </div>
     <div class="card">
