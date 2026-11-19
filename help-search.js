@@ -149,6 +149,9 @@
   }
   function getNavItems() {
     const role = getRole();
+    // Teacher: every page the teacher can open, from the teacher menu (index.html renderTeacherPortal), whether or not
+    // the menu is on screen. On phones the menu is closed, so reading buttons on the page found almost nothing.
+    if (role === 'Teacher' && Array.isArray(window.libTeacherNavItems) && window.libTeacherNavItems.length) return window.libTeacherNavItems.slice();
     let selector = '';
     if (role === 'Student') selector = '.student-portal-section-switcher [onclick*="setStudentPortalSection("]';
     else if (role === 'Teacher') selector = '#app [onclick]';
