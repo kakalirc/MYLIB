@@ -27031,7 +27031,7 @@ function qbSourcePapersHtml() {
     }
   });
   const duplicateWarning = currentRole === 'Teacher' ? '' : (duplicateNotices.length
-    ? '<div style="padding:10px 12px;margin:0 0 12px;border:1px solid #d6a34a;border-radius:9px;background:rgba(214,163,74,.10)"><b>Possible duplicate papers grouped together</b><div class="hint" style="margin-top:4px">' + duplicateNotices.map(esc).join('<br>') + '</div><div class="hint" style="margin-top:4px">Papers with matching details are candidates for comparison, not confirmed duplicates. Matching file checksums identify exact file copies. Review the PDFs before deleting anything.</div></div>'
+    ? '<details style="padding:10px 12px;margin:0 0 12px;border:1px solid #d6a34a;border-radius:9px;background:rgba(214,163,74,.10)"><summary style="cursor:pointer;font-weight:700">Possible duplicate papers grouped together</summary><div class="hint" style="margin-top:8px">' + duplicateNotices.map(esc).join('<br>') + '</div><div class="hint" style="margin-top:4px">Papers with matching details are candidates for comparison, not confirmed duplicates. Matching file checksums identify exact file copies. Review the PDFs before deleting anything.</div></details>'
     : '');
   const groups = new Map();
   list.forEach(sp => {
