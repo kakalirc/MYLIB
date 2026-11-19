@@ -187,6 +187,13 @@ if (location.hostname !== 'app.libeducation.com') {
   .btn-danger, .btn-primary.btn-danger { background: var(--brick); color: #fff; }   /* the 2-class form must out-rank .btn-primary's green, which is defined later */
   .nav-hint-mobile { display: none; }
   .teacher-bottom-nav { display:none; }
+  .teacher-menu-row { display: none; }
+  .teacher-home-hello { margin: 0 2px 12px; font-size: 15px; }
+  .teacher-home-more > summary { cursor: pointer; list-style: none; padding: 2px 0; font-size: 15px; }
+  .teacher-home-more > summary::-webkit-details-marker { display: none; }
+  .teacher-home-more > summary::before { content: '▸ '; color: var(--muted); }
+  .teacher-home-more[open] > summary::before { content: '▾ '; }
+  .teacher-home-more .card { box-shadow: none; margin: 12px 0 0; }
   @media (max-width: 700px) {
     .desktop-tabs { display: none; }
     .nav-hint-desktop { display: none; }
@@ -199,6 +206,18 @@ if (location.hostname !== 'app.libeducation.com') {
     .teacher-bottom-nav button.active { color:var(--primary); background:var(--soft); }
     .teacher-bottom-nav .nav-icon { font-size:20px; line-height:1; }
     body:has(.teacher-bottom-nav) { padding-bottom:82px; }
+    .teacher-bottom-nav button { position:relative; }
+    .teacher-bottom-nav .nav-badge { position:absolute; top:0; right:calc(50% - 22px); min-width:17px; height:17px; padding:0 4px; border-radius:9px; background:var(--brick); color:#fff; font-size:10px; line-height:17px; }
+    /* Teacher phone header: one row (logo, Chat, bells). Refresh sits beside the ☰ bar; Help, Support and Log out are in ☰ Menu. */
+    .topbar.is-teacher { flex-wrap:nowrap; gap:6px; padding:8px 10px; margin-bottom:12px; }
+    .topbar.is-teacher .btn-small { padding-left:9px; padding-right:9px; white-space:nowrap; }
+    .topbar.is-teacher img { height:28px; min-width:0; flex-shrink:1; object-fit:contain; object-position:left center; }
+    .topbar.is-teacher .who, .topbar.is-teacher .brand-sub, .topbar.is-teacher .tb-phone-more { display:none; }
+    .teacher-menu-row { display:flex; gap:8px; align-items:stretch; margin-bottom:12px; }
+    .teacher-menu-row .teacher-menu-bar { flex:1; min-width:0; }
+    .teacher-menu-row .teacher-menu-refresh { flex:0 0 auto; padding:0 14px; font-size:14px; background:var(--paper); border:1px solid var(--line); border-radius:8px; }
+    .teacher-more-menu .mobile-tab-dropdown.from-top { top:12px !important; bottom:auto !important; max-height:calc(100vh - 110px) !important; }
+    body:has(.teacher-bottom-nav) #lib-help-search:not(.teacher-show) { display:none; }
     .mobile-tab-bar { display:contents; }
     /* Keep the hamburger toggle visible on mobile alongside bottom navigation. */
     .mobile-tab-dropdown { position:fixed !important; top:auto !important; bottom:calc(72px + env(safe-area-inset-bottom)) !important; left:10px !important; right:10px !important; max-height:70vh !important; overflow-y:auto !important; z-index:999; }
@@ -805,7 +824,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-19 16:30 IST'; // Parent login: one menu (Home, Fees, Classes, Learning, Account), child switcher
+const BUILD_TIMESTAMP = '2026-11-19 19:40 IST'; // Teacher login: phone bottom bar, one-tap attendance, shorter Home, grouped menu
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -2264,6 +2283,7 @@ let resettingUserId = null;
 let studentViewMonth = monthStr;
 let teacherViewMonth = monthStr;
 let teacherPortalTab = 'dashboard';
+let teacherHomeMoreOpen = false; // Home: AI helpers and student notes folded away until opened
 let teacherFrameworkAccess = null;
 let teacherFrameworkAccessLoading = false;
 async function loadTeacherFrameworkAccess() {
@@ -2761,7 +2781,26 @@ function researchMdHtml(md) {
   close();
   return '<div style="font-size:14px;line-height:1.6;color:var(--ink)">' + html + '</div>';
 }
-function toggleTeacherMobileTabMenu() { teacherMobileTabMenuOpen = !teacherMobileTabMenuOpen; render(); }
+let teacherMenuFromTop = false; // phone menu opened from the ☰ in the header (shows under the header) or from the bottom bar
+function toggleTeacherMobileTabMenu(fromTop) { teacherMenuFromTop = !!fromTop; teacherMobileTabMenuOpen = !teacherMobileTabMenuOpen; render(); }
+// Phone More menu: header buttons that are hidden on phones.
+function teacherMoreAction(what) {
+  teacherMobileTabMenuOpen = false;
+  if (what === 'logout') { logout(); return; }
+  render();
+  if (what === 'refresh') refreshAllData();
+  else if (what === 'help') toggleHelpAi();
+  else if (what === 'support') openSupportModal();
+  else if (what === 'find') {
+    const root = document.getElementById('lib-help-search');
+    if (!root) return;
+    root.classList.add('teacher-show');
+    if (typeof root.__setHelpCollapsed === 'function') root.__setHelpCollapsed(false);
+    window.scrollTo(0, 0);
+    const input = root.querySelector('[data-help-input]');
+    if (input) input.focus();
+  }
+}
 function setTeacherPortalTab(t) {
   teacherPortalTab = t;
   if (t === 'dashboard' || t === 'pendingactions') { loadClassFrequencyRows().then(() => render()); loadTeacherPendingExtras(true); }
@@ -2784,7 +2823,13 @@ function setTeacherPortalTab(t) {
   if (t === 'attendance') { logDraft.teacherId = currentLinkedId; logDraft.date = todayStr; logMsg = ''; }
   if (t === 'report') { loadTeacherPayrollRecords().then(() => render()); return; }
   if (t === 'studyplans') { studyPlanTeacherStudentId = ''; studyPlanTeacherSubjectId = ''; studyPlanDraftItems = []; studyPlanMsg = ''; studyPlanViewMode = 'report'; studyPlanFilterStatus = 'all'; studyPlanFilterSubjectId = ''; studyPlanFilterStudent = ''; studyPlanPendingSubjectId = ''; loadStudyPlans().then(() => render()); return; }
-  if (t === 'homework') { hwShowForm = false; hwMsg = ''; hwFilterStudentId = ''; hwFilterStatus = 'assigned'; loadHomework().then(() => render()); return; }
+  if (t === 'homework') {
+    // Open on handed-in work when there is any to review, otherwise on Assigned (as before).
+    const hasToReview = () => homeworkData.some(h => h.teacherId === currentLinkedId && h.status === 'submitted');
+    hwShowForm = false; hwMsg = ''; hwFilterStudentId = ''; hwFilterStatus = hasToReview() ? 'submitted' : 'assigned';
+    loadHomework().then(() => { if (teacherPortalTab === 'homework' && hwFilterStatus === 'assigned' && hasToReview()) hwFilterStatus = 'submitted'; render(); });
+    return;
+  }
   if (t === 'studentworkspace') { Promise.all([loadStudyPlans(), loadHomework(), loadScheduledClasses()]).then(() => { if (teacherPortalTab === 'studentworkspace') render(); }); }
   if (t === 'questionbank' && !teacherQbAccess) { teacherPortalTab = 'dashboard'; render(); return; }
   if (t === 'research' && !teacherResearchAccess) { teacherPortalTab = 'dashboard'; render(); return; }
@@ -20077,6 +20122,23 @@ function canUndoSchedule(entry, isAdminCaller) {
 }
 function startMarkDone(id) { markDoneDraft = { scheduleId: id, status: 'Present', count: 1, mode: '', remarks: '', dateOverride: '' }; render(); }
 function cancelMarkDone() { markDoneDraft = null; render(); }
+// Teacher Home → Today's Classes: give attendance for one scheduled class in one tap.
+// Same as Class Schedule → Mark done, with Online/Offline filled in from the student's preference or the last class.
+function teacherTodayGiveAttendance(id) {
+  const entry = scheduledClasses.find(s => s.id === id);
+  scheduleMsg = '';
+  startMarkDone(id);
+  if (!entry || !markDoneDraft) return;
+  const st = data.students.find(s => s.id === entry.studentId);
+  let mode = st && (st.modePreference === 'Online' || st.modePreference === 'Offline') ? st.modePreference : '';
+  if (!mode) {
+    const last = data.sessions.filter(s => s.studentId === entry.studentId && s.subjectId === entry.subjectId && s.teacherId === entry.teacherId)
+      .sort((a, b) => b.date.localeCompare(a.date))[0];
+    if (last && (last.mode === 'Online' || last.mode === 'Offline')) mode = last.mode;
+  }
+  markDoneDraft.mode = mode;
+  render();
+}
 async function confirmMarkDone(isAdminCaller) {
   if (!markDoneDraft) return;
   const { scheduleId, status, count, mode, remarks, dateOverride } = markDoneDraft;
@@ -20521,7 +20583,7 @@ function renderTeacherSchedule(teacher, isAdminCaller) {
   const viewList = teacherScheduleViewMode === 'day' ? scheduleEntriesFor(teacher.id, 'day', teacherScheduleDate) : scheduleEntriesFor(teacher.id, 'month', teacherScheduleMonth);
   const groups = groupScheduleBySlot(viewList);
 
-  return `
+  const setupCardsHtml = `
     <div class="card">
       <h2>Set up weekly schedule <button class="help-btn" onclick="openHelp('weekly-setup',event)">?</button></h2>
       ${weeklyPatternMsg ? `<div class="hint" style="color:${/^(Generated|Updated|Updating|Preview ready|Removed|Class date|Saving|Loading)/.test(weeklyPatternMsg)&&!/ failed:/.test(weeklyPatternMsg)?'var(--forest)':'var(--brick)'}">${esc(weeklyPatternMsg)}</div>` : ''}
@@ -20602,7 +20664,8 @@ function renderTeacherSchedule(teacher, isAdminCaller) {
         <button class="btn-primary" onclick="addScheduledClass('${teacher.id}')">Schedule</button>
       </div>
     </div>
-
+  `;
+  const scheduleListHtml = `
     <div class="card">
       <h2>Class Schedule <button class="help-btn" onclick="openHelp('class-schedule',event)">?</button></h2>
       <div class="row-form">
@@ -20653,6 +20716,10 @@ function renderTeacherSchedule(teacher, isAdminCaller) {
         </div>`).join('')}
     </div>
     <div class="row-form" style="margin-top:8px"><button class="btn-gold" onclick="exportScheduledClasses('${teacher.id}',teacherScheduleViewMode,teacherScheduleViewMode==='day'?teacherScheduleDate:teacherScheduleMonth)">Export schedule to Excel</button></div>
+  `;
+  // Teachers open this page to see their classes, so the class list comes first and the setup cards follow. Admin keeps the old order.
+  return `
+    ${isAdminCaller ? setupCardsHtml + scheduleListHtml : scheduleListHtml + setupCardsHtml}
     ${markDoneModalHtml(isAdminCaller)}
     ${markDoneSuccessPopupHtml()}
     ${reassignModalHtml()}
@@ -20948,6 +21015,10 @@ function renderTeacherProfile(teacher) {
       <div class="hint"><a href="${escAttr(teacher.onlineClassLink)}" target="_blank" rel="noopener">${esc(teacher.onlineClassLink)}</a></div>
     </div>` : ''}
   `;
+}
+function openTeacherPasswordBox() {
+  setTeacherPortalTab('profile');
+  setTimeout(() => { const el = document.getElementById('curPass'); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); } }, 50);
 }
 function renderTeacherSetup() {
   return `
@@ -21988,7 +22059,8 @@ function renderTeacherDashboard(teacher) {
     var h='<div class="card" style="border-left:4px solid var(--primary)">';
     h+='<h2>🗓️ Today\'s Classes</h2>';
     h+='<div class="table-scroll"><table>';
-    h+='<tr><th>Time</th><th>Student</th><th>Subject</th><th>Type</th><th>Status</th></tr>';
+    if (scheduleMsg) h+='<div class="hint" style="color:var(--brick)">'+esc(scheduleMsg)+'</div>';
+    h+='<tr><th>Time</th><th>Student</th><th>Subject</th><th>Type</th><th>Status</th><th>Attendance</th></tr>';
     myScheduledToday.forEach(function(sc){
       var stName=esc(studentNameWithCode(sc.studentId));
       var subName=sc.subjectId?esc(subjectName(sc.subjectId)):'—';
@@ -22010,7 +22082,10 @@ function renderTeacherDashboard(teacher) {
         var stateColor=timeState.kind==='error'?'var(--brick)':timeState.kind==='saved'?'var(--forest)':'var(--muted)';
         timeCell+='<div class="hint" style="color:'+stateColor+';font-size:11px;margin-top:3px">'+esc(timeState.message)+'</div>';
       }
-      h+='<tr><td>'+timeCell+'</td><td>'+stName+'</td><td>'+subName+'</td><td>'+(sc.classType||'—')+'</td><td style="color:'+statusColor+'">'+esc(sc.status)+'</td></tr>';
+      var attCell=sc.status==='Done' ? '<span class="tag">✓ Given</span>'
+        : canMarkDone(sc,false) ? '<button class="btn-small btn-primary" onclick="teacherTodayGiveAttendance(\''+sc.id+'\')">✓ Give attendance</button>'
+        : '<span class="hint">—</span>';
+      h+='<tr><td>'+timeCell+'</td><td>'+stName+'</td><td>'+subName+'</td><td>'+(sc.classType||'—')+'</td><td style="color:'+statusColor+'">'+esc(sc.status)+'</td><td>'+attCell+'</td></tr>';
     });
     h+='</table></div></div>';
     return h;
@@ -22125,37 +22200,16 @@ function renderTeacherDashboard(teacher) {
       + (watch.length ? '<h2 style="margin:22px 0 4px 4px;font-size:17px">Keep an eye on</h2><div class="hint" style="margin:0 0 10px 4px">Reminders. These are not counted as pending items.</div>' + watch.join('') : '');
   }
 
+  // Home order (phone first): Today's Classes → Pending banner → Earnings + Salary Slip → number boxes → Quick Actions → reminders → AI helpers and notes (folded).
+  const todayCardHtml = todaySchedHtml || `<div class="card" style="border-left:4px solid var(--primary)"><h2>🗓️ Today's Classes</h2><div class="hint">No classes are scheduled for you today.</div><button class="btn-small btn-primary" style="margin-top:8px" onclick="setTeacherPortalTab('attendance')">Give Attendance</button></div>`;
   return `
-    ${todaySchedHtml}
-    <div class="card" style="margin-bottom:12px">
-      <h2 style="margin-top:0">⚡ Quick Actions</h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn-primary" onclick="setTeacherPortalTab('attendance')">Give Attendance</button>
-        <button class="btn-small" onclick="setTeacherPortalTab('schedule')">Class Schedule</button>
-        <button class="btn-small" onclick="setTeacherPortalTab('students')">My Students</button>
-        <button class="btn-small" onclick="setTeacherPortalTab('studentworkspace')">Student Workspace</button>
-        <button class="btn-small" onclick="setTeacherPortalTab('studyplans')">Study Plans</button>
-        <button class="btn-small" onclick="teacherOpenHomeworkReview()">Homework Review ${awaitingReview ? '· '+awaitingReview+' pending' : ''}</button>
-        ${teacherQbAccess ? `<button class="btn-small" onclick="setTeacherPortalTab('questionbank')">Question Bank</button>` : ''}
-        ${teacherResearchAccess && aiMasterEnabled ? `<button class="btn-small" onclick="setTeacherPortalTab('research')">Research</button>` : ''}
-      </div>
-    </div>
+    <div class="teacher-home-hello">Welcome back, <b>${esc(teacher.name)}</b> <span class="hint"><span class="nav-hint-desktop">· Use the menu on the left for everything else.</span><span class="nav-hint-mobile">· Tap ☰ below for every page.</span></span></div>
+    <!--TEACHER-MENU-BAR-->
+    ${todayCardHtml}
     ${teacherPendingBannerHtml(pend)}
-    ${starSafe(() => starDashLineHtml(teacher), 'dashboard')}
-    ${celebHtml}
-    ${milestonesHtml}
-    <div class="stat-grid">
-      ${cards.map(c=>`
-        <div class="stat-card" onclick="${c.action ? c.action : (c.tab==='chat' ? 'toggleChatPanel()' : `setTeacherPortalTab('${c.tab}')`)}">
-          <div class="num ${(c.num===0 || c.zero)?'zero':''}">${c.num}</div>
-          <div class="label">${c.label}</div>
-        </div>
-      `).join('')}
-    </div>
-    <div class="card">
-      <h2>Welcome back, ${esc(teacher.name)}</h2>
-      <div class="hint"><span class="nav-hint-desktop">Use the menu on the left</span><span class="nav-hint-mobile">Use the ☰ menu at the top</span> to get to your schedule, availability, attendance, students, and everything else. The boxes above show what's waiting for you today. Click any of them to go straight there.</div>
-      <div style="margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <div class="card" id="teacherEarningsCard">
+      <h2 style="margin-top:0">💰 My Earnings</h2>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <label style="font-size:13px;color:var(--hint)"><b>Earnings for</b>
           <input type="month" value="${teacherEarningsMonth}" max="${monthStr}" onchange="teacherEarningsMonth=this.value;render()" style="margin-left:6px;font-size:13px;border:1px solid var(--line);border-radius:6px;padding:2px 6px">
         </label>
@@ -22176,7 +22230,30 @@ function renderTeacherDashboard(teacher) {
         ${earningsRevealError ? `<span style="font-size:12px;color:var(--brick)">${esc(earningsRevealError)}</span>` : ''}
       </div>`}
       </div>
-      ${aiOn()?aiTeacherMonthCardHtml(teacher):''}
+    </div>
+    ${starSafe(() => starDashLineHtml(teacher), 'dashboard')}
+    ${celebHtml}
+    ${milestonesHtml}
+    <div class="stat-grid">
+      ${cards.map(c=>`
+        <div class="stat-card" onclick="${c.action ? c.action : (c.tab==='chat' ? 'toggleChatPanel()' : `setTeacherPortalTab('${c.tab}')`)}">
+          <div class="num ${(c.num===0 || c.zero)?'zero':''}">${c.num}</div>
+          <div class="label">${c.label}</div>
+        </div>
+      `).join('')}
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <h2 style="margin-top:0">⚡ Quick Actions</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn-primary" onclick="setTeacherPortalTab('attendance')">Give Attendance</button>
+        <button class="btn-small" onclick="setTeacherPortalTab('schedule')">Class Schedule</button>
+        <button class="btn-small" onclick="setTeacherPortalTab('students')">My Students</button>
+        <button class="btn-small" onclick="setTeacherPortalTab('studentworkspace')">Student Workspace</button>
+        <button class="btn-small" onclick="setTeacherPortalTab('studyplans')">Study Plans</button>
+        <button class="btn-small" onclick="teacherOpenHomeworkReview()">Homework Review ${awaitingReview ? '· '+awaitingReview+' pending' : ''}</button>
+        ${teacherQbAccess ? `<button class="btn-small" onclick="setTeacherPortalTab('questionbank')">Question Bank</button>` : ''}
+        ${teacherResearchAccess && aiMasterEnabled ? `<button class="btn-small" onclick="setTeacherPortalTab('research')">Research</button>` : ''}
+      </div>
     </div>
     ${(()=>{
       const tRenewalRows = renewalRows(teacher.id);
@@ -22243,6 +22320,9 @@ function renderTeacherDashboard(teacher) {
       h+='</table></div></div>';
       return h;
     })()}
+    <details class="card teacher-home-more" ${teacherHomeMoreOpen ? 'open' : ''} ontoggle="teacherHomeMoreOpen=this.open">
+      <summary><b>${aiOn() ? '✨ AI helpers and student notes' : '📝 Student notes'}</b> <span class="hint">tap to open</span></summary>
+      ${aiOn() ? aiTeacherMonthCardHtml(teacher) : ''}
     ${(()=>{
       if (!_myStudents.length) return '';
       var h='<div class="card">';
@@ -22273,7 +22353,10 @@ function renderTeacherDashboard(teacher) {
       h+='</div>';
       return h;
     })()}
-    ${teacherPrivateNoteCardHtml(teacher)}`;
+    ${teacherPrivateNoteCardHtml(teacher)}
+    </details>
+    ${markDoneModalHtml(false)}
+    ${markDoneSuccessPopupHtml()}`;
 }
 async function revealEarnings() {
   if (!earningsRevealPwd.trim()) return;
@@ -22550,70 +22633,43 @@ function renderTeacherPortal() {
     return `<div class="card"><div class="empty">Your teacher record could not be found. Contact the admin.</div></div>`;
   }
   if (teacherFrameworkAccess === null && !teacherFrameworkAccessLoading) loadTeacherFrameworkAccess();
+  // Menu groups (same page names as before, grouped by how often teachers use them).
   const teacherTabGroups = [
-    { label: 'Teaching', tabs: [
-      ['myfrequency', 'My Students Class Frequency'],
+    { label: 'Today', tabs: [
+      ['attendance', 'Give Attendance'],
       ['schedule', 'Class Schedule'],
-      ['frequency', 'Class Frequency Setup'],
+      ['homework', 'Homework'],
+    ]},
+    { label: 'Students', tabs: [
       ['students', 'My Students'],
       ['studentworkspace', 'Student Workspace'],
       ['studyplans', 'Study Plans'],
-      ['homework', 'Homework'],
+      ['myfrequency', 'My Students Class Frequency'],
+      ['frequency', 'Class Frequency Setup'],
+    ]},
+    { label: 'Teaching tools', tabs: [
       ...(teacherQbAccess ? [['questionbank', 'Question Bank']] : []),
       ...(teacherResearchAccess && aiMasterEnabled ? [['research', 'Research']] : []),
-    ]},
-    { label: 'Attendance', tabs: [
-      ['attendance', 'Give Attendance'],
-      ['report', 'My Attendance Report'],
-      ['availability', 'Availability'],
-    ]},
-    { label: 'Learning', tabs: [
       ['knowledgearena', 'Knowledge Arena'],
     ]},
-    { label: 'Account', tabs: [
+    { label: 'Me', tabs: [
+      ['report', 'My Attendance Report'],
+      ['availability', 'Availability'],
       ['profile', 'My Profile'],
       ...(teacherFrameworkAccess ? [['appraisalframework', 'My Appraisal Framework']] : []),
-      ['setup', 'Setup'],
     ]},
     { label: 'Analytics', tabs: [
       ['demoanalysis', 'Demo Analysis'],
       ['classdelivery', 'Class Delivery Intelligence'],
+      ['teacherperformance', 'Teacher Performance Intelligence'],
     ]},
   ];
-  let tpiAnalyticsGroup = teacherTabGroups.find(g => g.label === 'Analytics');
-  if (!tpiAnalyticsGroup) { tpiAnalyticsGroup = { label: 'Analytics', tabs: [] }; teacherTabGroups.push(tpiAnalyticsGroup); }
-  if (!tpiAnalyticsGroup.tabs.some(([key]) => key === 'teacherperformance')) tpiAnalyticsGroup.tabs.push(['teacherperformance', 'Teacher Performance Intelligence']);
-  // Phone burger menu keeps its original flat order.
-  const teacherMobileTabsList = [
-    ['dashboard', 'Dashboard'],
-    ['pendingactions', 'Pending Action Items'],
-    ['myfrequency', 'My Students Class Frequency'],
-    ['schedule', 'Class Schedule'],
-    ['frequency', 'Class Frequency Setup'],
-    ['students', 'My Students'],
-    ['studentworkspace', 'Student Workspace'],
-    ['studyplans', 'Study Plans'],
-    ['homework', 'Homework'],
-    ...(teacherQbAccess ? [['questionbank', 'Question Bank']] : []),
-    ...(teacherResearchAccess && aiMasterEnabled ? [['research', 'Research']] : []),
-    ['availability', 'Availability'],
-    ['knowledgearena', 'Knowledge Arena'],
-    ['report', 'My Attendance Report'],
-    ['attendance', 'Give Attendance'],
-    ['profile', 'My Profile'],
-    ...(teacherFrameworkAccess ? [['appraisalframework', 'My Appraisal Framework']] : []),
-    ['setup', 'Setup'],
-    ['demoanalysis', 'Demo Analysis'],
-    ['classdelivery', 'Class Delivery Intelligence'],
-  ];
-  teacherMobileTabsList.push(['teacherperformance', 'Teacher Performance Intelligence']);
   const pendingTotal = teacherPendingItems(teacher).total;
   const pendingBadge = pendingTotal ? ` <span style="color:var(--gold-dark,#b8860b)">(${pendingTotal})</span>` : '';
-  teacherMobileTabsList[1] = ['pendingactions', 'Pending Action Items' + (pendingTotal ? ` (${pendingTotal})` : '')];
   let starEarn = 0;
   try { starEarn = starOn ? starEarnNow(teacher).total : 0; } catch (e) { console.error('Star Teacher menu', e); }
-  if (starOn) teacherMobileTabsList.splice(2, 0, ['starteacher', '🏆 Star Teacher' + (starEarn ? ` (+${starEarn})` : '')]);
-  const currentTeacherTabLabel = (teacherMobileTabsList.find(([key])=>key===teacherPortalTab) || [,''])[1];
+  const hwToReview = homeworkData.filter(h => h.teacherId === teacher.id && h.status === 'submitted').length;
+  const openSupport = data.supportTickets.filter(t => t.status !== 'resolved').length;
   const sidebarHtml = `
     <div class="sidebar-nav">
       ${desktopSidebarCollapseButtonHtml('teacher')}
@@ -22627,34 +22683,49 @@ function renderTeacherPortal() {
           <div class="sidebar-group-header" data-rail="${desktopSidebarRailIcon(g.label)}" title="${esc(g.label)}" onclick="toggleSidebarGroup('${g.label}')">
             <span>${esc(g.label)}</span><span class="chevron ${isCollapsed?'collapsed':''}">▾</span>
           </div>
-          ${isCollapsed ? '' : g.tabs.map(([key,label])=>`<div class="sidebar-item ${teacherPortalTab===key?'active':''}" data-rail="${desktopSidebarRailIcon(key)}" title="${esc(label)}" aria-label="${esc(label)}" onclick="setTeacherPortalTab('${key}')">${label}</div>`).join('')}
+          ${isCollapsed ? '' : g.tabs.map(([key,label])=>`<div class="sidebar-item ${teacherPortalTab===key?'active':''}" data-rail="${desktopSidebarRailIcon(key)}" title="${esc(label)}" aria-label="${esc(label)}" onclick="setTeacherPortalTab('${key}')">${label}${key==='homework' && hwToReview ? ` <span style="color:var(--gold-dark,#b8860b)">(${hwToReview})</span>` : ''}</div>`).join('')}
         </div>`;
       }).join('')}
     </div>`;
+  // Phone: the ☰ Menu button at the bottom opens one grouped menu. It also holds Refresh, Help, Support and Log out,
+  // which are hidden from the phone header to keep it to one row.
+  const moreItem = (key, label) => `<div class="mobile-tab-item ${teacherPortalTab===key?'active':''}" onclick="setTeacherPortalTab('${key}')">${label}</div>`;
   const mobileTabBarHtml = `
-    <div class="mobile-tab-bar">
-      <div class="mobile-tab-toggle" onclick="toggleTeacherMobileTabMenu()">
-        <span class="burger">☰</span> ${esc(currentTeacherTabLabel)}
-      </div>
+    <div class="mobile-tab-bar teacher-more-menu">
       ${teacherMobileTabMenuOpen ? `
         <div class="mobile-tab-overlay" onclick="toggleTeacherMobileTabMenu()"></div>
-        <div class="mobile-tab-dropdown">
-          ${teacherMobileTabsList.map(([key,label])=>`<div class="mobile-tab-item ${teacherPortalTab===key?'active':''}" onclick="setTeacherPortalTab('${key}')">${label}</div>`).join('')}
+        <div class="mobile-tab-dropdown${teacherMenuFromTop ? ' from-top' : ''}">
+          ${moreItem('dashboard', 'Dashboard')}
+          ${moreItem('pendingactions', 'Pending Action Items' + (pendingTotal ? ` (${pendingTotal})` : ''))}
+          ${starOn ? moreItem('starteacher', '🏆 Star Teacher' + (starEarn ? ` (+${starEarn})` : '')) : ''}
+          ${teacherTabGroups.map(g => `<div class="mobile-group-label">${esc(g.label)}</div>` + g.tabs.map(([key,label]) => moreItem(key, label + (key==='homework' && hwToReview ? ` (${hwToReview})` : ''))).join('')).join('')}
+          <div class="mobile-group-label">Logged in as ${esc(currentUsername)}</div>
+          <div class="mobile-tab-item" onclick="teacherMoreAction('refresh')">↻ Refresh</div>
+          <div class="mobile-tab-item" onclick="teacherMoreAction('find')">🔎 Find a feature</div>
+          <div class="mobile-tab-item" onclick="teacherMoreAction('help')">? Help</div>
+          <div class="mobile-tab-item" onclick="teacherMoreAction('support')">Support${openSupport ? ` (${openSupport})` : ''}</div>
+          <div class="mobile-tab-item" style="color:var(--brick)" onclick="teacherMoreAction('logout')">Log out</div>
         </div>
       ` : ''}
     </div>`;
+  // Phone: the ☰ bar teachers know, showing the page name. On Home it sits under the Welcome back line; on other pages at the top.
+  const tabLabels = { dashboard: 'Dashboard', pendingactions: 'Pending Action Items', starteacher: '🏆 Star Teacher', setup: 'My Profile' };
+  teacherTabGroups.forEach(g => g.tabs.forEach(([key, label]) => { tabLabels[key] = label; }));
+  const teacherMenuBarHtml = `<div class="teacher-menu-row"><div class="teacher-menu-bar mobile-tab-toggle" onclick="toggleTeacherMobileTabMenu(true)"><span class="burger">☰</span> ${esc(tabLabels[teacherPortalTab] || 'Menu')}</div><button class="btn-small teacher-menu-refresh" ${isRefreshing?'disabled':''} onclick="refreshAllData()">${isRefreshing?'Refreshing…':'↻ Refresh'}</button></div>`;
+  const bottomBtn = (key, icon, label, badge) => `<button class="${teacherPortalTab===key && !teacherMobileTabMenuOpen?'active':''}" onclick="setTeacherPortalTab('${key}')"><span class="nav-icon">${icon}</span><span>${label}</span>${badge ? `<span class="nav-badge">${badge}</span>` : ''}</button>`;
   const teacherBottomNavHtml = `
     <nav class="teacher-bottom-nav" aria-label="Teacher navigation">
-      <button class="${teacherPortalTab==='dashboard'?'active':''}" onclick="setTeacherPortalTab('dashboard')"><span class="nav-icon">⌂</span><span>Home</span></button>
-      <button class="${teacherPortalTab==='schedule'?'active':''}" onclick="setTeacherPortalTab('schedule')"><span class="nav-icon">▦</span><span>Classes</span></button>
-      <button class="${teacherPortalTab==='students'?'active':''}" onclick="setTeacherPortalTab('students')"><span class="nav-icon">♙</span><span>Students</span></button>
-      <button class="${teacherMobileTabMenuOpen?'active':''}" onclick="toggleTeacherMobileTabMenu()"><span class="nav-icon">☰</span><span>More</span></button>
+      ${bottomBtn('dashboard', '⌂', 'Home', 0)}
+      ${bottomBtn('attendance', '✓', 'Attendance', 0)}
+      ${bottomBtn('schedule', '▦', 'Classes', 0)}
+      ${bottomBtn('homework', '✎', 'Homework', hwToReview)}
+      <button class="${teacherMobileTabMenuOpen?'active':''}" onclick="toggleTeacherMobileTabMenu()"><span class="nav-icon">☰</span><span>Menu</span>${pendingTotal ? `<span class="nav-badge">${pendingTotal}</span>` : ''}</button>
     </nav>`;
   return `
     ${mobileTabBarHtml}
     <div class="admin-layout ${isDesktopSidebarCollapsed('teacher') ? 'is-sidebar-collapsed' : ''}">
       ${sidebarHtml}
-      <div class="sidebar-content">${teacherPortalBodyHtml(teacher)}</div>
+      <div class="sidebar-content">${(() => { const body = teacherPortalBodyHtml(teacher); return body.includes('<!--TEACHER-MENU-BAR-->') ? body.replace('<!--TEACHER-MENU-BAR-->', teacherMenuBarHtml) : teacherMenuBarHtml + body; })()}</div>
     </div>
     ${teacherBottomNavHtml}`;
 }
@@ -22711,11 +22782,9 @@ function teacherPortalBodyHtml(teacher) {
   if (teacherPortalTab === 'appraisalframework' && teacherFrameworkAccess) {
     return `<div class="card" style="padding:0;overflow:hidden"><iframe src="teacher-appraisal/framework.html?v=20261111-framework1" title="My Appraisal Framework" style="display:block;width:100%;height:calc(100vh - 150px);min-height:900px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
   }
-  if (teacherPortalTab === 'profile') {
-    return renderTeacherProfile(teacher);
-  }
-  if (teacherPortalTab === 'setup') {
-    return renderTeacherSetup();
+  // Setup (change password, fingerprint login) now sits at the bottom of My Profile; the old 'setup' key still opens it.
+  if (teacherPortalTab === 'profile' || teacherPortalTab === 'setup') {
+    return renderTeacherProfile(teacher) + renderTeacherSetup();
   }
   if (teacherPortalTab === 'starteacher' && starOn) {
     return starSafe(() => renderStarTeacher(teacher), 'page');
@@ -22820,24 +22889,24 @@ function renderPortalShell(bodyHtml) {
   const app = document.getElementById('app');
   const _sy = window.scrollY;
   app.innerHTML = `
-    <div class="topbar">
+    <div class="topbar${currentRole === 'Teacher' ? ' is-teacher' : ''}">
       <img src="${LOGO_SRC}" alt="LIB Education">
       <div class="brand-sub">My LIB</div>
       <div class="spacer"></div>
       <div class="who">Logged in as ${portalWhoLabel()} (${esc(currentRole)})</div>
       ${currentRole === 'Teacher' ? `<div class="who">Active students: <b>${studentsForTeacher(currentLinkedId).filter(s=>!s.archived).length}</b></div>` : ''}
-      <button class="btn-small" ${isRefreshing?'disabled':''} onclick="refreshAllData()">${isRefreshing?'Refreshing…':'↻ Refresh'}</button>
+      <button class="btn-small tb-phone-more" ${isRefreshing?'disabled':''} onclick="refreshAllData()">${isRefreshing?'Refreshing…':'↻ Refresh'}</button>
       ${refreshMsg ? `<span style="font-size:12px;color:${refreshMsg.startsWith('Could not')?'#ff9d89':'var(--gold)'}">${esc(refreshMsg)}</span>` : ''}
       ${showInstallButton ? '<button class="btn-small" onclick="triggerInstall()">Install app</button>' : ''}
       <button class="btn-small" onclick="toggleChatPanel()" style="position:relative">${chatPanelOpen ? '← Back to menu' : '💬 Chat'}${(!chatPanelOpen && chatTotalUnread()) ? `<span style="position:absolute;top:-6px;right:-6px;background:var(--brick);color:#fff;border-radius:9px;padding:1px 5px;font-size:10px">${chatTotalUnread()}</span>` : ''}</button>
       ${notifBellHtml()}
       ${announcementBellHtml()}
-      <button class="btn-small" onclick="toggleHelpAi()">? Help</button>
-      <button class="btn-small" onclick="openSupportModal()">Support${data.supportTickets.filter(t=>t.status!=='resolved').length ? ` (${data.supportTickets.filter(t=>t.status!=='resolved').length})` : ''}</button>
-      <button class="btn-logout btn-small" onclick="logout()">Log out</button>
+      <button class="btn-small tb-phone-more" onclick="toggleHelpAi()">? Help</button>
+      <button class="btn-small tb-phone-more" onclick="openSupportModal()">Support${data.supportTickets.filter(t=>t.status!=='resolved').length ? ` (${data.supportTickets.filter(t=>t.status!=='resolved').length})` : ''}</button>
+      <button class="btn-logout btn-small tb-phone-more" onclick="logout()">Log out</button>
     </div>
-    ${currentRole==='Student' || currentRole==='Parent' ? '' : `<div class="tagline">Your classes for the selected month.</div>`}
-    ${pwIsDefault ? `<div class="card" style="border-color:var(--brick)"><b>Please change your password.</b> It is still the same as your login ID, so anyone who knows your login ID could log in. <button class="btn-small btn-primary" onclick="${currentRole==='Student' ? 'openStudentSettings()' : currentRole==='Parent' ? 'openParentAccount()' : "document.getElementById('curPass').scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('curPass').focus()"}">Change it now</button></div>` : ''}
+    ${currentRole==='Student' || currentRole==='Parent' || currentRole==='Teacher' ? '' : `<div class="tagline">Your classes for the selected month.</div>`}
+    ${pwIsDefault ? `<div class="card" style="border-color:var(--brick)"><b>Please change your password.</b> It is still the same as your login ID, so anyone who knows your login ID could log in. <button class="btn-small btn-primary" onclick="${currentRole==='Student' ? 'openStudentSettings()' : currentRole==='Parent' ? 'openParentAccount()' : currentRole==='Teacher' ? 'openTeacherPasswordBox()' : "document.getElementById('curPass').scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('curPass').focus()"}">Change it now</button></div>` : ''}
     ${currentRole === 'Student' || currentRole === 'Parent' ? '' : aiHowAmIDoingHtml(currentLinkedId)}
     ${chatPanelOpen ? renderChat() : bodyHtml}
     ${currentRole === 'Teacher' || currentRole === 'Student' || currentRole === 'Parent' ? '' : changePasswordCardHtml()}
