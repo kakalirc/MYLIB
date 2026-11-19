@@ -106,6 +106,7 @@
     let name = raw;
     try { name = decodeURIComponent(raw); } catch (_) {}
     name = name.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/i, '');
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name)) return '';
     name = name.replace(/\.pdf$/i, '').replace(/[-_]+/g, ' ').trim();
     return name;
   }
