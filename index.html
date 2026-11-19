@@ -847,7 +847,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-19 21:45 IST'; // Student Journey: where they came from, Journey list, Student Journey page (SQL 81)
+const BUILD_TIMESTAMP = '2026-11-19 21:55 IST'; // Student Journey: Direct admission instead of Not set
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -17320,7 +17320,7 @@ let journeyMsg = '';
 let journeyFilter = { period: 'all', source: '', beforeApp: false };
 let journeyDrill = null;             // { title, keys:[personKey] }
 const JOURNEY_APP_START = '2026-09-22';   // students made on or before this day came from the September import
-const JOURNEY_SOURCES = ['LIB website', 'Phone call', 'Registration form', 'Knowledge Arena', 'Referral', 'Sibling', 'Walk-in', 'WhatsApp / Instagram', 'Google search', 'Other', 'Before the app'];
+const JOURNEY_SOURCES = ['LIB website', 'Phone call', 'Registration form', 'Knowledge Arena', 'Direct admission', 'Referral', 'Sibling', 'Walk-in', 'WhatsApp / Instagram', 'Google search', 'Other', 'Before the app'];
 const JOURNEY_LEFT_REASONS = ['Fees too high', 'Timing', 'Not happy with teacher', 'Exams over', 'Course finished', 'Moved away', 'Joined elsewhere', 'Other'];
 const JOURNEY_COLUMNS = ',lead_source,lead_source_note,left_on,left_reason,left_note';
 async function loadJourneyKaLeads() {
@@ -17361,7 +17361,7 @@ function journeyAutoSource(s, links) {
   if (links.ka.length) return { source: 'Knowledge Arena', how: 'from the Knowledge Arena lead' };
   if (s.onboardingSource === 'student_maintenance_copy') return { source: 'Sibling', how: 'made with Copy to new student' };
   if (s.createdAt && jDate(s.createdAt) <= JOURNEY_APP_START) return { source: 'Before the app', how: 'student from before the app' };
-  return { source: '', how: links.demos.length ? 'had a demo, but no booking or form says where they came from' : 'nothing linked says where they came from' };
+  return { source: 'Direct admission', how: links.demos.length ? 'added by admin after a demo, with no booking or form behind it' : 'added by admin, with no booking, form or Arena lead behind it' };
 }
 function journeySource(s, links) {
   if (s.leadSource) return { source: s.leadSource, how: 'saved in Student Maintenance', saved: true };
@@ -17395,7 +17395,7 @@ function journeySummary(s) {
   else status = 'Lapsed';
   const beforeApp = src.source === 'Before the app' || (!!s.createdAt && madeBeforeApp);
   return {
-    key: 's:' + s.id, studentId: s.id, name: s.name, student: s, links, source: src.source || 'Not set', sourceHow: src.how, sourceSaved: src.saved,
+    key: 's:' + s.id, studentId: s.id, name: s.name, student: s, links, source: src.source || 'Direct admission', sourceHow: src.how, sourceSaved: src.saved,
     beforeApp, firstContact: firstContact || joinDate, enquiryDate, hasEnquiry: !!(enquiryDate || links.demos.length),
     demoBooked: links.demos.length > 0 || links.bookings.some(b => b.scheduledDate), demoDate: jMin(demoDates), demoDone: demoDone.length > 0, demoDoneDate: jMin(demoDone.map(d => d.date)),
     admitted: true, joinDate, paid: paid.length > 0, firstPaid: paid[0] ? jDate(paid[0].date) : '', carried: carried.length > 0,
@@ -17416,7 +17416,7 @@ function journeyUnlinkedPeople() {
       admitted: false, status: (d && d.status === 'Lost') || ['Lost', 'Cancelled'].includes(b.status) ? 'Lost' : 'Open', leftReason: d && d.lostReason ? d.lostReason : (b.status === 'Cancelled' ? 'Booking cancelled' : '') });
   });
   data.demoLogs.filter(d => !d.linkedStudentId && !usedDemo.has(d.id) && d.status !== 'Cancelled' && !data.wixBookings.some(b => b.demoLogId === d.id)).forEach(d => {
-    out.push({ key: 'd:' + d.id, name: d.studentName || '(no name)', kind: 'Demo (Demo Register)', openTab: 'wixbookings', source: 'Not set', firstContact: jDate(d.date), hasEnquiry: true,
+    out.push({ key: 'd:' + d.id, name: d.studentName || '(no name)', kind: 'Demo (Demo Register)', openTab: 'wixbookings', source: 'Demo Register (no booking)', firstContact: jDate(d.date), hasEnquiry: true,
       demoBooked: true, demoDate: d.date, demoDone: !!(d.doneAt || ['Done', 'Converted'].includes(d.status)), demoDoneDate: d.doneAt || ['Done', 'Converted'].includes(d.status) ? d.date : '', admitted: false, status: d.status === 'Lost' ? 'Lost' : 'Open', leftReason: d.lostReason || '' });
   });
   (data.registrations || []).filter(r => !r.student_id && !r.archived).forEach(r => {
@@ -17452,7 +17452,7 @@ function journeyEvents(sum) {
     else add(d.date, 'gold', 'Demo booked' + label, d.demoTime || '');
   });
   add(sum.beforeApp && !L.bookings.length && !L.regs.length ? sum.joinDate : (s.createdAt || sum.joinDate), 'green',
-    sum.beforeApp ? 'With us before the app started' : 'Admitted · student record made', sum.sourceSaved || sum.source !== 'Not set' ? 'Source: ' + sum.source : '');
+    sum.beforeApp ? 'With us before the app started' : 'Admitted · student record made', 'Source: ' + sum.source);
   const subs = data.subscriptions.filter(p => p.studentId === s.id).sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.createdAt || '').localeCompare(b.createdAt || ''));
   const seenSubject = new Set(), paidDatesSeen = [];
   subs.forEach(p => {
@@ -17512,7 +17512,7 @@ function studentJourneyHtml(student) {
     ? `<div class="hint" style="color:var(--brick)">To save a source or a leaving reason, run SQL 81 (student-journey/81-student-journey.sql) in Supabase SQL Editor.</div>`
     : `<div class="row-form" style="margin-top:8px">
         <label>Where they came from <select id="jSource_${student.id}">
-          <option value="">${esc(auto.source ? 'Automatic: ' + auto.source : '— not set —')}</option>
+          <option value="">${esc('Automatic: ' + auto.source)}</option>
           ${journeySourceOptions(student.leadSource || '')}
         </select></label>
         <label>Note <input type="text" id="jSourceNote_${student.id}" value="${escAttr(student.leadSourceNote || '')}" placeholder="e.g. referred by …" style="width:200px"></label>
@@ -17529,7 +17529,7 @@ function studentJourneyHtml(student) {
       <h3>🧭 Where they came from &amp; Journey ${helpBtn('student-journey')}</h3>
       ${journeyMsg ? `<div class="hint" style="color:${journeyMsg.startsWith('Saved') ? 'var(--forest)' : 'var(--brick)'}">${esc(journeyMsg)}</div>` : ''}
       <div class="j-facts">
-        <div><b>Source</b><span>${sum.source === 'Not set' ? '<span class="j-pill j-mid">Not set</span>' : `<span class="j-pill j-src">${esc(sum.source)}</span>`} <span class="hint">${esc(sum.sourceHow)}${student.leadSourceNote ? ' · ' + esc(student.leadSourceNote) : ''}</span></span></div>
+        <div><b>Source</b><span><span class="j-pill j-src">${esc(sum.source)}</span> <span class="hint">${esc(sum.sourceHow)}${student.leadSourceNote ? ' · ' + esc(student.leadSourceNote) : ''}</span></span></div>
         <div><b>First contact</b><span>${sum.firstContact ? dayDate(sum.firstContact) : '—'}</span></div>
         <div><b>${sum.beforeApp ? 'With us since' : 'Admitted'}</b><span>${dayDate(sum.joinDate)}${!sum.beforeApp && sum.firstContact && sum.firstContact < sum.joinDate ? ' · ' + jDaysText(jDays(sum.firstContact, sum.joinDate)) + ' after first contact' : ''}</span></div>
         <div><b>Status</b><span>${journeyStatusPill(sum.status)}${sum.renewals ? ' · ' + sum.renewals + ' renewal' + (sum.renewals > 1 ? 's' : '') : ''}${student.archived && student.leftOn ? ' · left ' + dayDate(student.leftOn) : ''}</span></div>
@@ -17628,7 +17628,7 @@ function renderStudentJourney() {
   const srcNames = [...new Set(people.map(p => p.source))].sort((a, b) => people.filter(p => p.source === b).length - people.filter(p => p.source === a).length);
   const bySource = srcNames.map(src => {
     const g = people.filter(p => p.source === src), st = g.filter(p => p.admitted), pd = st.filter(p => p.paid || p.carried);
-    return `<tr><td>${src === 'Not set' ? '<span class="j-pill j-mid">Not set</span>' : esc(src)}</td>
+    return `<tr><td>${esc(src)}</td>
       <td class="num">${jCell(g.length, src + ' · everyone', g)}</td>
       <td class="num">${jCell(g.filter(p => p.demoDone).length, src + ' · demo done', g.filter(p => p.demoDone))}</td>
       <td class="num">${jCell(st.length, src + ' · admitted', st)}</td>
@@ -17666,7 +17666,7 @@ function renderStudentJourney() {
     ['Admitted → first paid', students.filter(p => p.firstPaid && !p.carried), p => jDays(p.joinDate, p.firstPaid)],
     ['First paid → first renewal', paidStudents.filter(p => p.firstRenewal && p.firstPaid && !p.carried), p => jDays(p.firstPaid, p.firstRenewal)],
   ].map(([label, list, fn]) => { const v = list.map(fn).filter(x => x != null); return `<tr><td>${label}</td><td class="num">${jDaysText(jAvg(v))}</td><td class="num">${jCell(v.length, label, list)}</td></tr>`; }).join('');
-  const notSet = students.filter(p => p.source === 'Not set');
+  const notSet = students.filter(p => p.source === 'Direct admission' && !p.sourceSaved);
   const periodOpts = [['all', 'All time'], ['1', 'This month'], ['3', 'Last 3 months'], ['6', 'Last 6 months']]
     .concat([...new Set(journeyAllPeople().map(p => (p.firstContact || '').slice(0, 7)).filter(Boolean))].sort().reverse().map(m => [m, jMonthLabel(m)]));
   const allSources = [...new Set(journeyAllPeople().map(p => p.source))].sort();
@@ -17680,7 +17680,7 @@ function renderStudentJourney() {
         ${list.map(p => {
           const reached = p.renewed ? 'Renewed' : p.paid ? 'Paid' : p.carried ? 'Carried forward' : p.admitted ? 'Admitted' : p.demoDone ? 'Demo done' : p.demoBooked ? 'Demo booked' : 'Enquiry';
           return `<tr><td>${esc(p.name)}${p.student && p.student.code ? ` <span class="hint">${esc(p.student.code)}</span>` : ''}${p.kind ? `<div class="hint">${esc(p.kind)}</div>` : ''}</td>
-            <td>${p.source === 'Not set' ? '<span class="j-pill j-mid">Not set</span>' : esc(p.source)}</td>
+            <td>${esc(p.source)}</td>
             <td>${p.firstContact ? dayDate(p.firstContact) : '—'}</td><td>${reached}</td><td>${journeyStatusPill(p.status)}${p.leftReason ? `<div class="hint">${esc(p.leftReason)}</div>` : ''}</td>
             <td>${p.studentId ? `<button class="btn-small" onclick="openStudentJourney('${p.studentId}',true)">Journey</button> <button class="btn-small" onclick="openStudentJourney('${p.studentId}')">Student Maintenance</button>` : `<button class="btn-small" onclick="setTab('${p.openTab}')">Open ${p.openTab === 'registrations' ? 'New registrations' : p.openTab === 'knowledgearena' ? 'Knowledge Arena' : 'Demo Bookings'}</button>`}</td></tr>`;
         }).join('')}
@@ -17712,7 +17712,7 @@ function renderStudentJourney() {
     <div class="card"><h3>By source</h3><div class="table-scroll"><table>
       <tr><th>Source</th><th class="num">People</th><th class="num">Demo done</th><th class="num">Admitted</th><th class="num">Paid</th><th class="num">Renewed</th><th class="num">Still active</th><th class="num">Left / lapsed</th><th class="num">Avg days to pay</th></tr>
       ${bySource || '<tr><td colspan="9" class="hint">No one in this period.</td></tr>'}</table></div>
-      ${notSet.length ? `<div class="hint" style="margin-top:8px">${jCell(notSet.length, 'Students with no source', notSet)} students have no source. Open each one in Student Maintenance to set it.</div>` : ''}
+      ${notSet.length ? `<div class="hint" style="margin-top:8px">${jCell(notSet.length, 'Direct admission (nothing linked)', notSet)} students show Direct admission because nothing is linked to them. If you know a more exact source (for example Referral or Walk-in), set it in Student Maintenance.</div>` : ''}
     </div>
     <div class="card"><h3>By month of first contact</h3><div class="table-scroll"><table>
       <tr><th>Month</th><th class="num">Enquiries</th><th class="num">Admitted</th><th class="num">Paid</th><th class="num">Renewed</th><th class="num">Still active</th></tr>
@@ -23449,7 +23449,7 @@ const HELP = {
   'payment-history': { t:'Subscription Payment History', b:'<ul><li><b>Active</b> — this payment\'s classes are being used now.</li><li><b>Expired</b> — unused classes were removed after the expiry date.</li><li>The Expires on date shows when unused classes will be lost.</li><li>Contact the Admin to correct any details.</li></ul>' },
   'raise-fees': { t:'Raise fee requests', b:"<ul><li>Makes the month's fee requests for every active student in one go: one request per student, subject and Group / Individual.</li><li><b>Preview Fee Requests</b> works any day and saves nothing. <b>Confirm</b> works from the 25th of the month before to the 7th of the month (November's requests: 25 Oct to 7 Nov), once per month (Reset removes the run so you can do it again). Raised before the 1st, the classes still to be used this month are taken off what is left.</li><li>Classes come from the student's <b>Class Frequency</b> (each weekday counted in the month), minus clear teacher-leave days, against the classes they still have. Package students (30, 50, 60 or 100 classes) are asked for the same package again.</li><li>Amount = Fee setup rate (or the student's Special fee rate) × classes, less the bulk discount: the best tier reached by the request, the child's subjects added up, or the whole family added up (family's other pending requests count too). Tick <b>No discount</b> on a row or a family for this run only.</li><li>The preview is grouped by family. You can change classes or amount, or untick a row, before Confirm. The ticks in the headings (Raise, Ignore all, No discount (all)) do every row at once. Not raised shows who was left out and why.</li><li><b>Ignore classes left</b>: bills the full month without taking off the classes still left (per row, per student or whole family; Raise anyway in Not raised). The fee message then does not mention those classes. Owed classes are never ignored.</li><li>Every request keeps its working, so you can explain the amount to a parent.</li></ul>" },
   'fee-message': { t:'Fee message', b:"<ul><li>One WhatsApp message for the whole family: each child's subjects, classes and amount, the total, how it was worked out, any bulk discount (and what the family saves, with a line that a part payment loses it), UPI and Razorpay details and the parent's app login.</li><li>The first message starts 'Please find below the tuition fee details…'. Tick <b>Short reminder</b> for a follow-up; only the opening line changes to 'gentle reminder … still due'.</li><li>You can edit the text before sending. On a phone the WhatsApp button opens the app. On a computer use 📤 Desktop (WhatsApp app) or 📤 Web (WhatsApp Web).</li><li>Sending stamps the date, so you can see when the family was last reminded and how many times.</li></ul>" },
-  'student-journey': { t:'Student Journey', b:"<ul><li><b>Where they came from</b> is worked out by itself when the student is linked to a demo booking, a registration form or a Knowledge Arena lead. Students from before the app show <b>Before the app</b>. For anyone else, pick it in Student Maintenance (when adding the student, or on their page) and press Save.</li><li><b>Journey</b> lists every step in date order: enquiry, calls, demo, admission, first payment, renewals, new subjects, transfers, classes each month, and leaving.</li><li>When you <b>Archive</b> a student you are asked the date and the reason they left. You can change these later on the student's page. Unarchiving clears them.</li><li><b>Lapsed</b> = not archived, no classes left, and no class or payment in the last 30 days.</li><li>The <b>Student Journey</b> page (Analytics) shows the funnel, results by source and by month, days between steps and why students left. Tap any number to see the students behind it, then open their Journey or Student Maintenance. Nothing is typed on that page.</li><li>Payments of ₹0 marked Carry Forward are classes brought over from before the app; they are not counted as a first payment.</li></ul>" },
+  'student-journey': { t:'Student Journey', b:"<ul><li><b>Where they came from</b> is worked out by itself when the student is linked to a demo booking, a registration form or a Knowledge Arena lead. Students from before the app show <b>Before the app</b>; students added by admin with nothing linked show <b>Direct admission</b>. To be more exact, pick it in Student Maintenance (when adding the student, or on their page) and press Save.</li><li><b>Journey</b> lists every step in date order: enquiry, calls, demo, admission, first payment, renewals, new subjects, transfers, classes each month, and leaving.</li><li>When you <b>Archive</b> a student you are asked the date and the reason they left. You can change these later on the student's page. Unarchiving clears them.</li><li><b>Lapsed</b> = not archived, no classes left, and no class or payment in the last 30 days.</li><li>The <b>Student Journey</b> page (Analytics) shows the funnel, results by source and by month, days between steps and why students left. Tap any number to see the students behind it, then open their Journey or Student Maintenance. Nothing is typed on that page.</li><li>Payments of ₹0 marked Carry Forward are classes brought over from before the app; they are not counted as a first payment.</li></ul>" },
   'student-calls': { t:'Call log', b:"<ul><li>After phoning a student or parent, open the student and press <b>+ Add call note</b>: when, who you spoke to (Parent / Student), what happened, what was said, and an optional <b>Call again on</b> date.</li><li>Every call stays on the student page, newest first; notes can be edited, never deleted. Only admins see the call log (teachers do not).</li><li>Calls made while the student was still a demo booking also show here, with a <b>Demo booking</b> tag (edit those on the Demo Bookings card).</li><li>When the latest call says Call again on today or earlier, the student shows under <b>Student calls due</b> on the dashboard and at the top of the Students page.</li></ul>" },
   'special-rates': { t:'Special fee rates', b:"<ul><li>An agreed per-class rate for one student, subject and Group / Individual, from a date and optionally until a date.</li><li>While it is in use it replaces the Fee setup rate everywhere: Record payment, fee requests, Calculate, Raise fee requests, Fee calculator and the student's and parent's Applicable Rates.</li><li>Leave Offline rate empty if it is the same as Online. Discount tiers still apply on top.</li><li>Requests and payments already saved are not changed. Remove puts the student back on Fee setup rates.</li></ul>" },
   'class-frequency': { t:'Class Frequency', b:"<ul><li>How many classes each student has on each weekday, per subject (each class is 60 minutes).</li><li>+ New Frequency or Edit: tick the weekdays and set the classes on each day.</li><li>Raise fee requests uses it to count the month's classes, and Rebuild Pending Classes uses it to make the schedule. Saving it does not change classes already scheduled.</li><li>Pairs still Not configured are listed so you can fill them in. Teachers can set it for their own students too.</li></ul>" },
