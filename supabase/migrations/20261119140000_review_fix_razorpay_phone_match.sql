@@ -1,9 +1,6 @@
--- Review fixes 2026-11-19 (SQL 80). Safe to run more than once.
--- 1) razorpay_try_match: the 9 Nov version wrote '\\D' (matches a backslash + D) instead of '\D' (any non-digit),
+-- Review fix 2026-11-19 (SQL 80). Safe to run more than once.
+-- razorpay_try_match: the 9 Nov version wrote '\\D' (matches a backslash + D) instead of '\D' (any non-digit),
 --    so a booking phone like '+91 98765 43210' never matched the Razorpay payer's 10-digit number.
--- 2) Past paper PDFs: the restrictive storage rule qb_teacher_switch only lets Admin/Teacher touch the qb-papers
---    bucket, which cancels the 12 Nov read rule for Students/Parents. Add read-only room for them;
---    qb_papers_student_parent_read_published still limits them to published papers.
 
 begin;
 create or replace function public.razorpay_try_match(p_payment text)
@@ -81,24 +78,5 @@ begin
   end;
 end
 $function$;
-
-drop policy if exists qb_teacher_switch on storage.objects;
-create policy qb_teacher_switch
-on storage.objects
-as restrictive
-for all to authenticated
-using (
-  bucket_id not in ('qb-images', 'qb-papers', 'practice-answers')
-  or (bucket_id = 'qb-papers' and qb_my_role() in ('Admin', 'Teacher') and (qb_my_role() = 'Admin' or qb_my_qb_access()))
-  or (bucket_id = 'qb-papers' and qb_my_role() in ('Student', 'Parent'))
-  or (bucket_id in ('qb-images', 'practice-answers')
-      and (qb_my_role() is distinct from 'Teacher' or qb_my_qb_access()))
-)
-with check (
-  bucket_id not in ('qb-images', 'qb-papers', 'practice-answers')
-  or (bucket_id = 'qb-papers' and qb_my_role() in ('Admin', 'Teacher') and (qb_my_role() = 'Admin' or qb_my_qb_access()))
-  or (bucket_id in ('qb-images', 'practice-answers')
-      and (qb_my_role() is distinct from 'Teacher' or qb_my_qb_access()))
-);
 
 commit;
