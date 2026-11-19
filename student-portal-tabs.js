@@ -1,6 +1,7 @@
-/* My LIB Student Portal: separate academic work from recreational learning games.
- * Existing attendance XP, badges, streaks and attendance leaderboard remain in My Learning
- * without changing their calculations. Knowledge Arena has its own separate Game XP system.
+/* My LIB Student Portal helpers. The student menu itself (Home, Homework, Study, Fun, Me)
+ * lives in index.html (renderStudentPortal). This file gives it the Fun Zone page and the
+ * password / quick-login cards, loads the attendance panel, and adds the admin Knowledge
+ * Arena link. Knowledge Arena has its own separate Game XP system.
  */
 (function () {
   'use strict';
@@ -17,7 +18,7 @@
       ? document.currentScript.src
       : document.baseURI;
     var attendanceScript = document.createElement('script');
-    attendanceScript.src = new URL('student-attendance.js', portalTabsScriptUrl).href;
+    attendanceScript.src = new URL('student-attendance.js?v=20261119-menu', portalTabsScriptUrl).href;
     attendanceScript.async = true;
     attendanceScript.onerror = function () {
       window.__libStudentAttendanceLoadFailed = true;
@@ -26,9 +27,7 @@
     document.head.appendChild(attendanceScript);
   }
 
-  var originalRenderStudentPortal = window.renderStudentPortal;
   var originalRenderPortalShell = window.renderPortalShell;
-  var tabByStudent = Object.create(null);
   var styleId = 'lib-student-portal-tabs-css';
 
   if (!document.getElementById(styleId)) {
@@ -39,29 +38,9 @@
     document.head.appendChild(link);
   }
 
-  function studentKey() {
-    try { return typeof currentLinkedId !== 'undefined' ? String(currentLinkedId || '') : ''; }
-    catch (e) { return ''; }
-  }
-
-  function activeTab() {
-    var key = studentKey();
-    return tabByStudent[key] === 'fun' || tabByStudent[key] === 'settings' ? tabByStudent[key] : 'academics';
-  }
-
-  window.setStudentPortalSection = function (tab) {
-    if (tab !== 'academics' && tab !== 'fun' && tab !== 'settings') return;
-    var key = studentKey();
-    if (!key) return;
-    tabByStudent[key] = tab;
-    window.scrollTo(0, 0);
-    if (typeof render === 'function') render();
-  };
-
-
-  function studentSettingsHtml() {
-    return '<section class="student-settings-zone" aria-labelledby="student-settings-heading">'
-      + '<h2 id="student-settings-heading" class="student-settings-title">Account settings</h2>'
+  // Password + quick login cards for the student's Me > My account page (index.html calls this).
+  window.studentAccountSettingsHtml = function () {
+    return '<section class="student-settings-zone" id="student-portal-settings">'
       + '<div class="card"><h2>Change your password</h2>'
       + (userMsg.changePw ? '<div class="hint" style="color:var(--forest)">' + escapeHtml(userMsg.changePw) + '</div>' : '')
       + '<div class="narrow-form">'
@@ -94,34 +73,12 @@
           else topbar.appendChild(link);
         }
       }
-      if (typeof currentRole !== 'undefined' && currentRole === 'Student') {
-        Array.prototype.forEach.call(document.querySelectorAll('#app .card'), function (card) {
-          if (card.closest('#student-portal-settings')) return;
-          var heading = card.querySelector('h2');
-          if (!heading) return;
-          var title = heading.textContent.trim().toLowerCase();
-          if (title === 'change your password' || title === 'quick login') card.remove();
-        });
-        Array.prototype.forEach.call(document.querySelectorAll('#app button'), function (button) {
-          if (button.textContent.trim() === 'Change it now') {
-            button.onclick = function () { window.openStudentSettings(); };
-          }
-        });
-      }
       return result;
     };
   }
 
-  window.openStudentSettings = function () {
-    window.setStudentPortalSection('settings');
-    var input = document.getElementById('curPass');
-    if (input) {
-      input.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      input.focus();
-    }
-  };
-
-  function funZoneHtml() {
+  // Fun Zone page for the student menu (index.html calls this).
+  window.studentFunZoneHtml = function () {
     var arenaUrl = new URL('knowledge-arena/knowledge-arena.html', document.baseURI).href;
     return '<section class="student-fun-zone" aria-labelledby="student-fun-heading">'
       + '<div class="student-fun-hero">'
@@ -139,32 +96,6 @@
       + '<div class="student-fun-preview-note"><b>Knowledge Arena:</b> Opens with your existing LIB login. Live scores and Game XP are saved to your student account when the Knowledge Arena service is enabled; preview-mode scores are never saved.</div>'
       + '</section>';
   }
-
-  window.renderStudentPortal = function () {
-    var selected = activeTab();
-
-    // Keep the existing full-screen practice-paper experience unchanged.
-    try {
-      if (typeof spOpen !== 'undefined' && spOpen) return originalRenderStudentPortal.apply(this, arguments);
-    } catch (e) {}
-
-    // Avoid loading academic-only widgets (such as the attendance leaderboard) while Fun Zone is open.
-    var academicHtml = selected === 'academics' ? originalRenderStudentPortal.apply(this, arguments) : '';
-    return '<div class="student-portal-section-switcher" role="tablist" aria-label="Student portal sections">'
-      + '<button type="button" class="student-portal-section-tab" role="tab" aria-selected="' + (selected === 'academics') + '" aria-controls="student-portal-academics" onclick="setStudentPortalSection(\'academics\')">📚 My Learning</button>'
-      + '<button type="button" class="student-portal-section-tab" role="tab" aria-selected="' + (selected === 'fun') + '" aria-controls="student-portal-fun" onclick="setStudentPortalSection(\'fun\')">🎮 Fun Zone</button>'
-      + '<button type="button" class="student-portal-section-tab" role="tab" aria-selected="' + (selected === 'settings') + '" aria-controls="student-portal-settings" onclick="setStudentPortalSection(\'settings\')">⚙️ Settings</button>'
-      + '</div>'
-      + '<section id="student-portal-academics" role="tabpanel" ' + (selected === 'academics' ? '' : 'hidden') + '>'
-      + academicHtml
-      + '</section>'
-      + '<section id="student-portal-fun" role="tabpanel" ' + (selected === 'fun' ? '' : 'hidden') + '>'
-      + (selected === 'fun' ? funZoneHtml() : '')
-      + '</section>'
-      + '<section id="student-portal-settings" role="tabpanel" ' + (selected === 'settings' ? '' : 'hidden') + '>'
-      + (selected === 'settings' ? studentSettingsHtml() : '')
-      + '</section>';
-  };
 
   // If a restored session finished rendering before this file loaded, apply the tabs once now.
   try {
