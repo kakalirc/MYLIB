@@ -18,7 +18,7 @@
       ? document.currentScript.src
       : document.baseURI;
     var attendanceScript = document.createElement('script');
-    attendanceScript.src = new URL('student-attendance.js?v=20261119-menu', portalTabsScriptUrl).href;
+    attendanceScript.src = new URL('student-attendance.js?v=20261119-menu2', portalTabsScriptUrl).href;
     attendanceScript.async = true;
     attendanceScript.onerror = function () {
       window.__libStudentAttendanceLoadFailed = true;
