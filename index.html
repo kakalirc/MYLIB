@@ -750,6 +750,34 @@ if (location.hostname !== 'app.libeducation.com') {
     }
   }
 
+
+  /* Student menu (Home, Homework, Study, Fun, Me): a tab row at the top on computers, a fixed bar at the bottom on phones. */
+  .student-nav.student-portal-section-switcher { display:flex; gap:6px; padding:6px; margin:0 0 16px; border:1px solid var(--line); border-radius:14px; background:var(--paper); position:sticky; top:8px; z-index:20; box-shadow:0 2px 10px rgba(35,42,36,.06); }
+  .student-nav .student-portal-section-tab { flex:1; min-width:0; display:flex; align-items:center; justify-content:center; gap:7px; min-height:46px; padding:8px 10px; border:1px solid transparent; border-radius:10px; background:transparent; color:var(--muted); font:700 14px 'Work Sans', sans-serif; cursor:pointer; position:relative; }
+  .student-nav .student-portal-section-tab[aria-selected="true"] { color:var(--ink); background:#fff; border-color:var(--line); box-shadow:0 1px 3px rgba(35,42,36,.08); }
+  .student-nav-icon { font-size:18px; line-height:1; }
+  .student-nav-count { background:var(--brick); color:#fff; border-radius:9px; padding:1px 6px; font-size:10.5px; font-weight:700; }
+  .student-section-title h1 { font-family:'Zilla Slab', serif; font-size:24px; margin:2px 0 2px; color:var(--ink); }
+  .student-section-title p { margin:0 0 14px; color:var(--muted); font-size:13px; }
+  .student-subnav { display:flex; gap:6px; flex-wrap:wrap; margin:6px 0 14px; }
+  .student-subnav button { flex:1; min-width:0; padding:10px 8px; white-space:nowrap; border:1px solid var(--line); border-radius:22px; background:var(--paper); color:var(--muted); font:700 13px 'Work Sans', sans-serif; cursor:pointer; }
+  .student-subnav button[aria-selected="true"] { background:var(--forest); border-color:var(--forest); color:#fff; }
+  .student-fees-due, .student-big-link { width:100%; display:flex; align-items:center; gap:12px; text-align:left; padding:13px 16px; margin:0 0 14px; border:2px solid var(--gold); border-radius:12px; background:#fff8e6; color:var(--ink); font:500 14px 'Work Sans', sans-serif; cursor:pointer; }
+  .student-big-link { border:1px solid var(--line); background:var(--paper); }
+  .student-fees-due > span:nth-child(2), .student-big-link > span:nth-child(2) { flex:1; }
+  .student-fees-due span:first-child, .student-big-link span:first-child { font-size:24px; }
+  .student-fees-due small, .student-big-link small { display:block; color:var(--muted); font-size:12px; margin-top:2px; }
+  .student-fees-note { margin:0 0 10px; }
+  @media (max-width: 700px) {
+    body:has(.student-nav) { padding-bottom:84px; }
+    .student-nav.student-portal-section-switcher { position:fixed; left:0; right:0; bottom:0; top:auto; margin:0; border-radius:0; border-width:1px 0 0; padding:4px 2px calc(4px + env(safe-area-inset-bottom)); z-index:997; box-shadow:0 -3px 12px rgba(0,0,0,.08); gap:2px; }
+    .student-nav .student-portal-section-tab { flex-direction:column; gap:2px; min-height:54px; padding:5px 2px; font-size:11px; border-radius:10px; }
+    .student-nav .student-portal-section-tab[aria-selected="true"] { background:rgba(60,94,66,.1); border-color:transparent; box-shadow:none; color:var(--forest); }
+    .student-nav-icon { font-size:21px; }
+    .student-nav-count { position:absolute; top:3px; right:calc(50% - 22px); }
+    .student-subnav { gap:4px; }
+    .student-subnav button { font-size:12px; padding:9px 4px; }
+  }
 </style>
 <link rel="stylesheet" href="admin-experience-v2.css?v=20261118-adminv2">
 </head>
@@ -764,7 +792,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-19 14:30 IST'; // Review fixes: admin quick-search dead pages, parent shortcuts
+const BUILD_TIMESTAMP = '2026-11-19 14:55 IST'; // Student login: one menu (Home, Homework, Study, Fun, Me), attendance subject names
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -8611,7 +8639,7 @@ async function logout(options = {}) {
   teacherPortalTab = 'dashboard'; // the next login starts on the Dashboard, so a tab's data is loaded when it is opened
   teacherDailyTip = null; teacherDailyTipPending = null; teacherDailyTipCheckStarted = false; teacherDailyTipClaiming = false;
   weeklyPatternTeacherId = ''; weeklyPatternAdminFreqLoaded = false;
-  isLoggedIn = false; currentUsername = ''; currentRole = ''; currentLinkedId = ''; currentUserId = ''; parentSelectedChildId = ''; pwIsDefault = false; userMsg.changePw = ''; spAssignments = []; spPapers = {}; spOpen = null; spPhotoUrls = {};
+  isLoggedIn = false; currentUsername = ''; currentRole = ''; currentLinkedId = ''; currentUserId = ''; parentSelectedChildId = ''; studentSection = 'home'; studentMeSection = 'progress'; pwIsDefault = false; userMsg.changePw = ''; spAssignments = []; spPapers = {}; spOpen = null; spPhotoUrls = {};
   biometricOfferShown = false; // allow the enrollment banner on the next password login
   dangerZoneUnlocked = false; unlockPasswordAttempt = ''; unlockMsg = '';
   // Financial records shouldn't linger in memory once someone has signed out.
@@ -12324,20 +12352,15 @@ const SUPPORT_KB = {
 - Setup (Account): change your password.
 - Chat: message Admin and others (💬 Chat button at the top).
 - Report an Issue: use the Support button at the top if something looks wrong.`,
-  Student: `My LIB app guide for Student (everything is on one page, scroll down):
-- Top of the page: your classes remaining, classes attended this month, XP level, badges and streak. The Student Login has My Learning, Fun Zone and Settings sections. Tap a colour dot next to Theme to change your colours.
-- Fun Zone / Knowledge Arena: play the games and daily challenge available for your grade. Game XP and game achievements are separate from attendance XP and attendance rewards. Use the in-game Help panel for game instructions.
-- XP & Levels: earn 1 XP for every class you attend. Levels go Beginner → Explorer → Rising Star → Pro → Champion → Legend.
-- My Study Plan: the topics your teacher planned for you and how far you've got.
-- Homework: homework from your teachers. Upload a photo of your work (or Mark submitted) before the due date; marks and feedback show once your teacher reviews it.
-- Practice Papers: papers your teacher assigned. Tap Start (or Continue), go section by section, tap the MCQ answer, type short answers or upload a photo. Answers save automatically. Tap Submit paper when done. MCQs are marked at once; your total shows after your teacher reviews it.
-- From your teachers: notes, worksheets and links your teachers shared for your subjects.
-- Ask AI: ask about your own progress, classes remaining or what to focus on.
-- Leaderboard: your rank among students in each subject.
-- My Attendance: overall and subject-wise Present, Absent and Pending overdue counts, with a month selector or All time view and expandable class details. Attendance percentage is Present ÷ (Present + Absent + Pending Overdue); future Pending classes are excluded. Only Present and Absent classes count against the subscription.
-- Further down: online class links, fee requests, subscription reports, class schedule, payment history with receipts, and the fee calculator.
-- Paying fees: tick the fee requests and press Pay to pay by UPI (put the Unique ID shown in the UPI note, then Payment Completed), or press Pay online (Razorpay). Payments are confirmed by the office, so they take a little time to show.
-- Change Password: at the bottom of the page.
+  Student: `My LIB app guide for Student. The menu has 5 buttons (at the bottom on phones, at the top on computers): Home, Homework, Study, Fun and Me.
+- Home: hello and Theme colours (tap a colour dot), Today's Focus (today's or next class and what to do next), a note from your teacher, your XP level. If fees are due, a gold "Fees due" box opens Me → Fees & classes.
+- XP & Levels: earn XP for every class you attend. Levels go Beginner → Explorer → Rising Star → Pro → Champion → Legend.
+- Homework: homework and practice papers. Upload a photo of your work (or Mark submitted) before the due date; marks and feedback show once your teacher reviews it. Practice Papers: tap Start (or Continue), go section by section, tap the MCQ answer, type short answers or upload a photo. Answers save automatically. Tap Submit paper when done. MCQs are marked at once; your total shows after your teacher reviews it. The Homework button shows how many are still to do.
+- Study: My Study Plan (tick topics you have revised), Question Bank (past papers), From your teachers (notes, worksheets and links), online class links and your class schedule.
+- Fun: Knowledge Arena games and the daily challenge for your grade. Game XP is separate from attendance XP.
+- Me → My progress: progress numbers, badges, streak, My Attendance (overall and subject-wise; Attendance % = Present ÷ (Present + Absent + Pending Overdue)), leaderboard and AI 'How am I doing?'.
+- Me → Fees & classes (for parents too): classes left, fee requests, subscription report, payment history with receipts, Ask AI about classes or balance, and the fee calculator. Paying fees: tick the fee requests and press Pay to pay by UPI (put the Unique ID shown in the UPI note, then Payment Completed), or press Pay online (Razorpay). Payments are confirmed by the office, so they take a little time to show.
+- Me → My account: your photo (for the Student ID card), My Details, change password and quick login.
 - Chat (💬 at the top) to message your teacher or Admin. Support (at the top) to report a problem.`,
   Parent: `My LIB app guide for Parent (everything is on one page, scroll down):
 - If you have more than one child, pick the child at the top (Viewing).
@@ -18254,7 +18277,9 @@ function studentDashboardStatsHtml(student) {
       </div>
     </div>`;
 }
-function renderStudentReportCards(student, viewMonth, monthSetterFn, titlePrefix) {
+function renderStudentReportCards(student, viewMonth, monthSetterFn, titlePrefix, parts) {
+  // parts: optional list of cards to show (student login splits them across its menu). Left out = all cards.
+  const want = p => !parts || parts.includes(p);
   const myEnrolledSubjects = byName(subjectsForStudent(student.id));
   const balRows = myEnrolledSubjects.length ? myEnrolledSubjects.map(subj => TYPES.map(ty=>{
     const sub=studentSubscribed(student.id,subj.id,ty), used=studentUsed(student.id,subj.id,ty), left=sub-used;
@@ -18353,27 +18378,27 @@ function renderStudentReportCards(student, viewMonth, monthSetterFn, titlePrefix
     </div>` : '';
 
   return `
-    ${renderContactInfoCard(student.id)}
-    ${teacherLinksCard}
-    <div class="card">
+    ${want('details') ? renderContactInfoCard(student.id) : ''}
+    ${want('links') ? teacherLinksCard : ''}
+    ${want('subs') ? `<div class="card">
       <h2>${titlePrefix} Subscription Report</h2>
       <div class="table-scroll"><table>
         <tr><th>Subject</th><th>Type</th><th>Subscribed</th><th>Used</th><th>Remaining</th></tr>
         ${balRows}
       </table></div>
-    </div>
-    ${studentScheduleCardHtml(student.id, titlePrefix)}
-    ${pendingRequestsCard}
-    ${aiChatCardHtml(currentLinkedId)}
-    <div class="card">
+    </div>` : ''}
+    ${want('schedule') ? studentScheduleCardHtml(student.id, titlePrefix) : ''}
+    ${want('fees') ? pendingRequestsCard : ''}
+    ${want('ai') ? aiChatCardHtml(currentLinkedId) : ''}
+    ${want('payments') ? `<div class="card">
       <h2>${titlePrefix} Subscription Payment History <button class=\"help-btn\" onclick=\"openHelp('payment-history',event)\">?</button></h2>
       ${paymentsHtml}
-    </div>
-    <div class="card">
+    </div>` : ''}
+    ${want('attendance') ? `<div class="card">
       <h2>${titlePrefix} Attendance Report</h2>
       <div class="row-form"><input type="month" value="${viewMonth}" onchange="${monthSetterFn}(this.value)"></div>
       ${rows}
-    </div>
+    </div>` : ''}
   `;
 }
 
@@ -18390,7 +18415,7 @@ function studentScheduleCardHtml(studentId, titlePrefix) {
   return `
     <div class="card">
       <h2>${titlePrefix} Class Schedule</h2>
-      ${leaveNotices.length ? leaveNotices.map(l=>`<div class="hint" style="color:var(--brick)">${esc(teacherName(l.teacherId))} is on leave ${esc(dayDate(l.startDate))} to ${esc(dayDate(l.endDate))}${l.reason?' ('+esc(l.reason)+')':''}.</div>`).join('') : ''}
+      ${leaveNotices.length ? leaveNotices.map(l=>`<div class="hint" style="color:var(--brick)">${esc(teacherName(l.teacherId))} is on leave ${esc(dayDate(l.startDate))} to ${esc(dayDate(l.endDate))}.</div>`).join('') : ''}
       <div class="row-form"><input type="month" value="${studentScheduleViewMonth}" onchange="studentScheduleViewMonth=this.value; render();"></div>
       ${list.length===0 ? '<div class="empty">No classes scheduled for this month.</div>' : `
       <div class="table-scroll"><table>
@@ -18530,7 +18555,7 @@ function studentBadgesHtml(student) {
   else if (total >= 50) badges.push({icon:'💎', label:'Gold Student'});
 
   // All-Rounder: enrolled in 2+ subjects
-  if (subjectsForStudent(student.id).length >= 2) badges.push({icon:'🎵', label:'All-Rounder'});
+  if (subjectsForStudent(student.id).length >= 2) badges.push({icon:'🌈', label:'All-Rounder'});
 
   // Veteran: first attendance 180+ days ago
   var firstDate = presentSess.map(function(s){ return s.date; }).sort()[0];
@@ -19528,12 +19553,61 @@ function renderStudyPlanReadOnly(student) {
     ${planCards}
   </div>`;
 }
-function renderStudentPortal() {
-  const student = data.students.find(s=>s.id===currentLinkedId);
-  if (!student) {
-    return `<div class="card"><div class="empty">Your student record could not be found. Contact the admin.</div></div>`;
-  }
-  if (spOpen) return spPaperHtml();
+// Student login: one menu (Home, Homework, Study, Fun, Me). Each section shows only its own
+// cards. The same menu sits at the top on computers and at the bottom on phones.
+let studentSection = 'home';           // home | homework | study | fun | me
+let studentMeSection = 'progress';     // progress | fees | account (sub-tabs inside Me)
+const STUDENT_SECTIONS = [
+  { key: 'home', icon: '🏠', label: 'Home' },
+  { key: 'homework', icon: '📝', label: 'Homework' },
+  { key: 'study', icon: '📚', label: 'Study' },
+  { key: 'fun', icon: '🎮', label: 'Fun' },
+  { key: 'me', icon: '🙂', label: 'Me' },
+];
+function setStudentPortalSection(key, sub) {
+  // Old names still work (Help & Search and older buttons use them).
+  if (key === 'academics') key = 'home';
+  if (key === 'settings') { key = 'me'; sub = sub || 'account'; }
+  if (key === 'progress') { key = 'me'; sub = sub || 'progress'; }
+  if (key === 'fees') { key = 'me'; sub = sub || 'fees'; }
+  if (!STUDENT_SECTIONS.some(x => x.key === key)) return;
+  if (typeof window.libExitPastPapers === 'function') window.libExitPastPapers();
+  spOpen = null;
+  studentSection = key;
+  if (key === 'me' && sub) studentMeSection = sub;
+  if (typeof trackUse === 'function') trackUse('student:' + key + (key === 'me' ? ':' + studentMeSection : ''));
+  window.scrollTo(0, 0);
+  render();
+}
+window.setStudentPortalSection = setStudentPortalSection;
+function openStudentSettings() {
+  setStudentPortalSection('me', 'account');
+  setTimeout(() => { const el = document.getElementById('curPass'); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); } }, 50);
+}
+window.openStudentSettings = openStudentSettings;
+function studentPortalNavHtml(active) {
+  const studentId = currentLinkedId;
+  const hwDue = (homeworkData || []).filter(h => h.studentId === studentId && (h.status === 'assigned' || (typeof hwIsLate === 'function' && hwIsLate(h)))).length
+    + (spAssignments || []).filter(a => a.student_id === studentId && a.status !== 'submitted' && a.status !== 'reviewed').length;
+  return '<nav class="student-portal-section-switcher student-nav" role="tablist" aria-label="Student menu">'
+    + STUDENT_SECTIONS.map(x => '<button type="button" class="student-portal-section-tab" role="tab" aria-selected="' + (x.key === active) + '" onclick="setStudentPortalSection(\'' + x.key + '\')">'
+      + '<span class="student-nav-icon" aria-hidden="true">' + x.icon + '</span><span class="student-nav-label">' + x.label + '</span>'
+      + (x.key === 'homework' && hwDue ? '<span class="student-nav-count">' + hwDue + '</span>' : '')
+      + '</button>').join('')
+    + '</nav>';
+}
+window.studentPortalNavHtml = studentPortalNavHtml;
+function studentSectionTitleHtml(title, sub) {
+  return '<div class="student-section-title"><h1>' + title + '</h1>' + (sub ? '<p>' + sub + '</p>' : '') + '</div>';
+}
+function studentFeesDueHomeHtml(student) {
+  const due = pendingFeeRequests(student.id);
+  if (!due.length) return '';
+  const total = due.reduce((a, r) => a + (r.amountPaid || 0), 0);
+  return '<button type="button" class="student-fees-due" onclick="setStudentPortalSection(\'me\',\'fees\')">'
+    + '<span aria-hidden="true">💳</span><span><b>Fees due: ₹' + total.toFixed(2) + '</b><small>For parents: tap to see the details and pay</small></span><span aria-hidden="true">›</span></button>';
+}
+function studentHomeHtml(student) {
   const _mySubjs = byName(subjectsForStudent(student.id));
   const _subjLabel = _mySubjs.length ? _mySubjs.map(s=>esc(s.name)).join(' · ') : '';
   const _firstName = esc(student.name.split(' ')[0]);
@@ -19545,29 +19619,79 @@ function renderStudentPortal() {
   const welcomeHtml = `<div class="s-welcome" style="background:linear-gradient(${_theme.g})">
     <div class="s-welcome-hi">Welcome back,</div>
     <div class="s-welcome-name">${_firstName} 👋</div>
-    ${_subjLabel ? `<span class="s-welcome-sub">🎵 ${_subjLabel}</span>` : ''}
+    ${_subjLabel ? `<span class="s-welcome-sub">📘 ${_subjLabel}</span>` : ''}
     <div class="s-theme-row"><span class="s-theme-label">Theme</span>${_dotsHtml}</div>
   </div>`;
+  const focus = typeof window.studentV2FocusHtml === 'function' ? window.studentV2FocusHtml(student) : studentTodayClassHtml(student);
   return studentFeeOverdueBanner(student)
     + welcomeHtml
-    + studentBadgesHtml(student)
-    + studentXpHtml(student)
-    + studentDashboardStatsHtml(student)
-    + studentStreakHtml(student)
-    + studentMilestoneBannerHtml(student)
-    + studentMonthlyRecapHtml(student)
-    + studentLowBalanceNudgeHtml(student)
-    + studentTodayClassHtml(student)
-    + renderStudyPlanReadOnly(student)
-    + renderStudentHomeworkSection(student)
-    + renderStudentPracticeSection(student)
-    + renderStudentResourcesSection(student)
-    + aiHowAmIDoingHtml(student.id)
+    + studentFeesDueHomeHtml(student)
+    + focus
     + studentTeacherNoteHtml()
-    + myPhotoUploadHtml()
-    + studentLeaderboardHtml(student)
-    + renderStudentReportCards(student, studentViewMonth, 'setStudentViewMonth', 'My')
-    + studentFeeCalculatorHtml(student);
+    + studentXpHtml(student)
+    + studentMilestoneBannerHtml(student);
+}
+function studentHomeworkHtml(student) {
+  return studentSectionTitleHtml('📝 Homework', 'Homework and practice papers from your teachers.')
+    + renderStudentHomeworkSection(student)
+    + renderStudentPracticeSection(student);
+}
+function studentStudyHtml(student) {
+  let plan = renderStudyPlanReadOnly(student);
+  if (typeof window.studentV2PlanTicks === 'function') plan = window.studentV2PlanTicks(plan, student);
+  const papersCard = typeof window.libSetStudentPastPapersTab === 'function'
+    ? '<button type="button" class="student-big-link" onclick="libSetStudentPastPapersTab()"><span aria-hidden="true">📄</span><span><b>Question Bank</b><small>Past papers to practise with</small></span><span aria-hidden="true">›</span></button>'
+    : '';
+  return studentSectionTitleHtml('📚 Study', 'Your study plan, notes from teachers and your classes.')
+    + plan
+    + papersCard
+    + renderStudentResourcesSection(student)
+    + renderStudentReportCards(student, studentViewMonth, 'setStudentViewMonth', 'My', ['links', 'schedule']);
+}
+function studentMeHtml(student) {
+  const subs = [['progress', '📈 My progress'], ['fees', '💳 Fees & classes'], ['account', '⚙️ My account']];
+  if (!subs.some(x => x[0] === studentMeSection)) studentMeSection = 'progress';
+  const subNav = '<div class="student-subnav" role="tablist">' + subs.map(x => '<button type="button" role="tab" aria-selected="' + (x[0] === studentMeSection) + '" onclick="setStudentPortalSection(\'me\',\'' + x[0] + '\')">' + x[1] + '</button>').join('') + '</div>';
+  let body = '';
+  if (studentMeSection === 'progress') {
+    // Summary panel (if loaded) plus the class-by-class Attendance Report, which also has mode and teacher remarks.
+    const attendance = (typeof window.libStudentAttendancePanel === 'function' ? window.libStudentAttendancePanel(student) : '')
+      + renderStudentReportCards(student, studentViewMonth, 'setStudentViewMonth', 'My', ['attendance']);
+    body = (typeof window.studentV2ProgressHtml === 'function' ? window.studentV2ProgressHtml(student) : '')
+      + studentBadgesHtml(student)
+      + studentStreakHtml(student)
+      + studentMonthlyRecapHtml(student)
+      + attendance
+      + studentLeaderboardHtml(student)
+      + aiHowAmIDoingHtml(student.id);
+  } else if (studentMeSection === 'fees') {
+    body = '<div class="hint student-fees-note">Classes left, fees and receipts. Parents can pay from here.</div>'
+      + studentDashboardStatsHtml(student)
+      + studentLowBalanceNudgeHtml(student)
+      + renderStudentReportCards(student, studentViewMonth, 'setStudentViewMonth', 'My', ['fees'])
+      + renderStudentReportCards(student, studentViewMonth, 'setStudentViewMonth', 'My', ['subs', 'payments', 'ai'])
+      + studentFeeCalculatorHtml(student);
+  } else {
+    body = myPhotoUploadHtml()
+      + renderStudentReportCards(student, studentViewMonth, 'setStudentViewMonth', 'My', ['details'])
+      + (typeof window.studentAccountSettingsHtml === 'function' ? window.studentAccountSettingsHtml() : '');
+  }
+  return studentSectionTitleHtml('🙂 Me') + subNav + body;
+}
+function renderStudentPortal() {
+  const student = data.students.find(s=>s.id===currentLinkedId);
+  if (!student) {
+    return `<div class="card"><div class="empty">Your student record could not be found. Contact the admin.</div></div>`;
+  }
+  if (spOpen) return spPaperHtml();
+  if (!STUDENT_SECTIONS.some(x => x.key === studentSection)) studentSection = 'home';
+  let body;
+  if (studentSection === 'homework') body = studentHomeworkHtml(student);
+  else if (studentSection === 'study') body = studentStudyHtml(student);
+  else if (studentSection === 'fun') body = typeof window.studentFunZoneHtml === 'function' ? window.studentFunZoneHtml() : '<div class="card"><div class="empty">Fun Zone is loading…</div></div>';
+  else if (studentSection === 'me') body = studentMeHtml(student);
+  else body = studentHomeHtml(student);
+  return studentPortalNavHtml(studentSection) + '<div class="student-page student-page-' + studentSection + '">' + body + '</div>';
 }
 
 // ---------- teacher portal ----------
@@ -22517,11 +22641,11 @@ function renderPortalShell(bodyHtml) {
       <button class="btn-small" onclick="openSupportModal()">Support${data.supportTickets.filter(t=>t.status!=='resolved').length ? ` (${data.supportTickets.filter(t=>t.status!=='resolved').length})` : ''}</button>
       <button class="btn-logout btn-small" onclick="logout()">Log out</button>
     </div>
-    <div class="tagline">${currentRole==='Student' ? 'Your attendance and subscription details.' : currentRole==='Parent' ? "Your child's attendance and subscription details." : 'Your classes for the selected month.'}</div>
-    ${pwIsDefault ? `<div class="card" style="border-color:var(--brick)"><b>Please change your password.</b> It is still the same as your login ID, so anyone who knows your login ID could log in. <button class="btn-small btn-primary" onclick="document.getElementById('curPass').scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('curPass').focus()">Change it now</button></div>` : ''}
+    ${currentRole==='Student' ? '' : `<div class="tagline">${currentRole==='Parent' ? "Your child's attendance and subscription details." : 'Your classes for the selected month.'}</div>`}
+    ${pwIsDefault ? `<div class="card" style="border-color:var(--brick)"><b>Please change your password.</b> It is still the same as your login ID, so anyone who knows your login ID could log in. <button class="btn-small btn-primary" onclick="${currentRole==='Student' ? 'openStudentSettings()' : "document.getElementById('curPass').scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('curPass').focus()"}">Change it now</button></div>` : ''}
     ${currentRole === 'Student' ? '' : aiHowAmIDoingHtml(currentLinkedId)}
     ${chatPanelOpen ? renderChat() : bodyHtml}
-    ${currentRole === 'Teacher' ? '' : `
+    ${currentRole === 'Teacher' || currentRole === 'Student' ? '' : `
     <div class="card">
       <h2>Change your password</h2>
       ${userMsg.changePw ? `<div class="hint" style="color:var(--forest)">${esc(userMsg.changePw)}</div>` : ''}
@@ -22532,7 +22656,7 @@ function renderPortalShell(bodyHtml) {
         <button class="btn-primary" onclick="changePassword()">Save new password</button>
       </div>
     </div>`}
-    ${currentRole === 'Teacher' ? '' : bioSettingsCardHtml()}
+    ${currentRole === 'Teacher' || currentRole === 'Student' ? '' : bioSettingsCardHtml()}
     ${iosInstallHelpHtml()}
     ${helpPanelHtml()}
     ${aiHelpPanelHtml()}
@@ -28761,12 +28885,12 @@ adminV2Loader.onerror = () => initApp(); // Existing app remains available if th
 document.head.appendChild(adminV2Loader);
 </script>
 <script src="demo-control-centre.js"></script>
-<script src="student-portal-tabs.js"></script>
-<script src="student-experience-v2.js?v=20261118-v2"></script>
+<script src="student-portal-tabs.js?v=20261119-menu2"></script>
+<script src="student-experience-v2.js?v=20261119-menu2"></script>
 <script src="parent-experience-v2.js?v=20261118-parentv2"></script>
-<script src="past-papers-portal.js"></script>
+<script src="past-papers-portal.js?v=20261119-menu2"></script>
 <script src="past-paper-discovery.js?v=20261112-discovery1"></script>
 <script src="question-bank-host.js?v=20261113-release2"></script>
-<script src="help-search.js?v=20261117-help1"></script>
+<script src="help-search.js?v=20261119-menu2"></script>
 </body>
 </html>

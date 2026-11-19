@@ -270,13 +270,10 @@
     }
   };
 
+  // Student Question Bank sits under Study in the student menu (index.html studentPortalNavHtml).
   function studentTabsHtml(selected) {
-    return '<div class="lib-past-paper-tabs" role="tablist" aria-label="Student portal sections">'
-      + '<button class="lib-past-paper-tab" role="tab" aria-selected="' + (selected === 'learning') + '" onclick="libExitPastPapersAndGo(\'academics\')">📚 My Learning</button>'
-      + '<button class="lib-past-paper-tab" role="tab" aria-selected="' + (selected === 'fun') + '" onclick="libExitPastPapersAndGo(\'fun\')">🎮 Fun Zone</button>'
-      + '<button class="lib-past-paper-tab" role="tab" aria-selected="' + (selected === 'papers') + '" onclick="libSetStudentPastPapersTab()">📄 Question Bank</button>'
-      + '<button class="lib-past-paper-tab" role="tab" aria-selected="' + (selected === 'settings') + '" onclick="libExitPastPapersAndGo(\'settings\')">⚙️ Settings</button>'
-      + '</div>';
+    var nav = typeof window.studentPortalNavHtml === 'function' ? window.studentPortalNavHtml('study') : '';
+    return nav + '<button type="button" class="btn-small" style="margin:0 0 12px" onclick="libExitPastPapersAndGo(\'study\')">← Back to Study</button>';
   }
   function parentTabsHtml(selected) {
     return '<div class="lib-past-paper-tabs" role="tablist" aria-label="Parent portal sections">'
@@ -314,6 +311,10 @@
     if (tab === 'papers') loadPublishedPapers(false);
     render();
   };
+  // Called by the student menu before it switches section, so Question Bank closes.
+  window.libExitPastPapers = function () {
+    if (typeof currentRole !== 'undefined' && currentRole === 'Student') delete studentPaperTabs[currentLinkedId];
+  };
   window.libExitPastPapersAndGo = function (section) {
     if (currentRole !== 'Student') return;
     delete studentPaperTabs[currentLinkedId];
@@ -330,13 +331,7 @@
         addStyles();
         return studentTabsHtml('papers') + renderPublishedPapers();
       }
-      var html = originalStudentPortal.apply(this, arguments);
-      if (typeof currentRole !== 'undefined' && currentRole === 'Student' && !(typeof spOpen !== 'undefined' && spOpen)) {
-        addStyles();
-        return html.replace(/(<div class="student-portal-section-switcher"[\s\S]*?)(<\/div>)/,
-          '$1<button type="button" class="student-portal-section-tab" role="tab" aria-selected="false" onclick="libSetStudentPastPapersTab()">📄 Question Bank</button>$2');
-      }
-      return html;
+      return originalStudentPortal.apply(this, arguments);
     };
   }
 

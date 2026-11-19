@@ -27,7 +27,8 @@
     return new Date(Number(p[0]), Number(p[1]) - 1, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
   }
   function subjectName(id) {
-    var list = typeof subjects !== 'undefined' ? subjects : [];
+    // Subjects live in data.subjects (there is no global `subjects`), which is why every row said "Unassigned subject".
+    var list = typeof data !== 'undefined' && Array.isArray(data.subjects) ? data.subjects : [];
     var found = list.find(function (x) { return String(x.id) === String(id); });
     return found ? found.name : 'Unassigned subject';
   }
@@ -51,29 +52,6 @@
       }
     });
     return result.filter(function (r) { return /^\d{4}-\d{2}-\d{2}$/.test(r.date); });
-  }
-  // Insert the attendance panel directly after the Next Class card in the
-  // Student dashboard. The card contains nested divs, so find its matching close.
-  function insertAfterNextClass(html, markup) {
-    var start = html.indexOf('<div class="s-today-card"');
-    if (start !== -1) {
-      var tags = /<[/]?div[^>]*>/gi;
-      tags.lastIndex = start;
-      var depth = 0, match;
-      while ((match = tags.exec(html))) {
-        if (match[0].charAt(1) !== '/') depth++;
-        else depth--;
-        if (depth === 0) return html.slice(0, tags.lastIndex) + markup + html.slice(tags.lastIndex);
-      }
-    }
-    // If the student has no upcoming class card, keep attendance in the same
-    // dashboard position: immediately before the Study Plan section.
-    var studyPlan = html.indexOf('<h2>📋 My Study Plan</h2>');
-    if (studyPlan !== -1) {
-      var cardStart = html.lastIndexOf('<div class="card">', studyPlan);
-      if (cardStart !== -1) return html.slice(0, cardStart) + markup + html.slice(cardStart);
-    }
-    return html + markup;
   }
 
   function panel(student) {
@@ -131,21 +109,8 @@
   }
   styles();
 
-  window.renderStudentPortal = function () {
-    var html = originalRender.apply(this, arguments);
-    if (typeof currentRole !== 'undefined' && currentRole === 'Student') {
-      // Match the academics panel by its stable ID and role, without depending on
-      // whitespace or whether optional attributes are present on the opening tag.
-      var academicsOpen = /<section\b(?=[^>]*\bid=["']student-portal-academics["'])(?=[^>]*\brole=["']tabpanel["'])[^>]*>/i;
-      if (academicsOpen.test(html) && html.indexOf('class="lib-student-attendance"') === -1) {
-        var student = typeof data !== 'undefined' && Array.isArray(data.students)
-          ? data.students.find(function (s) { return String(s.id) === String(currentLinkedId); })
-          : null;
-        if (student) html = insertAfterNextClass(html, panel(student));
-      }
-    }
-    return html;
-  };
+  // The student menu (index.html) shows this panel on Me > My progress.
+  window.libStudentAttendancePanel = function (student) { return student ? panel(student) : ''; };
 
   document.addEventListener('change', function (event) {
     var target = event.target;
