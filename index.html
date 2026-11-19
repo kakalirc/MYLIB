@@ -208,9 +208,10 @@ if (location.hostname !== 'app.libeducation.com') {
     body:has(.teacher-bottom-nav) { padding-bottom:82px; }
     .teacher-bottom-nav button { position:relative; }
     .teacher-bottom-nav .nav-badge { position:absolute; top:0; right:calc(50% - 22px); min-width:17px; height:17px; padding:0 4px; border-radius:9px; background:var(--brick); color:#fff; font-size:10px; line-height:17px; }
-    /* Teacher phone header: one row (logo, Chat, bells). Refresh, Help, Support and Log out are in ☰ Menu. */
-    .topbar.is-teacher { flex-wrap:nowrap; gap:8px; padding:8px 12px; margin-bottom:12px; }
-    .topbar.is-teacher img { height:28px; }
+    /* Teacher phone header: one row (logo, Refresh, Chat, bells). Help, Support and Log out are in ☰ Menu. */
+    .topbar.is-teacher { flex-wrap:nowrap; gap:6px; padding:8px 10px; margin-bottom:12px; }
+    .topbar.is-teacher .btn-small { padding-left:9px; padding-right:9px; white-space:nowrap; }
+    .topbar.is-teacher img { height:28px; min-width:0; flex-shrink:1; object-fit:contain; object-position:left center; }
     .topbar.is-teacher .who, .topbar.is-teacher .brand-sub, .topbar.is-teacher .tb-phone-more { display:none; }
     .teacher-menu-bar.mobile-tab-toggle { display:flex; margin-bottom:12px; }
     .teacher-more-menu .mobile-tab-dropdown.from-top { top:12px !important; bottom:auto !important; max-height:calc(100vh - 110px) !important; }
@@ -821,7 +822,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-19 19:20 IST'; // Teacher login: phone bottom bar, one-tap attendance, shorter Home, grouped menu
+const BUILD_TIMESTAMP = '2026-11-19 19:30 IST'; // Teacher login: phone bottom bar, one-tap attendance, shorter Home, grouped menu
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -22892,7 +22893,7 @@ function renderPortalShell(bodyHtml) {
       <div class="spacer"></div>
       <div class="who">Logged in as ${portalWhoLabel()} (${esc(currentRole)})</div>
       ${currentRole === 'Teacher' ? `<div class="who">Active students: <b>${studentsForTeacher(currentLinkedId).filter(s=>!s.archived).length}</b></div>` : ''}
-      <button class="btn-small tb-phone-more" ${isRefreshing?'disabled':''} onclick="refreshAllData()">${isRefreshing?'Refreshing…':'↻ Refresh'}</button>
+      <button class="btn-small" ${isRefreshing?'disabled':''} onclick="refreshAllData()">${isRefreshing?'Refreshing…':'↻ Refresh'}</button>
       ${refreshMsg ? `<span style="font-size:12px;color:${refreshMsg.startsWith('Could not')?'#ff9d89':'var(--gold)'}">${esc(refreshMsg)}</span>` : ''}
       ${showInstallButton ? '<button class="btn-small" onclick="triggerInstall()">Install app</button>' : ''}
       <button class="btn-small" onclick="toggleChatPanel()" style="position:relative">${chatPanelOpen ? '← Back to menu' : '💬 Chat'}${(!chatPanelOpen && chatTotalUnread()) ? `<span style="position:absolute;top:-6px;right:-6px;background:var(--brick);color:#fff;border-radius:9px;padding:1px 5px;font-size:10px">${chatTotalUnread()}</span>` : ''}</button>
