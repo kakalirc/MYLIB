@@ -777,9 +777,22 @@ if (location.hostname !== 'app.libeducation.com') {
     .student-nav-count { position:absolute; top:3px; right:calc(50% - 22px); }
     .student-subnav { gap:4px; }
     .student-subnav button { font-size:12px; padding:9px 4px; }
+    .parent-family { grid-template-columns:1fr; }
   }
+  /* Parent login: child switcher and family cards (menu uses the student menu styles above). */
+  .parent-kids { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:0 0 12px; }
+  .parent-kids-label { font-size:12px; color:var(--muted); font-weight:700; margin-right:2px; }
+  .parent-kids button { padding:8px 14px; border:1px solid var(--line); border-radius:22px; background:var(--paper); color:var(--ink); font:700 13px 'Work Sans', sans-serif; cursor:pointer; }
+  .parent-kids button[aria-selected="true"] { background:var(--forest); border-color:var(--forest); color:#fff; }
+  .parent-family { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:8px; margin:0 0 14px; }
+  .parent-family-card { display:flex; flex-direction:column; align-items:flex-start; gap:4px; padding:12px 14px; text-align:left; border:1px solid var(--line); border-radius:12px; background:var(--paper); color:var(--ink); font:500 13px 'Work Sans', sans-serif; cursor:pointer; }
+  .parent-family-card b { font-size:15px; }
+  .parent-family-card span { font-size:12px; color:var(--muted); }
+  .parent-family-card[aria-pressed="true"] { border:2px solid var(--forest); background:rgba(60,94,66,.07); }
+  .parent-glance .pv2-actions h3 { margin-top:14px; }
 </style>
 <link rel="stylesheet" href="admin-experience-v2.css?v=20261118-adminv2">
+<link rel="stylesheet" href="parent-experience-v2.css?v=20261119-parent1">
 </head>
 <body>
 <div id="cdnStatus" style="display:none; max-width:1040px; margin:16px auto; padding:14px 16px; border-radius:8px; background:#f5e2de; color:#a6432e; font-family:'Work Sans',sans-serif; font-size:14px;"></div>
@@ -792,7 +805,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-19 14:55 IST'; // Student login: one menu (Home, Homework, Study, Fun, Me), attendance subject names
+const BUILD_TIMESTAMP = '2026-11-19 16:30 IST'; // Parent login: one menu (Home, Fees, Classes, Learning, Account), child switcher
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -8639,7 +8652,7 @@ async function logout(options = {}) {
   teacherPortalTab = 'dashboard'; // the next login starts on the Dashboard, so a tab's data is loaded when it is opened
   teacherDailyTip = null; teacherDailyTipPending = null; teacherDailyTipCheckStarted = false; teacherDailyTipClaiming = false;
   weeklyPatternTeacherId = ''; weeklyPatternAdminFreqLoaded = false;
-  isLoggedIn = false; currentUsername = ''; currentRole = ''; currentLinkedId = ''; currentUserId = ''; parentSelectedChildId = ''; studentSection = 'home'; studentMeSection = 'progress'; pwIsDefault = false; userMsg.changePw = ''; spAssignments = []; spPapers = {}; spOpen = null; spPhotoUrls = {};
+  isLoggedIn = false; currentUsername = ''; currentRole = ''; currentLinkedId = ''; currentUserId = ''; parentSelectedChildId = ''; parentSection = 'home'; studentSection = 'home'; studentMeSection = 'progress'; pwIsDefault = false; userMsg.changePw = ''; spAssignments = []; spPapers = {}; spOpen = null; spPhotoUrls = {};
   biometricOfferShown = false; // allow the enrollment banner on the next password login
   dangerZoneUnlocked = false; unlockPasswordAttempt = ''; unlockMsg = '';
   // Financial records shouldn't linger in memory once someone has signed out.
@@ -12362,15 +12375,15 @@ const SUPPORT_KB = {
 - Me → Fees & classes (for parents too): classes left, fee requests, subscription report, payment history with receipts, Ask AI about classes or balance, and the fee calculator. Paying fees: tick the fee requests and press Pay to pay by UPI (put the Unique ID shown in the UPI note, then Payment Completed), or press Pay online (Razorpay). Payments are confirmed by the office, so they take a little time to show.
 - Me → My account: your photo (for the Student ID card), My Details, change password and quick login.
 - Chat (💬 at the top) to message your teacher or Admin. Support (at the top) to report a problem.`,
-  Parent: `My LIB app guide for Parent (everything is on one page, scroll down):
-- If you have more than one child, pick the child at the top (Viewing).
-- Your child's classes remaining, attendance this month and any fee due.
-- Study Plan, Homework and Practice Papers: what your child's teachers have set and how your child is doing.
-- Knowledge Arena: your child plays games and daily challenges from their own Student Login. Game XP is separate from attendance rewards; parents cannot submit game answers on the child's behalf.
-- From your teachers: notes, worksheets and links the teachers shared.
-- Further down: online class links, fee requests, subscription and attendance reports, class schedule, payment history with receipts (tap Receipt to download or print) and the fee calculator.
+  Parent: `My LIB app guide for Parent. The menu has 5 buttons (at the bottom on phones, at the top on computers): Home, Fees, Classes, Learning and Account.
+- More than one child: tap a child's name at the top of the page (or their card on Home) to switch. Everything below is for that child.
+- Home: one card per child (next class and fees due), a gold "Fees due" box (opens Fees), the next class, classes remaining, attended this month, unread chats and a "Needs your attention" list (fees, homework, practice papers, low attendance). Tap any item to open it.
+- Fees: fees due for each child and the family total, fee requests to pay, low class balance note, subscription report (classes bought, used, left), payment history with receipts (tap Receipt to download or print) and the fee calculator (Rates & Fees).
 - Paying fees: tick the fee requests and press Pay to pay by UPI (UPI ID or QR code; put the Unique ID shown in the UPI note), then Payment Completed and send the screenshot to the contact number. Or press Pay online (Razorpay). The office confirms each payment by hand. The WhatsApp fee message shows each child's classes, amount and how it was worked out.
-- Change Password: at the bottom of the page. If your password is still your mobile number, a red box asks you to change it; please do.
+- Classes: next class, online class links, class schedule (and teacher leave dates) and attendance (summary plus class by class for any month).
+- Learning: AI 'How am I doing?' (if switched on), homework, practice papers, Study Plan, Question Bank (past papers), From your teachers (notes, worksheets, links) and Ask AI.
+- Knowledge Arena: your child plays games and daily challenges from their own Student Login. Game XP is separate from attendance rewards; parents cannot submit game answers on the child's behalf.
+- Account: your child's Student Login ID, your child's details, Change Password, quick login (fingerprint) and your photo. If your password is still your mobile number, a red box asks you to change it; please do.
 - Terms and Conditions and Privacy Policy: links on the login screen.
 - Chat (💬 at the top) to message the teacher or Admin. Support (at the top) to report a problem.`
 };
@@ -19696,56 +19709,225 @@ function renderStudentPortal() {
 
 // ---------- teacher portal ----------
 // ---------- parent portal ----------
-function renderParentPortal() {
-  const myChildren = byName(
+// Parent login: one menu (Home, Fees, Classes, Learning, Account). Each section shows only its own
+// cards for the child picked in the child switcher. Same menu look as the student login:
+// a tab row at the top on computers, a fixed bar at the bottom on phones.
+let parentSection = 'home';            // home | fees | classes | learning | account
+const PARENT_SECTIONS = [
+  { key: 'home', icon: '🏠', label: 'Home' },
+  { key: 'fees', icon: '💳', label: 'Fees' },
+  { key: 'classes', icon: '📅', label: 'Classes' },
+  { key: 'learning', icon: '📚', label: 'Learning' },
+  { key: 'account', icon: '⚙️', label: 'Account' },
+];
+function parentChildrenList() {
+  return byName(
     data.parentStudents.filter(m=>m.parentUserId===currentUserId)
       .map(m=>data.students.find(s=>s.id===m.studentId)).filter(Boolean)
   );
-  if (myChildren.length === 0) {
-    return `<div class="card"><div class="empty">No children are linked to this account yet. Contact the admin.</div></div>`;
-  }
-  if (!parentSelectedChildId || !myChildren.some(c=>c.id===parentSelectedChildId)) {
-    parentSelectedChildId = myChildren[0].id;
-  }
-  const child = myChildren.find(c=>c.id===parentSelectedChildId);
-  const childOptions = myChildren.map(c=>`<option value="${c.id}" ${c.id===child.id?'selected':''}>${esc(c.name)}${c.archived?' (archived)':''}</option>`).join('');
-
-  const switcher = myChildren.length > 1 ? `
-    <div class="card">
-      <div class="row-form" style="margin-bottom:0">
-        <span style="font-family:'Zilla Slab',serif;font-size:17px;font-weight:600">Viewing:</span>
-        <select onchange="setParentSelectedChild(this.value)">${childOptions}</select>
-        ${child.archived ? '<span class="tag cat">Archived</span>' : ''}
-      </div>
-    </div>` : `<div class="card"><div class="hint">Viewing: <b>${esc(child.name)}</b>${child.archived?' <span class="tag cat">Archived</span>':''}</div></div>`;
-
-  // Parent-only secure lookup: the RPC verifies the parent-child link and returns only this child's login ID.
-  ensureParentStudentLogin(child.id);
-  const childLoginResult = parentStudentLoginCache[child.id];
-  const childLoginDetails = `<details class="parent-student-login-details">
-    <summary>Student Login Details</summary>
-    ${!childLoginResult ? `<div class="hint" style="padding:8px 0 2px">Loading student login details…</div>` : childLoginResult.error ? `<div class="hint" style="padding:8px 0 2px">Could not load login details. Please try again later or contact LIB Education.</div>` : childLoginResult.username ? `<div class="parent-student-login-content">
-      <div><span class="hint">Student Login ID</span><b>${esc(childLoginResult.username)}</b></div>
-      <div><span class="hint">Default password</span><b>Same as Student Login ID</b></div>
-      <div class="hint">The student must change this password after the first login.</div>
-    </div>` : `<div class="hint" style="padding:8px 0 2px">No Student Login has been created for ${esc(child.name)} yet. Please contact LIB Education.</div>`}
-  </details>`;
-
+}
+function setParentPortalSection(key) {
+  // Old names still work (older buttons and links use them).
+  if (key === 'overview' || key === 'progress') key = key === 'progress' ? 'learning' : 'home';
+  if (key === 'settings') key = 'account';
+  if (!PARENT_SECTIONS.some(x => x.key === key)) return;
+  if (typeof window.libExitParentPastPapers === 'function') window.libExitParentPastPapers();
+  spOpen = null;
+  chatPanelOpen = false;
+  parentSection = key;
+  if (typeof trackUse === 'function') trackUse('parent:' + key);
+  window.scrollTo(0, 0);
+  render();
+}
+window.setParentPortalSection = setParentPortalSection;
+function openParentAccount() {
+  setParentPortalSection('account');
+  setTimeout(() => { const el = document.getElementById('curPass'); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); } }, 50);
+}
+window.openParentAccount = openParentAccount;
+function parentFeesDueTotal(kids) {
+  return kids.reduce((a, c) => a + pendingFeeRequests(c.id).reduce((b, r) => b + (r.amountPaid || 0), 0), 0);
+}
+function parentHomeworkDue(child) {
+  return (homeworkData || []).filter(h => h.studentId === child.id && (h.status === 'assigned' || (typeof hwIsLate === 'function' && hwIsLate(h)))).length
+    + (spAssignments || []).filter(a => a.student_id === child.id && a.status !== 'submitted' && a.status !== 'reviewed').length;
+}
+function parentPortalNavHtml(active, kids, child) {
+  const feesDue = kids.reduce((a, c) => a + pendingFeeRequests(c.id).length, 0);
+  const hwDue = child ? parentHomeworkDue(child) : 0;
+  return '<nav class="student-portal-section-switcher student-nav parent-nav" role="tablist" aria-label="Parent menu">'
+    + PARENT_SECTIONS.map(x => '<button type="button" class="student-portal-section-tab" role="tab" aria-selected="' + (x.key === active) + '" onclick="setParentPortalSection(\'' + x.key + '\')">'
+      + '<span class="student-nav-icon" aria-hidden="true">' + x.icon + '</span><span class="student-nav-label">' + x.label + '</span>'
+      + (x.key === 'fees' && feesDue ? '<span class="student-nav-count">' + feesDue + '</span>' : '')
+      + (x.key === 'learning' && hwDue ? '<span class="student-nav-count">' + hwDue + '</span>' : '')
+      + '</button>').join('')
+    + '</nav>';
+}
+window.libParentNavHtml = function (active) {
+  const kids = parentChildrenList();
+  return parentPortalNavHtml(active || parentSection, kids, kids.find(c => c.id === parentSelectedChildId) || kids[0]);
+};
+// Child switcher: one button per child. Shown at the top of every section when there is more than one child.
+function parentChildSwitcherHtml(kids, child) {
+  if (kids.length < 2) return '';
+  return '<div class="parent-kids" role="tablist" aria-label="Choose a child"><span class="parent-kids-label">Showing</span>'
+    + kids.map(c => '<button type="button" role="tab" aria-selected="' + (c.id === child.id) + '" onclick="setParentSelectedChild(\'' + c.id + '\')">'
+      + esc(c.name.split(' ')[0]) + (c.archived ? ' <small>(archived)</small>' : '') + '</button>').join('')
+    + '</div>';
+}
+window.libParentChildSwitcherHtml = function () {
+  const kids = parentChildrenList();
+  const child = kids.find(c => c.id === parentSelectedChildId) || kids[0];
+  return child ? parentChildSwitcherHtml(kids, child) : '';
+};
+function parentSectionTitleHtml(title, child, sub) {
+  return '<div class="student-section-title"><h1>' + title + '</h1><p>' + (child ? '<b>' + esc(child.name) + '</b>' + (child.archived ? ' <span class="tag cat">Archived</span>' : '') + (sub ? ' · ' : '') : '') + (sub || '') + '</p></div>';
+}
+function parentNextClass(child) {
+  return (scheduledClasses || []).filter(c => c.studentId === child.id && c.status !== 'Done' && c.date >= todayStr)
+    .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')))[0];
+}
+function parentAttendanceThisMonth(child) {
+  const m = (data.sessions || []).filter(x => x.studentId === child.id && String(x.date || '').startsWith(monthStr));
+  const p = m.filter(x => x.status === 'Present').reduce((n, x) => n + (Number(x.count) || 1), 0);
+  const a = m.filter(x => x.status !== 'Present').reduce((n, x) => n + (Number(x.count) || 1), 0);
+  return { p, a, rate: p + a ? Math.round(p / (p + a) * 100) : null };
+}
+// Home: one line per child when there are several (tap to switch), the fees due box and a short to-do list.
+function parentFamilyHtml(kids, child) {
+  if (kids.length < 2) return '';
+  return '<div class="parent-family">' + kids.map(c => {
+    const nc = parentNextClass(c), due = pendingFeeRequests(c.id).reduce((a, r) => a + (r.amountPaid || 0), 0);
+    return '<button type="button" class="parent-family-card" aria-pressed="' + (c.id === child.id) + '" onclick="setParentSelectedChild(\'' + c.id + '\')">'
+      + '<b>' + esc(c.name) + '</b>'
+      + '<span>' + (nc ? '📅 ' + esc(subjectName(nc.subjectId)) + ' · ' + esc(nc.date === todayStr ? 'Today' : dayDate(nc.date)) + (nc.time ? ' ' + esc(nc.time) : '') : 'No class booked yet') + '</span>'
+      + '<span>' + (due ? '💳 Fees due ₹' + due.toFixed(0) : '✓ No fees due') + '</span>'
+      + '</button>';
+  }).join('') + '</div>';
+}
+function parentFeesDueHomeHtml(kids, child) {
+  const total = kids.length > 1 ? parentFeesDueTotal(kids) : parentFeesDueTotal([child]);
+  if (!total) return '';
+  return '<button type="button" class="student-fees-due" onclick="setParentPortalSection(\'fees\')">'
+    + '<span aria-hidden="true">💳</span><span><b>Fees due: ₹' + total.toFixed(2) + '</b><small>' + (kids.length > 1 ? 'For all your children. ' : '') + 'Tap to see the details and pay</small></span><span aria-hidden="true">›</span></button>';
+}
+function parentNextClassHtml(child) {
+  const c = parentNextClass(child);
+  if (!c) return '<div class="pv2-next"><span class="pv2-next-icon">📅</span><div><b>No class booked yet</b><span>Classes appear here once the teacher books them.</span></div></div>';
+  return '<div class="pv2-next"><span class="pv2-next-icon">📅</span><div><b>' + (c.date === todayStr ? 'Today\'s class' : 'Next class') + '</b><span>'
+    + esc(subjectName(c.subjectId)) + ' with ' + esc(teacherName(c.teacherId)) + ' · ' + esc(c.date === todayStr ? 'Today' : dayDate(c.date)) + (c.time ? ' at ' + esc(c.time) : '') + '</span></div></div>';
+}
+function parentAttentionHtml(kids, child) {
+  const out = [];
+  const hw = (homeworkData || []).filter(h => h.studentId === child.id && (h.status === 'assigned' || (typeof hwIsLate === 'function' && hwIsLate(h))));
+  const papers = (spAssignments || []).filter(a => a.student_id === child.id && a.status !== 'submitted' && a.status !== 'reviewed');
+  const att = parentAttendanceThisMonth(child);
+  if (hw.length) out.push({ icon: '📝', title: hw.length + ' homework to do', detail: hw[0].dueDate ? 'Next due ' + dayDate(hw[0].dueDate) : 'Homework given', go: 'learning' });
+  if (papers.length) out.push({ icon: '📄', title: papers.length + ' practice paper' + (papers.length === 1 ? '' : 's') + ' to do', detail: 'Your child answers these in the student login', go: 'learning' });
+  if (att.rate !== null && att.rate < 80) out.push({ icon: '⚠️', title: 'Attendance this month: ' + att.rate + '%', detail: att.p + ' present · ' + att.a + ' absent', go: 'classes' });
+  return '<div class="pv2-actions parent-attention"><h3>Needs your attention</h3>'
+    + (out.length ? out.map(x => '<button type="button" onclick="setParentPortalSection(\'' + x.go + '\')"><span>' + x.icon + '</span><span><b>' + esc(x.title) + '</b><small>' + esc(x.detail) + '</small></span><i>›</i></button>').join('')
+      : '<div class="pv2-clear">✓ Nothing needs your attention right now.</div>')
+    + '</div>';
+}
+function parentHomeHtml(kids, child) {
+  const parentName = (data.students.find(s => s.id === child.id) || {}).parentName || '';
+  return parentSectionTitleHtml('🏠 Home', null, parentName ? 'Welcome, ' + esc(parentName) : 'Welcome')
+    + parentFamilyHtml(kids, child)
+    + studentFeeOverdueBanner(child).replace('Your fees are due.', esc(child.name.split(' ')[0]) + '\'s classes have run out.')
+    + parentFeesDueHomeHtml(kids, child)
+    + '<div class="card parent-glance">'
+    +   (kids.length < 2 ? '<h2 style="margin-top:0">' + esc(child.name) + (child.archived ? ' <span class="tag cat">Archived</span>' : '') + '</h2>' : '<h2 style="margin-top:0">' + esc(child.name) + '</h2>')
+    +   parentNextClassHtml(child)
+    +   studentDashboardStatsHtml(child)
+    +   parentAttentionHtml(kids, child)
+    + '</div>';
+}
+function parentFeesHtml(kids, child) {
   // More than one child with fees due: one line per child and the family total.
-  const kidsDue = myChildren.map(c => ({ c, amt: pendingFeeRequests(c.id).reduce((a, r) => a + (r.amountPaid || 0), 0) })).filter(x => x.amt > 0);
+  const kidsDue = kids.map(c => ({ c, amt: pendingFeeRequests(c.id).reduce((a, r) => a + (r.amountPaid || 0), 0) })).filter(x => x.amt > 0);
   const familyDue = kidsDue.length > 1 ? `
     <div class="card" style="border-color:var(--gold)">
       <h2 style="margin-top:0">Fees due for your children ${helpBtn('pay-fees')}</h2>
-      <div class="table-scroll"><table>
-        ${kidsDue.map(x => `<tr><td><a href="#" onclick="setParentSelectedChild('${x.c.id}');return false">${esc(x.c.name)}</a></td><td>₹${x.amt.toFixed(2)}</td></tr>`).join('')}
+      <div class="table-scroll"><table class="no-stack">
+        ${kidsDue.map(x => `<tr><td><a href="#" onclick="setParentSelectedChild('${x.c.id}');return false">${esc(x.c.name)}</a>${x.c.id === child.id ? ' <span class="hint">(showing below)</span>' : ''}</td><td>₹${x.amt.toFixed(2)}</td></tr>`).join('')}
         <tr><td><b>Total</b></td><td><b>₹${kidsDue.reduce((a, x) => a + x.amt, 0).toFixed(2)}</b></td></tr>
       </table></div>
-      ${discountRuleHtml(familyDiscountSaved(myChildren.flatMap(c => pendingFeeRequests(c.id))), true)}
-      <div class="hint">Open each child to see the details and pay.</div>
+      ${discountRuleHtml(familyDiscountSaved(kids.flatMap(c => pendingFeeRequests(c.id))), true)}
+      <div class="hint">Tap a name to see that child's fees and pay.</div>
     </div>` : '';
-  if (spOpen) return switcher + childLoginDetails + spPaperHtml();
-  return studentFeeOverdueBanner(child) + switcher + childLoginDetails + familyDue + studentDashboardStatsHtml(child) + renderStudyPlanReadOnly(child) + renderStudentHomeworkSection(child) + renderStudentPracticeSection(child) + renderStudentResourcesSection(child) + myPhotoUploadHtml() + renderStudentReportCards(child, studentViewMonth, 'setStudentViewMonth', esc(child.name) + "'s")
+  const prefix = esc(child.name) + "'s";
+  const noneDue = pendingFeeRequests(child.id).length ? '' : '<div class="card"><div class="pv2-clear" style="padding:0">✓ No fees due for ' + esc(child.name.split(' ')[0]) + ' right now.</div></div>';
+  return parentSectionTitleHtml('💳 Fees', child, 'Fees due, classes left and receipts')
+    + familyDue
+    + noneDue
+    + renderStudentReportCards(child, studentViewMonth, 'setStudentViewMonth', prefix, ['fees'])
+    + studentLowBalanceNudgeHtml(child)
+    + renderStudentReportCards(child, studentViewMonth, 'setStudentViewMonth', prefix, ['subs', 'payments'])
     + studentFeeCalculatorHtml(child);
+}
+function parentClassesHtml(kids, child) {
+  const prefix = esc(child.name) + "'s";
+  return parentSectionTitleHtml('📅 Classes', child, 'Class times, join links and attendance')
+    + '<div class="card">' + parentNextClassHtml(child).replace('class="pv2-next"', 'class="pv2-next" style="margin:0"') + '</div>'
+    + renderStudentReportCards(child, studentViewMonth, 'setStudentViewMonth', prefix, ['links', 'schedule'])
+    + (typeof window.libStudentAttendancePanel === 'function' ? window.libStudentAttendancePanel(child).replace('<h2>My Attendance</h2>', '<h2>' + esc(child.name.split(' ')[0]) + '\'s attendance</h2>').replace('from your class records', 'from the class records') : '')
+    + renderStudentReportCards(child, studentViewMonth, 'setStudentViewMonth', prefix, ['attendance']);
+}
+function parentLearningHtml(kids, child) {
+  const papersCard = typeof window.libSetParentPastPapersTab === 'function'
+    ? '<button type="button" class="student-big-link" onclick="libSetParentPastPapersTab(\'papers\')"><span aria-hidden="true">📄</span><span><b>Question Bank</b><small>Past papers your child can practise with</small></span><span aria-hidden="true">›</span></button>'
+    : '';
+  return parentSectionTitleHtml('📚 Learning', child, 'Homework, practice papers, study plan and notes')
+    + aiHowAmIDoingHtml(child.id)
+    + renderStudentHomeworkSection(child)
+    + renderStudentPracticeSection(child)
+    + renderStudyPlanReadOnly(child).replace('📋 My Study Plan', '📋 Study Plan').replace('Your teacher updates this as you progress', 'The teacher updates this as ' + esc(child.name.split(' ')[0]) + ' progresses')
+    + papersCard
+    + renderStudentResourcesSection(child)
+    + aiChatCardHtml(child.id);
+}
+function parentAccountHtml(kids, child) {
+  // Parent-only secure lookup: the RPC verifies the parent-child link and returns only this child's login ID.
+  ensureParentStudentLogin(child.id);
+  const r = parentStudentLoginCache[child.id];
+  const childLogin = `<div class="card">
+    <h2 style="margin-top:0">${esc(child.name)}'s student login</h2>
+    ${!r ? `<div class="hint">Loading student login details…</div>` : r.error ? `<div class="hint">Could not load login details. Please try again later or contact LIB Education.</div>` : r.username ? `<div class="parent-student-login-content">
+      <div><span class="hint">Student Login ID</span><b>${esc(r.username)}</b></div>
+      <div><span class="hint">Default password</span><b>Same as Student Login ID</b></div>
+      <div class="hint">The student must change this password after the first login.</div>
+    </div>` : `<div class="hint">No Student Login has been created for ${esc(child.name)} yet. Please contact LIB Education.</div>`}
+  </div>`;
+  return parentSectionTitleHtml('⚙️ Account', child, 'Logins, contact details and password')
+    + childLogin
+    + renderStudentReportCards(child, studentViewMonth, 'setStudentViewMonth', esc(child.name) + "'s", ['details']).replace('<h2>My Details', '<h2>' + esc(child.name) + '\'s details')
+    + changePasswordCardHtml()
+    + bioSettingsCardHtml()
+    + myPhotoUploadHtml().replace('<h2>My Photo</h2>', '<h2>Your photo</h2>');
+}
+function renderParentPortal() {
+  const kids = parentChildrenList();
+  if (kids.length === 0) {
+    return `<div class="card"><div class="empty">No children are linked to this account yet. Contact the admin.</div></div>`
+      + changePasswordCardHtml();
+  }
+  if (!parentSelectedChildId || !kids.some(c=>c.id===parentSelectedChildId)) {
+    parentSelectedChildId = kids[0].id;
+  }
+  const child = kids.find(c=>c.id===parentSelectedChildId);
+  if (spOpen) return parentChildSwitcherHtml(kids, child) + spPaperHtml();
+  if (!PARENT_SECTIONS.some(x => x.key === parentSection)) parentSection = 'home';
+  let body;
+  if (parentSection === 'fees') body = parentFeesHtml(kids, child);
+  else if (parentSection === 'classes') body = parentClassesHtml(kids, child);
+  else if (parentSection === 'learning') body = parentLearningHtml(kids, child);
+  else if (parentSection === 'account') body = parentAccountHtml(kids, child);
+  else body = parentHomeHtml(kids, child);
+  return parentPortalNavHtml(parentSection, kids, child)
+    + '<div class="student-page parent-page parent-page-' + parentSection + '">'
+    + (parentSection === 'home' ? '' : parentChildSwitcherHtml(kids, child))
+    + body + '</div>';
 }
 
 // ---------- Class Scheduler (Teacher) ----------
@@ -22621,6 +22803,19 @@ function portalWhoLabel() {
   }
   return esc(currentUsername);
 }
+function changePasswordCardHtml() {
+  return `
+    <div class="card">
+      <h2>Change your password</h2>
+      ${userMsg.changePw ? `<div class="hint" style="color:var(--forest)">${esc(userMsg.changePw)}</div>` : ''}
+      <div class="narrow-form">
+        <input type="password" autocomplete="new-password" id="curPass" placeholder="Current password">
+        <input type="password" autocomplete="new-password" id="newPass1" placeholder="New password">
+        <input type="password" autocomplete="new-password" id="newPass2" placeholder="Confirm new password">
+        <button class="btn-primary" onclick="changePassword()">Save new password</button>
+      </div>
+    </div>`;
+}
 function renderPortalShell(bodyHtml) {
   const app = document.getElementById('app');
   const _sy = window.scrollY;
@@ -22641,22 +22836,12 @@ function renderPortalShell(bodyHtml) {
       <button class="btn-small" onclick="openSupportModal()">Support${data.supportTickets.filter(t=>t.status!=='resolved').length ? ` (${data.supportTickets.filter(t=>t.status!=='resolved').length})` : ''}</button>
       <button class="btn-logout btn-small" onclick="logout()">Log out</button>
     </div>
-    ${currentRole==='Student' ? '' : `<div class="tagline">${currentRole==='Parent' ? "Your child's attendance and subscription details." : 'Your classes for the selected month.'}</div>`}
-    ${pwIsDefault ? `<div class="card" style="border-color:var(--brick)"><b>Please change your password.</b> It is still the same as your login ID, so anyone who knows your login ID could log in. <button class="btn-small btn-primary" onclick="${currentRole==='Student' ? 'openStudentSettings()' : "document.getElementById('curPass').scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('curPass').focus()"}">Change it now</button></div>` : ''}
-    ${currentRole === 'Student' ? '' : aiHowAmIDoingHtml(currentLinkedId)}
+    ${currentRole==='Student' || currentRole==='Parent' ? '' : `<div class="tagline">Your classes for the selected month.</div>`}
+    ${pwIsDefault ? `<div class="card" style="border-color:var(--brick)"><b>Please change your password.</b> It is still the same as your login ID, so anyone who knows your login ID could log in. <button class="btn-small btn-primary" onclick="${currentRole==='Student' ? 'openStudentSettings()' : currentRole==='Parent' ? 'openParentAccount()' : "document.getElementById('curPass').scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('curPass').focus()"}">Change it now</button></div>` : ''}
+    ${currentRole === 'Student' || currentRole === 'Parent' ? '' : aiHowAmIDoingHtml(currentLinkedId)}
     ${chatPanelOpen ? renderChat() : bodyHtml}
-    ${currentRole === 'Teacher' || currentRole === 'Student' ? '' : `
-    <div class="card">
-      <h2>Change your password</h2>
-      ${userMsg.changePw ? `<div class="hint" style="color:var(--forest)">${esc(userMsg.changePw)}</div>` : ''}
-      <div class="narrow-form">
-        <input type="password" autocomplete="new-password" id="curPass" placeholder="Current password">
-        <input type="password" autocomplete="new-password" id="newPass1" placeholder="New password">
-        <input type="password" autocomplete="new-password" id="newPass2" placeholder="Confirm new password">
-        <button class="btn-primary" onclick="changePassword()">Save new password</button>
-      </div>
-    </div>`}
-    ${currentRole === 'Teacher' || currentRole === 'Student' ? '' : bioSettingsCardHtml()}
+    ${currentRole === 'Teacher' || currentRole === 'Student' || currentRole === 'Parent' ? '' : changePasswordCardHtml()}
+    ${currentRole === 'Teacher' || currentRole === 'Student' || currentRole === 'Parent' ? '' : bioSettingsCardHtml()}
     ${iosInstallHelpHtml()}
     ${helpPanelHtml()}
     ${aiHelpPanelHtml()}
@@ -28887,10 +29072,9 @@ document.head.appendChild(adminV2Loader);
 <script src="demo-control-centre.js"></script>
 <script src="student-portal-tabs.js?v=20261119-menu2"></script>
 <script src="student-experience-v2.js?v=20261119-menu2"></script>
-<script src="parent-experience-v2.js?v=20261118-parentv2"></script>
-<script src="past-papers-portal.js?v=20261119-menu2"></script>
+<script src="past-papers-portal.js?v=20261119-parent1"></script>
 <script src="past-paper-discovery.js?v=20261112-discovery1"></script>
 <script src="question-bank-host.js?v=20261113-release2"></script>
-<script src="help-search.js?v=20261119-menu2"></script>
+<script src="help-search.js?v=20261119-parent1"></script>
 </body>
 </html>
