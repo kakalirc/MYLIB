@@ -402,12 +402,26 @@
     root.id = 'lib-help-search';
     root.setAttribute('aria-label', 'MY LIB Help and Search');
     root.innerHTML = `
-      <div class="lib-help-head"><div><strong>MY LIB Help &amp; Search</strong><span>Find a feature or learn how to do something</span></div></div>
-      <div class="lib-help-input-wrap"><span aria-hidden="true">⌕</span><input type="search" autocomplete="off" placeholder="What would you like to do? e.g. send a fee request" aria-label="Search MY LIB features and help" data-help-input><button type="button" data-help-clear aria-label="Clear search">×</button></div>
-      <div class="lib-help-quick" data-help-quick></div>
-      <div class="lib-help-results" data-help-results><div class="lib-help-hint">Search menu options or describe what you want to do.</div></div>
-      <section class="lib-help-article" data-help-article hidden aria-live="polite"></section>`;
+      <div class="lib-help-head"><div><strong>MY LIB Help &amp; Search</strong><span>Find a feature or learn how to do something</span></div><button type="button" class="lib-help-toggle" data-help-toggle aria-expanded="true">Hide</button></div>
+      <div data-help-content>
+        <div class="lib-help-input-wrap"><span aria-hidden="true">⌕</span><input type="search" autocomplete="off" placeholder="What would you like to do? e.g. send a fee request" aria-label="Search MY LIB features and help" data-help-input><button type="button" data-help-clear aria-label="Clear search">×</button></div>
+        <div class="lib-help-quick" data-help-quick></div>
+        <div class="lib-help-results" data-help-results><div class="lib-help-hint">Search menu options or describe what you want to do.</div></div>
+        <section class="lib-help-article" data-help-article hidden aria-live="polite"></section>
+      </div>`;
     topbar.insertAdjacentElement('afterend', root);
+    const toggle = root.querySelector('[data-help-toggle]');
+    const content = root.querySelector('[data-help-content]');
+    const setCollapsed = collapsed => {
+      content.hidden = collapsed;
+      toggle.textContent = collapsed ? 'Show' : 'Hide';
+      toggle.setAttribute('aria-expanded', String(!collapsed));
+      root.classList.toggle('is-collapsed', collapsed);
+    };
+    // Always start collapsed on login/reload, regardless of the previous session.
+    root.__setHelpCollapsed = setCollapsed;
+    setCollapsed(true);
+    toggle.addEventListener('click', () => setCollapsed(!content.hidden));
     refreshQuickActions(root);
     const input = root.querySelector('[data-help-input]');
     input.addEventListener('input', () => {
@@ -461,6 +475,7 @@
     style.textContent = `
       #lib-help-search{margin:0 0 16px;padding:13px 16px 12px;background:var(--paper,#fbf9f3);border:1px solid var(--line,#ded5bd);border-radius:10px;box-shadow:var(--card-shadow,0 1px 2px rgba(0,0,0,.05));}
       .lib-help-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:9px}.lib-help-head strong{display:block;font-family:'Zilla Slab',serif;font-size:17px;color:var(--forest,#3c5e42)}.lib-help-head span{display:block;font-size:12px;color:var(--muted,#7c7461);margin-top:2px}
+      .lib-help-toggle{flex:0 0 auto;border:1px solid var(--line,#ded5bd);border-radius:18px;background:#fff;color:var(--forest,#3c5e42);padding:6px 12px;font:600 11px 'Work Sans',sans-serif;cursor:pointer}.lib-help-toggle:hover{background:#e7eee5}#lib-help-search [data-help-content][hidden]{display:none}
       
       .lib-help-input-wrap{display:flex;align-items:center;gap:9px;border:1px solid var(--line,#ded5bd);border-radius:8px;background:#fff;padding:0 10px;min-height:43px}.lib-help-input-wrap>span{font-size:23px;color:var(--muted,#7c7461)}.lib-help-input-wrap input{flex:1;min-width:0;border:0!important;outline:none!important;box-shadow:none!important;background:transparent!important;color:var(--ink,#232a24)!important;font:14px 'Work Sans',sans-serif!important;padding:10px 0!important}.lib-help-input-wrap button{border:0;background:transparent;color:var(--muted,#7c7461);font-size:22px;cursor:pointer}
       .lib-help-quick{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}.lib-help-quick button{border:1px solid var(--line,#ded5bd);background:transparent;color:var(--forest,#3c5e42);border-radius:20px;padding:5px 9px;font:600 11px 'Work Sans',sans-serif;cursor:pointer}.lib-help-quick button:hover{background:#e7eee5}
@@ -483,6 +498,8 @@
         return target && !root.contains(target) && !(target.closest && target.closest('#lib-help-search'));
       });
       if (portalChanged) {
+        // A portal/menu transition starts a fresh view: collapse Help & Search again.
+        if (root.__setHelpCollapsed) root.__setHelpCollapsed(true);
         refreshQuickActions(root);
         const input = root.querySelector('[data-help-input]');
         if (input && input.value.trim()) renderResults(root, input.value);
