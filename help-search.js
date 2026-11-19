@@ -420,8 +420,11 @@
       root.classList.toggle('is-collapsed', collapsed);
       try { localStorage.setItem(storageKey, collapsed ? '1' : '0'); } catch (_) {}
     };
-    let initiallyCollapsed = false;
-    try { initiallyCollapsed = localStorage.getItem(storageKey) === '1'; } catch (_) {}
+    let initiallyCollapsed = true;
+    try {
+      const savedPreference = localStorage.getItem(storageKey);
+      if (savedPreference !== null) initiallyCollapsed = savedPreference === '1';
+    } catch (_) {}
     setCollapsed(initiallyCollapsed);
     toggle.addEventListener('click', () => setCollapsed(!content.hidden));
     refreshQuickActions(root);
