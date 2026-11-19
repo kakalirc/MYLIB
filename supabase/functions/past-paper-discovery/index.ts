@@ -568,20 +568,28 @@ async function readBounded(res: Response, maxBytes = MAX_PDF_BYTES): Promise<Uin
   // Use one bounded destination buffer instead of retaining every stream chunk
   // and then allocating a second full-size copy. This keeps peak memory bounded
   // when verifying PDFs near the 100 MB ceiling.
-  const capacity = declared > 0 ? declared : maxBytes;
-  const buffer = new Uint8Array(capacity);
+  let capacity = declared > 0 ? declared : Math.min(maxBytes, 1024 * 1024);
+  let buffer = new Uint8Array(capacity);
   const reader = res.body.getReader();
   let total = 0;
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      total += value.length;
-      if (total > maxBytes || total > capacity) {
+      const nextTotal = total + value.length;
+      if (nextTotal > maxBytes) {
         await reader.cancel();
         throw new Error(maxBytes === MAX_PDF_BYTES ? "PDF exceeds the 100 MB limit." : "Source page exceeds the 2 MB inspection limit.");
       }
-      buffer.set(value, total - value.length);
+      if (nextTotal > capacity) {
+        const nextCapacity = Math.min(maxBytes, Math.max(nextTotal, capacity * 2));
+        const expanded = new Uint8Array(nextCapacity);
+        expanded.set(buffer.subarray(0, total));
+        buffer = expanded;
+        capacity = nextCapacity;
+      }
+      buffer.set(value, total);
+      total = nextTotal;
     }
   } catch (error) {
     try { await reader.cancel(); } catch { /* Stream may already be closed. */ }
