@@ -68,6 +68,29 @@ if (location.hostname !== 'app.libeducation.com') {
   /* Star Teacher (teacher points game) */
   .star-pill { display:inline-block; font-size:11.5px; font-weight:700; color:var(--forest); background:#e3eee4; border-radius:10px; padding:1px 7px; margin-left:4px; vertical-align:middle; }
   .sidebar-item.active .star-pill { background:#fff; }
+  /* Student Journey */
+  .j-pill { display:inline-block; border-radius:11px; padding:1px 9px; font-size:11.5px; font-weight:700; }
+  .j-src, .j-ok { background:#e3eee4; color:var(--forest); } .j-mid { background:#f6ead0; color:#8a6420; } .j-bad { background:#f6dcd5; color:var(--brick); }
+  .j-facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:6px 18px; font-size:13.5px; }
+  .j-facts > div { display:grid; grid-template-columns:120px 1fr; gap:8px; } .j-facts b { color:var(--muted); font-weight:500; }
+  .j-tl { position:relative; margin:14px 0 6px 8px; padding-left:22px; border-left:2px solid var(--line); }
+  .j-ev { position:relative; padding:0 0 13px; }
+  .j-ev:before { content:''; position:absolute; left:-29px; top:3px; width:12px; height:12px; border-radius:50%; background:var(--paper); border:3px solid var(--forest); }
+  .j-ev.j-gold:before { border-color:var(--gold); } .j-ev.j-red:before { border-color:var(--brick); } .j-ev.j-grey:before { border-color:var(--muted); }
+  .j-ev.j-class:before { border-color:#9bb59f; width:8px; height:8px; left:-27px; top:5px; }
+  .j-d { font-size:12px; color:var(--muted); } .j-t { font-weight:600; } .j-n { font-size:12.5px; color:var(--muted); }
+  .j-gap { margin:0 0 13px; }
+  .j-stats { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+  .j-stat { flex:1; min-width:140px; background:#fff; border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  .j-stat .v { font-family:'Zilla Slab',serif; font-size:24px; font-weight:700; } .j-stat .l { font-size:12px; color:var(--muted); }
+  .j-stat .v .j-num { font-size:24px; font-family:'Zilla Slab',serif; }
+  .j-num { background:none; border:0; padding:0; font:inherit; font-weight:700; color:var(--forest); text-decoration:underline dotted; cursor:pointer; }
+  .j-funnel { display:grid; grid-template-columns:130px 1fr 48px; gap:6px 10px; align-items:center; font-size:13px; }
+  .j-bar { height:24px; border:0; border-radius:4px; color:#fff; font:inherit; font-size:12px; font-weight:700; text-align:left; padding:0 8px; cursor:pointer; min-width:28px; }
+  .j-bar[disabled] { cursor:default; background:var(--line) !important; }
+  .j-two { display:flex; gap:16px; flex-wrap:wrap; } .j-two > .card { flex:1; min-width:280px; }
+  #journeyDrill { border-color:var(--forest); }
+  @media (max-width:600px) { .j-funnel { grid-template-columns:96px 1fr 40px; font-size:12px; } .j-facts > div { grid-template-columns:105px 1fr; } .j-stat { min-width:45%; } }
   .star-row { display:flex; gap:16px; flex-wrap:wrap; } .star-row > .card { flex:1; min-width:240px; }
   .star-big { font-family:'Zilla Slab',serif; font-size:46px; font-weight:700; line-height:1; }
   .star-lvl { display:inline-block; background:var(--soft); border:1px solid var(--line); border-radius:14px; padding:2px 12px; font-weight:700; font-size:13px; margin-left:6px; vertical-align:middle; }
@@ -824,7 +847,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-19 20:45 IST'; // Demo Analysis: plain source names (LIB website, Direct admission)
+const BUILD_TIMESTAMP = '2026-11-19 21:45 IST'; // Student Journey: where they came from, Journey list, Student Journey page (SQL 81)
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -921,7 +944,20 @@ function confirmArchiveStudent(id) {
   const s = data.students.find(x=>x.id===id); if (!s) return;
   const subjIds = [...new Set(data.subscriptions.filter(p=>p.studentId===id && p.kind==='Payment').map(p=>p.subjectId))];
   const hasUnused = subjIds.some(sj=>TYPES.some(ty=>studentRemaining(id,sj,ty)>0));
-  if (hasUnused) { archiveStudentConfirmId = id; render(); } else toggleArchiveStudent(id);
+  // Always ask when and why they left (Student Journey); the unused-classes warning shows only when it applies.
+  archiveStudentHasUnused = hasUnused;
+  archiveStudentConfirmId = id; render();
+}
+let archiveStudentHasUnused = false;
+function archiveStudentFromModal(id) {
+  const leaving = {
+    left_on: (document.getElementById('archiveLeftOn') || {}).value || todayStr,
+    left_reason: (document.getElementById('archiveLeftReason') || {}).value || '',
+    left_note: ((document.getElementById('archiveLeftNote') || {}).value || '').trim()
+  };
+  if (journeyReady && !leaving.left_reason) { alert('Please pick why they left.'); return; }
+  archiveStudentConfirmId = null;
+  toggleArchiveStudent(id, journeyReady ? leaving : null);
 }
 function cancelArchiveStudent() { archiveStudentConfirmId = null; render(); }
 function helpBtn(key) { return `<button class="help-btn" onclick="openHelp('${key}',event)">?</button>`; }
@@ -2901,6 +2937,7 @@ async function load() {
     currentRole === 'Admin' ? loadWixBookings() : Promise.resolve(),
     currentRole === 'Admin' ? loadStudentCalls() : Promise.resolve(),
     currentRole === 'Admin' ? loadRegistrations() : Promise.resolve(),
+    currentRole === 'Admin' ? loadJourneyKaLeads() : Promise.resolve(),
     currentRole === 'Admin' ? loadRazorpayFeePayments() : Promise.resolve(),
     currentRole === 'Admin' ? loadProspectQuotes() : Promise.resolve(),
     loadSupportTickets(),
@@ -6074,11 +6111,14 @@ async function loadStudentsAndSubscriptions() {
   // The four reads don't depend on each other, so they run at the same time instead of one after another.
   let [stRes, phRes, enRes, subRes] = await Promise.all([
     selectAllPaged('students', ['name'],
-      STUDENT_COLUMNS + ',bill_separately,no_bulk_discount'),
+      STUDENT_COLUMNS + ',bill_separately,no_bulk_discount,created_at,onboarding_source' + (currentRole === 'Admin' ? JOURNEY_COLUMNS : '')),
     selectAllPaged('student_phone_numbers', ['created_at']),
     selectAllPaged('student_subjects', []),
     loadSubscriptionRows(),
   ]);
+  // lead_source / left_on etc. come with SQL 81 (Student Journey); until it is run, read the students without them.
+  journeyReady = currentRole === 'Admin' && !stRes.error;
+  if (stRes.error && /lead_source|left_on|left_reason|left_note/.test(stRes.error.message || '')) stRes = await selectAllPaged('students', ['name'], STUDENT_COLUMNS + ',bill_separately,no_bulk_discount,created_at,onboarding_source');
   // bill_separately comes with SQL 60; until it is run, read the students without it.
   // no_bulk_discount comes with SQL 76.
   if (stRes.error && /no_bulk_discount/.test(stRes.error.message || '')) stRes = await selectAllPaged('students', ['name'], STUDENT_COLUMNS + ',bill_separately');
@@ -6087,7 +6127,9 @@ async function loadStudentsAndSubscriptions() {
   if (!stErr && studentRows) {
     data.students = studentRows.map(r => {
       const existing = data.students.find(s=>s.id===r.id);
-      return { id: r.id, name: r.name, archived: !!r.archived, code: r.student_code || '', parentName: r.parent_name || '', mobileNumber: r.mobile_number || '', email: r.email || '', address: r.address || '', photo: existing ? existing.photo : '', gradeId: r.grade_id || '', boardId: r.board_id || '', academicYear: r.academic_year || '', modePreference: r.mode_preference || '', classTypePreference: r.class_type_preference || '', billSeparately: !!r.bill_separately, noBulkDiscount: !!r.no_bulk_discount };
+      return { id: r.id, name: r.name, archived: !!r.archived, code: r.student_code || '', parentName: r.parent_name || '', mobileNumber: r.mobile_number || '', email: r.email || '', address: r.address || '', photo: existing ? existing.photo : '', gradeId: r.grade_id || '', boardId: r.board_id || '', academicYear: r.academic_year || '', modePreference: r.mode_preference || '', classTypePreference: r.class_type_preference || '', billSeparately: !!r.bill_separately, noBulkDiscount: !!r.no_bulk_discount,
+        createdAt: r.created_at || '', onboardingSource: r.onboarding_source || '',
+        leadSource: r.lead_source || '', leadSourceNote: r.lead_source_note || '', leftOn: r.left_on || '', leftReason: r.left_reason || '', leftNote: r.left_note || '' };
     });
   }
   const { data: phoneRows, error: phErr } = phRes;
@@ -10417,7 +10459,7 @@ async function deleteSubject(id) {
 }
 
 // ---------- students + subscriptions + enrollment ----------
-let studentAddDraft = { name: '', parentMobile: '', studentMobile: '', selectedDemoId: '', matches: null };
+let studentAddDraft = { name: '', parentMobile: '', studentMobile: '', selectedDemoId: '', matches: null, leadSource: '', leadSourceNote: '' };
 function studentAddDemoMatches(name, parentMobile, studentMobile) {
   const n = String(name || '').trim().toLocaleLowerCase(), p = phoneKey(parentMobile), st = phoneKey(studentMobile);
   if (!n || (!p && !st)) return [];
@@ -10436,7 +10478,8 @@ async function addStudent(mode) {
   if (!name) return;
   if (!isValidPersonName(name)) { addConfirmMsg.student = 'Name cannot contain numbers.'; render(); return; }
   const matches = studentAddDemoMatches(name, parentMobile, studentMobile);
-  studentAddDraft = { name, parentMobile, studentMobile, selectedDemoId: studentAddDraft.selectedDemoId || '', matches };
+  const leadSource = studentAddDraft.leadSource || '', leadSourceNote = (studentAddDraft.leadSourceNote || '').trim();
+  studentAddDraft = { name, parentMobile, studentMobile, selectedDemoId: studentAddDraft.selectedDemoId || '', matches, leadSource, leadSourceNote };
   if (!mode && matches.length) { addConfirmMsg.student = ''; render(); return; }
   mode = mode || 'without';
   if (mode === 'convert' && !matches.some(d => d.id === studentAddDraft.selectedDemoId)) { addConfirmMsg.student = 'Select the exact matching demo before converting.'; render(); return; }
@@ -10444,11 +10487,12 @@ async function addStudent(mode) {
   if (!confirm(mode === 'convert'
     ? 'Create this student and link & convert the selected demo? This will trigger the existing ₹100 demo conversion bonus.'
     : 'Create a new student record without converting a demo?')) return;
-  const { data: row, error } = await sb.from('students').insert({
+  const { data: row, error } = await sb.from('students').insert(Object.assign({
     name, archived: false, onboarding_source: 'student_maintenance_add', mobile_number: parentMobile || null
-  }).select().single();
+  }, journeyReady && leadSource ? { lead_source: leadSource, lead_source_note: leadSourceNote || null } : {})).select().single();
   if (error) { addConfirmMsg.student = 'Could not add student: ' + error.message; render(); return; }
-  const student = { id: row.id, name: row.name, archived: !!row.archived, code: row.student_code || '', parentName: '', mobileNumber: row.mobile_number || '', email: '', address: '', photo: '', gradeId: '', boardId: '', academicYear: '', modePreference: '', classTypePreference: '', billSeparately: false };
+  const student = { id: row.id, name: row.name, archived: !!row.archived, code: row.student_code || '', parentName: '', mobileNumber: row.mobile_number || '', email: '', address: '', photo: '', gradeId: '', boardId: '', academicYear: '', modePreference: '', classTypePreference: '', billSeparately: false,
+    createdAt: row.created_at || '', onboardingSource: row.onboarding_source || '', leadSource: row.lead_source || '', leadSourceNote: row.lead_source_note || '', leftOn: '', leftReason: '', leftNote: '' };
   data.students.push(student);
   let phoneWarning = '';
   const phoneRowsToSave = [];
@@ -10459,7 +10503,7 @@ async function addStudent(mode) {
     if (phoneErr) phoneWarning = ' Contact mobile number(s) could not be saved: ' + phoneErr.message;
     else (savedPhones || []).forEach(p => data.studentPhoneNumbers.push({ id: p.id, studentId: p.student_id, type: p.phone_type, number: p.phone_number }));
   }
-  studentAddDraft = { name: '', parentMobile: '', studentMobile: '', selectedDemoId: '', matches: null };
+  studentAddDraft = { name: '', parentMobile: '', studentMobile: '', selectedDemoId: '', matches: null, leadSource: '', leadSourceNote: '' };
   if (mode === 'convert') {
     const result = await convertDemoForStudent(demoId, row.id, { navigate: false });
     setTab('students'); selectStudent(row.id);
@@ -10530,13 +10574,19 @@ function siblingFormHtml(student) {
     </div>`;
 }
 function activeStudents() { return data.students.filter(s=>!s.archived); }
-async function toggleArchiveStudent(id) {
+async function toggleArchiveStudent(id, leaving) {
   const s = data.students.find(x=>x.id===id);
   if (!s) return;
   const newArchived = !s.archived;
-  const { error } = await sb.from('students').update({ archived: newArchived }).eq('id', id);
+  // Student Journey (SQL 81): archiving saves when and why they left; unarchiving clears it (they are back).
+  const update = { archived: newArchived };
+  if (journeyReady) Object.assign(update, newArchived
+    ? { left_on: (leaving && leaving.left_on) || todayStr, left_reason: (leaving && leaving.left_reason) || null, left_note: (leaving && leaving.left_note) || null }
+    : { left_on: null, left_reason: null, left_note: null });
+  const { error } = await sb.from('students').update(update).eq('id', id);
   if (error) { render(); return; }
   s.archived = newArchived;
+  if (journeyReady) { s.leftOn = update.left_on || ''; s.leftReason = update.left_reason || ''; s.leftNote = update.left_note || ''; }
   // When archiving, stamp today as the expiry date on every active payment that still has
   // an open balance (kind=Payment, either no expiry yet or a future expiry). This converts
   // all unused classes into expired ones so they don't linger on reports.
@@ -10744,7 +10794,7 @@ async function removeStudentPhoneNumberAdmin(id) {
   data.studentPhoneNumbers = data.studentPhoneNumbers.filter(p=>p.id!==id);
   render();
 }
-function selectStudent(id) { selectedStudentId = id; studentGapMsg = ''; subDraft = newSubDraft(); subPayPendingWarning = null; refundDraft = { subjectId: '', type: 'Group', date: todayStr }; refundMsg = ''; requestDraft = { subjectId: '', type: 'Group', mode: '', classes: '', amountPaid: '', amountEdited: false, date: todayStr }; requestMsg = ''; enrollDraft = { teacherId: '', subjectId: '' }; enrollShowAllSubjects = false; addConfirmMsg.student = ''; contactMsg = ''; render(); loadStudentPhotoOnDemand(id); }
+function selectStudent(id) { if (selectedStudentId !== id) { journeyShowAllFor = ''; } journeyMsg = ''; selectedStudentId = id; studentGapMsg = ''; subDraft = newSubDraft(); subPayPendingWarning = null; refundDraft = { subjectId: '', type: 'Group', date: todayStr }; refundMsg = ''; requestDraft = { subjectId: '', type: 'Group', mode: '', classes: '', amountPaid: '', amountEdited: false, date: todayStr }; requestMsg = ''; enrollDraft = { teacherId: '', subjectId: '' }; enrollShowAllSubjects = false; addConfirmMsg.student = ''; contactMsg = ''; render(); loadStudentPhotoOnDemand(id); }
 function backToStudentList() { selectedStudentId = ''; addConfirmMsg.student = ''; contactMsg = ''; render(); }
 function subDraftSet(field, val) {
   subDraft[field] = val;
@@ -15588,6 +15638,8 @@ function renderStudents() {
         <input type="text" id="newStudent" value="${escAttr(studentAddDraft.name)}" placeholder="Student's name" oninput="studentAddDraft.name=this.value" onkeydown="if(event.key==='Enter') addStudent()">
         <input type="tel" id="newStudentParentMobile" value="${escAttr(studentAddDraft.parentMobile)}" placeholder="Parent mobile (optional)" oninput="studentAddDraft.parentMobile=this.value" style="width:170px">
         <input type="tel" id="newStudentStudentMobile" value="${escAttr(studentAddDraft.studentMobile)}" placeholder="Student mobile (optional)" oninput="studentAddDraft.studentMobile=this.value" style="width:170px">
+        ${journeyReady ? `<select id="newStudentSource" onchange="studentAddDraft.leadSource=this.value" title="Where did this student come from?"><option value="">Where they came from…</option>${journeySourceOptions(studentAddDraft.leadSource)}</select>
+        <input type="text" id="newStudentSourceNote" value="${escAttr(studentAddDraft.leadSourceNote)}" placeholder="e.g. referred by …" oninput="studentAddDraft.leadSourceNote=this.value" style="width:170px">` : ''}
         <button class="btn-primary" onclick="addStudent()">Add student</button>
       </div>
       ${studentAddDraft.matches && studentAddDraft.matches.length ? `<div style="margin-top:8px;padding:10px;background:#fff8e6;border:1px solid var(--line);border-radius:7px"><b>Possible previous demo match (${studentAddDraft.matches.length})</b><div class="hint">Confirm the exact demo before converting. No match is linked automatically.</div>
@@ -15784,6 +15836,7 @@ function renderStudents() {
       </div>
       ${siblingFormHtml(student)}
       ${regFromFormHtml(student.id)}
+      ${studentJourneyHtml(student)}
 
       
       <div class="student-section" style="background:#e8f0fe">
@@ -16081,7 +16134,7 @@ function renderStudents() {
     ${enrollConfirmModalHtml()}
     ${adminAcademicYearConfirmModalHtml()}
     ${transferConfirmModalHtml()}
-    ${archiveStudentConfirmId ? (() => { const s = data.students.find(x=>x.id===archiveStudentConfirmId); return `<div class="modal-backdrop" onclick="cancelArchiveStudent()"></div><div class="modal-box"><h3>Archive ${esc(s?s.name:'student')}?</h3><p style="margin:8px 0 16px">All unused classes will be expired immediately. You can restore them later by editing each payment\'s expiry date.</p><div class="row-form"><button class="btn-small" onclick="cancelArchiveStudent()">Cancel</button><button class="btn-primary" style="background:var(--brick);border-color:var(--brick)" onclick="archiveStudentConfirmId=null;toggleArchiveStudent('${archiveStudentConfirmId}')">Archive &amp; expire classes</button></div></div>`; })() : ''}
+    ${archiveStudentConfirmId ? (() => { const s = data.students.find(x=>x.id===archiveStudentConfirmId); return `<div class="modal-backdrop" onclick="cancelArchiveStudent()"></div><div class="modal-box"><h3>Archive ${esc(s?s.name:'student')}?</h3>${archiveStudentHasUnused ? `<p style="margin:8px 0 12px">All unused classes will be expired immediately. You can restore them later by editing each payment\'s expiry date.</p>` : ''}${journeyReady ? `<div class="row-form" style="margin:8px 0"><label>Left on <input type="date" id="archiveLeftOn" value="${todayStr}" max="${todayStr}"></label></div><div class="row-form" style="margin:8px 0"><label>Why did they leave? <select id="archiveLeftReason"><option value="">Pick a reason…</option>${JOURNEY_LEFT_REASONS.map(r => `<option>${esc(r)}</option>`).join('')}</select></label></div><div class="row-form" style="margin:8px 0 16px"><label>Note <input type="text" id="archiveLeftNote" placeholder="optional" style="width:220px"></label></div>` : '<p class="hint">Run SQL 81 to save when and why students leave.</p>'}<div class="row-form"><button class="btn-small" onclick="cancelArchiveStudent()">Cancel</button><button class="btn-primary" style="background:var(--brick);border-color:var(--brick)" onclick="archiveStudentFromModal('${archiveStudentConfirmId}')">${archiveStudentHasUnused ? 'Archive &amp; expire classes' : 'Archive student'}</button></div></div>`; })() : ''}
   ${(() => {
     // Private notes for this student from all teachers (admin read + delete only)
     const privRows = teacherPrivateNotes.filter(function(n){ return n.studentId===student.id && n.note; });
@@ -17255,6 +17308,422 @@ function wixCallsHtml(b) {
 // ---- Call log on the student page (SQL 74) ----
 const STU_CALL_OUTCOMES = ['Spoke', 'No answer', 'Call back later', 'Busy', 'Fee follow-up', 'Complaint / issue'];
 const STU_CALL_WHO = ['Parent', 'Student'];
+// ---------- Student Journey (SQL 81) ----------
+// Where each student came from (students.lead_source, or worked out from the booking / form / Arena lead
+// they are linked to), every step of their time with us, and when / why they left.
+// Data is entered only in Student Maintenance; the Journey list and the Student Journey page only show it.
+let journeyReady = false;            // SQL 81 run (students.lead_source etc. exist)
+let journeyKaLeads = [];             // Knowledge Arena leads (admin_ka_leads_for_journey, SQL 81)
+let journeyKaLoaded = false;
+let journeyShowAllFor = '';          // student whose whole Journey is open
+let journeyMsg = '';
+let journeyFilter = { period: 'all', source: '', beforeApp: false };
+let journeyDrill = null;             // { title, keys:[personKey] }
+const JOURNEY_APP_START = '2026-09-22';   // students made on or before this day came from the September import
+const JOURNEY_SOURCES = ['LIB website', 'Phone call', 'Registration form', 'Knowledge Arena', 'Referral', 'Sibling', 'Walk-in', 'WhatsApp / Instagram', 'Google search', 'Other', 'Before the app'];
+const JOURNEY_LEFT_REASONS = ['Fees too high', 'Timing', 'Not happy with teacher', 'Exams over', 'Course finished', 'Moved away', 'Joined elsewhere', 'Other'];
+const JOURNEY_COLUMNS = ',lead_source,lead_source_note,left_on,left_reason,left_note';
+async function loadJourneyKaLeads() {
+  if (currentRole !== 'Admin') { journeyKaLeads = []; return; }
+  const { data: rows, error } = await sb.rpc('admin_ka_leads_for_journey');
+  journeyKaLeads = error || !Array.isArray(rows) ? [] : rows;
+  journeyKaLoaded = true;
+}
+function jDate(v) { return v ? String(v).slice(0, 10) : ''; }
+function jDays(a, b) {
+  if (!a || !b) return null;
+  const d = Math.round((new Date(jDate(b) + 'T00:00:00') - new Date(jDate(a) + 'T00:00:00')) / 86400000);
+  return isNaN(d) || d < 0 ? null : d;
+}
+function jMin(list) { const v = list.filter(Boolean).map(jDate).sort(); return v[0] || ''; }
+function jMax(list) { const v = list.filter(Boolean).map(jDate).sort(); return v[v.length - 1] || ''; }
+function jDaysText(n) { return n == null ? '—' : n === 0 ? 'same day' : n === 1 ? '1 day' : n + ' days'; }
+function jMonthLabel(ym) { if (!ym) return '—'; const [y, m] = ym.split('-'); return MONTH_SHORT[Number(m) - 1] + ' ' + y; }
+function journeyBookingSource(b) { return b.source && b.source !== 'Wix' ? b.source : 'LIB website'; }
+// Everything linked to one student: bookings, demos, forms, Arena leads, calls, money and classes.
+function journeyLinks(studentId) {
+  const demos = data.demoLogs.filter(d => d.linkedStudentId === studentId);
+  const demoIds = new Set(demos.map(d => d.id));
+  const bookings = data.wixBookings.filter(b => b.convertedStudentId === studentId || (b.demoLogId && demoIds.has(b.demoLogId)));
+  bookings.forEach(b => { if (b.demoLogId && !demoIds.has(b.demoLogId)) { const d = data.demoLogs.find(x => x.id === b.demoLogId); if (d) { demos.push(d); demoIds.add(d.id); } } });
+  const regs = (data.registrations || []).filter(r => r.student_id === studentId);
+  const ka = journeyKaLeads.filter(l => l.converted_student_id === studentId);
+  const bookingIds = new Set(bookings.map(b => b.id));
+  const calls = wixCalls.filter(c => c.student_id === studentId || (c.booking_id && bookingIds.has(c.booking_id)));
+  return { demos, bookings, regs, ka, calls };
+}
+// The source shown for a student: saved in Student Maintenance, else worked out from what it is linked to.
+function journeyAutoSource(s, links) {
+  links = links || journeyLinks(s.id);
+  const b = links.bookings.slice().sort((x, y) => (x.submittedAt || '').localeCompare(y.submittedAt || ''))[0];
+  if (b) return { source: journeyBookingSource(b), how: 'from the demo booking' };
+  if (links.regs.length) return { source: 'Registration form', how: 'from the registration form' + (links.regs[0].heard_from ? ' (heard from: ' + links.regs[0].heard_from + ')' : '') };
+  if (links.ka.length) return { source: 'Knowledge Arena', how: 'from the Knowledge Arena lead' };
+  if (s.onboardingSource === 'student_maintenance_copy') return { source: 'Sibling', how: 'made with Copy to new student' };
+  if (s.createdAt && jDate(s.createdAt) <= JOURNEY_APP_START) return { source: 'Before the app', how: 'student from before the app' };
+  return { source: '', how: links.demos.length ? 'had a demo, but no booking or form says where they came from' : 'nothing linked says where they came from' };
+}
+function journeySource(s, links) {
+  if (s.leadSource) return { source: s.leadSource, how: 'saved in Student Maintenance', saved: true };
+  return Object.assign({ saved: false }, journeyAutoSource(s, links));
+}
+// One summary per student, used by the Journey list and by the Student Journey page.
+function journeySummary(s) {
+  const links = journeyLinks(s.id);
+  const src = journeySource(s, links);
+  const subs = data.subscriptions.filter(p => p.studentId === s.id);
+  const paid = subs.filter(p => p.kind === 'Payment' && p.amountPaid > 0).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const carried = subs.filter(p => p.kind === 'Payment' && !(p.amountPaid > 0));
+  const sessions = data.sessions.filter(x => x.studentId === s.id && x.status !== 'Absent-NoCharge').sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const enquiryDate = jMin([].concat(links.bookings.map(b => b.submittedAt || b.createdAt), links.regs.map(r => r.created_at), links.ka.map(l => l.first_seen_at)));
+  const demoDates = links.demos.filter(d => d.status !== 'Cancelled').map(d => d.date);
+  const demoDone = links.demos.filter(d => d.doneAt || ['Done', 'Converted'].includes(d.status));
+  const firstContact = jMin([enquiryDate, jMin(demoDates), jMin(links.calls.map(c => c.called_at))]);
+  const madeBeforeApp = !s.createdAt || jDate(s.createdAt) <= JOURNEY_APP_START;
+  // Students from the September import: the record date is not their real start, so use their first payment / class.
+  const joinDate = madeBeforeApp ? jMin([s.createdAt || todayStr, jMin(subs.filter(p => p.kind === 'Payment').map(p => p.date)), sessions[0] && sessions[0].date]) : jDate(s.createdAt);
+  const paidDates = [...new Set(paid.map(p => jDate(p.date)))];
+  const renewals = Math.max(0, paidDates.length - (carried.length ? 0 : 1));
+  const lastClass = sessions.length ? sessions[sessions.length - 1].date : '';
+  const lastPaid = paidDates[paidDates.length - 1] || '';
+  const remaining = [...new Set(subs.map(p => p.subjectId))].reduce((n, sj) => n + TYPES.reduce((m, ty) => m + Math.max(0, studentRemaining(s.id, sj, ty)), 0), 0);
+  const recent = jDays(jMax([lastClass, lastPaid]), todayStr);
+  let status;
+  if (s.archived) status = 'Left';
+  else if (!paid.length && !carried.length) status = 'Not paid yet';
+  else if (remaining > 0 || (recent != null && recent <= 30)) status = 'Active';
+  else status = 'Lapsed';
+  const beforeApp = src.source === 'Before the app' || (!!s.createdAt && madeBeforeApp);
+  return {
+    key: 's:' + s.id, studentId: s.id, name: s.name, student: s, links, source: src.source || 'Not set', sourceHow: src.how, sourceSaved: src.saved,
+    beforeApp, firstContact: firstContact || joinDate, enquiryDate, hasEnquiry: !!(enquiryDate || links.demos.length),
+    demoBooked: links.demos.length > 0 || links.bookings.some(b => b.scheduledDate), demoDate: jMin(demoDates), demoDone: demoDone.length > 0, demoDoneDate: jMin(demoDone.map(d => d.date)),
+    admitted: true, joinDate, paid: paid.length > 0, firstPaid: paid[0] ? jDate(paid[0].date) : '', carried: carried.length > 0,
+    renewed: renewals > 0, renewals, firstRenewal: carried.length ? (paidDates[0] || '') : (paidDates[1] || ''),
+    lastClass, remaining, status, active: status === 'Active',
+    leftOn: s.leftOn || '', leftReason: s.archived ? (s.leftReason || '') : ''
+  };
+}
+// People who enquired but are not (yet) linked to a student.
+function journeyUnlinkedPeople() {
+  const out = [];
+  const usedDemo = new Set();
+  data.wixBookings.filter(b => !b.convertedStudentId).forEach(b => {
+    const d = b.demoLogId ? data.demoLogs.find(x => x.id === b.demoLogId) : null;
+    if (d) { usedDemo.add(d.id); if (d.linkedStudentId) return; }
+    out.push({ key: 'b:' + b.id, name: b.studentName || '(no name)', kind: 'Demo booking', openTab: 'wixbookings', source: journeyBookingSource(b), firstContact: jDate(b.submittedAt || b.createdAt), hasEnquiry: true,
+      demoBooked: !!(d || b.scheduledDate), demoDate: d ? d.date : (b.scheduledDate || ''), demoDone: !!(d && (d.doneAt || ['Done', 'Converted'].includes(d.status))), demoDoneDate: d && (d.doneAt || ['Done', 'Converted'].includes(d.status)) ? d.date : '',
+      admitted: false, status: (d && d.status === 'Lost') || ['Lost', 'Cancelled'].includes(b.status) ? 'Lost' : 'Open', leftReason: d && d.lostReason ? d.lostReason : (b.status === 'Cancelled' ? 'Booking cancelled' : '') });
+  });
+  data.demoLogs.filter(d => !d.linkedStudentId && !usedDemo.has(d.id) && d.status !== 'Cancelled' && !data.wixBookings.some(b => b.demoLogId === d.id)).forEach(d => {
+    out.push({ key: 'd:' + d.id, name: d.studentName || '(no name)', kind: 'Demo (Demo Register)', openTab: 'wixbookings', source: 'Not set', firstContact: jDate(d.date), hasEnquiry: true,
+      demoBooked: true, demoDate: d.date, demoDone: !!(d.doneAt || ['Done', 'Converted'].includes(d.status)), demoDoneDate: d.doneAt || ['Done', 'Converted'].includes(d.status) ? d.date : '', admitted: false, status: d.status === 'Lost' ? 'Lost' : 'Open', leftReason: d.lostReason || '' });
+  });
+  (data.registrations || []).filter(r => !r.student_id && !r.archived).forEach(r => {
+    out.push({ key: 'r:' + r.id, name: r.student_name || '(no name)', kind: 'Registration form', openTab: 'registrations', source: 'Registration form', firstContact: jDate(r.created_at), hasEnquiry: true,
+      demoBooked: false, demoDone: false, admitted: false, status: r.status === 'Rejected' ? 'Lost' : 'Open', leftReason: r.status === 'Rejected' ? (r.reject_reason || 'Rejected') : '' });
+  });
+  journeyKaLeads.filter(l => !l.converted_student_id).forEach(l => {
+    out.push({ key: 'k:' + l.id, name: 'Knowledge Arena guest', kind: 'Knowledge Arena lead', openTab: 'knowledgearena', source: 'Knowledge Arena', firstContact: jDate(l.first_seen_at), hasEnquiry: true,
+      demoBooked: false, demoDone: false, admitted: false, status: /lost|closed|not/i.test(l.lead_status || '') ? 'Lost' : 'Open', leftReason: '' });
+  });
+  return out;
+}
+function journeyAllPeople() { return data.students.map(journeySummary).concat(journeyUnlinkedPeople()); }
+
+// ---- Journey list on the student's page ----
+function journeyEvents(sum) {
+  const s = sum.student, L = sum.links, ev = [];
+  const who = id => id ? ((data.users.find(u => u.id === id) || {}).username || '') : '';
+  const add = (date, tone, title, note) => { if (date) ev.push({ date: jDate(date), at: String(date), tone, title, note: note || '' }); };
+  L.bookings.forEach(b => add(b.submittedAt || b.createdAt, 'gold', (b.source === 'Phone call' ? 'Demo booked by phone' : 'Demo booked on LIB website'),
+    [b.subject, b.classMode, b.paid ? '₹' + b.amount + ' paid by Razorpay' : ''].filter(Boolean).join(' · ')));
+  L.regs.forEach(r => {
+    add(r.created_at, 'gold', 'Registration form sent', [Array.isArray(r.subjects) ? r.subjects.join(', ') : '', r.heard_from ? 'Heard from: ' + r.heard_from : ''].filter(Boolean).join(' · '));
+    if (r.decided_at && r.status === 'Accepted') add(r.decided_at, 'gold', 'Registration accepted');
+  });
+  L.ka.forEach(l => add(l.first_seen_at, 'gold', 'Played Knowledge Arena as a guest', l.games_completed ? l.games_completed + ' games' : ''));
+  L.calls.forEach(c => add(c.called_at, 'gold', '📞 Call' + (c.spoke_to ? ' · spoke to ' + c.spoke_to : ''), [c.outcome, c.comment ? '"' + c.comment + '"' : '', who(c.called_by) ? 'by ' + who(c.called_by) : ''].filter(Boolean).join(' · ')));
+  L.demos.forEach(d => {
+    const label = subjectName(d.subjectId) !== '—' ? ' · ' + teacherName(d.teacherId) + ' (' + subjectName(d.subjectId) + ')' : ' · ' + teacherName(d.teacherId);
+    if (d.status === 'Cancelled') add(d.date, 'grey', 'Demo cancelled' + label);
+    else if (d.doneAt || ['Done', 'Converted'].includes(d.status)) add(d.date, 'gold', 'Demo done' + label, d.doneNote ? '"' + d.doneNote + '"' : '');
+    else if (d.status === 'Lost') add(d.date, 'red', 'Demo lost' + label, d.lostReason || '');
+    else add(d.date, 'gold', 'Demo booked' + label, d.demoTime || '');
+  });
+  add(sum.beforeApp && !L.bookings.length && !L.regs.length ? sum.joinDate : (s.createdAt || sum.joinDate), 'green',
+    sum.beforeApp ? 'With us before the app started' : 'Admitted · student record made', sum.sourceSaved || sum.source !== 'Not set' ? 'Source: ' + sum.source : '');
+  const subs = data.subscriptions.filter(p => p.studentId === s.id).sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.createdAt || '').localeCompare(b.createdAt || ''));
+  const seenSubject = new Set(), paidDatesSeen = [];
+  subs.forEach(p => {
+    const what = subjectName(p.subjectId) + ' ' + p.type + ' · ' + p.classes + ' classes';
+    if (p.kind === 'Payment' && !(p.amountPaid > 0)) { add(p.date, 'grey', 'Carried forward from before the app · ' + what); seenSubject.add(p.subjectId); return; }
+    if (p.kind === 'Payment') {
+      const d = jDate(p.date);
+      if (!paidDatesSeen.includes(d)) paidDatesSeen.push(d);
+      const n = paidDatesSeen.length - (sum.carried ? 0 : 1);
+      const title = !seenSubject.has(p.subjectId) && seenSubject.size ? '+ New subject · ' + what : (n <= 0 ? '💰 First payment · ' + what : '💰 Renewal ' + n + ' · ' + what);
+      seenSubject.add(p.subjectId);
+      add(p.date, 'green', title, '₹' + p.amountPaid.toLocaleString('en-IN') + (p.paymentReference ? ' · ' + p.paymentReference : ''));
+    } else if (p.kind === 'Refund') add(p.date, 'red', 'Refund · ' + what, '₹' + Math.abs(p.amountPaid).toLocaleString('en-IN'));
+    else if (p.kind === 'Expiry') add(p.date, 'grey', 'Classes expired · ' + subjectName(p.subjectId) + ' ' + p.type + ' · ' + Math.abs(p.classes));
+    else if (p.kind === 'TransferOut' || p.kind === 'TransferIn') {
+      const other = p.transferGroupId ? data.subscriptions.find(x => x.transferGroupId === p.transferGroupId && x.id !== p.id) : null;
+      const os = other ? data.students.find(x => x.id === other.studentId) : null;
+      const n = Math.abs(p.classes);
+      add(p.date, 'grey', '⇄ ' + (p.kind === 'TransferOut' ? n + ' ' + subjectName(p.subjectId) + ' classes moved to ' + (os ? os.name : 'another student') : n + ' ' + subjectName(p.subjectId) + ' classes moved in from ' + (os ? os.name : 'another student')));
+    }
+  });
+  const sessions = data.sessions.filter(x => x.studentId === s.id).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  if (sessions.length) {
+    add(sessions[0].date, 'green', 'First class · ' + teacherName(sessions[0].teacherId) + ' (' + subjectName(sessions[0].subjectId) + ')');
+    const byMonth = {};
+    sessions.forEach(x => { const m = jDate(x.date).slice(0, 7); (byMonth[m] = byMonth[m] || {})[subjectName(x.subjectId)] = (byMonth[m][subjectName(x.subjectId)] || 0) + (Number(x.count) || 1); });
+    Object.keys(byMonth).sort().forEach(m => {
+      const parts = Object.entries(byMonth[m]).map(([k, v]) => k + ' ' + v);
+      const total = Object.values(byMonth[m]).reduce((a, b) => a + b, 0);
+      const last = m === jDate(todayStr).slice(0, 7) ? todayStr : (m + '-28');
+      add(last, 'class', 'Classes in ' + jMonthLabel(m) + ': ' + total, parts.join(' · '));
+    });
+  }
+  if (s.archived) add(s.leftOn || todayStr, 'red', 'Left' + (s.leftReason ? ' · ' + s.leftReason : ''), s.leftNote || (s.leftOn ? '' : 'Leaving date not saved'));
+  else if (sum.status === 'Lapsed') add(todayStr, 'red', 'Lapsed · no classes left and no class or payment in the last 30 days', sum.lastClass ? 'Last class ' + dayDate(sum.lastClass) : '');
+  else add(todayStr, 'grey', 'Today · ' + sum.status, (sum.lastClass ? 'Last class ' + dayDate(sum.lastClass) : 'No classes yet') + (sum.remaining ? ' · ' + sum.remaining + ' classes left' : ''));
+  return ev.sort((a, b) => a.date.localeCompare(b.date) || a.at.localeCompare(b.at));
+}
+function journeyStatusPill(status) {
+  const cls = status === 'Active' ? 'j-ok' : status === 'Left' || status === 'Lapsed' || status === 'Lost' ? 'j-bad' : 'j-mid';
+  return `<span class="j-pill ${cls}">${esc(status)}</span>`;
+}
+function journeySourceOptions(current) {
+  const list = JOURNEY_SOURCES.slice();
+  if (current && !list.includes(current)) list.push(current);
+  return list.map(x => `<option value="${escAttr(x)}" ${current === x ? 'selected' : ''}>${esc(x)}</option>`).join('');
+}
+function studentJourneyHtml(student) {
+  if (currentRole !== 'Admin') return '';
+  const sum = journeySummary(student);
+  const auto = journeyAutoSource(student, sum.links);
+  const evs = journeyEvents(sum);
+  const showAll = journeyShowAllFor === student.id;
+  const shown = showAll || evs.length <= 14 ? evs : evs.slice(0, 4).concat([{ gap: evs.length - 12 }], evs.slice(-8));
+  const firstStep = sum.enquiryDate || sum.demoDate;
+  const sourceBox = !journeyReady
+    ? `<div class="hint" style="color:var(--brick)">To save a source or a leaving reason, run SQL 81 (student-journey/81-student-journey.sql) in Supabase SQL Editor.</div>`
+    : `<div class="row-form" style="margin-top:8px">
+        <label>Where they came from <select id="jSource_${student.id}">
+          <option value="">${esc(auto.source ? 'Automatic: ' + auto.source : '— not set —')}</option>
+          ${journeySourceOptions(student.leadSource || '')}
+        </select></label>
+        <label>Note <input type="text" id="jSourceNote_${student.id}" value="${escAttr(student.leadSourceNote || '')}" placeholder="e.g. referred by …" style="width:200px"></label>
+        <button class="btn-small btn-primary" onclick="saveJourneySource('${student.id}')">Save</button>
+      </div>
+      ${student.archived ? `<div class="row-form">
+        <label>Left on <input type="date" id="jLeftOn_${student.id}" value="${escAttr(student.leftOn || '')}" max="${todayStr}"></label>
+        <label>Reason <select id="jLeftReason_${student.id}"><option value="">— not saved —</option>${JOURNEY_LEFT_REASONS.concat(student.leftReason && !JOURNEY_LEFT_REASONS.includes(student.leftReason) ? [student.leftReason] : []).map(r => `<option ${student.leftReason === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select></label>
+        <label>Note <input type="text" id="jLeftNote_${student.id}" value="${escAttr(student.leftNote || '')}" style="width:200px"></label>
+        <button class="btn-small btn-primary" onclick="saveJourneyLeft('${student.id}')">Save</button>
+      </div>` : ''}`;
+  return `
+    <div class="student-section" id="studentJourney" style="background:#f6f1e4">
+      <h3>🧭 Where they came from &amp; Journey ${helpBtn('student-journey')}</h3>
+      ${journeyMsg ? `<div class="hint" style="color:${journeyMsg.startsWith('Saved') ? 'var(--forest)' : 'var(--brick)'}">${esc(journeyMsg)}</div>` : ''}
+      <div class="j-facts">
+        <div><b>Source</b><span>${sum.source === 'Not set' ? '<span class="j-pill j-mid">Not set</span>' : `<span class="j-pill j-src">${esc(sum.source)}</span>`} <span class="hint">${esc(sum.sourceHow)}${student.leadSourceNote ? ' · ' + esc(student.leadSourceNote) : ''}</span></span></div>
+        <div><b>First contact</b><span>${sum.firstContact ? dayDate(sum.firstContact) : '—'}</span></div>
+        <div><b>${sum.beforeApp ? 'With us since' : 'Admitted'}</b><span>${dayDate(sum.joinDate)}${!sum.beforeApp && sum.firstContact && sum.firstContact < sum.joinDate ? ' · ' + jDaysText(jDays(sum.firstContact, sum.joinDate)) + ' after first contact' : ''}</span></div>
+        <div><b>Status</b><span>${journeyStatusPill(sum.status)}${sum.renewals ? ' · ' + sum.renewals + ' renewal' + (sum.renewals > 1 ? 's' : '') : ''}${student.archived && student.leftOn ? ' · left ' + dayDate(student.leftOn) : ''}</span></div>
+        ${firstStep ? `<div><b>Enquiry → demo</b><span>${jDaysText(jDays(sum.enquiryDate, sum.demoDate))}</span></div><div><b>Demo → admitted</b><span>${jDaysText(jDays(sum.demoDate, sum.joinDate))}</span></div>` : ''}
+        <div><b>Admitted → paid</b><span>${sum.firstPaid ? jDaysText(jDays(sum.joinDate, sum.firstPaid)) : (sum.carried ? 'carried forward' : 'not paid yet')}</span></div>
+      </div>
+      ${sourceBox}
+      <div class="j-tl">
+        ${shown.map(e => e.gap ? `<div class="j-gap"><button class="btn-small" onclick="journeyShowAllFor='${student.id}';render()">Show ${e.gap} more steps</button></div>` : `
+          <div class="j-ev j-${e.tone}"><div class="j-d">${dayDate(e.date)}</div><div class="j-t">${esc(e.title)}</div>${e.note ? `<div class="j-n">${esc(e.note)}</div>` : ''}</div>`).join('')}
+      </div>
+      ${showAll && evs.length > 14 ? `<button class="btn-small" onclick="journeyShowAllFor='';render()">Show fewer</button>` : ''}
+    </div>`;
+}
+async function saveJourneySource(id) {
+  const s = data.students.find(x => x.id === id); if (!s) return;
+  const src = (document.getElementById('jSource_' + id) || {}).value || '';
+  const note = ((document.getElementById('jSourceNote_' + id) || {}).value || '').trim();
+  const { error } = await sb.from('students').update({ lead_source: src || null, lead_source_note: note || null }).eq('id', id);
+  if (error) { journeyMsg = 'Could not save: ' + error.message; render(); return; }
+  s.leadSource = src; s.leadSourceNote = note;
+  journeyMsg = 'Saved. Source: ' + (src || 'automatic') + '.';
+  render();
+}
+async function saveJourneyLeft(id) {
+  const s = data.students.find(x => x.id === id); if (!s) return;
+  const leftOn = (document.getElementById('jLeftOn_' + id) || {}).value || '';
+  const reason = (document.getElementById('jLeftReason_' + id) || {}).value || '';
+  const note = ((document.getElementById('jLeftNote_' + id) || {}).value || '').trim();
+  const { error } = await sb.from('students').update({ left_on: leftOn || null, left_reason: reason || null, left_note: note || null }).eq('id', id);
+  if (error) { journeyMsg = 'Could not save: ' + error.message; render(); return; }
+  s.leftOn = leftOn; s.leftReason = reason; s.leftNote = note;
+  journeyMsg = 'Saved. Leaving details updated.';
+  render();
+}
+// From the Student Journey page: open one student's Journey (or the whole Student Maintenance page).
+function openStudentJourney(id, toJourney) {
+  setTab('students'); selectStudent(id);
+  if (toJourney) setTimeout(() => { const el = document.getElementById('studentJourney'); if (el) el.scrollIntoView({ block: 'start' }); }, 50);
+}
+
+// ---- Student Journey page (Analytics) ----
+function journeyPeriodOk(date) {
+  const p = journeyFilter.period;
+  if (p === 'all') return true;
+  if (!date) return false;
+  if (/^\d{4}-\d{2}$/.test(p)) return date.slice(0, 7) === p;
+  const n = Number(p), d = new Date(todayStr + 'T00:00:00'); d.setMonth(d.getMonth() - n + 1); d.setDate(1);
+  const from = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01';
+  return date >= from;
+}
+function journeyFilteredPeople() {
+  return journeyAllPeople().filter(p => (journeyFilter.beforeApp || !p.beforeApp)
+    && (!journeyFilter.source || p.source === journeyFilter.source)
+    && journeyPeriodOk(p.firstContact));
+}
+let journeyDrillMap = {};
+function jDrillId(title, list) {
+  const id = 'j' + Object.keys(journeyDrillMap).length;
+  journeyDrillMap[id] = { title, keys: list.map(p => p.key) };
+  return id;
+}
+function jCell(n, title, list, extra) {
+  const id = jDrillId(title, list);
+  return n ? `<button class="j-num" onclick="openJourneyDrill('${id}')" title="Show these students">${n}${extra || ''}</button>` : `<span class="hint">${n === 0 ? '0' : '—'}</span>`;
+}
+function openJourneyDrill(id) { journeyDrill = journeyDrillMap[id] || null; render(); setTimeout(() => { const el = document.getElementById('journeyDrill'); if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 30); }
+function jAvg(list) { const v = list.filter(x => x != null); return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : null; }
+function jPct(a, b) { return b ? Math.round(100 * a / b) + '%' : '—'; }
+function renderStudentJourney() {
+  if (!journeyKaLoaded) loadJourneyKaLeads().then(() => { if (currentTab === 'studentjourney') render(); });
+  journeyDrillMap = {};
+  const people = journeyFilteredPeople();
+  const enq = people.filter(p => p.hasEnquiry);
+  const direct = people.filter(p => !p.hasEnquiry);
+  const stages = [
+    ['Enquiry', enq],
+    ['Demo booked', enq.filter(p => p.demoBooked)],
+    ['Demo done', enq.filter(p => p.demoDone)],
+    ['Admitted', enq.filter(p => p.admitted)],
+    ['First paid', enq.filter(p => p.paid)],
+    ['Renewed', enq.filter(p => p.renewed)],
+    ['Still active', enq.filter(p => p.active)],
+  ];
+  const students = people.filter(p => p.admitted);
+  const paidStudents = students.filter(p => p.paid || p.carried);
+  const renewed = paidStudents.filter(p => p.renewed);
+  const gone = students.filter(p => p.status === 'Left' || p.status === 'Lapsed');
+  const daysEnqPaid = enq.filter(p => p.paid).map(p => jDays(p.firstContact, p.firstPaid));
+  const top = enq.length || 1;
+  const funnel = stages.map(([label, list], i) => `
+    <span class="j-fl">${esc(label)}</span>
+    <button class="j-bar" style="width:${Math.max(list.length ? 8 : 0, 100 * list.length / top)}%;background:${i >= 5 ? 'var(--gold)' : 'var(--forest)'}" onclick="openJourneyDrill('${jDrillId(label, list)}')" ${list.length ? '' : 'disabled'}>${list.length}</button>
+    <span class="hint">${jPct(list.length, enq.length)}</span>`).join('');
+  // by source
+  const srcNames = [...new Set(people.map(p => p.source))].sort((a, b) => people.filter(p => p.source === b).length - people.filter(p => p.source === a).length);
+  const bySource = srcNames.map(src => {
+    const g = people.filter(p => p.source === src), st = g.filter(p => p.admitted), pd = st.filter(p => p.paid || p.carried);
+    return `<tr><td>${src === 'Not set' ? '<span class="j-pill j-mid">Not set</span>' : esc(src)}</td>
+      <td class="num">${jCell(g.length, src + ' · everyone', g)}</td>
+      <td class="num">${jCell(g.filter(p => p.demoDone).length, src + ' · demo done', g.filter(p => p.demoDone))}</td>
+      <td class="num">${jCell(st.length, src + ' · admitted', st)}</td>
+      <td class="num">${jCell(pd.length, src + ' · paid', pd, ' · ' + jPct(pd.length, g.length))}</td>
+      <td class="num">${jCell(pd.filter(p => p.renewed).length, src + ' · renewed', pd.filter(p => p.renewed))}</td>
+      <td class="num">${jCell(st.filter(p => p.active).length, src + ' · still active', st.filter(p => p.active))}</td>
+      <td class="num">${jCell(st.filter(p => p.status === 'Left' || p.status === 'Lapsed').length, src + ' · left or lapsed', st.filter(p => p.status === 'Left' || p.status === 'Lapsed'))}</td>
+      <td class="num">${jDaysText(jAvg(g.filter(p => p.paid && p.hasEnquiry).map(p => jDays(p.firstContact, p.firstPaid))))}</td></tr>`;
+  }).join('');
+  // by month of first contact
+  const months = [...new Set(people.map(p => (p.firstContact || '').slice(0, 7)).filter(Boolean))].sort().reverse();
+  const byMonth = months.map(m => {
+    const g = people.filter(p => (p.firstContact || '').slice(0, 7) === m), st = g.filter(p => p.admitted), pd = st.filter(p => p.paid || p.carried);
+    return `<tr><td>${jMonthLabel(m)}</td>
+      <td class="num">${jCell(g.filter(p => p.hasEnquiry).length, jMonthLabel(m) + ' · enquiries', g.filter(p => p.hasEnquiry))}</td>
+      <td class="num">${jCell(st.length, jMonthLabel(m) + ' · admitted', st)}</td>
+      <td class="num">${jCell(pd.length, jMonthLabel(m) + ' · paid', pd)}</td>
+      <td class="num">${jCell(pd.filter(p => p.renewed).length, jMonthLabel(m) + ' · renewed', pd.filter(p => p.renewed), pd.length ? ' · ' + jPct(pd.filter(p => p.renewed).length, pd.length) : '')}</td>
+      <td class="num">${jCell(st.filter(p => p.active).length, jMonthLabel(m) + ' · still active', st.filter(p => p.active))}</td></tr>`;
+  }).join('');
+  // why they left / were lost
+  const reasonRows = [];
+  const leftBy = {};
+  students.filter(p => p.status === 'Left').forEach(p => { const r = p.leftReason || 'Archived, reason not saved'; (leftBy[r] = leftBy[r] || []).push(p); });
+  Object.entries(leftBy).sort((a, b) => b[1].length - a[1].length).forEach(([r, list]) => reasonRows.push(`<tr><td>${esc(r)}</td><td class="num">${jCell(list.length, 'Left · ' + r, list)}</td></tr>`));
+  const lapsed = students.filter(p => p.status === 'Lapsed');
+  if (lapsed.length) reasonRows.push(`<tr><td>Lapsed (no classes left, no class or payment in 30 days, not archived)</td><td class="num">${jCell(lapsed.length, 'Lapsed', lapsed)}</td></tr>`);
+  const lostBy = {};
+  people.filter(p => !p.admitted && p.status === 'Lost').forEach(p => { const r = p.leftReason || 'No reason saved'; (lostBy[r] = lostBy[r] || []).push(p); });
+  const lostRows = Object.entries(lostBy).sort((a, b) => b[1].length - a[1].length).map(([r, list]) => `<tr><td>${esc(r)}</td><td class="num">${jCell(list.length, 'Lost before admission · ' + r, list)}</td></tr>`).join('');
+  // average days between steps
+  const stepRows = [
+    ['Enquiry → demo', enq.filter(p => p.enquiryDate && p.demoDate), p => jDays(p.enquiryDate, p.demoDate)],
+    ['Demo → admitted', enq.filter(p => p.admitted && p.demoDate), p => jDays(p.demoDate, p.joinDate)],
+    ['Admitted → first paid', students.filter(p => p.firstPaid && !p.carried), p => jDays(p.joinDate, p.firstPaid)],
+    ['First paid → first renewal', paidStudents.filter(p => p.firstRenewal && p.firstPaid && !p.carried), p => jDays(p.firstPaid, p.firstRenewal)],
+  ].map(([label, list, fn]) => { const v = list.map(fn).filter(x => x != null); return `<tr><td>${label}</td><td class="num">${jDaysText(jAvg(v))}</td><td class="num">${jCell(v.length, label, list)}</td></tr>`; }).join('');
+  const notSet = students.filter(p => p.source === 'Not set');
+  const periodOpts = [['all', 'All time'], ['1', 'This month'], ['3', 'Last 3 months'], ['6', 'Last 6 months']]
+    .concat([...new Set(journeyAllPeople().map(p => (p.firstContact || '').slice(0, 7)).filter(Boolean))].sort().reverse().map(m => [m, jMonthLabel(m)]));
+  const allSources = [...new Set(journeyAllPeople().map(p => p.source))].sort();
+  const drill = journeyDrill ? (() => {
+    const keys = new Set(journeyDrill.keys);
+    const list = journeyAllPeople().filter(p => keys.has(p.key)).sort((a, b) => (b.firstContact || '').localeCompare(a.firstContact || ''));
+    return `<div class="card" id="journeyDrill">
+      <div class="row-form" style="justify-content:space-between"><h3 style="margin:0">${esc(journeyDrill.title)} · ${list.length}</h3><button class="btn-small" onclick="journeyDrill=null;render()">Close</button></div>
+      <div class="table-scroll"><table>
+        <tr><th>Name</th><th>Source</th><th>First contact</th><th>Reached</th><th>Status</th><th></th></tr>
+        ${list.map(p => {
+          const reached = p.renewed ? 'Renewed' : p.paid ? 'Paid' : p.carried ? 'Carried forward' : p.admitted ? 'Admitted' : p.demoDone ? 'Demo done' : p.demoBooked ? 'Demo booked' : 'Enquiry';
+          return `<tr><td>${esc(p.name)}${p.student && p.student.code ? ` <span class="hint">${esc(p.student.code)}</span>` : ''}${p.kind ? `<div class="hint">${esc(p.kind)}</div>` : ''}</td>
+            <td>${p.source === 'Not set' ? '<span class="j-pill j-mid">Not set</span>' : esc(p.source)}</td>
+            <td>${p.firstContact ? dayDate(p.firstContact) : '—'}</td><td>${reached}</td><td>${journeyStatusPill(p.status)}${p.leftReason ? `<div class="hint">${esc(p.leftReason)}</div>` : ''}</td>
+            <td>${p.studentId ? `<button class="btn-small" onclick="openStudentJourney('${p.studentId}',true)">Journey</button> <button class="btn-small" onclick="openStudentJourney('${p.studentId}')">Student Maintenance</button>` : `<button class="btn-small" onclick="setTab('${p.openTab}')">Open ${p.openTab === 'registrations' ? 'New registrations' : p.openTab === 'knowledgearena' ? 'Knowledge Arena' : 'Demo Bookings'}</button>`}</td></tr>`;
+        }).join('')}
+      </table></div></div>`;
+  })() : '';
+  return `
+    <div class="card">
+      <h2>Student Journey ${helpBtn('student-journey')}</h2>
+      <div class="hint">Every student from first contact to today. Tap any number to see the students behind it. Sources and leaving reasons are entered in Student Maintenance.</div>
+      ${journeyReady ? '' : `<div class="hint" style="color:var(--brick);margin-top:6px">Run SQL 81 (student-journey/81-student-journey.sql) in Supabase SQL Editor so sources and leaving reasons can be saved.</div>`}
+      <div class="row-form" style="margin-top:10px">
+        <label>First contact <select onchange="journeyFilter.period=this.value;journeyDrill=null;render()">${periodOpts.map(([v, l]) => `<option value="${v}" ${journeyFilter.period === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label>Source <select onchange="journeyFilter.source=this.value;journeyDrill=null;render()"><option value="">All sources</option>${allSources.map(s => `<option ${journeyFilter.source === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select></label>
+        <label><input type="checkbox" ${journeyFilter.beforeApp ? 'checked' : ''} onchange="journeyFilter.beforeApp=this.checked;journeyDrill=null;render()"> Include students from before the app</label>
+      </div>
+      <div class="j-stats">
+        <div class="j-stat"><div class="v">${jCell(enq.length, 'Enquiries', enq)}</div><div class="l">Enquiries</div></div>
+        <div class="j-stat"><div class="v">${jPct(enq.filter(p => p.paid).length, enq.length)}</div><div class="l">Enquiry → paid (${jCell(enq.filter(p => p.paid).length, 'Enquiries that paid', enq.filter(p => p.paid))})</div></div>
+        <div class="j-stat"><div class="v">${jPct(renewed.length, paidStudents.length)}</div><div class="l">Renewed at least once (${jCell(renewed.length, 'Renewed at least once', renewed)} of ${jCell(paidStudents.length, 'Paid students', paidStudents)})</div></div>
+        <div class="j-stat"><div class="v">${jDaysText(jAvg(daysEnqPaid))}</div><div class="l">Average enquiry → paid</div></div>
+        <div class="j-stat"><div class="v">${jCell(gone.length, 'Left or lapsed', gone)}</div><div class="l">Left or lapsed</div></div>
+      </div>
+    </div>
+    ${drill}
+    <div class="card"><h3>Funnel</h3>
+      <div class="j-funnel">${funnel}</div>
+      <div class="hint" style="margin-top:8px">Counts people with an enquiry (demo booking, registration form, Knowledge Arena or a demo). ${direct.length ? `Another ${jCell(direct.length, 'Admitted with no enquiry record', direct)} students were admitted directly with no enquiry record.` : ''}</div>
+    </div>
+    <div class="card"><h3>By source</h3><div class="table-scroll"><table>
+      <tr><th>Source</th><th class="num">People</th><th class="num">Demo done</th><th class="num">Admitted</th><th class="num">Paid</th><th class="num">Renewed</th><th class="num">Still active</th><th class="num">Left / lapsed</th><th class="num">Avg days to pay</th></tr>
+      ${bySource || '<tr><td colspan="9" class="hint">No one in this period.</td></tr>'}</table></div>
+      ${notSet.length ? `<div class="hint" style="margin-top:8px">${jCell(notSet.length, 'Students with no source', notSet)} students have no source. Open each one in Student Maintenance to set it.</div>` : ''}
+    </div>
+    <div class="card"><h3>By month of first contact</h3><div class="table-scroll"><table>
+      <tr><th>Month</th><th class="num">Enquiries</th><th class="num">Admitted</th><th class="num">Paid</th><th class="num">Renewed</th><th class="num">Still active</th></tr>
+      ${byMonth || '<tr><td colspan="6" class="hint">No one in this period.</td></tr>'}</table></div></div>
+    <div class="j-two">
+      <div class="card"><h3>Days between steps</h3><div class="table-scroll"><table><tr><th>Step</th><th class="num">Average</th><th class="num">Students</th></tr>${stepRows}</table></div></div>
+      <div class="card"><h3>Why they left</h3><div class="table-scroll"><table><tr><th>Reason</th><th class="num">Students</th></tr>${reasonRows.join('') || '<tr><td colspan="2" class="hint">No one has left in this period.</td></tr>'}</table></div>
+        ${lostRows ? `<h3 style="margin-top:14px">Lost before admission</h3><div class="table-scroll"><table><tr><th>Reason</th><th class="num">People</th></tr>${lostRows}</table></div>` : ''}</div>
+    </div>`;
+}
+
 function studentCallsFor(studentId) { return wixCalls.filter(c => c.student_id === studentId); }
 // Calls made while the student was still a demo booking: Convert to Student links the booking,
 // Demo Register "Link & Convert" links the booking's demo log (older links only have that).
@@ -22980,6 +23449,7 @@ const HELP = {
   'payment-history': { t:'Subscription Payment History', b:'<ul><li><b>Active</b> — this payment\'s classes are being used now.</li><li><b>Expired</b> — unused classes were removed after the expiry date.</li><li>The Expires on date shows when unused classes will be lost.</li><li>Contact the Admin to correct any details.</li></ul>' },
   'raise-fees': { t:'Raise fee requests', b:"<ul><li>Makes the month's fee requests for every active student in one go: one request per student, subject and Group / Individual.</li><li><b>Preview Fee Requests</b> works any day and saves nothing. <b>Confirm</b> works from the 25th of the month before to the 7th of the month (November's requests: 25 Oct to 7 Nov), once per month (Reset removes the run so you can do it again). Raised before the 1st, the classes still to be used this month are taken off what is left.</li><li>Classes come from the student's <b>Class Frequency</b> (each weekday counted in the month), minus clear teacher-leave days, against the classes they still have. Package students (30, 50, 60 or 100 classes) are asked for the same package again.</li><li>Amount = Fee setup rate (or the student's Special fee rate) × classes, less the bulk discount: the best tier reached by the request, the child's subjects added up, or the whole family added up (family's other pending requests count too). Tick <b>No discount</b> on a row or a family for this run only.</li><li>The preview is grouped by family. You can change classes or amount, or untick a row, before Confirm. The ticks in the headings (Raise, Ignore all, No discount (all)) do every row at once. Not raised shows who was left out and why.</li><li><b>Ignore classes left</b>: bills the full month without taking off the classes still left (per row, per student or whole family; Raise anyway in Not raised). The fee message then does not mention those classes. Owed classes are never ignored.</li><li>Every request keeps its working, so you can explain the amount to a parent.</li></ul>" },
   'fee-message': { t:'Fee message', b:"<ul><li>One WhatsApp message for the whole family: each child's subjects, classes and amount, the total, how it was worked out, any bulk discount (and what the family saves, with a line that a part payment loses it), UPI and Razorpay details and the parent's app login.</li><li>The first message starts 'Please find below the tuition fee details…'. Tick <b>Short reminder</b> for a follow-up; only the opening line changes to 'gentle reminder … still due'.</li><li>You can edit the text before sending. On a phone the WhatsApp button opens the app. On a computer use 📤 Desktop (WhatsApp app) or 📤 Web (WhatsApp Web).</li><li>Sending stamps the date, so you can see when the family was last reminded and how many times.</li></ul>" },
+  'student-journey': { t:'Student Journey', b:"<ul><li><b>Where they came from</b> is worked out by itself when the student is linked to a demo booking, a registration form or a Knowledge Arena lead. Students from before the app show <b>Before the app</b>. For anyone else, pick it in Student Maintenance (when adding the student, or on their page) and press Save.</li><li><b>Journey</b> lists every step in date order: enquiry, calls, demo, admission, first payment, renewals, new subjects, transfers, classes each month, and leaving.</li><li>When you <b>Archive</b> a student you are asked the date and the reason they left. You can change these later on the student's page. Unarchiving clears them.</li><li><b>Lapsed</b> = not archived, no classes left, and no class or payment in the last 30 days.</li><li>The <b>Student Journey</b> page (Analytics) shows the funnel, results by source and by month, days between steps and why students left. Tap any number to see the students behind it, then open their Journey or Student Maintenance. Nothing is typed on that page.</li><li>Payments of ₹0 marked Carry Forward are classes brought over from before the app; they are not counted as a first payment.</li></ul>" },
   'student-calls': { t:'Call log', b:"<ul><li>After phoning a student or parent, open the student and press <b>+ Add call note</b>: when, who you spoke to (Parent / Student), what happened, what was said, and an optional <b>Call again on</b> date.</li><li>Every call stays on the student page, newest first; notes can be edited, never deleted. Only admins see the call log (teachers do not).</li><li>Calls made while the student was still a demo booking also show here, with a <b>Demo booking</b> tag (edit those on the Demo Bookings card).</li><li>When the latest call says Call again on today or earlier, the student shows under <b>Student calls due</b> on the dashboard and at the top of the Students page.</li></ul>" },
   'special-rates': { t:'Special fee rates', b:"<ul><li>An agreed per-class rate for one student, subject and Group / Individual, from a date and optionally until a date.</li><li>While it is in use it replaces the Fee setup rate everywhere: Record payment, fee requests, Calculate, Raise fee requests, Fee calculator and the student's and parent's Applicable Rates.</li><li>Leave Offline rate empty if it is the same as Online. Discount tiers still apply on top.</li><li>Requests and payments already saved are not changed. Remove puts the student back on Fee setup rates.</li></ul>" },
   'class-frequency': { t:'Class Frequency', b:"<ul><li>How many classes each student has on each weekday, per subject (each class is 60 minutes).</li><li>+ New Frequency or Edit: tick the weekdays and set the classes on each day.</li><li>Raise fee requests uses it to count the month's classes, and Rebuild Pending Classes uses it to make the schedule. Saving it does not change classes already scheduled.</li><li>Pairs still Not configured are listed so you can fill them in. Teachers can set it for their own students too.</li></ul>" },
@@ -28894,7 +29364,7 @@ function render() {
     ]},
     // Superuser admins only: backups, imports, clearing data, logging switches and the Academic Year roll-over.
     ...(isCurrentUserSuperuserAdmin() ? [{ label: 'Superadmin', tabs: [['superadmin', 'Superadmin tools']] }] : []),
-    { label: 'Analytics', tabs: [['admissionsintelligence', 'Demo Analysis'], ['classdelivery', 'Class Delivery Intelligence'], ['studentengagement', 'Student Engagement Intelligence'], ['revenueintelligence', 'Revenue Intelligence']] },
+    { label: 'Analytics', tabs: [['admissionsintelligence', 'Demo Analysis'], ['studentjourney', 'Student Journey'], ['classdelivery', 'Class Delivery Intelligence'], ['studentengagement', 'Student Engagement Intelligence'], ['revenueintelligence', 'Revenue Intelligence']] },
   ];
   const analyticsGroup = tabGroups.find(g => g.label === 'Analytics');
   if (analyticsGroup && !analyticsGroup.tabs.some(([key]) => key === 'teacherperformance')) analyticsGroup.tabs.push(['teacherperformance', 'Teacher Performance Intelligence']);
@@ -28942,6 +29412,7 @@ function render() {
   else if (currentTab === 'knowledgearena') body = `<div class="card" style="padding:0;overflow:hidden"><iframe src="knowledge-arena/knowledge-arena.html?view=admin&v=20261109-ka-adminfix1" title="Knowledge Arena Admin" style="display:block;width:100%;height:calc(100vh - 150px);min-height:680px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
   else if (currentTab === 'admissionsintelligence') body = `<div class="card" style="padding:0;overflow:hidden"><iframe src="admissions-intelligence/index.html" title="Demo Analysis" style="display:block;width:100%;height:calc(100vh - 150px);min-height:780px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
   else if (currentTab === 'classdelivery') body = `<div class="card" style="padding:0;overflow:hidden"><iframe src="class-delivery-intelligence/index.html" title="Class Delivery Intelligence" style="display:block;width:100%;height:calc(100vh - 150px);min-height:820px;border:0;background:var(--paper)" loading="lazy" referrerpolicy="same-origin"></iframe></div>`;
+  else if (currentTab === 'studentjourney') body = renderStudentJourney();
   else if (currentTab === 'setup') body = renderSetup();
   else if (currentTab === 'students') body = renderStudents();
   else if (currentTab === 'attendancerewards') body = renderAttendanceRewardsMonitor();
@@ -29077,7 +29548,7 @@ async function initApp() {
   const validTabs = ['dashboard','log','registrations','chat','wixbookings','democontrol','support','rebuildclasses','questionbank',
     'fees','payroll','expenses','reports','students','attendancerewards','onboarding','setup','parents',
     'staradmin','researchmonitor','appusage','aiusage','studyplans','homework','qbmonitoring','teacherappraisal',
-    'knowledgearena','users','admins','ai','audit','superadmin','admissionsintelligence','classdelivery',
+    'knowledgearena','users','admins','ai','audit','superadmin','admissionsintelligence','studentjourney','classdelivery',
     'studentengagement','revenueintelligence','teacherperformance',
     // Retain legacy/previously shared tab names.
     'teachers','subjects','schedule','settings'];
@@ -29128,7 +29599,7 @@ window.addEventListener('hashchange', function () {
   if (currentRole === 'Admin' && ['dashboard','log','registrations','chat','wixbookings','democontrol','support','rebuildclasses','questionbank',
     'fees','payroll','expenses','reports','students','attendancerewards','onboarding','setup','parents','staradmin','researchmonitor',
     'appusage','aiusage','studyplans','homework','qbmonitoring','teacherappraisal','knowledgearena','users','admins','ai','audit',
-    'superadmin','admissionsintelligence','classdelivery','studentengagement','revenueintelligence','teacherperformance',
+    'superadmin','admissionsintelligence','studentjourney','classdelivery','studentengagement','revenueintelligence','teacherperformance',
     'teachers','subjects','schedule','settings'].includes(requested)) {
     if (currentTab !== requested) setTab(requested);
     return;
