@@ -187,6 +187,7 @@ if (location.hostname !== 'app.libeducation.com') {
   .btn-danger, .btn-primary.btn-danger { background: var(--brick); color: #fff; }   /* the 2-class form must out-rank .btn-primary's green, which is defined later */
   .nav-hint-mobile { display: none; }
   .teacher-bottom-nav { display:none; }
+  .tb-phone-only { display: none; }
   .teacher-home-hello { margin: 0 2px 12px; font-size: 15px; }
   .teacher-home-more > summary { cursor: pointer; list-style: none; padding: 2px 0; font-size: 15px; }
   .teacher-home-more > summary::-webkit-details-marker { display: none; }
@@ -211,6 +212,8 @@ if (location.hostname !== 'app.libeducation.com') {
     .topbar.is-teacher { flex-wrap:nowrap; gap:8px; padding:8px 12px; margin-bottom:12px; }
     .topbar.is-teacher img { height:28px; }
     .topbar.is-teacher .who, .topbar.is-teacher .brand-sub, .topbar.is-teacher .tb-phone-more { display:none; }
+    .topbar.is-teacher .tb-phone-only { display:inline-block; }
+    .teacher-more-menu .mobile-tab-dropdown.from-top { top:64px !important; bottom:auto !important; max-height:calc(100vh - 150px) !important; }
     body:has(.teacher-bottom-nav) #lib-help-search:not(.teacher-show) { display:none; }
     .mobile-tab-bar { display:contents; }
     /* Keep the hamburger toggle visible on mobile alongside bottom navigation. */
@@ -818,7 +821,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-19 19:00 IST'; // Teacher login: phone bottom bar, one-tap attendance, shorter Home, grouped menu
+const BUILD_TIMESTAMP = '2026-11-19 19:10 IST'; // Teacher login: phone bottom bar, one-tap attendance, shorter Home, grouped menu
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -2775,7 +2778,8 @@ function researchMdHtml(md) {
   close();
   return '<div style="font-size:14px;line-height:1.6;color:var(--ink)">' + html + '</div>';
 }
-function toggleTeacherMobileTabMenu() { teacherMobileTabMenuOpen = !teacherMobileTabMenuOpen; render(); }
+let teacherMenuFromTop = false; // phone menu opened from the ☰ in the header (shows under the header) or from the bottom bar
+function toggleTeacherMobileTabMenu(fromTop) { teacherMenuFromTop = !!fromTop; teacherMobileTabMenuOpen = !teacherMobileTabMenuOpen; render(); }
 // Phone More menu: header buttons that are hidden on phones.
 function teacherMoreAction(what) {
   teacherMobileTabMenuOpen = false;
@@ -22686,7 +22690,7 @@ function renderTeacherPortal() {
     <div class="mobile-tab-bar teacher-more-menu">
       ${teacherMobileTabMenuOpen ? `
         <div class="mobile-tab-overlay" onclick="toggleTeacherMobileTabMenu()"></div>
-        <div class="mobile-tab-dropdown">
+        <div class="mobile-tab-dropdown${teacherMenuFromTop ? ' from-top' : ''}">
           ${moreItem('dashboard', 'Dashboard')}
           ${moreItem('pendingactions', 'Pending Action Items' + (pendingTotal ? ` (${pendingTotal})` : ''))}
           ${starOn ? moreItem('starteacher', '🏆 Star Teacher' + (starEarn ? ` (+${starEarn})` : '')) : ''}
@@ -22892,6 +22896,7 @@ function renderPortalShell(bodyHtml) {
       <button class="btn-small tb-phone-more" onclick="toggleHelpAi()">? Help</button>
       <button class="btn-small tb-phone-more" onclick="openSupportModal()">Support${data.supportTickets.filter(t=>t.status!=='resolved').length ? ` (${data.supportTickets.filter(t=>t.status!=='resolved').length})` : ''}</button>
       <button class="btn-logout btn-small tb-phone-more" onclick="logout()">Log out</button>
+      ${currentRole === 'Teacher' ? `<button class="btn-small tb-phone-only" aria-label="Menu" onclick="toggleTeacherMobileTabMenu(true)" style="font-size:18px;line-height:1;padding:6px 10px">☰</button>` : ''}
     </div>
     ${currentRole==='Student' || currentRole==='Parent' || currentRole==='Teacher' ? '' : `<div class="tagline">Your classes for the selected month.</div>`}
     ${pwIsDefault ? `<div class="card" style="border-color:var(--brick)"><b>Please change your password.</b> It is still the same as your login ID, so anyone who knows your login ID could log in. <button class="btn-small btn-primary" onclick="${currentRole==='Student' ? 'openStudentSettings()' : currentRole==='Parent' ? 'openParentAccount()' : currentRole==='Teacher' ? 'openTeacherPasswordBox()' : "document.getElementById('curPass').scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('curPass').focus()"}">Change it now</button></div>` : ''}
