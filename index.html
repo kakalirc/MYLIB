@@ -187,7 +187,7 @@ if (location.hostname !== 'app.libeducation.com') {
   .btn-danger, .btn-primary.btn-danger { background: var(--brick); color: #fff; }   /* the 2-class form must out-rank .btn-primary's green, which is defined later */
   .nav-hint-mobile { display: none; }
   .teacher-bottom-nav { display:none; }
-  .teacher-menu-bar { display: none; }
+  .teacher-menu-row { display: none; }
   .teacher-home-hello { margin: 0 2px 12px; font-size: 15px; }
   .teacher-home-more > summary { cursor: pointer; list-style: none; padding: 2px 0; font-size: 15px; }
   .teacher-home-more > summary::-webkit-details-marker { display: none; }
@@ -208,12 +208,14 @@ if (location.hostname !== 'app.libeducation.com') {
     body:has(.teacher-bottom-nav) { padding-bottom:82px; }
     .teacher-bottom-nav button { position:relative; }
     .teacher-bottom-nav .nav-badge { position:absolute; top:0; right:calc(50% - 22px); min-width:17px; height:17px; padding:0 4px; border-radius:9px; background:var(--brick); color:#fff; font-size:10px; line-height:17px; }
-    /* Teacher phone header: one row (logo, Refresh, Chat, bells). Help, Support and Log out are in ☰ Menu. */
+    /* Teacher phone header: one row (logo, Chat, bells). Refresh sits beside the ☰ bar; Help, Support and Log out are in ☰ Menu. */
     .topbar.is-teacher { flex-wrap:nowrap; gap:6px; padding:8px 10px; margin-bottom:12px; }
     .topbar.is-teacher .btn-small { padding-left:9px; padding-right:9px; white-space:nowrap; }
     .topbar.is-teacher img { height:28px; min-width:0; flex-shrink:1; object-fit:contain; object-position:left center; }
     .topbar.is-teacher .who, .topbar.is-teacher .brand-sub, .topbar.is-teacher .tb-phone-more { display:none; }
-    .teacher-menu-bar.mobile-tab-toggle { display:flex; margin-bottom:12px; }
+    .teacher-menu-row { display:flex; gap:8px; align-items:stretch; margin-bottom:12px; }
+    .teacher-menu-row .teacher-menu-bar { flex:1; min-width:0; }
+    .teacher-menu-row .teacher-menu-refresh { flex:0 0 auto; padding:0 14px; font-size:14px; background:var(--paper); border:1px solid var(--line); border-radius:8px; }
     .teacher-more-menu .mobile-tab-dropdown.from-top { top:12px !important; bottom:auto !important; max-height:calc(100vh - 110px) !important; }
     body:has(.teacher-bottom-nav) #lib-help-search:not(.teacher-show) { display:none; }
     .mobile-tab-bar { display:contents; }
@@ -822,7 +824,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-19 19:30 IST'; // Teacher login: phone bottom bar, one-tap attendance, shorter Home, grouped menu
+const BUILD_TIMESTAMP = '2026-11-19 19:40 IST'; // Teacher login: phone bottom bar, one-tap attendance, shorter Home, grouped menu
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -22709,7 +22711,7 @@ function renderTeacherPortal() {
   // Phone: the ☰ bar teachers know, showing the page name. On Home it sits under the Welcome back line; on other pages at the top.
   const tabLabels = { dashboard: 'Dashboard', pendingactions: 'Pending Action Items', starteacher: '🏆 Star Teacher', setup: 'My Profile' };
   teacherTabGroups.forEach(g => g.tabs.forEach(([key, label]) => { tabLabels[key] = label; }));
-  const teacherMenuBarHtml = `<div class="teacher-menu-bar mobile-tab-toggle" onclick="toggleTeacherMobileTabMenu(true)"><span class="burger">☰</span> ${esc(tabLabels[teacherPortalTab] || 'Menu')}</div>`;
+  const teacherMenuBarHtml = `<div class="teacher-menu-row"><div class="teacher-menu-bar mobile-tab-toggle" onclick="toggleTeacherMobileTabMenu(true)"><span class="burger">☰</span> ${esc(tabLabels[teacherPortalTab] || 'Menu')}</div><button class="btn-small teacher-menu-refresh" ${isRefreshing?'disabled':''} onclick="refreshAllData()">${isRefreshing?'Refreshing…':'↻ Refresh'}</button></div>`;
   const bottomBtn = (key, icon, label, badge) => `<button class="${teacherPortalTab===key && !teacherMobileTabMenuOpen?'active':''}" onclick="setTeacherPortalTab('${key}')"><span class="nav-icon">${icon}</span><span>${label}</span>${badge ? `<span class="nav-badge">${badge}</span>` : ''}</button>`;
   const teacherBottomNavHtml = `
     <nav class="teacher-bottom-nav" aria-label="Teacher navigation">
@@ -22893,7 +22895,7 @@ function renderPortalShell(bodyHtml) {
       <div class="spacer"></div>
       <div class="who">Logged in as ${portalWhoLabel()} (${esc(currentRole)})</div>
       ${currentRole === 'Teacher' ? `<div class="who">Active students: <b>${studentsForTeacher(currentLinkedId).filter(s=>!s.archived).length}</b></div>` : ''}
-      <button class="btn-small" ${isRefreshing?'disabled':''} onclick="refreshAllData()">${isRefreshing?'Refreshing…':'↻ Refresh'}</button>
+      <button class="btn-small tb-phone-more" ${isRefreshing?'disabled':''} onclick="refreshAllData()">${isRefreshing?'Refreshing…':'↻ Refresh'}</button>
       ${refreshMsg ? `<span style="font-size:12px;color:${refreshMsg.startsWith('Could not')?'#ff9d89':'var(--gold)'}">${esc(refreshMsg)}</span>` : ''}
       ${showInstallButton ? '<button class="btn-small" onclick="triggerInstall()">Install app</button>' : ''}
       <button class="btn-small" onclick="toggleChatPanel()" style="position:relative">${chatPanelOpen ? '← Back to menu' : '💬 Chat'}${(!chatPanelOpen && chatTotalUnread()) ? `<span style="position:absolute;top:-6px;right:-6px;background:var(--brick);color:#fff;border-radius:9px;padding:1px 5px;font-size:10px">${chatTotalUnread()}</span>` : ''}</button>
