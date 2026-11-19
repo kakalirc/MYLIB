@@ -275,11 +275,10 @@
     var nav = typeof window.studentPortalNavHtml === 'function' ? window.studentPortalNavHtml('study') : '';
     return nav + '<button type="button" class="btn-small" style="margin:0 0 12px" onclick="libExitPastPapersAndGo(\'study\')">← Back to Study</button>';
   }
+  // Parent login: Question Bank opens from Learning, with the parent menu on top and a way back.
   function parentTabsHtml(selected) {
-    return '<div class="lib-past-paper-tabs" role="tablist" aria-label="Parent portal sections">'
-      + '<button class="lib-past-paper-tab" role="tab" aria-selected="' + (selected === 'overview') + '" onclick="libSetParentPastPapersTab(\'overview\')">🏠 Overview</button>'
-      + '<button class="lib-past-paper-tab" role="tab" aria-selected="' + (selected === 'papers') + '" onclick="libSetParentPastPapersTab(\'papers\')">📄 Question Bank</button>'
-      + '</div>';
+    var nav = typeof window.libParentNavHtml === 'function' ? window.libParentNavHtml('learning') : '';
+    return nav + '<button type="button" class="btn-small" style="margin:0 0 12px" onclick="libSetParentPastPapersTab(\'overview\')">← Back to Learning</button>';
   }
   function parentChildren() {
     return (data.parentStudents || []).filter(function (link) { return link.parentUserId === currentUserId; })
@@ -315,6 +314,9 @@
   window.libExitPastPapers = function () {
     if (typeof currentRole !== 'undefined' && currentRole === 'Student') delete studentPaperTabs[currentLinkedId];
   };
+  window.libExitParentPastPapers = function () {
+    if (typeof currentRole !== 'undefined' && currentRole === 'Parent') delete parentPaperTabs[currentUserId];
+  };
   window.libExitPastPapersAndGo = function (section) {
     if (currentRole !== 'Student') return;
     delete studentPaperTabs[currentLinkedId];
@@ -348,9 +350,9 @@
         addStyles();
         if (selected === 'papers') {
           loadPublishedPapers(false);
-          return parentTabsHtml('papers') + parentChildSwitcher(children) + renderPublishedPapers();
+          return parentTabsHtml('papers') + (typeof window.libParentChildSwitcherHtml === 'function' ? window.libParentChildSwitcherHtml() : parentChildSwitcher(children)) + renderPublishedPapers();
         }
-        return parentTabsHtml('overview') + originalParentPortal.apply(this, arguments);
+        return originalParentPortal.apply(this, arguments);
       }
       return originalParentPortal.apply(this, arguments);
     };
