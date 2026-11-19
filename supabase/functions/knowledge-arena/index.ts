@@ -117,7 +117,7 @@ async function getGuestSession(db: ReturnType<typeof adminClient>, token: unknow
 async function handleGuestAction(db: ReturnType<typeof adminClient>, body: Record<string, unknown>) {
   const action = String(body.action || "");
   if (action === "guest_register") {
-    const name = String(body.guest_name || "").trim().replace(/\\s+/g, " ");
+    const name = String(body.guest_name || "").trim().replace(/\s+/g, " ");
     const mobile = normalizeGuestMobile(body.mobile_number);
     const grade = String(body.grade_label || "").trim();
     if (name.length < 2 || name.length > 80) return errorResponse(400, "Enter a name between 2 and 80 characters.");
