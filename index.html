@@ -824,7 +824,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-19 19:45 IST'; // Teacher login: Find a feature in the phone menu opens Help & Search
+const BUILD_TIMESTAMP = '2026-11-19 19:55 IST'; // Teacher Help & Search finds every teacher page on phones
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -22675,6 +22675,9 @@ function renderTeacherPortal() {
   let starEarn = 0;
   try { starEarn = starOn ? starEarnNow(teacher).total : 0; } catch (e) { console.error('Star Teacher menu', e); }
   const hwToReview = homeworkData.filter(h => h.teacherId === teacher.id && h.status === 'submitted').length;
+  // Help & Search (help-search.js) uses this list of the teacher's pages as its destinations.
+  window.libTeacherNavItems = [['dashboard', 'Dashboard'], ['pendingactions', 'Pending Action Items'], ...(starOn ? [['starteacher', 'Star Teacher']] : []),
+    ...teacherTabGroups.flatMap(g => g.tabs)].map(([key, label]) => ({ key, label, handler: `setTeacherPortalTab('${key}')` }));
   const openSupport = data.supportTickets.filter(t => t.status !== 'resolved').length;
   const sidebarHtml = `
     <div class="sidebar-nav">
@@ -29150,6 +29153,6 @@ document.head.appendChild(adminV2Loader);
 <script src="past-papers-portal.js?v=20261119-parent1"></script>
 <script src="past-paper-discovery.js?v=20261112-discovery1"></script>
 <script src="question-bank-host.js?v=20261113-release2"></script>
-<script src="help-search.js?v=20261119-teacher2"></script>
+<script src="help-search.js?v=20261119-teacher3"></script>
 </body>
 </html>
