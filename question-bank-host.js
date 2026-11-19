@@ -116,11 +116,12 @@
     if (typeof qbSourcePapers === 'undefined' || !Array.isArray(qbSourcePapers)) return;
     if (!root || typeof root.querySelectorAll !== 'function') return;
     const buttons = Array.from(root.querySelectorAll('button[onclick*="qbPrepareSourcePaperExtraction"]'));
-    const ids = [...new Set(buttons.map((button) => {
+    const ids = [...new Set(qbSourcePapers.map((paper) => String(paper.id)).filter(Boolean))];
+    const visibleIds = [...new Set(buttons.map((button) => {
       const match = String(button.getAttribute('onclick') || '').match(/qbPrepareSourcePaperExtraction\(['"]([^'"]+)['"]\)/);
       return match ? match[1] : '';
     }).filter(Boolean))];
-    if (!ids.length) return;
+    if (!ids.length || !visibleIds.length) return;
 
     // The main legacy list query predates paper_title. Fetch the new field directly
     // rather than assuming it is present on the cached qbSourcePapers rows.
