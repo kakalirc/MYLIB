@@ -65,7 +65,8 @@
   function openPalette(){if(currentRole!=='Admin')return;paletteOpen=true;paletteQuery='';renderPalette();setTimeout(()=>document.querySelector('#adminV2Palette input')?.focus(),20);}
   function closePalette(){paletteOpen=false;document.getElementById('adminV2Palette')?.remove();}
   function renderPalette(){
-    closePalette();if(!paletteOpen)return;
+    // Re-render the overlay without changing paletteOpen; closePalette() resets that state.
+    document.getElementById('adminV2Palette')?.remove();if(!paletteOpen)return;
     const all=navItems(),q=paletteQuery.toLowerCase(),ordered=[...all.filter(x=>favorites.includes(x.key)),...all.filter(x=>recent.includes(x.key)&&!favorites.includes(x.key)),...all.filter(x=>!favorites.includes(x.key)&&!recent.includes(x.key))];
     const matches=ordered.filter(x=>!q||x.label.toLowerCase().includes(q)||x.key.toLowerCase().includes(q)).slice(0,14);
     const overlay=document.createElement('div');overlay.id='adminV2Palette';overlay.className='admin-v2-palette-overlay';overlay.innerHTML=`<div class="admin-v2-palette" role="dialog" aria-modal="true" aria-label="Admin command palette"><div class="admin-v2-palette-input"><span>⌕</span><input placeholder="Search pages and actions…" value="${escapeHtml(paletteQuery)}"><kbd>ESC</kbd></div><div class="admin-v2-palette-list">${matches.map(x=>`<div class="admin-v2-palette-row" data-tab="${x.key}"><button class="admin-v2-palette-open"><span>${favorites.includes(x.key)?'★':recent.includes(x.key)?'↻':'›'}</span><span>${escapeHtml(x.label)}</span><kbd>Enter</kbd></button><button class="admin-v2-palette-star" title="${favorites.includes(x.key)?'Unstar':'Star'} page">${favorites.includes(x.key)?'★':'☆'}</button></div>`).join('')||'<div class="admin-v2-palette-empty">No matching pages</div>'}</div><div class="admin-v2-palette-footer"><span>↑↓ navigate</span><span>Enter open</span><span>★ star page</span><span>Ctrl+K toggle</span></div></div>`;
