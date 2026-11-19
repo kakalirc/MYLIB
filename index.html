@@ -824,7 +824,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-19 19:40 IST'; // Teacher login: phone bottom bar, one-tap attendance, shorter Home, grouped menu
+const BUILD_TIMESTAMP = '2026-11-19 19:45 IST'; // Teacher login: Find a feature in the phone menu opens Help & Search
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -2782,7 +2782,7 @@ function researchMdHtml(md) {
   return '<div style="font-size:14px;line-height:1.6;color:var(--ink)">' + html + '</div>';
 }
 let teacherMenuFromTop = false; // phone menu opened from the ☰ in the header (shows under the header) or from the bottom bar
-function toggleTeacherMobileTabMenu(fromTop) { teacherMenuFromTop = !!fromTop; teacherMobileTabMenuOpen = !teacherMobileTabMenuOpen; render(); }
+function toggleTeacherMobileTabMenu(fromTop) { window.libHelpKeepOpen = false; teacherMenuFromTop = !!fromTop; teacherMobileTabMenuOpen = !teacherMobileTabMenuOpen; render(); }
 // Phone More menu: header buttons that are hidden on phones.
 function teacherMoreAction(what) {
   teacherMobileTabMenuOpen = false;
@@ -2792,16 +2792,22 @@ function teacherMoreAction(what) {
   else if (what === 'help') toggleHelpAi();
   else if (what === 'support') openSupportModal();
   else if (what === 'find') {
-    const root = document.getElementById('lib-help-search');
-    if (!root) return;
-    root.classList.add('teacher-show');
-    if (typeof root.__setHelpCollapsed === 'function') root.__setHelpCollapsed(false);
-    window.scrollTo(0, 0);
-    const input = root.querySelector('[data-help-input]');
-    if (input) input.focus();
+    // Help & Search is mounted by help-search.js after each render; this flag keeps it open until the teacher moves on.
+    window.libHelpKeepOpen = true;
+    const openFind = (tries) => {
+      const root = document.getElementById('lib-help-search');
+      if (!root) { if (tries > 0) setTimeout(() => openFind(tries - 1), 50); return; }
+      root.classList.add('teacher-show');
+      if (typeof root.__setHelpCollapsed === 'function') root.__setHelpCollapsed(false);
+      window.scrollTo(0, 0);
+      const input = root.querySelector('[data-help-input]');
+      if (input) input.focus();
+    };
+    setTimeout(() => openFind(20), 0);
   }
 }
 function setTeacherPortalTab(t) {
+  window.libHelpKeepOpen = false;
   teacherPortalTab = t;
   if (t === 'dashboard' || t === 'pendingactions') { loadClassFrequencyRows().then(() => render()); loadTeacherPendingExtras(true); }
   if (t === 'frequency') { frequencyMsg = ''; loadClassFrequencyRows().then(() => render()); }
@@ -29144,6 +29150,6 @@ document.head.appendChild(adminV2Loader);
 <script src="past-papers-portal.js?v=20261119-parent1"></script>
 <script src="past-paper-discovery.js?v=20261112-discovery1"></script>
 <script src="question-bank-host.js?v=20261113-release2"></script>
-<script src="help-search.js?v=20261119-parent1"></script>
+<script src="help-search.js?v=20261119-teacher2"></script>
 </body>
 </html>

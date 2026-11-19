@@ -154,7 +154,8 @@
     else if (role === 'Teacher') selector = '#app [onclick]';
     else if (role === 'Parent') selector = '.parent-nav [onclick*="setParentPortalSection("]';
     else selector = '.sidebar-nav .sidebar-item[onclick], .mobile-tab-dropdown .mobile-tab-item[onclick]';
-    const nodes = Array.from(document.querySelectorAll(selector)).filter(isVisibleInCurrentPortal);
+    // Teacher: leave out the phone bottom bar (labels carry badge numbers, e.g. "Homework1") and the Home number boxes (labels like "1 Class given today"); the same pages are found under their real names.
+    const nodes = Array.from(document.querySelectorAll(selector)).filter(isVisibleInCurrentPortal).filter(node => !(node.closest && node.closest(role === 'Teacher' ? '.teacher-bottom-nav, .stat-card' : '.teacher-bottom-nav')));
     const found = new Map();
     nodes.forEach(node => {
       const handler = node.getAttribute('onclick') || '';
@@ -430,7 +431,9 @@
     };
     // Always start collapsed on login/reload, regardless of the previous session.
     root.__setHelpCollapsed = setCollapsed;
-    setCollapsed(true);
+    // Teacher phone: "Find a feature" in the ☰ menu asks for it open (window.libHelpKeepOpen) until the teacher moves on.
+    if (window.libHelpKeepOpen) { root.classList.add('teacher-show'); setCollapsed(false); }
+    else setCollapsed(true);
     toggle.addEventListener('click', () => setCollapsed(!content.hidden));
     refreshQuickActions(root);
     const input = root.querySelector('[data-help-input]');
@@ -507,7 +510,7 @@
         const target = record.target && (record.target.nodeType === 1 ? record.target : record.target.parentElement);
         return target && !root.contains(target) && !(target.closest && target.closest('#lib-help-search'));
       });
-      if (portalChanged) {
+      if (portalChanged && !window.libHelpKeepOpen) {
         // A portal/menu transition starts a fresh view: collapse Help & Search again.
         if (root.__setHelpCollapsed) root.__setHelpCollapsed(true);
         refreshQuickActions(root);
