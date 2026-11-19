@@ -116,30 +116,36 @@
     if (typeof qbSourcePapers === 'undefined' || !Array.isArray(qbSourcePapers)) return;
     if (!root || typeof root.querySelectorAll !== 'function') return;
     const buttons = Array.from(root.querySelectorAll('button[onclick*="qbPrepareSourcePaperExtraction"]'));
-    const ids = [...new Set(qbSourcePapers.map((paper) => String(paper.id)).filter(Boolean))];
     const visibleIds = [...new Set(buttons.map((button) => {
       const match = String(button.getAttribute('onclick') || '').match(/qbPrepareSourcePaperExtraction\(['"]([^'"]+)['"]\)/);
       return match ? match[1] : '';
     }).filter(Boolean))];
-    if (!ids.length || !visibleIds.length) return;
+    if (!visibleIds.length) return;
 
-    // The main legacy list query predates paper_title. Fetch the new field directly
-    // rather than assuming it is present on the cached qbSourcePapers rows.
+    // Discovery downloads are stored under random UUID.pdf names. Their real
+    // document names live on the discovery candidate row, keyed by imported_paper_id.
     if (!sourcePaperTitleLookup && typeof sb !== 'undefined' && sb && typeof sb.from === 'function') {
-      sourcePaperTitleLookup = sb.from('qb_source_papers')
-        .select('id,paper_title,stored_pdf_url')
-        .in('id', ids)
+      const ids = qbSourcePapers.map((paper) => String(paper.id)).filter(Boolean);
+      sourcePaperTitleLookup = sb.from('qb_paper_discovery_candidates')
+        .select('imported_paper_id,title')
+        .in('imported_paper_id', ids)
         .then(({ data, error }) => {
           if (error) throw error;
-          return new Map((data || []).map((paper) => [String(paper.id), paper]));
+          return new Map((data || []).map((candidate) => [
+            String(candidate.imported_paper_id),
+            String(candidate.title || '').trim()
+          ]));
         })
         .catch(() => new Map());
     }
-    const titleRows = sourcePaperTitleLookup ? await sourcePaperTitleLookup : new Map();
+    const discoveryTitles = sourcePaperTitleLookup ? await sourcePaperTitleLookup : new Map();
     const byId = new Map(qbSourcePapers.map((paper) => {
-      const stored = titleRows.get(String(paper.id)) || paper;
-      return [String(paper.id), {
-        name: String(stored.paper_title || filenameFromStoredPath(stored.stored_pdf_url || paper.stored_pdf_url) || '').trim(),
+      const id = String(paper.id);
+      const storedName = filenameFromStoredPath(paper.stored_pdf_url);
+      const discoveryName = discoveryTitles.get(id) || '';
+      const name = discoveryName || storedName;
+      return [id, {
+        name: name && !/^[0-9a-f-]{32,}$/i.test(name) ? name : '',
         subject: String(paper.subject_name || 'Question Paper'),
         year: String(paper.year || '')
       }];
@@ -153,8 +159,7 @@
       const row = button.parentElement && button.parentElement.parentElement;
       const heading = row && row.querySelector('b');
       if (!heading || !/^Paper\s+\d+\s*[·.-]/i.test(heading.textContent || '')) return;
-      const name = paper.name || paper.subject;
-      const label = [name, paper.year].filter(Boolean).join(' · ');
+      const label = [paper.name || paper.subject, paper.year].filter(Boolean).join(' · ');
       if (label && heading.textContent !== label) heading.textContent = label;
     });
   }
