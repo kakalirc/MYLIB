@@ -412,20 +412,15 @@
     topbar.insertAdjacentElement('afterend', root);
     const toggle = root.querySelector('[data-help-toggle]');
     const content = root.querySelector('[data-help-content]');
-    const storageKey = 'lib-help-search-collapsed';
     const setCollapsed = collapsed => {
       content.hidden = collapsed;
       toggle.textContent = collapsed ? 'Show' : 'Hide';
       toggle.setAttribute('aria-expanded', String(!collapsed));
       root.classList.toggle('is-collapsed', collapsed);
-      try { localStorage.setItem(storageKey, collapsed ? '1' : '0'); } catch (_) {}
     };
-    let initiallyCollapsed = true;
-    try {
-      const savedPreference = localStorage.getItem(storageKey);
-      if (savedPreference !== null) initiallyCollapsed = savedPreference === '1';
-    } catch (_) {}
-    setCollapsed(initiallyCollapsed);
+    // Always start collapsed on login/reload, regardless of the previous session.
+    root.__setHelpCollapsed = setCollapsed;
+    setCollapsed(true);
     toggle.addEventListener('click', () => setCollapsed(!content.hidden));
     refreshQuickActions(root);
     const input = root.querySelector('[data-help-input]');
@@ -503,6 +498,8 @@
         return target && !root.contains(target) && !(target.closest && target.closest('#lib-help-search'));
       });
       if (portalChanged) {
+        // A portal/menu transition starts a fresh view: collapse Help & Search again.
+        if (root.__setHelpCollapsed) root.__setHelpCollapsed(true);
         refreshQuickActions(root);
         const input = root.querySelector('[data-help-input]');
         if (input && input.value.trim()) renderResults(root, input.value);
