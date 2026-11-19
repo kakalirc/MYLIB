@@ -110,26 +110,50 @@
     return name;
   }
 
-  function applySourcePaperFilenames(root) {
+  let sourcePaperTitleLookup = null;
+  async function applySourcePaperFilenames(root) {
     if (typeof qbSourcePapers === 'undefined' || !Array.isArray(qbSourcePapers)) return;
-    const byId = new Map(qbSourcePapers.map((paper) => [
-      String(paper.id),
-      String(paper.paper_title || filenameFromStoredPath(paper.stored_pdf_url) || '').trim()
-    ]));
     if (!root || typeof root.querySelectorAll !== 'function') return;
+    const buttons = Array.from(root.querySelectorAll('button[onclick*="qbPrepareSourcePaperExtraction"]'));
+    const ids = [...new Set(buttons.map((button) => {
+      const match = String(button.getAttribute('onclick') || '').match(/qbPrepareSourcePaperExtraction\(['"]([^'"]+)['"]\)/);
+      return match ? match[1] : '';
+    }).filter(Boolean))];
+    if (!ids.length) return;
 
-    // Admin extraction/review rows identify the source paper in the extraction action.
-    root.querySelectorAll('button[onclick*="qbPrepareSourcePaperExtraction"]').forEach((button) => {
+    // The main legacy list query predates paper_title. Fetch the new field directly
+    // rather than assuming it is present on the cached qbSourcePapers rows.
+    if (!sourcePaperTitleLookup && typeof sb !== 'undefined' && sb && typeof sb.from === 'function') {
+      sourcePaperTitleLookup = sb.from('qb_source_papers')
+        .select('id,paper_title,stored_pdf_url')
+        .in('id', ids)
+        .then(({ data, error }) => {
+          if (error) throw error;
+          return new Map((data || []).map((paper) => [String(paper.id), paper]));
+        })
+        .catch(() => new Map());
+    }
+    const titleRows = sourcePaperTitleLookup ? await sourcePaperTitleLookup : new Map();
+    const byId = new Map(qbSourcePapers.map((paper) => {
+      const stored = titleRows.get(String(paper.id)) || paper;
+      return [String(paper.id), {
+        name: String(stored.paper_title || filenameFromStoredPath(stored.stored_pdf_url || paper.stored_pdf_url) || '').trim(),
+        subject: String(paper.subject_name || 'Question Paper'),
+        year: String(paper.year || '')
+      }];
+    }));
+
+    buttons.forEach((button) => {
       const match = String(button.getAttribute('onclick') || '').match(/qbPrepareSourcePaperExtraction\(['"]([^'"]+)['"]\)/);
       if (!match) return;
-      const name = byId.get(match[1]);
-      if (!name) return;
+      const paper = byId.get(match[1]);
+      if (!paper) return;
       const row = button.parentElement && button.parentElement.parentElement;
       const heading = row && row.querySelector('b');
       if (!heading || !/^Paper\s+\d+\s*[·.-]/i.test(heading.textContent || '')) return;
-      const year = (heading.textContent.match(/\b(?:19|20|21)\d{2}\b/) || [])[0] || '';
-      const label = year ? name + ' · ' + year : name;
-      if (heading.textContent !== label) heading.textContent = label;
+      const name = paper.name || paper.subject;
+      const label = [name, paper.year].filter(Boolean).join(' · ');
+      if (label && heading.textContent !== label) heading.textContent = label;
     });
   }
 
