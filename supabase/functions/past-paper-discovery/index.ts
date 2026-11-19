@@ -1362,7 +1362,7 @@ Deno.serve(async (req) => {
     if (upload.error) return reply(500, { error: "Could not store the PDF: " + upload.error.message });
     const paper = {
       source_type: schoolId ? "school" : "board", board_id: boardId, school_id: schoolId,
-      grade_id: gradeId, paper_title: clip(candidate.title, 500), subject_name: subject, year, exam_type: examType, medium,
+      grade_id: gradeId, subject_name: subject, year, exam_type: examType, medium,
       source_url: candidate.source_url, stored_pdf_url: "qb-papers/" + path,
       pdf_type: "digital", download_date: new Date().toISOString().slice(0, 10),
       extraction_status: "not_started", checksum, uploaded_by: auth.user.id,
