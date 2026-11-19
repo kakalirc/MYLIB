@@ -26516,6 +26516,18 @@ function qbExtractionReviewHtml(id) {
     + (state.stage === 'finished' ? '<div class="hint">This run has already been published.</div>' : '<button class="btn-small btn-primary" ' + (pending ? 'disabled' : '') + ' onclick="qbPublishExtractionRun(\'' + id + '\')">Publish approved items</button>')
     + '</div>';
 }
+function qbSourcePaperDisplayName(sp) {
+  if (!sp) return '';
+  const rawPath = String(sp.stored_pdf_url || '').split('?')[0];
+  let fileName = rawPath.split('/').pop() || '';
+  try { fileName = decodeURIComponent(fileName); } catch (_) {}
+  fileName = fileName.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/i, '');
+  fileName = fileName.replace(/\\.pdf$/i, '').replace(/[-_]+/g, ' ').trim();
+  const isUuid = /^[0-9a-f-]{32,}$/i.test(fileName);
+  const title = String(sp.discovery_title || '').trim() || (!isUuid ? fileName : '');
+  return title || [sp.subject_name || 'Question Paper', sp.year].filter(Boolean).join(' · ');
+}
+
 async function loadQbSourcePapers(force = true) {
   if (!sb) return;
   if (qbSourceLoadPromise) return qbSourceLoadPromise;
@@ -26539,6 +26551,20 @@ async function loadQbSourcePapers(force = true) {
       ]);
       if (result.error) throw result.error;
       qbSourcePapers = result.data || [];
+      if (qbSourcePapers.length) {
+        const ids = qbSourcePapers.map(paper => paper.id).filter(Boolean);
+        const titleResult = await sb.from('qb_paper_discovery_candidates')
+          .select('imported_paper_id,title')
+          .in('imported_paper_id', ids);
+        if (titleResult.error) throw titleResult.error;
+        const titleByPaperId = new Map((titleResult.data || []).map(row => [
+          String(row.imported_paper_id), String(row.title || '').trim()
+        ]));
+        qbSourcePapers.forEach(paper => {
+          paper.discovery_title = titleByPaperId.get(String(paper.id)) || '';
+          paper.display_title = qbSourcePaperDisplayName(paper);
+        });
+      }
       qbSourceLoaded = true;
 
       if (currentRole === 'Admin') {
@@ -27051,7 +27077,7 @@ function qbSourcePapersHtml() {
               ? ' <span class="badge" style="background:rgba(75,155,112,.12);color:var(--forest)">Comparison reference · Paper ' + (index + 1) + '</span>'
               : '');
         return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px">
-        <span><b>Paper ${index + 1} · ${esc(String(sp.year || ''))}</b> ${esc(sp.exam_type || '')}${relationBadge}${sp.medium ? ` <span style="color:var(--muted);font-size:12px">· ${esc(sp.medium)}</span>` : ''}${sp.question_count ? ` <span style="color:var(--muted);font-size:12px">· ${esc(String(sp.question_count))} questions</span>` : ''}<br><span class="hint">${esc(sp.source_type === 'school' ? 'School: ' + (qbByName(qbSchools, sp.school_id) || 'Unknown school') : 'Board: ' + (qbByName(boards, sp.board_id) || 'Unknown board'))} · ${esc(sp.subject_name || '')} · ${esc(sp.uploader_name || 'Legacy upload')} · ${esc(sp.status || 'published')}</span></span>
+        <span><b>${esc(sp.display_title || qbSourcePaperDisplayName(sp))}</b> ${esc(sp.exam_type || '')}${relationBadge}${sp.medium ? ` <span style="color:var(--muted);font-size:12px">· ${esc(sp.medium)}</span>` : ''}${sp.question_count ? ` <span style="color:var(--muted);font-size:12px">· ${esc(String(sp.question_count))} questions</span>` : ''}<br><span class="hint">${esc(sp.source_type === 'school' ? 'School: ' + (qbByName(qbSchools, sp.school_id) || 'Unknown school') : 'Board: ' + (qbByName(boards, sp.board_id) || 'Unknown board'))} · ${esc(sp.subject_name || '')} · ${esc(sp.uploader_name || 'Legacy upload')} · ${esc(sp.status || 'published')}</span></span>
         <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${sp.stored_pdf_url || sp.source_url ? `${currentRole === 'Admin' ? `<button type="button" class="btn-small" onclick="qbToggleSourcePaperPreview('${sp.id}')">${qbSourcePreviewOpenIds.has(sp.id) ? 'Hide preview' : 'Preview first page'}</button>` : ''}<button class="btn-small" onclick="qbOpenSourcePdf('${sp.id}')">⬇ Open PDF</button>` : '<span class="hint">No PDF</span>'}
         ${currentRole === 'Admin' && (duplicateIds.has(sp.id) || sp.duplicate_override) ? `<button class="btn-small" onclick="qbSetSourcePaperDuplicateOverride('${sp.id}',${sp.duplicate_override ? 'false' : 'true'})">${sp.duplicate_override ? 'Restore duplicate check' : 'Not a Duplicate'}</button>` : ''}
         ${qbDuplicateActionMsg[sp.id] ? `<span role="status" aria-live="polite" style="font-size:12px;color:${qbDuplicateActionMsg[sp.id].error ? 'var(--brick)' : 'var(--forest)'};font-weight:600">${esc(qbDuplicateActionMsg[sp.id].text)}</span>` : ''}
