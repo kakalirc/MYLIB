@@ -62,6 +62,14 @@
     });
     return result;
   }
+  function paperNameFromStoredPath(value) {
+    var raw = String(value || '').split('?')[0].split('/').pop() || '';
+    try { raw = decodeURIComponent(raw); } catch (_) {}
+    raw = raw.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/i, '');
+    raw = raw.replace(/\\.pdf$/i, '').replace(/[-_]+/g, ' ').trim();
+    return /^[0-9a-f-]{32,}$/i.test(raw) ? '' : raw;
+  }
+
   async function loadPublishedPapers(force) {
     if (papersLoading || (papersLoaded && !force) || typeof sb === 'undefined' || !sb) return;
     papersLoading = true;
@@ -79,6 +87,23 @@
       if (results[0].error) throw results[0].error;
       publishedPapers = results[0].data || [];
       schoolDirectory = results[1].error ? [] : (results[1].data || []);
+      // Discovery files are stored under random UUID.pdf names. Their human-readable
+      // names remain in the candidate table and are exposed only for published papers.
+      if (publishedPapers.length) {
+        var paperIds = publishedPapers.map(function (paper) { return paper.id; }).filter(Boolean);
+        var candidateResult = await sb.from('qb_paper_discovery_candidates')
+          .select('imported_paper_id,title')
+          .in('imported_paper_id', paperIds);
+        if (candidateResult.error) throw candidateResult.error;
+        var discoveredTitles = Object.create(null);
+        (candidateResult.data || []).forEach(function (candidate) {
+          if (candidate.imported_paper_id && candidate.title) discoveredTitles[String(candidate.imported_paper_id)] = String(candidate.title).trim();
+        });
+        publishedPapers.forEach(function (paper) {
+          paper.display_title = discoveredTitles[String(paper.id)] || paperNameFromStoredPath(paper.stored_pdf_url)
+            || [paper.subject_name || 'Question Paper', paper.year].filter(Boolean).join(' · ');
+        });
+      }
       if (typeof currentRole !== 'undefined' && currentRole === 'Student'
           && typeof currentLinkedId !== 'undefined' && currentLinkedId) {
         var studentResult = await sb.from('students').select('grade_id').eq('id', currentLinkedId).maybeSingle();
@@ -157,7 +182,7 @@
       var meta = [source, labelFor(gradesList, p.grade_id), p.subject_name, p.year,
         p.exam_type ? String(p.exam_type).replace(/_/g, ' ') : '', p.medium].filter(Boolean);
       return '<article class="lib-past-paper-card"><div class="lib-past-paper-card-main">'
-        + '<h3>' + escHtml(p.subject_name || 'Question Paper') + '</h3>'
+        + '<h3>' + escHtml(p.display_title || [p.subject_name || 'Question Paper', p.year].filter(Boolean).join(' · ')) + '</h3>'
         + '<p>' + escHtml(meta.join(' · ')) + '</p>'
         + (p.question_count ? '<span class="hint">' + escHtml(p.question_count) + ' questions</span>' : '')
         + '</div><button class="btn-small btn-primary" type="button" onclick="libOpenPublishedPastPaper(\'' + escHtml(p.id) + '\')">View / Download PDF</button></article>';

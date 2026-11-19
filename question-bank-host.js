@@ -100,6 +100,70 @@
     if (!selected) pastPapersTab.click();
   }
 
+
+  function filenameFromStoredPath(value) {
+    const raw = String(value || '').split('?')[0].split('/').pop() || '';
+    let name = raw;
+    try { name = decodeURIComponent(raw); } catch (_) {}
+    name = name.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/i, '');
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name)) return '';
+    name = name.replace(/\.pdf$/i, '').replace(/[-_]+/g, ' ').trim();
+    return name;
+  }
+
+  let sourcePaperTitleLookup = null;
+  async function applySourcePaperFilenames(root) {
+    if (typeof qbSourcePapers === 'undefined' || !Array.isArray(qbSourcePapers)) return;
+    if (!root || typeof root.querySelectorAll !== 'function') return;
+    const buttons = Array.from(root.querySelectorAll('button[onclick*="qbPrepareSourcePaperExtraction"]'));
+    const visibleIds = [...new Set(buttons.map((button) => {
+      const match = String(button.getAttribute('onclick') || '').match(/qbPrepareSourcePaperExtraction\(['"]([^'"]+)['"]\)/);
+      return match ? match[1] : '';
+    }).filter(Boolean))];
+    if (!visibleIds.length) return;
+
+    // Discovery downloads are stored under random UUID.pdf names. Their real
+    // document names live on the discovery candidate row, keyed by imported_paper_id.
+    if (!sourcePaperTitleLookup && typeof sb !== 'undefined' && sb && typeof sb.from === 'function') {
+      const ids = qbSourcePapers.map((paper) => String(paper.id)).filter(Boolean);
+      sourcePaperTitleLookup = sb.from('qb_paper_discovery_candidates')
+        .select('imported_paper_id,title')
+        .in('imported_paper_id', ids)
+        .then(({ data, error }) => {
+          if (error) throw error;
+          return new Map((data || []).map((candidate) => [
+            String(candidate.imported_paper_id),
+            String(candidate.title || '').trim()
+          ]));
+        })
+        .catch(() => new Map());
+    }
+    const discoveryTitles = sourcePaperTitleLookup ? await sourcePaperTitleLookup : new Map();
+    const byId = new Map(qbSourcePapers.map((paper) => {
+      const id = String(paper.id);
+      const storedName = filenameFromStoredPath(paper.stored_pdf_url);
+      const discoveryName = discoveryTitles.get(id) || '';
+      const name = discoveryName || storedName;
+      return [id, {
+        name: name && !/^[0-9a-f-]{32,}$/i.test(name) ? name : '',
+        subject: String(paper.subject_name || 'Question Paper'),
+        year: String(paper.year || '')
+      }];
+    }));
+
+    buttons.forEach((button) => {
+      const match = String(button.getAttribute('onclick') || '').match(/qbPrepareSourcePaperExtraction\(['"]([^'"]+)['"]\)/);
+      if (!match) return;
+      const paper = byId.get(match[1]);
+      if (!paper) return;
+      const row = button.parentElement && button.parentElement.parentElement;
+      const heading = row && row.querySelector('b');
+      if (!heading || !/^Paper\s+\d+\s*[·.-]/i.test(heading.textContent || '')) return;
+      const label = [paper.name || paper.subject, paper.year].filter(Boolean).join(' · ');
+      if (label && heading.textContent !== label) heading.textContent = label;
+    });
+  }
+
   function formatReleaseTimestamp(isoTimestamp) {
     const date = new Date(isoTimestamp);
     if (Number.isNaN(date.getTime())) return null;
@@ -145,6 +209,7 @@
     }
     suppressTeacherDuplicateSummary(document);
     selectTeacherPastPapersOnEntry();
+    applySourcePaperFilenames(document);
     applyReleaseAttribution();
   });
 
@@ -152,6 +217,7 @@
     removePreviewLauncher(document);
     suppressTeacherDuplicateSummary(document);
     selectTeacherPastPapersOnEntry();
+    applySourcePaperFilenames(document);
     applyReleaseAttribution();
     if (document.body) observer.observe(document.body, { childList: true, subtree: true });
   }

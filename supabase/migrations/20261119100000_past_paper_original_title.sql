@@ -1,0 +1,4 @@
+-- Paper titles are derived from existing source records:
+-- * online discovery: qb_paper_discovery_candidates.title via imported_paper_id
+-- * manual uploads: original filename embedded in qb_source_papers.stored_pdf_url
+-- No additional title column is required.
