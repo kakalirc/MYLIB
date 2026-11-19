@@ -847,7 +847,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-19 21:55 IST'; // Student Journey: Direct admission instead of Not set
+const BUILD_TIMESTAMP = '2026-11-19 22:00 IST'; // Student Journey + turned off the 75-second auto refresh
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -8590,9 +8590,8 @@ async function refreshAllData(silent) {
     if (currentRole === 'Admin' && currentTab === 'audit') { await Promise.all([loadAuditLog(), loadLoginLog()]); }
     if (currentRole === 'Admin' && currentTab === 'onboarding') await loadStudentOnboardingData();
     if (currentRole === 'Admin' && (currentTab === 'users' || currentTab === 'chat')) await loadAllAnnouncementsAdmin();
-    // Only confirm success for an explicit click — the periodic and focus/visibility
-    // triggers run silently in the background, and a "Refreshed." popping up
-    // unprompted every 75 seconds would just be noise.
+    // Only confirm success for an explicit click — the focus/visibility
+    // triggers run silently in the background.
     if (!silent) refreshMsg = 'Refreshed.';
   } catch (e) {
     // Previously uncaught — a failed refresh (e.g. a dropped connection) would fail
@@ -8696,13 +8695,9 @@ if ('serviceWorker' in navigator) {
 window.addEventListener('focus', () => {
   if (isLoggedIn && !hasUnsavedEditInProgress()) refreshAllData(true);
 });
-// So a second logged-in user's screen catches up on its own (e.g. seeing a
-// newly-added student) without needing to switch tabs/apps away and back or
-// click Refresh manually. Only runs while the tab is actually visible, and
-// respects the same unsaved-edit guard as the other auto-refresh triggers.
-setInterval(() => {
-  if (isLoggedIn && document.visibilityState === 'visible' && !hasUnsavedEditInProgress()) refreshAllData(true);
-}, 75000);
+// No timed auto-refresh (the old 75-second timer was removed at Rishin's request,
+// 2026-11-19). Data still refreshes on the ↻ Refresh button, when the app/tab is
+// opened again (focus/visibility), and chat messages arrive live via Supabase Realtime.
 
 async function logout(options = {}) {
   const sessionExpired = options.sessionExpired === true;
