@@ -207,7 +207,7 @@ if (location.hostname !== 'app.libeducation.com') {
     body:has(.teacher-bottom-nav) { padding-bottom:82px; }
     .teacher-bottom-nav button { position:relative; }
     .teacher-bottom-nav .nav-badge { position:absolute; top:0; right:calc(50% - 22px); min-width:17px; height:17px; padding:0 4px; border-radius:9px; background:var(--brick); color:#fff; font-size:10px; line-height:17px; }
-    /* Teacher phone header: one row (logo, Chat, bells). Refresh, Help, Support and Log out are in ☰ More. */
+    /* Teacher phone header: one row (logo, Chat, bells). Refresh, Help, Support and Log out are in ☰ Menu. */
     .topbar.is-teacher { flex-wrap:nowrap; gap:8px; padding:8px 12px; margin-bottom:12px; }
     .topbar.is-teacher img { height:28px; }
     .topbar.is-teacher .who, .topbar.is-teacher .brand-sub, .topbar.is-teacher .tb-phone-more { display:none; }
@@ -818,7 +818,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-19 18:45 IST'; // Teacher login: phone bottom bar, one-tap attendance, shorter Home, grouped menu
+const BUILD_TIMESTAMP = '2026-11-19 19:00 IST'; // Teacher login: phone bottom bar, one-tap attendance, shorter Home, grouped menu
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -22196,7 +22196,7 @@ function renderTeacherDashboard(teacher) {
   // Home order (phone first): Today's Classes → Pending banner → Earnings + Salary Slip → number boxes → Quick Actions → reminders → AI helpers and notes (folded).
   const todayCardHtml = todaySchedHtml || `<div class="card" style="border-left:4px solid var(--primary)"><h2>🗓️ Today's Classes</h2><div class="hint">No classes are scheduled for you today.</div><button class="btn-small btn-primary" style="margin-top:8px" onclick="setTeacherPortalTab('attendance')">Give Attendance</button></div>`;
   return `
-    <div class="teacher-home-hello">Welcome back, <b>${esc(teacher.name)}</b> <span class="hint"><span class="nav-hint-desktop">· Use the menu on the left for everything else.</span><span class="nav-hint-mobile">· Tap ☰ More at the bottom for everything else.</span></span></div>
+    <div class="teacher-home-hello">Welcome back, <b>${esc(teacher.name)}</b> <span class="hint"><span class="nav-hint-desktop">· Use the menu on the left for everything else.</span><span class="nav-hint-mobile">· Tap ☰ Menu at the bottom right for every page.</span></span></div>
     ${todayCardHtml}
     ${teacherPendingBannerHtml(pend)}
     <div class="card" id="teacherEarningsCard">
@@ -22679,7 +22679,7 @@ function renderTeacherPortal() {
         </div>`;
       }).join('')}
     </div>`;
-  // Phone: the ☰ More button at the bottom opens one grouped menu. It also holds Refresh, Help, Support and Log out,
+  // Phone: the ☰ Menu button at the bottom opens one grouped menu. It also holds Refresh, Help, Support and Log out,
   // which are hidden from the phone header to keep it to one row.
   const moreItem = (key, label) => `<div class="mobile-tab-item ${teacherPortalTab===key?'active':''}" onclick="setTeacherPortalTab('${key}')">${label}</div>`;
   const mobileTabBarHtml = `
@@ -22707,7 +22707,7 @@ function renderTeacherPortal() {
       ${bottomBtn('attendance', '✓', 'Attendance', 0)}
       ${bottomBtn('schedule', '▦', 'Classes', 0)}
       ${bottomBtn('homework', '✎', 'Homework', hwToReview)}
-      <button class="${teacherMobileTabMenuOpen?'active':''}" onclick="toggleTeacherMobileTabMenu()"><span class="nav-icon">☰</span><span>More</span>${pendingTotal ? `<span class="nav-badge">${pendingTotal}</span>` : ''}</button>
+      <button class="${teacherMobileTabMenuOpen?'active':''}" onclick="toggleTeacherMobileTabMenu()"><span class="nav-icon">☰</span><span>Menu</span>${pendingTotal ? `<span class="nav-badge">${pendingTotal}</span>` : ''}</button>
     </nav>`;
   return `
     ${mobileTabBarHtml}
