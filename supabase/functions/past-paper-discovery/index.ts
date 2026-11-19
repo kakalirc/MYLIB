@@ -17,7 +17,7 @@ const CORS = {
 const reply = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 const clip = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
-const MAX_PDF_BYTES = 50 * 1024 * 1024;
+const MAX_PDF_BYTES = 100 * 1024 * 1024;
 const MAX_DISCOVERED_CANDIDATES_PER_BATCH = 300;
 const uuid = (v: unknown) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v ?? ""));
 
@@ -562,22 +562,40 @@ async function crawlCbseZipArchives(source: any, query: string): Promise<Discove
 
 async function readBounded(res: Response, maxBytes = MAX_PDF_BYTES): Promise<Uint8Array> {
   const declared = Number(res.headers.get("content-length") || 0);
-  if (declared > maxBytes) throw new Error(maxBytes === MAX_PDF_BYTES ? "PDF exceeds the 50 MB limit." : "Source page exceeds the 2 MB inspection limit.");
+  if (declared > maxBytes) throw new Error(maxBytes === MAX_PDF_BYTES ? "PDF exceeds the 100 MB limit." : "Source page exceeds the 2 MB inspection limit.");
   if (!res.body) throw new Error("Source returned an empty response.");
+
+  // Use one bounded destination buffer instead of retaining every stream chunk
+  // and then allocating a second full-size copy. This keeps peak memory bounded
+  // when verifying PDFs near the 100 MB ceiling.
+  let capacity = declared > 0 ? declared : Math.min(maxBytes, 1024 * 1024);
+  let buffer = new Uint8Array(capacity);
   const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
   let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.length;
-    if (total > maxBytes) { await reader.cancel(); throw new Error(maxBytes === MAX_PDF_BYTES ? "PDF exceeds the 50 MB limit." : "Source page exceeds the 2 MB inspection limit."); }
-    chunks.push(value);
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const nextTotal = total + value.length;
+      if (nextTotal > maxBytes) {
+        await reader.cancel();
+        throw new Error(maxBytes === MAX_PDF_BYTES ? "PDF exceeds the 100 MB limit." : "Source page exceeds the 2 MB inspection limit.");
+      }
+      if (nextTotal > capacity) {
+        const nextCapacity = Math.min(maxBytes, Math.max(nextTotal, capacity * 2));
+        const expanded = new Uint8Array(nextCapacity);
+        expanded.set(buffer.subarray(0, total));
+        buffer = expanded;
+        capacity = nextCapacity;
+      }
+      buffer.set(value, total);
+      total = nextTotal;
+    }
+  } catch (error) {
+    try { await reader.cancel(); } catch { /* Stream may already be closed. */ }
+    throw error;
   }
-  const all = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) { all.set(chunk, offset); offset += chunk.length; }
-  return all;
+  return buffer.subarray(0, total);
 }
 async function sha256(bytes: Uint8Array): Promise<string> {
   const hash = await crypto.subtle.digest("SHA-256", bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
@@ -1260,7 +1278,7 @@ Deno.serve(async (req) => {
     const { data: localObject, error: localDownloadError } = await admin.storage.from("qb-papers").download(storagePath);
     if (localDownloadError || !localObject) return reply(400, { error: "Could not read the uploaded PDF: " + (localDownloadError?.message || "file not found") });
     const bytes = new Uint8Array(await localObject.arrayBuffer());
-    if (!bytes.length || bytes.length > MAX_PDF_BYTES) { await admin.storage.from("qb-papers").remove([storagePath]); return reply(413, { error: "The uploaded PDF is empty or exceeds the 50 MB limit." }); }
+    if (!bytes.length || bytes.length > MAX_PDF_BYTES) { await admin.storage.from("qb-papers").remove([storagePath]); return reply(413, { error: "The uploaded PDF is empty or exceeds the 100 MB limit." }); }
     if (!isPdf(bytes)) { await admin.storage.from("qb-papers").remove([storagePath]); return reply(422, { error: "The uploaded file is not a valid PDF (PDF signature check failed)." }); }
     const checksum = await sha256(bytes);
     const { data: duplicate } = await admin.from("qb_source_papers").select("id").eq("checksum", checksum).maybeSingle();
