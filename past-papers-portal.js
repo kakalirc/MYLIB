@@ -70,7 +70,7 @@
       syncStudentDefaults();
       var results = await Promise.all([
         sb.from('qb_source_papers')
-          .select('id,source_type,school_id,board_id,grade_id,subject_name,year,exam_type,medium,question_count,stored_pdf_url,source_url')
+          .select('id,source_type,school_id,board_id,grade_id,paper_title,subject_name,year,exam_type,medium,question_count,stored_pdf_url,source_url')
           .eq('status', 'published')
           .order('year', { ascending: false })
           .limit(2000),
@@ -157,7 +157,7 @@
       var meta = [source, labelFor(gradesList, p.grade_id), p.subject_name, p.year,
         p.exam_type ? String(p.exam_type).replace(/_/g, ' ') : '', p.medium].filter(Boolean);
       return '<article class="lib-past-paper-card"><div class="lib-past-paper-card-main">'
-        + '<h3>' + escHtml(p.subject_name || 'Question Paper') + '</h3>'
+        + '<h3>' + escHtml(p.paper_title || [p.subject_name || 'Question Paper', p.year].filter(Boolean).join(' · ')) + '</h3>'
         + '<p>' + escHtml(meta.join(' · ')) + '</p>'
         + (p.question_count ? '<span class="hint">' + escHtml(p.question_count) + ' questions</span>' : '')
         + '</div><button class="btn-small btn-primary" type="button" onclick="libOpenPublishedPastPaper(\'' + escHtml(p.id) + '\')">View / Download PDF</button></article>';
