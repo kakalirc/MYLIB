@@ -187,7 +187,7 @@ if (location.hostname !== 'app.libeducation.com') {
   .btn-danger, .btn-primary.btn-danger { background: var(--brick); color: #fff; }   /* the 2-class form must out-rank .btn-primary's green, which is defined later */
   .nav-hint-mobile { display: none; }
   .teacher-bottom-nav { display:none; }
-  .tb-phone-only { display: none; }
+  .teacher-menu-bar { display: none; }
   .teacher-home-hello { margin: 0 2px 12px; font-size: 15px; }
   .teacher-home-more > summary { cursor: pointer; list-style: none; padding: 2px 0; font-size: 15px; }
   .teacher-home-more > summary::-webkit-details-marker { display: none; }
@@ -212,8 +212,8 @@ if (location.hostname !== 'app.libeducation.com') {
     .topbar.is-teacher { flex-wrap:nowrap; gap:8px; padding:8px 12px; margin-bottom:12px; }
     .topbar.is-teacher img { height:28px; }
     .topbar.is-teacher .who, .topbar.is-teacher .brand-sub, .topbar.is-teacher .tb-phone-more { display:none; }
-    .topbar.is-teacher .tb-phone-only { display:inline-block; }
-    .teacher-more-menu .mobile-tab-dropdown.from-top { top:64px !important; bottom:auto !important; max-height:calc(100vh - 150px) !important; }
+    .teacher-menu-bar.mobile-tab-toggle { display:flex; margin-bottom:12px; }
+    .teacher-more-menu .mobile-tab-dropdown.from-top { top:12px !important; bottom:auto !important; max-height:calc(100vh - 110px) !important; }
     body:has(.teacher-bottom-nav) #lib-help-search:not(.teacher-show) { display:none; }
     .mobile-tab-bar { display:contents; }
     /* Keep the hamburger toggle visible on mobile alongside bottom navigation. */
@@ -821,7 +821,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-19 19:10 IST'; // Teacher login: phone bottom bar, one-tap attendance, shorter Home, grouped menu
+const BUILD_TIMESTAMP = '2026-11-19 19:20 IST'; // Teacher login: phone bottom bar, one-tap attendance, shorter Home, grouped menu
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -22200,7 +22200,8 @@ function renderTeacherDashboard(teacher) {
   // Home order (phone first): Today's Classes → Pending banner → Earnings + Salary Slip → number boxes → Quick Actions → reminders → AI helpers and notes (folded).
   const todayCardHtml = todaySchedHtml || `<div class="card" style="border-left:4px solid var(--primary)"><h2>🗓️ Today's Classes</h2><div class="hint">No classes are scheduled for you today.</div><button class="btn-small btn-primary" style="margin-top:8px" onclick="setTeacherPortalTab('attendance')">Give Attendance</button></div>`;
   return `
-    <div class="teacher-home-hello">Welcome back, <b>${esc(teacher.name)}</b> <span class="hint"><span class="nav-hint-desktop">· Use the menu on the left for everything else.</span><span class="nav-hint-mobile">· Tap ☰ Menu at the bottom right for every page.</span></span></div>
+    <div class="teacher-home-hello">Welcome back, <b>${esc(teacher.name)}</b> <span class="hint"><span class="nav-hint-desktop">· Use the menu on the left for everything else.</span><span class="nav-hint-mobile">· Tap ☰ below for every page.</span></span></div>
+    <!--TEACHER-MENU-BAR-->
     ${todayCardHtml}
     ${teacherPendingBannerHtml(pend)}
     <div class="card" id="teacherEarningsCard">
@@ -22704,6 +22705,10 @@ function renderTeacherPortal() {
         </div>
       ` : ''}
     </div>`;
+  // Phone: the ☰ bar teachers know, showing the page name. On Home it sits under the Welcome back line; on other pages at the top.
+  const tabLabels = { dashboard: 'Dashboard', pendingactions: 'Pending Action Items', starteacher: '🏆 Star Teacher', setup: 'My Profile' };
+  teacherTabGroups.forEach(g => g.tabs.forEach(([key, label]) => { tabLabels[key] = label; }));
+  const teacherMenuBarHtml = `<div class="teacher-menu-bar mobile-tab-toggle" onclick="toggleTeacherMobileTabMenu(true)"><span class="burger">☰</span> ${esc(tabLabels[teacherPortalTab] || 'Menu')}</div>`;
   const bottomBtn = (key, icon, label, badge) => `<button class="${teacherPortalTab===key && !teacherMobileTabMenuOpen?'active':''}" onclick="setTeacherPortalTab('${key}')"><span class="nav-icon">${icon}</span><span>${label}</span>${badge ? `<span class="nav-badge">${badge}</span>` : ''}</button>`;
   const teacherBottomNavHtml = `
     <nav class="teacher-bottom-nav" aria-label="Teacher navigation">
@@ -22717,7 +22722,7 @@ function renderTeacherPortal() {
     ${mobileTabBarHtml}
     <div class="admin-layout ${isDesktopSidebarCollapsed('teacher') ? 'is-sidebar-collapsed' : ''}">
       ${sidebarHtml}
-      <div class="sidebar-content">${teacherPortalBodyHtml(teacher)}</div>
+      <div class="sidebar-content">${(() => { const body = teacherPortalBodyHtml(teacher); return body.includes('<!--TEACHER-MENU-BAR-->') ? body.replace('<!--TEACHER-MENU-BAR-->', teacherMenuBarHtml) : teacherMenuBarHtml + body; })()}</div>
     </div>
     ${teacherBottomNavHtml}`;
 }
@@ -22896,7 +22901,6 @@ function renderPortalShell(bodyHtml) {
       <button class="btn-small tb-phone-more" onclick="toggleHelpAi()">? Help</button>
       <button class="btn-small tb-phone-more" onclick="openSupportModal()">Support${data.supportTickets.filter(t=>t.status!=='resolved').length ? ` (${data.supportTickets.filter(t=>t.status!=='resolved').length})` : ''}</button>
       <button class="btn-logout btn-small tb-phone-more" onclick="logout()">Log out</button>
-      ${currentRole === 'Teacher' ? `<button class="btn-small tb-phone-only" aria-label="Menu" onclick="toggleTeacherMobileTabMenu(true)" style="font-size:18px;line-height:1;padding:6px 10px">☰</button>` : ''}
     </div>
     ${currentRole==='Student' || currentRole==='Parent' || currentRole==='Teacher' ? '' : `<div class="tagline">Your classes for the selected month.</div>`}
     ${pwIsDefault ? `<div class="card" style="border-color:var(--brick)"><b>Please change your password.</b> It is still the same as your login ID, so anyone who knows your login ID could log in. <button class="btn-small btn-primary" onclick="${currentRole==='Student' ? 'openStudentSettings()' : currentRole==='Parent' ? 'openParentAccount()' : currentRole==='Teacher' ? 'openTeacherPasswordBox()' : "document.getElementById('curPass').scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('curPass').focus()"}">Change it now</button></div>` : ''}
