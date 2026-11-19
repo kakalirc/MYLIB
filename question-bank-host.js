@@ -50,6 +50,84 @@
     });
   }
 
+  function collapseAdminDuplicateSummary(root) {
+    if (isTeacher() || !root || typeof root.querySelectorAll !== 'function') return;
+    const headings = Array.from(root.querySelectorAll('h1,h2,h3,h4,strong,b,[role="heading"]'));
+
+    headings.forEach((heading) => {
+      if (normaliseText(heading.textContent) !== DUPLICATE_SUMMARY_TITLE) return;
+
+      let container = heading.parentElement;
+      let headingChild = heading;
+      let descriptionIndex = -1;
+      let contentStartIndex = -1;
+
+      // Find the smallest wrapper that keeps the heading and explanatory text
+      // visible while allowing the actual duplicate groups to be collapsed.
+      for (let depth = 0; container && depth < 8; depth += 1, container = container.parentElement) {
+        const children = Array.from(container.children || []);
+        headingChild = children.find((child) => child === heading || child.contains(heading));
+        if (!headingChild) continue;
+        const headingIndex = children.indexOf(headingChild);
+        descriptionIndex = children.findIndex((child, index) =>
+          index > headingIndex
+          && normaliseText(child.textContent).includes(DUPLICATE_SUMMARY_EXPLANATION)
+          && normaliseText(child.textContent).length < 260
+        );
+
+        if (normaliseText(headingChild.textContent).includes(DUPLICATE_SUMMARY_EXPLANATION)) {
+          contentStartIndex = headingIndex + 1;
+        } else if (descriptionIndex >= 0) {
+          contentStartIndex = descriptionIndex + 1;
+        } else {
+          contentStartIndex = headingIndex + 1;
+        }
+
+        if (contentStartIndex < children.length) break;
+        contentStartIndex = -1;
+      }
+
+      if (!container || contentStartIndex < 0 || container.dataset.duplicateGroupsToggle === 'true') {
+        if (container && container.dataset.duplicateGroupsToggle === 'true') {
+          const start = Number(container.dataset.duplicateGroupsStart || 0);
+          const collapsed = container.dataset.duplicateGroupsCollapsed !== 'false';
+          Array.from(container.children).slice(start).forEach((child) => {
+            child.hidden = collapsed;
+          });
+        }
+        return;
+      }
+
+      const children = Array.from(container.children);
+      const hiddenChildren = children.slice(contentStartIndex);
+      if (!hiddenChildren.length) return;
+
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'qb-duplicate-groups-toggle';
+      toggle.textContent = 'Show duplicate groups';
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.style.cssText = 'margin-left:10px;padding:4px 9px;border:1px solid var(--border,#d1d5db);border-radius:7px;background:transparent;color:inherit;font:inherit;font-size:12px;font-weight:600;cursor:pointer;';
+
+      container.dataset.duplicateGroupsToggle = 'true';
+      container.dataset.duplicateGroupsStart = String(contentStartIndex);
+      container.dataset.duplicateGroupsCollapsed = 'true';
+      hiddenChildren.forEach((child) => { child.hidden = true; });
+      heading.appendChild(toggle);
+
+      toggle.addEventListener('click', () => {
+        const collapsed = container.dataset.duplicateGroupsCollapsed !== 'false';
+        const nextCollapsed = !collapsed;
+        container.dataset.duplicateGroupsCollapsed = String(nextCollapsed);
+        Array.from(container.children).slice(contentStartIndex).forEach((child) => {
+          child.hidden = nextCollapsed;
+        });
+        toggle.textContent = nextCollapsed ? 'Show duplicate groups' : 'Hide duplicate groups';
+        toggle.setAttribute('aria-expanded', String(!nextCollapsed));
+      });
+    });
+  }
+
   let teacherQuestionBankWasVisible = false;
 
   function isElementVisible(element) {
@@ -208,6 +286,7 @@
       }
     }
     suppressTeacherDuplicateSummary(document);
+    collapseAdminDuplicateSummary(document);
     selectTeacherPastPapersOnEntry();
     applySourcePaperFilenames(document);
     applyReleaseAttribution();
@@ -216,6 +295,7 @@
   function start() {
     removePreviewLauncher(document);
     suppressTeacherDuplicateSummary(document);
+    collapseAdminDuplicateSummary(document);
     selectTeacherPastPapersOnEntry();
     applySourcePaperFilenames(document);
     applyReleaseAttribution();
