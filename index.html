@@ -847,7 +847,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-19 22:00 IST'; // Student Journey + turned off the 75-second auto refresh
+const BUILD_TIMESTAMP = '2026-11-20 19:55 IST'; // Edit payment: move to the right subject's monthly request, or save as an extra payment
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -10807,6 +10807,7 @@ function requestDraftSet(field, val) {
 }
 function editRequestDraftSet(field, val) {
   editRequestDraft[field] = val;
+  if (editRequestSwap && (field === 'subjectId' || field === 'type')) { editRequestSwap = null; editRequestMsg = ''; }
   // Pending requests only: changing what is asked for re-prices it from Fee setup.
   if (editRequestDraft.kind === 'Request') {
     if (field === 'subjectId' || field === 'type') { const editRow = data.subscriptions.find(x => x.id === editingRequestId); editRequestDraft.mode = studentUsualMode(editRow ? editRow.studentId : selectedStudentId, editRequestDraft.subjectId, editRequestDraft.type); }
@@ -13461,7 +13462,13 @@ async function confirmMarkPaid(id) {
   render();
 }
 let editRequestMsg = '';
+// Set when an edit would give the student two fee rows for the same month + subject + type
+// (blocked by the database rule subscriptions_monthly_request_unique). Holds what is needed to
+// move the payment onto the other (pending) request instead: { id, otherId, patch, ... }.
+let editRequestSwap = null;
+const MONTHLY_REQUEST_CLASH_MSG = 'This student already has a fee request for this month for that subject and type, and a month can have only one. Open the student\'s Pending fee requests: mark that request paid, then cancel or fix this one.';
 function startEditRequest(id) {
+  editRequestSwap = null;
   const s = data.subscriptions.find(x=>x.id===id);
   if (!s) return;
   editingRequestId = id;
@@ -13475,7 +13482,7 @@ function startEditRequest(id) {
   if (s.kind === 'Request') Object.assign(editRequestDraft, { kind: 'Request', mode: studentUsualMode(s.studentId, s.subjectId, s.type), amountEdited: true });
   render();
 }
-function cancelEditRequest() { editingRequestId = null; editRequestMsg = ''; render(); }
+function cancelEditRequest() { editingRequestId = null; editRequestMsg = ''; editRequestSwap = null; render(); }
 async function saveRequestEdit(id) {
   const d = editRequestDraft;
   const classesInput = document.getElementById('editReqClasses_'+id);
@@ -13485,6 +13492,7 @@ async function saveRequestEdit(id) {
   const amountPaid = Number(amountInput ? amountInput.value : 0) || 0;
   const date = dateInput ? dateInput.value : '';
   editRequestMsg = '';
+  editRequestSwap = null;
   if (!d.subjectId || !d.type || !classes || classes <= 0 || !date) return;
   const original = data.subscriptions.find(x=>x.id===id);
   if (!original) return;
@@ -13530,9 +13538,35 @@ async function saveRequestEdit(id) {
   const expInput = document.getElementById('editReqExpires_'+id);
   let expiryChanged = false;
   if (expInput && (expInput.value || '') !== (original.expiresOn || '')) { patch.expires_on = expInput.value || null; expiryChanged = true; }
+  // One fee row per student + month + subject + type (the database rule subscriptions_monthly_request_unique).
+  // Moving a monthly row to another subject/type that already has its own row for that month would break it.
+  if (original.requestMonth && (original.subjectId !== d.subjectId || original.type !== d.type)) {
+    const other = data.subscriptions.find(s => s.id !== id && s.studentId === original.studentId && s.subjectId === d.subjectId && s.type === d.type && s.requestMonth === original.requestMonth);
+    if (other) {
+      const monthName = monthLabelOf(original.requestMonth.slice(0, 7));
+      const newName = `${subjectName(d.subjectId)} (${d.type})`, oldName = `${subjectName(original.subjectId)} (${original.type})`;
+      Object.assign(editRequestDraft, { classes, amountPaid, date });   // keep what was typed on screen
+      const extra = { id, patch: { ...patch, request_month: null }, studentId: original.studentId, newName, oldName, expiryChanged };
+      if (original.kind === 'Payment' && other.kind === 'Request') {
+        editRequestSwap = { extra, id, otherId: other.id, studentId: original.studentId, requestMonth: original.requestMonth,
+          classes: storedClasses, amount: storedAmount, date, reference: patch.payment_reference, remarks: patch.payment_remarks,
+          expiresOn: expiryChanged ? patch.expires_on : undefined, newName, oldName };
+        editRequestMsg = `This student already has a ${monthName} fee request for ${newName} (still pending: ${other.classes} classes, ${rupees(other.amountPaid)}). A month can have only one request per subject, so this payment can't simply be changed to ${newName}. If the money was really for ${newName}, click the button below: the ${newName} request becomes paid with the details on this form, and this ${oldName} request goes back to pending. If the family really paid ${newName} twice this month, click "Save as an extra ${newName} payment" instead.`;
+      } else if (other.kind === 'Request') {
+        editRequestMsg = `This student already has a ${monthName} fee request for ${newName} (${other.classes} classes, ${rupees(other.amountPaid)}). A month can have only one request per subject. Cancel one of the two requests instead.`;
+      } else if (original.kind === 'Payment') {
+        editRequestSwap = { extra, id, newName };
+        editRequestMsg = `${monthName} ${newName} is already recorded as paid for this student (${other.classes} classes, ${rupees(Math.abs(other.amountPaid))} on ${other.date}). A month can have only one ${monthName} fee request per subject. If the family really paid ${newName} twice, click "Save as an extra ${newName} payment": it is saved as an ordinary payment, not as the ${monthName} request. If this payment was entered by mistake, delete it with the ✕ button in the history instead.`;
+      } else {
+        editRequestMsg = `${monthName} ${newName} is already recorded as paid for this student (${other.classes} classes, ${rupees(Math.abs(other.amountPaid))} on ${other.date}). A month can have only one fee row per subject. If this ${oldName} payment was entered by mistake, delete it with the ✕ button in the history instead of changing it.`;
+      }
+      render();
+      return;
+    }
+  }
   const oldDate = original.date, oldClasses = original.classes;
   const { error } = await sb.from('subscriptions').update(patch).eq('id', id);
-  if (error) { editRequestMsg = 'Could not save: ' + error.message; render(); return; }
+  if (error) { editRequestMsg = /monthly_request_unique/.test(error.message || '') ? MONTHLY_REQUEST_CLASH_MSG : 'Could not save: ' + error.message; render(); return; }
   original.subjectId = d.subjectId; original.type = d.type; original.classes = storedClasses; original.amountPaid = storedAmount; original.date = date;
   if ('base_amount' in patch) applyDiscountToLocal(original, patch);
   if (refInput) original.paymentReference = refInput.value.trim();
@@ -13545,6 +13579,50 @@ async function saveRequestEdit(id) {
   if (original.kind === 'Request') { const e = await repriceFamilyRequests(original.studentId); if (e) alert(e); }
   render();
   if (expiryAffected) await runExpirySweep(true, true);   // re-work the Expiry entry, then reload to pick up the new expiry date
+}
+// The payment was recorded against the wrong month's request (e.g. Sanskrit instead of Maths).
+// Move it: the other (pending) request becomes the payment, and this row goes back to a pending request.
+// Neither step changes a subject, so the one-request-per-month rule is never broken on the way.
+// The family really paid this subject twice in one month: save this row as an ordinary payment,
+// no longer tied to the monthly request (request_month cleared), so the one-per-month rule doesn't apply.
+async function saveAsExtraPayment() {
+  const x = editRequestSwap && editRequestSwap.extra;
+  if (!x) return;
+  const row = data.subscriptions.find(s => s.id === x.id);
+  if (!row || row.kind !== 'Payment') { editRequestSwap = null; editRequestMsg = 'Something changed. Please refresh the page and try again.'; render(); return; }
+  if (!confirm(`Save this as an extra ${x.newName} payment?\n\nIt will no longer count as the ${x.oldName} fee request for that month.`)) return;
+  const { error } = await sb.from('subscriptions').update(x.patch).eq('id', x.id);
+  if (error) { editRequestMsg = 'Could not save: ' + error.message; render(); return; }
+  editingRequestId = null; editRequestSwap = null; editRequestMsg = '';
+  await loadStudentsAndSubscriptions();   // the database works out the expiry date again
+  await runExpirySweep(true, true);
+  render();
+}
+async function swapPaymentToOtherRequest() {
+  const w = editRequestSwap;
+  if (!w || !w.otherId) return;
+  const mine = data.subscriptions.find(s => s.id === w.id);
+  const other = data.subscriptions.find(s => s.id === w.otherId);
+  if (!mine || !other || mine.kind !== 'Payment' || other.kind !== 'Request') { editRequestSwap = null; editRequestMsg = 'Something changed. Please refresh the page and try again.'; render(); return; }
+  if (data.subscriptions.some(s => s.expiredBatchId === mine.id)) { editRequestSwap = null; editRequestMsg = 'Some of this payment\'s classes have already expired, so it can\'t be moved back to a request.'; render(); return; }
+  if (!confirm(`Move this payment to the ${w.newName} request?\n\n${w.newName}: becomes paid (${Math.abs(w.classes)} classes, ${rupees(Math.abs(w.amount))}, ${w.date}).\n${w.oldName}: goes back to a pending fee request.`)) return;
+  const ym = w.requestMonth.slice(0, 7);
+  const paid = { kind: 'Payment', classes: w.classes, amount_paid: w.amount, date: w.date, payment_reference: w.reference === undefined ? (mine.paymentReference || null) : w.reference, payment_remarks: w.remarks === undefined ? (mine.paymentRemarks || null) : w.remarks };
+  if (w.expiresOn !== undefined) paid.expires_on = w.expiresOn;
+  const r1 = await sb.from('subscriptions').update(paid).eq('id', other.id).eq('kind', 'Request').select('id');
+  if (r1.error || !r1.data || !r1.data.length) { editRequestMsg = 'Could not move the payment: ' + (r1.error ? r1.error.message : 'the other request is no longer pending. Refresh the page.'); render(); return; }
+  const back = { kind: 'Request', date: w.requestMonth, payment_reference: 'AUTO-' + ym, payment_remarks: null, expires_on: null };
+  const r2 = await sb.from('subscriptions').update(back).eq('id', mine.id);
+  if (r2.error) {
+    // Put the other request back as it was, so nothing is counted twice.
+    const undo = await sb.from('subscriptions').update({ kind: 'Request', classes: other.classes, amount_paid: other.amountPaid, date: other.date, payment_reference: other.paymentReference || null, payment_remarks: other.paymentRemarks || null, expires_on: null }).eq('id', other.id);
+    editRequestMsg = 'Could not move the payment: ' + r2.error.message + (undo.error ? ' (Also could not undo the first step: ' + undo.error.message + '. Please tell Claude.)' : ' Nothing was changed.');
+    render(); return;
+  }
+  editingRequestId = null; editRequestSwap = null; editRequestMsg = '';
+  await loadStudentsAndSubscriptions();   // the database works out the new payment's expiry date
+  const e = await repriceFamilyRequests(w.studentId); if (e) alert(e);
+  render();
 }
 async function cancelFeeRequest(id) {
   const gone = data.subscriptions.find(s => s.id === id);
@@ -15729,6 +15807,7 @@ function renderStudents() {
         <button class="btn-small btn-primary" onclick="saveRequestEdit('${r.id}')">Save</button>
         <button class="btn-small" onclick="cancelEditRequest()">Cancel</button>
       </div>
+      ${editRequestSwap && editRequestSwap.id === r.id ? `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">${editRequestSwap.otherId ? `<button class="btn-small btn-primary" onclick="swapPaymentToOtherRequest()">Move this payment to the ${esc(editRequestSwap.newName)} request</button>` : ''}${editRequestSwap.extra ? `<button class="btn-small${editRequestSwap.otherId ? '' : ' btn-primary'}" onclick="saveAsExtraPayment()">Save as an extra ${esc(editRequestSwap.newName)} payment</button>` : ''}</div>` : ''}
     </div>`;
   }).join('');
   const historyHtml = (historyRows.length || historyTransfers.length) ? `
