@@ -137,6 +137,8 @@ if (location.hostname !== 'app.libeducation.com') {
   .student-section h3 { margin-top: 0; margin-bottom: 10px; }
   .tab { padding: 9px 14px; font-size: 14px; font-weight: 500; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; white-space: nowrap; }
   .tab.active { color: var(--ink); border-bottom-color: var(--brick); font-weight: 600; }
+  .sm-tabs { margin: 14px 0 6px; }
+  .sm-tab-count { display: inline-block; margin-left: 6px; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--brick); color: #fff; font-size: 11.5px; line-height: 18px; text-align: center; font-weight: 600; }
   /* Question Bank section tabs: wrap into multiple tappable rows on mobile. */
   @media (max-width: 767px) {
     .qb-sub-tabs {
@@ -847,7 +849,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-20 20:30 IST'; // Archiving a student cancels their pending (unpaid) fee requests
+const BUILD_TIMESTAMP = '2026-11-20 21:15 IST'; // Students & Subscriptions: student record split into tabs
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -2299,6 +2301,10 @@ let markingPaidId = null;
 let editingRequestId = null;
 let editRequestDraft = { subjectId: '', type: 'Group', classes: '', amountPaid: '', date: '' };
 let selectedStudentId = '';
+// Admin Students & Subscriptions: the student's record is split into tabs (one shows at a time).
+const STUDENT_MAINT_TABS = [['profile', 'Profile'], ['subjects', 'Subjects & Classes'], ['fees', 'Fees & Payments'], ['refunds', 'Refunds & Transfers'], ['journey', 'Journey & Notes']];
+let studentMaintTab = 'profile';
+function setStudentMaintTab(t) { studentMaintTab = t; render(); }
 let contactMsg = '';
 let newSubjectCategory = '';
 let selectedSubjectNameId = '';
@@ -12426,7 +12432,7 @@ const SUPPORT_KB = {
 - Payroll (Money): each teacher's earnings for the month, demo bonuses, adjustments, mark paid and salary slips.
 - Expenses (Money): monthly overhead costs such as rent and electricity.
 - Reports & Export (Money): student report, student balances, refunds, Razorpay payments history, net profit and Excel export.
-- Students & Subscriptions (People): add or edit students, enrol them in subjects, record payments, refunds and credit transfers, see subscription history and receipts. Special fee rates sets an agreed per-class rate for one student (used instead of Fee setup). Bill separately keeps a student out of their family's combined fee message. Create all student logins (with no student picked) makes the missing student logins in one go (login ID and first password = student code) with 📤 WhatsApp buttons to send the details.
+- Students & Subscriptions (People): add or edit students, enrol them in subjects, record payments, refunds and credit transfers, see subscription history and receipts. Special fee rates sets an agreed per-class rate for one student (used instead of Fee setup). Bill separately keeps a student out of their family's combined fee message. Create all student logins (with no student picked) makes the missing student logins in one go (login ID and first password = student code) with 📤 WhatsApp buttons to send the details. When a student is open, their record is split into tabs: Profile (registration form, photo, ID card, certificate, grade/board, contact details, mobile numbers, login ID), Subjects & Classes (subject enrollment, paid classes not on the schedule, attendance record, class schedule), Fees & Payments (balances, fee requests and messages, bill separately, record payment, subscription history and receipts, special fee rates), Refunds & Transfers (issue a refund, transfer class credits, move classes to another child in the family), Journey & Notes (where they came from, journey, call log, private teacher notes). The red number on Fees & Payments is the student's pending fee requests.
 - Attendance XP & Levels (People): review the existing student attendance rewards and levels. This is separate from Knowledge Arena Game XP and does not use the Knowledge Arena game scoring system.
 - Student Onboarding & Communication (People): manage student / family onboarding and communication. The call log records calls with the student or parent; use + Add call note to save the conversation and Call again on date to set a follow-up. Demo-stage calls are shown here too.
 - Teachers & Subjects (People): add teachers and subjects, and set which teacher teaches each subject. The Class Frequency button sets how many classes each student has on each weekday (used by Raise fee requests and Rebuild Pending Classes).
@@ -15778,7 +15784,7 @@ function renderStudents() {
       return `<tr><td>${esc(subj.name)}${isEnrolled?'':' <span class="hint">(not enrolled)</span>'}</td><td>${ty}</td><td>${fmtN(subPayments)}</td><td>${fmtN(used)}</td><td>${expiredClasses>0?`<span style="color:var(--brick)">${fmtN(expiredClasses)}</span>`:'—'}</td><td class="${left<=2?'low':'ok'}">${fmtN(left)}</td></tr>`;
     }).join('');
     return rowsForSubject || `<tr><td>${esc(subj.name)}</td><td colspan="4" class="hint">No subscription recorded yet for this subject.</td></tr>`;
-  }).join('') : '<tr><td colspan="5" class="hint">Enroll this student in a subject below to record a subscription.</td></tr>';
+  }).join('') : '<tr><td colspan="5" class="hint">Enroll this student in a subject (Subjects &amp; Classes tab) to record a subscription.</td></tr>';
 
   // ---- payment form (student is fixed; now needs a subject too) — restricted to currently
   // enrolled subjects, since starting a new payment for something they're not taking
@@ -15905,23 +15911,16 @@ function renderStudents() {
 
   const manageStudentOptions = byName(data.students).map(s=>`<option value="${s.id}" ${s.id===student.id?'selected':''}>${esc(studentLabel(s))}${s.archived?' (archived)':''}</option>`).join('');
 
-  return block1 + block2 + `
-    <div class="card">
-      <div class="row-form" style="justify-content:space-between">
-        <div class="row-form" style="margin-bottom:0">
-          <span style="font-family:'Zilla Slab',serif;font-size:17px;font-weight:600">Managing:</span>
-          <select onchange="selectStudent(this.value)">${manageStudentOptions}</select>
-          ${student.archived ? '<span class="tag cat">Archived</span>' : ''}
-        </div>
-        <div>
-          <button class="btn-small" onclick="backToStudentList()">← Back to all students</button>
-          ${student.archived ? '' : `<button class="btn-small" onclick="openSiblingForm('${student.id}')" title="Create a new student record with these parent and contact details already filled in">📋 Copy to new student</button>`}
-          <button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="${student.archived?`toggleArchiveStudent('${student.id}')`:`confirmArchiveStudent('${student.id}')`}">${student.archived?'Unarchive student':'Archive student'}</button>
-        </div>
-      </div>
-      ${siblingFormHtml(student)}
+  const smTab = STUDENT_MAINT_TABS.some(t => t[0] === studentMaintTab) ? studentMaintTab : 'profile';
+  const smPending = pendingFeeRequests(student.id).length;
+  const smGaps = unscheduledGapsFor(student.id).length;
+  const smCallDue = studentCallsReady && studentCallDueOn(student.id);
+  const smBadge = { fees: smPending ? `<span class="sm-tab-count">${smPending}</span>` : '', subjects: smGaps ? '<span class="sm-tab-count" title="Paid classes not on the schedule yet">!</span>' : '', journey: smCallDue ? '<span class="sm-tab-count" title="Call due">📞</span>' : '' };
+  const smTabBar = `<div class="tabs sm-tabs">${STUDENT_MAINT_TABS.map(([k, label]) => `<div class="tab ${k === smTab ? 'active' : ''}" onclick="setStudentMaintTab('${k}')">${label}${smBadge[k] || ''}</div>`).join('')}</div>`;
+  let smInCard = '', smAfter = '';
+  if (smTab === 'profile') {
+    smInCard = `
       ${regFromFormHtml(student.id)}
-      ${studentJourneyHtml(student)}
 
       
       <div class="student-section" style="background:#e8f0fe">
@@ -15999,7 +15998,13 @@ function renderStudents() {
       </div>
 
       </div>
-      ${studentCallLogHtml(student)}
+      <div class="student-section" style="background:#f0f0f4">
+      <h3>Login ID</h3>
+      <h3>Login ID</h3>
+      ${loginHtml}
+      </div>`;
+  } else if (smTab === 'subjects') {
+    smInCard = `
       <div class="student-section" style="background:#f3e8fd">
       <h3>Subject enrollment <button class="help-btn" onclick="openHelp('sub-enrollment',event)">?</button></h3>
       <div class="hint">${student.gradeId ? 'Showing subjects for this student\'s own grade by default.' : 'This student has no Grade set — showing all subjects.'}</div>
@@ -16025,16 +16030,34 @@ function renderStudents() {
       ${enrollTableHtml}
 
       </div>
+      ${studentUnscheduledHtml(student)}`;
+    smAfter = `
+  <div class="card">
+    <h2>Attendance Record</h2>
+    <div class="row-form">
+      <input type="month" value="${studentViewMonth}" onchange="setStudentViewMonth(this.value)">
+    </div>
+    ${(()=>{
+      const ms = data.sessions.filter(s=>s.studentId===student.id && s.date.startsWith(studentViewMonth)).sort((a,b)=>a.date.localeCompare(b.date));
+      if (!ms.length) return '<div class="empty">No classes recorded for this month.</div>';
+      return '<div class="table-scroll"><table><tr><th>Date</th><th>Subject</th><th>Teacher</th><th>Type</th><th>Mode</th><th>Status</th><th>Classes</th><th>Remarks</th></tr>'
+        + ms.map(s=>'<tr><td>'+s.date+'</td><td>'+esc(subjectName(s.subjectId))+'</td><td>'+esc(teacherName(s.teacherId))+'</td><td>'+s.classType+'</td><td>'+s.mode+'</td>'
+          +'<td>'+(s.status==='Present'?'<span class="tag">Present</span>':'<span class="tag absent">Absent</span>')+'</td>'
+          +'<td>'+s.count+'</td><td>'+(s.remarks?esc(s.remarks):'<span class="hint">—</span>')+'</td></tr>').join('')
+        + '</table></div>';
+    })()}
+  </div>
+  ${studentScheduleCardHtml(student.id, '')}`;
+  } else if (smTab === 'fees') {
+    smInCard = `
       <div class="student-section" style="background:#e8f8ee">
       <h3>Subscription balances <button class="help-btn" onclick="openHelp('sub-balances',event)">?</button></h3>
       <div class="table-scroll"><table><tr><th>Subject</th><th>Type</th><th>Subscribed</th><th>Used</th><th>Expired</th><th>Remaining</th></tr>${balRows}</table></div>
-      ${studentUnscheduledHtml(student)}
 
       </div>
-      ${studentSpecialRatesHtml(student, enrolledSubjects)}
       <div class="student-section" style="background:#e8f8ee">
       <h3>Fee requests <button class="help-btn" onclick="openHelp('fee-requests',event)">?</button></h3>
-      <div class="hint">A fee request is a placeholder for an expected payment — it does not add to the student's class count until you mark it Paid. Once paid, it becomes a normal subscription payment below.</div>
+      <div class="hint">A fee request is a placeholder for an expected payment — it does not add to the student's class count until you mark it Paid. Once paid, it becomes a normal subscription payment in the history below.</div>
       ${requestMsg ? `<div class="hint" style="color:var(--brick)">${esc(requestMsg)}</div>` : ''}
       ${requestDraft.subjectId && studentRemaining(student.id, requestDraft.subjectId, requestDraft.type) < 0 ? `<div class="hint" style="color:var(--brick)">⚠ Negative balance: this student is already ${Math.abs(studentRemaining(student.id, requestDraft.subjectId, requestDraft.type))} classes over for ${esc(subjectName(requestDraft.subjectId))} (${requestDraft.type}). A new fee request must cover at least that many classes.</div>` : ''}
       ${enrolledSubjects.length===0 ? '' : `
@@ -16129,7 +16152,7 @@ function renderStudents() {
       <div class="student-section" style="background:#e8f8ee">
       <h3>Record subscription payment <button class="help-btn" onclick="openHelp('record-payment',event)">?</button></h3>
       <div class="hint">Each payment is tied to one subject, and is its own batch of classes. Batches are used up oldest-first within that subject; once one runs out, log a new payment to keep going.</div>
-      ${enrolledSubjects.length===0 ? '<div class="hint">Enroll this student in a subject below before recording a payment.</div>' : ''}
+      ${enrolledSubjects.length===0 ? '<div class="hint">Enroll this student in a subject (Subjects &amp; Classes tab) before recording a payment.</div>' : ''}
       <div class="row-form">
         <select onchange="subDraftSet('subjectId', this.value)">${paySubjectOptions}</select>
         <select onchange="subDraftSet('type', this.value)">${TYPES.map(ty=>`<option value="${ty}" ${subDraft.type===ty?'selected':''}>${ty}</option>`).join('')}</select>
@@ -16159,6 +16182,14 @@ function renderStudents() {
       })() : ''}
 
       </div>
+      <div class="student-section" style="background:#e8f8ee">
+      <h3>Subscription history <button class="help-btn" onclick="openHelp('sub-history',event)">?</button></h3>
+      ${historyHtml}
+
+      </div>
+      ${studentSpecialRatesHtml(student, enrolledSubjects)}`;
+  } else if (smTab === 'refunds') {
+    smInCard = `
       <div class="student-section" style="background:#e8f8ee">
       <h3>Issue a refund <button class="help-btn" onclick="openHelp('issue-refund',event)">?</button></h3>
       <div class="hint">Only unused classes can be refunded — this reduces the subscribed total for that subject, same subject/type only. It doesn't touch the original payment record.</div>
@@ -16206,20 +16237,12 @@ function renderStudents() {
       `}
 
       </div>
-      ${familyTransferCardHtml(student, balanceSubjects)}
-      <div class="student-section" style="background:#e8f8ee">
-      <h3>Subscription history <button class="help-btn" onclick="openHelp('sub-history',event)">?</button></h3>
-      ${historyHtml}
-
-      </div><div class="student-section" style="background:#f0f0f4">
-      <h3>Login ID</h3>
-      ${loginHtml}
-      </div>
-    </div>
-    ${enrollConfirmModalHtml()}
-    ${adminAcademicYearConfirmModalHtml()}
-    ${transferConfirmModalHtml()}
-    ${archiveStudentConfirmId ? (() => { const s = data.students.find(x=>x.id===archiveStudentConfirmId); return `<div class="modal-backdrop" onclick="cancelArchiveStudent()"></div><div class="modal-box"><h3>Archive ${esc(s?s.name:'student')}?</h3>${archiveStudentHasUnused ? `<p style="margin:8px 0 12px">All unused classes will be expired immediately. You can restore them later by editing each payment\'s expiry date.</p>` : ''}${(() => { const reqs = data.subscriptions.filter(r => r.kind === 'Request' && r.studentId === archiveStudentConfirmId); if (!reqs.length) return ''; const kept = reqs.filter(paymentInitiated).length; return `<p style="margin:8px 0 12px">${reqs.length - kept ? `${reqs.length - kept} pending fee request${reqs.length - kept === 1 ? '' : 's'} will be cancelled.` : ''}${kept ? ` ${kept} request${kept === 1 ? '' : 's'} with a payment reference (parent may have paid) will be kept for you to check.` : ''}</p>`; })()}${journeyReady ? `<div class="row-form" style="margin:8px 0"><label>Left on <input type="date" id="archiveLeftOn" value="${todayStr}" max="${todayStr}"></label></div><div class="row-form" style="margin:8px 0"><label>Why did they leave? <select id="archiveLeftReason"><option value="">Pick a reason…</option>${JOURNEY_LEFT_REASONS.map(r => `<option>${esc(r)}</option>`).join('')}</select></label></div><div class="row-form" style="margin:8px 0 16px"><label>Note <input type="text" id="archiveLeftNote" placeholder="optional" style="width:220px"></label></div>` : '<p class="hint">Run SQL 81 to save when and why students leave.</p>'}<div class="row-form"><button class="btn-small" onclick="cancelArchiveStudent()">Cancel</button><button class="btn-primary" style="background:var(--brick);border-color:var(--brick)" onclick="archiveStudentFromModal('${archiveStudentConfirmId}')">${archiveStudentHasUnused ? 'Archive &amp; expire classes' : 'Archive student'}</button></div></div>`; })() : ''}
+      ${familyTransferCardHtml(student, balanceSubjects)}`;
+  } else if (smTab === 'journey') {
+    smInCard = `
+      ${studentJourneyHtml(student)}
+      ${studentCallLogHtml(student)}`;
+    smAfter = `
   ${(() => {
     // Private notes for this student from all teachers (admin read + delete only)
     const privRows = teacherPrivateNotes.filter(function(n){ return n.studentId===student.id && n.note; });
@@ -16237,23 +16260,32 @@ function renderStudents() {
       </div>`;
     }).join('');
     return `<div class="card"><h2>🔒 Private Teacher Notes</h2><div class="hint" style="margin-bottom:10px">These notes are entered by teachers and are <b>not visible to students or parents</b>.</div>${noteItems}</div>`;
-  })()}
-  <div class="card">
-    <h2>Attendance Record</h2>
-    <div class="row-form">
-      <input type="month" value="${studentViewMonth}" onchange="setStudentViewMonth(this.value)">
+  })()}`;
+  }
+
+  return block1 + block2 + `
+    <div class="card">
+      <div class="row-form" style="justify-content:space-between">
+        <div class="row-form" style="margin-bottom:0">
+          <span style="font-family:'Zilla Slab',serif;font-size:17px;font-weight:600">Managing:</span>
+          <select onchange="selectStudent(this.value)">${manageStudentOptions}</select>
+          ${student.archived ? '<span class="tag cat">Archived</span>' : ''}
+        </div>
+        <div>
+          <button class="btn-small" onclick="backToStudentList()">← Back to all students</button>
+          ${student.archived ? '' : `<button class="btn-small" onclick="openSiblingForm('${student.id}')" title="Create a new student record with these parent and contact details already filled in">📋 Copy to new student</button>`}
+          <button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="${student.archived?`toggleArchiveStudent('${student.id}')`:`confirmArchiveStudent('${student.id}')`}">${student.archived?'Unarchive student':'Archive student'}</button>
+        </div>
+      </div>
+      ${siblingFormHtml(student)}
+      ${smTabBar}
+      ${smInCard}
     </div>
-    ${(()=>{
-      const ms = data.sessions.filter(s=>s.studentId===student.id && s.date.startsWith(studentViewMonth)).sort((a,b)=>a.date.localeCompare(b.date));
-      if (!ms.length) return '<div class="empty">No classes recorded for this month.</div>';
-      return '<div class="table-scroll"><table><tr><th>Date</th><th>Subject</th><th>Teacher</th><th>Type</th><th>Mode</th><th>Status</th><th>Classes</th><th>Remarks</th></tr>'
-        + ms.map(s=>'<tr><td>'+s.date+'</td><td>'+esc(subjectName(s.subjectId))+'</td><td>'+esc(teacherName(s.teacherId))+'</td><td>'+s.classType+'</td><td>'+s.mode+'</td>'
-          +'<td>'+(s.status==='Present'?'<span class="tag">Present</span>':'<span class="tag absent">Absent</span>')+'</td>'
-          +'<td>'+s.count+'</td><td>'+(s.remarks?esc(s.remarks):'<span class="hint">—</span>')+'</td></tr>').join('')
-        + '</table></div>';
-    })()}
-  </div>
-  ${studentScheduleCardHtml(student.id, '')}
+    ${enrollConfirmModalHtml()}
+    ${adminAcademicYearConfirmModalHtml()}
+    ${transferConfirmModalHtml()}
+    ${archiveStudentConfirmId ? (() => { const s = data.students.find(x=>x.id===archiveStudentConfirmId); return `<div class="modal-backdrop" onclick="cancelArchiveStudent()"></div><div class="modal-box"><h3>Archive ${esc(s?s.name:'student')}?</h3>${archiveStudentHasUnused ? `<p style="margin:8px 0 12px">All unused classes will be expired immediately. You can restore them later by editing each payment\'s expiry date.</p>` : ''}${(() => { const reqs = data.subscriptions.filter(r => r.kind === 'Request' && r.studentId === archiveStudentConfirmId); if (!reqs.length) return ''; const kept = reqs.filter(paymentInitiated).length; return `<p style="margin:8px 0 12px">${reqs.length - kept ? `${reqs.length - kept} pending fee request${reqs.length - kept === 1 ? '' : 's'} will be cancelled.` : ''}${kept ? ` ${kept} request${kept === 1 ? '' : 's'} with a payment reference (parent may have paid) will be kept for you to check.` : ''}</p>`; })()}${journeyReady ? `<div class="row-form" style="margin:8px 0"><label>Left on <input type="date" id="archiveLeftOn" value="${todayStr}" max="${todayStr}"></label></div><div class="row-form" style="margin:8px 0"><label>Why did they leave? <select id="archiveLeftReason"><option value="">Pick a reason…</option>${JOURNEY_LEFT_REASONS.map(r => `<option>${esc(r)}</option>`).join('')}</select></label></div><div class="row-form" style="margin:8px 0 16px"><label>Note <input type="text" id="archiveLeftNote" placeholder="optional" style="width:220px"></label></div>` : '<p class="hint">Run SQL 81 to save when and why students leave.</p>'}<div class="row-form"><button class="btn-small" onclick="cancelArchiveStudent()">Cancel</button><button class="btn-primary" style="background:var(--brick);border-color:var(--brick)" onclick="archiveStudentFromModal('${archiveStudentConfirmId}')">${archiveStudentHasUnused ? 'Archive &amp; expire classes' : 'Archive student'}</button></div></div>`; })() : ''}
+  ${smAfter}
   `;
 }
 
@@ -17652,6 +17684,7 @@ async function saveJourneyLeft(id) {
 }
 // From the Student Journey page: open one student's Journey (or the whole Student Maintenance page).
 function openStudentJourney(id, toJourney) {
+  if (toJourney) studentMaintTab = 'journey';
   setTab('students'); selectStudent(id);
   if (toJourney) setTimeout(() => { const el = document.getElementById('studentJourney'); if (el) el.scrollIntoView({ block: 'start' }); }, 50);
 }
@@ -17910,7 +17943,7 @@ function studentCallsDueCardHtml() {
       <h2>📞 Student calls due ${helpBtn('student-calls')}</h2>
       <div class="hint">Students whose latest call note says "Call again on" today or earlier.</div>
       <ul class="list">${due.map(s => `<li><span>${esc(studentLabel(s))} <span class="hint" style="color:var(--brick)">call again ${esc(dayDate(studentCallDueOn(s.id)))}</span></span>
-        <button class="btn-small btn-primary" onclick="selectStudent('${s.id}')">Open →</button></li>`).join('')}</ul>
+        <button class="btn-small btn-primary" onclick="studentMaintTab='journey';selectStudent('${s.id}')">Open →</button></li>`).join('')}</ul>
     </div>`;
 }
 // What the parent filled in on the Wix booking form. form_data (SQL 69) is the whole form as Wix sent it;
