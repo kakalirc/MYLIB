@@ -847,7 +847,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-20 19:55 IST'; // Edit payment: move to the right subject's monthly request, or save as an extra payment
+const BUILD_TIMESTAMP = '2026-11-20 20:30 IST'; // Archiving a student cancels their pending (unpaid) fee requests
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -10603,6 +10603,17 @@ async function toggleArchiveStudent(id, leaving) {
       await sb.rpc('apply_subscription_expiry', { p_force: true });
       expiryIndexCache = null;
     }
+    // Cancel the student's pending (unpaid) fee requests, the same way the ✕ Cancel request button does.
+    // A request with a payment reference (parent may have paid) is kept so the admin can check it.
+    const cancelIds = data.subscriptions.filter(r => r.studentId === id && r.kind === 'Request' && !paymentInitiated(r)).map(r => r.id);
+    if (cancelIds.length) {
+      const { error: reqErr } = await sb.from('subscriptions').delete().in('id', cancelIds).eq('kind', 'Request');
+      if (reqErr) alert('The student is archived, but their pending fee requests could not be cancelled: ' + reqErr.message + '. Cancel them on the Fees page.');
+      else {
+        data.subscriptions = data.subscriptions.filter(r => !cancelIds.includes(r.id));
+        const e = await repriceFamilyRequests(id); if (e) alert(e);   // the rest of the family may drop a discount tier
+      }
+    }
   }
   render();
 }
@@ -16208,7 +16219,7 @@ function renderStudents() {
     ${enrollConfirmModalHtml()}
     ${adminAcademicYearConfirmModalHtml()}
     ${transferConfirmModalHtml()}
-    ${archiveStudentConfirmId ? (() => { const s = data.students.find(x=>x.id===archiveStudentConfirmId); return `<div class="modal-backdrop" onclick="cancelArchiveStudent()"></div><div class="modal-box"><h3>Archive ${esc(s?s.name:'student')}?</h3>${archiveStudentHasUnused ? `<p style="margin:8px 0 12px">All unused classes will be expired immediately. You can restore them later by editing each payment\'s expiry date.</p>` : ''}${journeyReady ? `<div class="row-form" style="margin:8px 0"><label>Left on <input type="date" id="archiveLeftOn" value="${todayStr}" max="${todayStr}"></label></div><div class="row-form" style="margin:8px 0"><label>Why did they leave? <select id="archiveLeftReason"><option value="">Pick a reason…</option>${JOURNEY_LEFT_REASONS.map(r => `<option>${esc(r)}</option>`).join('')}</select></label></div><div class="row-form" style="margin:8px 0 16px"><label>Note <input type="text" id="archiveLeftNote" placeholder="optional" style="width:220px"></label></div>` : '<p class="hint">Run SQL 81 to save when and why students leave.</p>'}<div class="row-form"><button class="btn-small" onclick="cancelArchiveStudent()">Cancel</button><button class="btn-primary" style="background:var(--brick);border-color:var(--brick)" onclick="archiveStudentFromModal('${archiveStudentConfirmId}')">${archiveStudentHasUnused ? 'Archive &amp; expire classes' : 'Archive student'}</button></div></div>`; })() : ''}
+    ${archiveStudentConfirmId ? (() => { const s = data.students.find(x=>x.id===archiveStudentConfirmId); return `<div class="modal-backdrop" onclick="cancelArchiveStudent()"></div><div class="modal-box"><h3>Archive ${esc(s?s.name:'student')}?</h3>${archiveStudentHasUnused ? `<p style="margin:8px 0 12px">All unused classes will be expired immediately. You can restore them later by editing each payment\'s expiry date.</p>` : ''}${(() => { const reqs = data.subscriptions.filter(r => r.kind === 'Request' && r.studentId === archiveStudentConfirmId); if (!reqs.length) return ''; const kept = reqs.filter(paymentInitiated).length; return `<p style="margin:8px 0 12px">${reqs.length - kept ? `${reqs.length - kept} pending fee request${reqs.length - kept === 1 ? '' : 's'} will be cancelled.` : ''}${kept ? ` ${kept} request${kept === 1 ? '' : 's'} with a payment reference (parent may have paid) will be kept for you to check.` : ''}</p>`; })()}${journeyReady ? `<div class="row-form" style="margin:8px 0"><label>Left on <input type="date" id="archiveLeftOn" value="${todayStr}" max="${todayStr}"></label></div><div class="row-form" style="margin:8px 0"><label>Why did they leave? <select id="archiveLeftReason"><option value="">Pick a reason…</option>${JOURNEY_LEFT_REASONS.map(r => `<option>${esc(r)}</option>`).join('')}</select></label></div><div class="row-form" style="margin:8px 0 16px"><label>Note <input type="text" id="archiveLeftNote" placeholder="optional" style="width:220px"></label></div>` : '<p class="hint">Run SQL 81 to save when and why students leave.</p>'}<div class="row-form"><button class="btn-small" onclick="cancelArchiveStudent()">Cancel</button><button class="btn-primary" style="background:var(--brick);border-color:var(--brick)" onclick="archiveStudentFromModal('${archiveStudentConfirmId}')">${archiveStudentHasUnused ? 'Archive &amp; expire classes' : 'Archive student'}</button></div></div>`; })() : ''}
   ${(() => {
     // Private notes for this student from all teachers (admin read + delete only)
     const privRows = teacherPrivateNotes.filter(function(n){ return n.studentId===student.id && n.note; });
