@@ -18056,18 +18056,18 @@ function wixConvertedElsewhereHtml(b) {
   return `<div style="margin-top:8px;padding:8px;border:1px solid var(--forest);border-radius:6px;font-size:12px;background:rgba(60,94,66,0.07)">🎓 Demo Register shows this demo Converted${st ? ' (student <b>' + esc(st.name) + '</b>)' : ''} on ${esc(dayDate(dl.convertedAt || dl.date))}, but ${done ? 'this booking is not linked to that student' : 'this booking still says ' + esc(b.status)}.
     <button class="btn-small btn-primary" style="background:var(--forest);margin-left:6px;font-size:11px" onclick="wixSyncConverted('${b.id}','${dl.id}')">✓ ${done ? 'Link student here' : 'Mark Converted here'}</button></div>`;
 }
-// Converted demo in Demo Register for this booking: linked, same parent mobile, or same name.
+// Only use the Demo Register record explicitly linked to this Wix booking.
+// Name/mobile matching can attach a different demo (including another subject or teacher).
 function wixConvertedDemoFor(b) {
-  const ph = phoneKey(b.phone), nm = (b.studentName || '').trim().toLowerCase();
-  return data.demoLogs.find(d => d.status === 'Converted' && d.linkedStudentId && (d.id === b.demoLogId
-    || (ph && phoneKey(d.parentMobile) === ph) || (nm && (d.studentName || '').trim().toLowerCase() === nm))) || null;
+  if (!b?.demoLogId) return null;
+  return data.demoLogs.find(d => d.id === b.demoLogId && d.status === 'Converted' && d.linkedStudentId) || null;
 }
 // Undo a converted Wix demo directly from its Demo Bookings card.
 async function wixUndoConversion(bookingId) {
   if (currentRole !== 'Admin') return;
   const wb = data.wixBookings.find(b => b.id === bookingId);
   if (!wb) { wixBookingsMsg = 'Booking not found. Refresh and try again.'; render(); return; }
-  const dl = wb.demoLogId ? data.demoLogs.find(d => d.id === wb.demoLogId) : wixConvertedDemoFor(wb);
+  const dl = wixConvertedDemoFor(wb);
   if (!dl || dl.status !== 'Converted' || !dl.linkedStudentId) {
     wixBookingsMsg = 'No linked converted Demo Register record was found. No changes were made.'; render(); return;
   }
