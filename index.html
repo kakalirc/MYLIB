@@ -18057,10 +18057,15 @@ function wixConvertedElsewhereHtml(b) {
     <button class="btn-small btn-primary" style="background:var(--forest);margin-left:6px;font-size:11px" onclick="wixSyncConverted('${b.id}','${dl.id}')">✓ ${done ? 'Link student here' : 'Mark Converted here'}</button></div>`;
 }
 // Only use the Demo Register record explicitly linked to this Wix booking.
-// Name/mobile matching can attach a different demo (including another subject or teacher).
+// Reject a stale cross-subject link: it can otherwise show another demo's teacher/bonus.
 function wixConvertedDemoFor(b) {
   if (!b?.demoLogId) return null;
-  return data.demoLogs.find(d => d.id === b.demoLogId && d.status === 'Converted' && d.linkedStudentId) || null;
+  const demo = data.demoLogs.find(d => d.id === b.demoLogId && d.status === 'Converted' && d.linkedStudentId);
+  if (!demo) return null;
+  const bookingSubject = String(b.subject || '').trim().toLowerCase();
+  const demoSubject = String(subjectName(demo.subjectId) || '').trim().toLowerCase();
+  if (bookingSubject && demoSubject && demoSubject !== '—' && bookingSubject !== demoSubject) return null;
+  return demo;
 }
 // Undo a converted Wix demo directly from its Demo Bookings card.
 async function wixUndoConversion(bookingId) {
@@ -18217,7 +18222,7 @@ function renderWixBookings() {
     }
 
     const showAge = b.status === 'New' || b.status === 'Scheduled';
-    const convertedDemo = b.status === 'Converted' ? (b.demoLogId ? data.demoLogs.find(x => x.id === b.demoLogId) : wixConvertedDemoFor(b)) : null;
+    const convertedDemo = b.status === 'Converted' ? wixConvertedDemoFor(b) : null;
     const bonusTeacher = convertedDemo?.teacherId ? (data.teachers.find(t => t.id === convertedDemo.teacherId) || {}).name || 'Teacher not found' : 'Not recorded';
     const bonusAmount = convertedDemo && Number.isFinite(Number(convertedDemo.bonusAmount)) ? Number(convertedDemo.bonusAmount) : null;
     const teacherBonusBlock = convertedDemo ? `<div style="margin-top:8px;padding:9px 10px;border:1px solid var(--border);border-radius:6px;background:var(--hover,rgba(0,0,0,.03));font-size:12px"><div style="font-weight:700;margin-bottom:4px">Teacher bonus</div><div>Teacher: <b>${esc(bonusTeacher)}</b></div><div>Bonus: <b>${bonusAmount === null ? 'Not recorded' : '₹' + bonusAmount.toLocaleString('en-IN')}</b></div><div>Payment: <b style="color:${demoBonusIsPaid(convertedDemo) ? 'var(--forest)' : 'var(--brick)'}">${demoBonusIsPaid(convertedDemo) ? 'Already paid' : bonusAmount > 0 ? 'Payable' : 'No payable bonus recorded'}</b></div>${!demoBonusIsPaid(convertedDemo) ? `<button class="btn-small" style="margin-top:7px;color:var(--brick);border-color:var(--brick)" onclick="wixUndoConversion('${b.id}')">↩ Undo Conversion</button><div class="hint" style="font-size:11px;margin-top:4px">Available only while the teacher bonus is unpaid.</div>` : ''}</div>` : '';
