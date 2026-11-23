@@ -849,7 +849,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-20 21:15 IST'; // Students & Subscriptions: student record split into tabs
+const BUILD_TIMESTAMP = '2026-11-23 11:45 IST'; // Set up weekly schedule from the student page + Open student after registration Accept
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -12422,7 +12422,7 @@ const SUPPORT_KB = {
 - Class Log (Daily work): record a class for a teacher. Pick the date and teacher, then student, subject, Group/Individual, Online/Offline and Present or Absent (Absent still uses a class). The list below shows the Selected day or the Whole month.
 - Communication (Daily work): chat with teachers, students and parents, and post announcements.
 - Demo Bookings (Daily work): demo bookings from the website arrive here (New → Scheduled → Done → Converted or Lost, or Cancelled). Teachers mark their own demos Done on their Dashboard; admins can set any status, mark Lost with an optional reason, and skip straight from Pending to Converted. A converted demo gives the teacher a demo bonus. The Demo Register shows Demo results per teacher (Converted %) and why demos were lost.
-- New registrations (Daily work): forms families send from the public link app.libeducation.com/register.html (no login). Accept adds the student (or a brother/sister to a family with the same mobile) and makes the parent login (mobile) and student login (student code); Reject (Reopen undoes it) or Archive (Show archived, Unarchive); nothing is deleted. The student's page shows what the form said that isn't on the record (subjects wanted, school, how they heard, message). Copy or WhatsApp the link from this page.
+- New registrations (Daily work): after Accept, Open student goes to the new student's Subjects & Classes tab to add the subject, payment and schedule. Forms families send from the public link app.libeducation.com/register.html (no login). Accept adds the student (or a brother/sister to a family with the same mobile) and makes the parent login (mobile) and student login (student code); Reject (Reopen undoes it) or Archive (Show archived, Unarchive); nothing is deleted. The student's page shows what the form said that isn't on the record (subjects wanted, school, how they heard, message). Copy or WhatsApp the link from this page.
 - Support (Daily work): view and resolve issues raised by teachers, students or parents.
 - New subscriptions and renewals (top of the Rebuild Pending Classes page): adds paid classes that are not on the schedule yet (new students, renewals) after the last scheduled class, from Class Frequency and saved timings. Only adds, never deletes. Runs by itself every night at 1 AM; Preview then Confirm to run it now. A student's page shows paid classes not on the schedule with an Add button. Students with no Class Frequency or no teacher are listed under Needs setup.
 - Rebuild Pending Classes (Daily work): rebuild the upcoming class schedule from each student's Class Frequency. Preview first. Only future Pending classes are removed; new classes get placeholder times (Group 00:00, Individual 01:00/02:00) that the teacher corrects.
@@ -12432,7 +12432,7 @@ const SUPPORT_KB = {
 - Payroll (Money): each teacher's earnings for the month, demo bonuses, adjustments, mark paid and salary slips.
 - Expenses (Money): monthly overhead costs such as rent and electricity.
 - Reports & Export (Money): student report, student balances, refunds, Razorpay payments history, net profit and Excel export.
-- Students & Subscriptions (People): add or edit students, enrol them in subjects, record payments, refunds and credit transfers, see subscription history and receipts. Special fee rates sets an agreed per-class rate for one student (used instead of Fee setup). Bill separately keeps a student out of their family's combined fee message. Create all student logins (with no student picked) makes the missing student logins in one go (login ID and first password = student code) with 📤 WhatsApp buttons to send the details. When a student is open, their record is split into tabs: Profile (registration form, photo, ID card, certificate, grade/board, contact details, mobile numbers, login ID), Subjects & Classes (subject enrollment, paid classes not on the schedule, attendance record, class schedule), Fees & Payments (balances, fee requests and messages, bill separately, record payment, subscription history and receipts, special fee rates), Refunds & Transfers (issue a refund, transfer class credits, move classes to another child in the family), Journey & Notes (where they came from, journey, call log, private teacher notes). The red number on Fees & Payments is the student's pending fee requests.
+- Students & Subscriptions (People): add or edit students, enrol them in subjects (Subjects & Classes tab: Set up weekly schedule button per subject opens the weekly schedule setup for it), record payments, refunds and credit transfers, see subscription history and receipts. Special fee rates sets an agreed per-class rate for one student (used instead of Fee setup). Bill separately keeps a student out of their family's combined fee message. Create all student logins (with no student picked) makes the missing student logins in one go (login ID and first password = student code) with 📤 WhatsApp buttons to send the details. When a student is open, their record is split into tabs: Profile (registration form, photo, ID card, certificate, grade/board, contact details, mobile numbers, login ID), Subjects & Classes (subject enrollment, paid classes not on the schedule, attendance record, class schedule), Fees & Payments (balances, fee requests and messages, bill separately, record payment, subscription history and receipts, special fee rates), Refunds & Transfers (issue a refund, transfer class credits, move classes to another child in the family), Journey & Notes (where they came from, journey, call log, private teacher notes). The red number on Fees & Payments is the student's pending fee requests.
 - Attendance XP & Levels (People): review the existing student attendance rewards and levels. This is separate from Knowledge Arena Game XP and does not use the Knowledge Arena game scoring system.
 - Student Onboarding & Communication (People): manage student / family onboarding and communication. The call log records calls with the student or parent; use + Add call note to save the conversation and Call again on date to set a follow-up. Demo-stage calls are shown here too.
 - Teachers & Subjects (People): add teachers and subjects, and set which teacher teaches each subject. The Class Frequency button sets how many classes each student has on each weekday (used by Raise fee requests and Rebuild Pending Classes).
@@ -15712,6 +15712,60 @@ function renderSetup() {
 }
 
 
+// ---------- Student page: shortcuts to the weekly schedule setup ----------
+// One button per class type the student has paid for in this subject. Opens Teachers & Subjects
+// with the subject's teacher chosen and the "Set up weekly schedule" card filled in.
+// No Class Frequency yet: the button opens the Class Frequency editor for this student and subject instead.
+let studentFreqLoadStarted = false;
+function studentScheduleButtonsHtml(student, subjectId) {
+  const subj = data.subjects.find(x => x.id === subjectId);
+  if (student.archived || !subj) return '';
+  // Admins don't load Class Frequency at login; load it once so the button knows whether it is set.
+  if (!studentFreqLoadStarted && !frequencyLoading) { studentFreqLoadStarted = true; loadClassFrequencyRows().then(() => render()); }
+  if (!subj.teacherId) return '<span class="hint" style="margin-right:6px">No teacher for this subject</span>';
+  const types = scheduleTypeOptionsFor(student.id, subjectId);
+  if (!types.length) return '<span class="hint" style="margin-right:6px">Record a payment first</span>';
+  if (frequencyRows.length && !frequencyRowFor(student.id, subjectId)) {
+    return `<button class="btn-small" style="margin-right:6px" onclick="studentOpenFrequency('${student.id}','${subjectId}')" title="Set how many classes on each weekday before setting up the weekly schedule">Set Class Frequency</button>`;
+  }
+  return types.map(ty => `<button class="btn-small btn-primary" style="margin-right:6px" onclick="studentOpenWeeklySetup('${student.id}','${subjectId}','${ty}')">Set up weekly schedule${types.length > 1 ? ' (' + ty + ')' : ''}</button>`).join('');
+}
+async function studentOpenWeeklySetup(studentId, subjectId, classType) {
+  const subj = data.subjects.find(x => x.id === subjectId);
+  if (!subj || !subj.teacherId) return;
+  setTab('setup');
+  setupSubTab = 'teachers';
+  selectTeacher(subj.teacherId);
+  // Set the teacher on the weekly card first so renderTeacherSchedule keeps this draft.
+  weeklyPatternTeacherId = subj.teacherId;
+  weeklyPatternAdminFreqLoaded = true;
+  weeklyGeneratedView = null;
+  weeklyPatternPreview = null;
+  weeklyPatternDraft = { studentId: studentId, subjectId: subjectId, classType: classType, startDate: todayStr, days: [] };
+  weeklyPatternMsg = 'Loading saved Class Frequency…';
+  render();
+  studentScrollToWeeklySetup();
+  await Promise.all([loadClassFrequencyRows(), loadScheduledClasses()]);
+  weeklyPatternLoadDaysFromFrequency();
+  weeklyPatternMsg = frequencyLoadError ? 'Could not load the saved Class Frequency. Refresh and try again.' : '';
+  render();
+  studentScrollToWeeklySetup();
+}
+function studentScrollToWeeklySetup() {
+  setTimeout(() => { const el = document.getElementById('weeklySetupCard'); if (el) el.scrollIntoView({ block: 'start' }); }, 0);
+}
+async function studentOpenFrequency(studentId, subjectId) {
+  setTab('setup');
+  setupSubTab = 'frequency';
+  await refreshFrequencySetupData();
+  frequencySearch = '';
+  frequencyFilterSubjectId = subjectId;
+  frequencyFilterStatus = 'all';
+  frequencyFilterDay = '';
+  frequencyFiltersApplied = true;
+  startFrequencyEditor(studentId, subjectId);
+}
+
 // ---------- render: students ----------
 function renderStudents() {
   const activeStudentOpts = byName(data.students.filter(s=>!s.archived)).map(s=>{const lb=subjectsForStudent(s.id).flatMap(subj=>TYPES.filter(ty=>data.subscriptions.some(p=>p.studentId===s.id&&p.subjectId===subj.id&&p.type===ty&&['Payment','TransferIn'].includes(p.kind))).map(ty=>studentRemaining(s.id,subj.id,ty))).reduce((a,v)=>Math.min(a,v),Infinity);const bal=isFinite(lb)?` [${lb<=0?'⚠ ':' '}${lb}]`:'';return `<option value="${s.id}" ${selectedStudentId===s.id?'selected':''}>${esc(studentLabel(s))}${bal}</option>`;}).join('');
@@ -15893,7 +15947,7 @@ function renderStudents() {
   const mySubjects = data.studentSubjects.filter(m=>m.studentId===student.id);
   const enrollTableHtml = mySubjects.length ? `
     <div class="table-scroll"><table>
-      <tr><th>Subject</th><th>Category</th><th>Teacher</th><th>Enrolled</th><th>Online Class Link</th><th></th></tr>
+      <tr><th>Subject</th><th>Category</th><th>Teacher</th><th>Enrolled</th><th>Online Class Link</th><th>Schedule</th></tr>
       ${mySubjects.slice().sort((a,b)=>(a.enrolledAt||'').localeCompare(b.enrolledAt||'')).map(m=>{
         const subj = subject(m.subjectId);
         const tch = subj ? data.teachers.find(t=>t.id===subj.teacherId) : null;
@@ -15904,7 +15958,7 @@ function renderStudents() {
           <td>${subj?esc(teacherName(subj.teacherId)):'—'}</td>
           <td>${m.enrolledAt || '<span class="hint">—</span>'}</td>
           <td>${link}</td>
-          <td><button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="removeEnrollment('${m.id}')">Remove</button></td>
+          <td>${studentScheduleButtonsHtml(student, m.subjectId)}<button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="removeEnrollment('${m.id}')">Remove</button></td>
         </tr>`;
       }).join('')}
     </table></div>` : '<div class="empty">No subjects enrolled yet.</div>';
@@ -21177,7 +21231,7 @@ function renderTeacherSchedule(teacher, isAdminCaller) {
   const groups = groupScheduleBySlot(viewList);
 
   const setupCardsHtml = `
-    <div class="card">
+    <div class="card" id="weeklySetupCard">
       <h2>Set up weekly schedule <button class="help-btn" onclick="openHelp('weekly-setup',event)">?</button></h2>
       ${weeklyPatternMsg ? `<div class="hint" style="color:${/^(Generated|Updated|Updating|Preview ready|Removed|Class date|Saving|Loading)/.test(weeklyPatternMsg)&&!/ failed:/.test(weeklyPatternMsg)?'var(--forest)':'var(--brick)'}">${esc(weeklyPatternMsg)}</div>` : ''}
       <div class="row-form">
@@ -23518,7 +23572,7 @@ function renderPortalShell(bodyHtml) {
 }
 
 const HELP = {
-  'sub-enrollment': { t:'Subject enrollment', b:'<ul><li>Lists subjects this student is currently studying.</li><li>Add a subject to allow payments, scheduling and attendance for it.</li><li>Remove to stop new scheduling — existing records are kept.</li><li>The Online Class Link column shows the teacher\'s join link (Zoom/Meet) — click Join ↗ to open it directly.</li></ul>' },
+  'sub-enrollment': { t:'Subject enrollment', b:'<ul><li>Lists subjects this student is currently studying.</li><li>Add a subject to allow payments, scheduling and attendance for it.</li><li>Remove to stop new scheduling — existing records are kept.</li><li>The Online Class Link column shows the teacher\'s join link (Zoom/Meet) — click Join ↗ to open it directly.</li><li><b>Set up weekly schedule</b> (Schedule column) opens the teacher\'s weekly schedule card with this student, subject and class type filled in. If the Class Frequency is not set yet, the button says <b>Set Class Frequency</b> instead. It needs a teacher for the subject and a recorded payment.</li></ul>' },
   'sub-balances': { t:'Subscription balances', b:'<ul><li>Shows subscribed, used and remaining classes per subject and class type.</li><li>Classes are drawn from the oldest payment first.</li><li>A balance of 0 or below means the student needs to renew.</li><li>Pending fee requests are not counted until marked Paid.</li></ul>' },
   'fee-requests': { t:'Fee requests', b:"<ul><li>A placeholder for an expected payment — doesn't add to the class count until marked Paid.</li><li>Use it when a parent confirms they will pay soon.</li><li>Amount fills in by itself from Fee setup (rate for the subject's category, Group/Individual and Online/Offline × classes, with the discount tier applied). Online/Offline starts on the mode the student uses most. You can type your own amount for a special price.</li><li><b>Calculate</b> fills classes and amount with the same rules as Fees › Raise fee requests (package, regular weekdays, irregular, owed classes) for this month, and the working is saved on the request.</li><li>Once marked Paid it becomes a real payment and classes are added.</li><li>Message makes one WhatsApp message for the student's whole family (see the ? next to Short reminder in the message box).</li></ul>" },
   'record-payment': { t:'Record subscription payment', b:'<ul><li>Records a new class purchase for this student.</li><li>Pick subject, class type, Online/Offline and number of classes. The amount fills in from Fee setup (rate × classes, less any discount) — you can type a different amount.</li><li>The payment date sets the expiry date (120 to 365 days depending on batch size).</li><li>Reference and Remarks are optional, for your records.</li></ul>' },
@@ -29241,7 +29295,7 @@ async function regAccept(id, conversionMode = 'without') {
     if (!conversionResult.ok) notes.push('Registration accepted and student linked, but demo conversion needs attention: ' + conversionResult.message);
   }
   regDone[id] = { studentId, phones, notes, message: regWelcomeMessage(r, row.name, parentLine, studentLine) };
-  regBusy = false; regAcceptId = '';
+  regBusy = false; regAcceptId = ''; regLastAcceptedId = studentId;
   regMsg = row.name + (row.student_code || row.code ? ' (' + (row.student_code || row.code) + ')' : '') + (isNewStudent ? ' created' : ' linked to the existing student record') + '. Registration accepted.' + (conversionMode === 'convert' ? (conversionResult && conversionResult.ok ? ' Demo converted; ₹100 bonus will appear in payroll.' + conversionResult.message : ' Demo conversion did not complete; see the note on this registration and retry after review.') : ' No demo conversion was performed.');
   trackUse('registration-accept');
   await loadRegistrations();
@@ -29279,12 +29333,13 @@ function regWelcomeMessage(r, name, parentLine, studentLine) {
   lines.push('', ...APP_LINK_LINES);
   return lines.join('\n');
 }
-function regOpenStudent(id) { setTab('students'); selectStudent(id); }
+function regOpenStudent(id, tab) { setTab('students'); selectStudent(id); if (tab) setStudentMaintTab(tab); }
 function regSendLink() {
   const n = phoneKey(regSendTo);
   if (!n) { regMsg = 'Type a 10-digit mobile number.'; render(); return; }
   launchWhatsApp(n, regLinkMessage(), isMobileDevice() ? 'web' : 'app');
 }
+let regLastAcceptedId = ''; // student from the last Accept, for the Open student button beside the message
 function regCardHtml(r) {
   const flags = regFlags(r), kids = regFamily(r), done = regDone[r.id];
   const st = r.student_id ? data.students.find(s => s.id === r.student_id) : null;
@@ -29341,10 +29396,11 @@ function regCardHtml(r) {
   } else if (r.status === 'Accepted') {
     const demos = st ? regDemoCandidates(r, st.id) : [];
     const demoBlock = demos.length ? `<div style="margin-top:8px;padding:8px;background:#f6f3ea;border:1px solid var(--line);border-radius:6px"><b style="font-size:12px">Possible demo records (${demos.length})</b><div class="hint" style="font-size:11px">Name and contact details suggest a match. Confirm each link individually. Linking does not convert the demo or trigger a bonus.</div>${demos.map(dl=>`<div class="row-form" style="margin-top:5px"><span style="font-size:12px">${esc(dayDate(dl.date))} · ${esc(dl.studentName)} · ${esc(dl.status)}${dl.linkedStudentId===st.id?' · Already linked': ''}</span>${dl.linkedStudentId===st.id?'<span class="hint">Linked</span>':`<button class="btn-small" onclick="regLinkDemo('${r.id}','${dl.id}')">Link this demo</button>`}</div>`).join('')}</div>` : (st ? '<div class="hint" style="margin-top:6px">No matching demo record found. This registration can proceed as a direct admission.</div>' : '');
-    action = `<div class="row-form" style="margin-top:8px">${st ? `<button class="btn-small" onclick="regOpenStudent('${st.id}')">Open ${esc(st.name)}${st.code ? ' (' + esc(st.code) + ')' : ''}</button>` : '<span class="hint">Student no longer found.</span>'}
+    action = `<div class="row-form" style="margin-top:8px">${st ? `<button class="btn-small btn-primary" onclick="regOpenStudent('${st.id}','subjects')" title="Opens the student's Subjects &amp; Classes tab">Open ${esc(st.name)}${st.code ? ' (' + esc(st.code) + ')' : ''}</button>` : '<span class="hint">Student no longer found.</span>'}
       ${done ? done.phones.map(n => waButtonHtml(n, '📤 ' + esc(n), done.message)).join(' ') : ''}</div>
       ${demoBlock}
       ${done && done.notes.length ? `<div class="hint" style="color:var(--brick)">${done.notes.map(esc).join('<br>')}</div>` : ''}
+      ${st && !st.archived && !subjectsForStudent(st.id).length ? '<div class="hint">Next, to schedule classes: open the student, add the subject with its teacher, record the payment, then press <b>Set up weekly schedule</b> on the subject line.</div>' : ''}
       ${!done && st ? '<div class="hint">To send the logins again, open the student (Login section) or the parent on the Parents page.</div>' : ''}`;
   } else {
     action = `<div class="row-form" style="margin-top:8px"><span class="hint">Rejected${r.reject_reason ? ': ' + esc(r.reject_reason) : ''}${r.decided_at ? ' · ' + esc(dayDate(r.decided_at.slice(0, 10))) : ''}</span><button class="btn-small" onclick="regReopen('${r.id}')">Reopen</button></div>`;
@@ -29406,7 +29462,7 @@ function renderRegistrations() {
       <div class="row-form">${['New', 'Accepted', 'Rejected'].map(f => `<button class="btn-small ${regFilter === f ? 'btn-primary' : ''}" onclick="regSetFilter('${f}')">${f} (${counts[f] || 0})</button>`).join('')}
         <label class="hint" style="margin-left:8px"><input type="checkbox" ${regShowArchived ? 'checked' : ''} onchange="regShowArchived=this.checked;regTicked=new Set();render()"> Show archived (${nArchived})</label>
         <button class="btn-small" style="margin-left:auto" onclick="loadRegistrations().then(()=>{regMsg='';render()})">↻ Refresh</button></div>
-      ${regMsg ? `<div class="hint" style="color:${/^Could not|not made|Type/.test(regMsg) ? 'var(--brick)' : 'var(--forest)'}">${esc(regMsg)}</div>` : ''}
+      ${regMsg ? `<div class="hint" style="color:${/^Could not|not made|Type/.test(regMsg) ? 'var(--brick)' : 'var(--forest)'}">${esc(regMsg)}${regLastAcceptedId && /Registration accepted\./.test(regMsg) && data.students.some(x => x.id === regLastAcceptedId) ? ` <button class="btn-small btn-primary" onclick="regOpenStudent('${regLastAcceptedId}','subjects')">Open student</button>` : ''}</div>` : ''}
       ${bulk}
     </div>
     ${list.length ? list.map(regCardHtml).join('') : `<div class="card"><div class="empty">No ${regFilter.toLowerCase()} forms.</div></div>`}`;
