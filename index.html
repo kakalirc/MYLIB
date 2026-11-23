@@ -849,7 +849,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-23 11:45 IST'; // Set up weekly schedule from the student page + Open student after registration Accept
+const BUILD_TIMESTAMP = '2026-11-23 22:45 IST'; // Undo Conversion fixes: paid payroll month blocks Undo, reopened booking unlinked from old demo
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -5232,7 +5232,7 @@ function demoBonusIsPaid(demo) {
   if (!demo) return false;
   if (demo.bonusPaid) return true;
   const month = (demo.convertedAt || demo.date || '').slice(0, 7);
-  if (!demo.teacherId || !/^\\d{4}-\\d{2}$/.test(month)) return false;
+  if (!demo.teacherId || !/^\d{4}-\d{2}$/.test(month)) return false;
   const payroll = payrollRecord(demo.teacherId, month);
   return !!(payroll && payroll.paid);
 }
@@ -5571,15 +5571,30 @@ async function reopenDemoLost(id) {
   const wb = await syncWixFromDemo(id, 'Done');
   demoLogMsg = 'Reopened: back to Done.' + (wb ? ' Website booking updated.' : ''); render();
 }
+// Returns true only when the conversion was reversed (false if blocked, cancelled or failed).
 async function undoDemoConvert(id) {
-  const dl = data.demoLogs.find(d => d.id === id); if (!dl) return;
-  if (demoBonusIsPaid(dl)) { demoLogMsg = 'The teacher payroll for this demo month is already paid, so this conversion cannot be undone.'; render(); return; }
-  if (!confirm('Undo Converted for ' + (dl.studentName || 'this demo') + '?\n\nThe demo goes back to Done and the ₹' + dl.bonusAmount + ' bonus comes off the teacher\'s payroll. The student record is kept.')) return;
+  const dl = data.demoLogs.find(d => d.id === id); if (!dl) return false;
+  if (demoBonusIsPaid(dl)) { demoLogMsg = 'The teacher payroll for this demo month is already paid, so this conversion cannot be undone.'; render(); return false; }
+  if (!confirm('Undo Converted for ' + (dl.studentName || 'this demo') + '?\n\nThe demo goes back to Done and the ₹' + dl.bonusAmount + ' bonus comes off the teacher\'s payroll. The student record is kept.')) return false;
   const { error } = await sb.from('demo_logs').update({ status: 'Done', converted_at: null, linked_student_id: null }).eq('id', id);
-  if (error) { demoLogMsg = 'Error: ' + error.message; render(); return; }
+  if (error) { demoLogMsg = 'Error: ' + error.message; render(); return false; }
   Object.assign(dl, { status: 'Done', convertedAt: '', linkedStudentId: '' });
   const wb = await syncWixFromDemo(id, 'Done');
   demoLogMsg = 'Converted undone: back to Done.' + (wb ? ' Website booking updated.' : ''); render();
+  return true;
+}
+// After Undo Conversion from a website booking: reopen the booking as New with no demo linked,
+// and close the old demo as Lost so it stops waiting for a result. Returns true when both saved.
+async function wixReopenBookingAfterUndo(wb, dl) {
+  const { data: saved, error } = await sb.from('wix_demo_bookings')
+    .update({ status: 'New', converted_student_id: null, demo_log_id: null, scheduled_teacher_id: null, scheduled_date: null, scheduled_time: null })
+    .eq('id', wb.id).eq('status', 'Done').select('id').maybeSingle();
+  if (error || !saved) return false;
+  Object.assign(wb, { status: 'New', convertedStudentId: '', demoLogId: null, scheduledTeacherId: null, scheduledDate: '', scheduledTime: '' });
+  const lost = { status: 'Lost', lost_at: todayStr, lost_reason: 'Other', lost_note: 'Conversion undone; website booking reopened for a new demo.', done_at: demoDoneDate(dl) };
+  const { error: lostErr } = await sb.from('demo_logs').update(lost).eq('id', dl.id);
+  if (!lostErr) Object.assign(dl, { status: 'Lost', lostAt: todayStr, lostReason: lost.lost_reason, lostNote: lost.lost_note, doneAt: lost.done_at || dl.doneAt });
+  return true;
 }
 // Teacher marks their own demo done (SQL 64 function checks it is theirs and the date has come).
 async function teacherMarkDemoDone(id) {
@@ -18074,7 +18089,8 @@ function wixConvertedDemoFor(b) {
   if (!demo) return null;
   const bookingSubject = String(b.subject || '').trim().toLowerCase();
   const demoSubject = String(subjectName(demo.subjectId) || '').trim().toLowerCase();
-  if (bookingSubject && demoSubject && demoSubject !== '—' && bookingSubject !== demoSubject) return null;
+  // Website text is free-form ('Sanskrit Class 10'), so a match is either name containing the other.
+  if (bookingSubject && demoSubject && demoSubject !== '—' && !bookingSubject.includes(demoSubject) && !demoSubject.includes(bookingSubject)) return null;
   return demo;
 }
 // Undo a converted Wix demo directly from its Demo Bookings card.
@@ -18089,16 +18105,12 @@ async function wixUndoConversion(bookingId) {
   if (demoBonusIsPaid(dl)) {
     wixBookingsMsg = 'The teacher payroll for this demo month is already paid. Conversion cannot be undone.'; render(); return;
   }
-  await undoDemoConvert(dl.id); // Uses the canonical Demo Register reversal and its confirmation prompt.
-  if (dl.status === 'Converted') return; // User cancelled or the reversal failed.
-  const { data: saved, error } = await sb.from('wix_demo_bookings')
-    .update({ status: 'New', converted_student_id: null })
-    .eq('id', wb.id).eq('status', 'Done').select('id').maybeSingle();
-  if (error || !saved) {
+  // Uses the canonical Demo Register reversal and its confirmation prompt.
+  if (!(await undoDemoConvert(dl.id))) return; // Cancelled, blocked or failed.
+  if (!(await wixReopenBookingAfterUndo(wb, dl))) {
     wixBookingsMsg = 'Demo conversion was reversed, but the Wix booking could not be reset to New. Refresh and review this booking.';
     await loadWixBookings(); render(); return;
   }
-  Object.assign(wb, { status: 'New', convertedStudentId: '' });
   wixBookingsFilter = wb.paid ? 'Paid New' : 'Not Paid New';
   wixBookingsMsg = 'Conversion undone. The student record and other subject enrolments were preserved; the paid booking can be scheduled again.';
   await loadWixBookings(); render();
