@@ -7733,6 +7733,17 @@ function teacherName(id) { const t = data.teachers.find(x=>x.id===id); return t?
 // Name + short ID, used anywhere two people might share a name — list rows and selection dropdowns.
 function teacherLabel(t) { return t.name + (t.code ? ' (' + t.code + ')' : ''); }
 function studentLabel(s) { return s.name + (s.code ? ' (' + s.code + ')' : ''); }
+function studentTypeBalanceLabel(studentId, subjectPool) {
+  return TYPES.map(type => {
+    const balances = subjectPool.filter(subj =>
+      data.subscriptions.some(p => p.studentId===studentId && p.subjectId===subj.id && p.type===type && ['Payment','TransferIn'].includes(p.kind))
+    ).map(subj => studentRemaining(studentId, subj.id, type));
+    if (!balances.length) return type === 'Individual' ? 'Individual —' : 'Group —';
+    const balance = Math.min(...balances);
+    const shortType = type === 'Individual' ? 'Individual' : 'Group';
+    return `${shortType} ${balance<=0?'⚠ ':''}${balance}`;
+  }).join(' | ');
+}
 function studentName(id) { const s = data.students.find(x=>x.id===id); return s?s.name:'—'; }
 function phoneNumbersFor(studentId, type) { return data.studentPhoneNumbers.filter(p=>p.studentId===studentId && p.type===type); }
 // Report-specific variants: always include the ID in brackets, for reports where
@@ -16655,8 +16666,7 @@ function renderLog() {
   const teacher = data.teachers.find(t=>t.id===d.teacherId);
   const roster = byName(studentsForTeacher(d.teacherId).filter(s=>!s.archived));
   const studentOptions = roster.map(s=>{
-    const lowestBal = subjectsForStudent(s.id).flatMap(subj=>TYPES.filter(ty=>data.subscriptions.some(p=>p.studentId===s.id&&p.subjectId===subj.id&&p.type===ty&&['Payment','TransferIn'].includes(p.kind))).map(ty=>studentRemaining(s.id,subj.id,ty))).reduce((a,v)=>Math.min(a,v),Infinity);
-    const bal = isFinite(lowestBal) ? ` [${lowestBal<=0?'⚠ ':' '}${lowestBal}]` : '';
+    const bal = ` [${studentTypeBalanceLabel(s.id, subjectsForStudent(s.id))}]`;
     return `<option value="${s.id}" ${d.studentId===s.id?'selected':''}>${esc(studentLabel(s))}${bal}</option>`;
   }).join('');
 
@@ -21575,9 +21585,7 @@ function renderTeacherAttendance(teacher) {
 
   const roster = byName(studentsForTeacher(teacher.id).filter(s=>!s.archived));
   const studentOptions = roster.map(s=>{
-    // Only include types where the student has actual payments — skip types never subscribed to.
-    const lowestBal = subjectsForStudentAndTeacher(s.id,teacher.id).flatMap(subj=>TYPES.filter(ty=>data.subscriptions.some(p=>p.studentId===s.id&&p.subjectId===subj.id&&p.type===ty&&['Payment','TransferIn'].includes(p.kind))).map(ty=>studentRemaining(s.id,subj.id,ty))).reduce((a,v)=>Math.min(a,v),Infinity);
-    const bal = isFinite(lowestBal) ? ` [${lowestBal<=0?'⚠ ':' '}${lowestBal}]` : '';
+    const bal = ` [${studentTypeBalanceLabel(s.id, subjectsForStudentAndTeacher(s.id,teacher.id))}]`;
     return `<option value="${s.id}" ${d.studentId===s.id?'selected':''}>${esc(studentLabel(s))}${bal}</option>`;
   }).join('');
   const availSubjects = d.studentId ? subjectsForStudentAndTeacher(d.studentId, teacher.id) : [];
