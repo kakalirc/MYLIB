@@ -18052,6 +18052,32 @@ function wixConvertedDemoFor(b) {
   return data.demoLogs.find(d => d.status === 'Converted' && d.linkedStudentId && (d.id === b.demoLogId
     || (ph && phoneKey(d.parentMobile) === ph) || (nm && (d.studentName || '').trim().toLowerCase() === nm))) || null;
 }
+// Undo a converted Wix demo directly from its Demo Bookings card.
+async function wixUndoConversion(bookingId) {
+  if (currentRole !== 'Admin') return;
+  const wb = data.wixBookings.find(b => b.id === bookingId);
+  if (!wb) { wixBookingsMsg = 'Booking not found. Refresh and try again.'; render(); return; }
+  const dl = wb.demoLogId ? data.demoLogs.find(d => d.id === wb.demoLogId) : wixConvertedDemoFor(wb);
+  if (!dl || dl.status !== 'Converted' || !dl.linkedStudentId) {
+    wixBookingsMsg = 'No linked converted Demo Register record was found. No changes were made.'; render(); return;
+  }
+  if (dl.bonusPaid) {
+    wixBookingsMsg = 'The teacher bonus has already been paid. Conversion cannot be undone.'; render(); return;
+  }
+  await undoDemoConvert(dl.id); // Uses the canonical Demo Register reversal and its confirmation prompt.
+  if (dl.status === 'Converted') return; // User cancelled or the reversal failed.
+  const { data: saved, error } = await sb.from('wix_demo_bookings')
+    .update({ status: 'New', converted_student_id: null })
+    .eq('id', wb.id).eq('status', 'Done').select('id').maybeSingle();
+  if (error || !saved) {
+    wixBookingsMsg = 'Demo conversion was reversed, but the Wix booking could not be reset to New. Refresh and review this booking.';
+    await loadWixBookings(); render(); return;
+  }
+  Object.assign(wb, { status: 'New', convertedStudentId: '' });
+  wixBookingsFilter = wb.paid ? 'Paid New' : 'Not Paid New';
+  wixBookingsMsg = 'Conversion undone. The student record and other subject enrolments were preserved; the paid booking can be scheduled again.';
+  await loadWixBookings(); render();
+}
 function renderWixBookings() {
   const filters = ['Paid New', 'Not Paid New', 'Scheduled', 'Done', 'Converted', 'Lost', 'Cancelled', 'All'].concat(wixCallsReady ? ['Calls due'] : []);
   const newCount = data.wixBookings.filter(b => b.status === 'New').length;
@@ -18181,6 +18207,10 @@ function renderWixBookings() {
     }
 
     const showAge = b.status === 'New' || b.status === 'Scheduled';
+    const convertedDemo = b.status === 'Converted' ? (b.demoLogId ? data.demoLogs.find(x => x.id === b.demoLogId) : wixConvertedDemoFor(b)) : null;
+    const bonusTeacher = convertedDemo?.teacherId ? (data.teachers.find(t => t.id === convertedDemo.teacherId) || {}).name || 'Teacher not found' : 'Not recorded';
+    const bonusAmount = convertedDemo && Number.isFinite(Number(convertedDemo.bonusAmount)) ? Number(convertedDemo.bonusAmount) : null;
+    const teacherBonusBlock = convertedDemo ? `<div style="margin-top:8px;padding:9px 10px;border:1px solid var(--border);border-radius:6px;background:var(--hover,rgba(0,0,0,.03));font-size:12px"><div style="font-weight:700;margin-bottom:4px">Teacher bonus</div><div>Teacher: <b>${esc(bonusTeacher)}</b></div><div>Bonus: <b>${bonusAmount === null ? 'Not recorded' : '₹' + bonusAmount.toLocaleString('en-IN')}</b></div><div>Payment: <b style="color:${convertedDemo.bonusPaid ? 'var(--forest)' : 'var(--brick)'}">${convertedDemo.bonusPaid ? 'Already paid' : bonusAmount > 0 ? 'Payable' : 'No payable bonus recorded'}</b></div>${!convertedDemo.bonusPaid ? `<button class="btn-small" style="margin-top:7px;color:var(--brick);border-color:var(--brick)" onclick="wixUndoConversion('${b.id}')">↩ Undo Conversion</button><div class="hint" style="font-size:11px;margin-top:4px">Available only while the teacher bonus is unpaid.</div>` : ''}</div>` : '';
     const paidBlock = !wixPaidReady ? '' : (b.amount === 0 && !b.paid) ? `<div style="margin-top:6px;font-size:12px;color:var(--forest)">Free demo</div>` : b.paid
       ? `<div style="margin-top:6px;font-size:12px;color:var(--forest)">✓ Paid${b.paidVia ? ' · ' + esc(b.paidVia) : ''}${b.paidAt ? ' · ' + new Date(b.paidAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}${b.paymentId ? ` · <span class="hint" style="font-size:11px">${esc(b.paymentId)}</span>` : ''}</div>`
       : `<div style="margin-top:6px;font-size:12px;color:var(--brick)">Not paid yet</div>`;
@@ -18197,6 +18227,7 @@ function renderWixBookings() {
             ${b.email ? `<span style="color:var(--muted)">✉ ${esc(b.email)}</span>` : ''}
           </div>
           ${paidBlock}
+          ${teacherBonusBlock}
           ${wixAckHtml(b)}
         </div>
         ${manualDemoFormHtml(b.id)}
