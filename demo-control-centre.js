@@ -276,7 +276,7 @@ async function demoCCUndoConvert(recordOrKey) {
   if(!fresh||fresh.status==='Converted'){demoCC.message='Conversion was not reversed. Refresh and review the Demo Register.';render();return;}
   const booking=record.type==='Wix Demo Booking'?record.raw:data.wixBookings.find(b=>b.demoLogId===dl.id);
   if(booking){
-    const {data:saved,error}=await sb.from('wix_demo_bookings').update({status:'New',converted_student_id:null}).eq('id',booking.id).eq('status','Converted').select('id').maybeSingle();
+    const {data:saved,error}=await sb.from('wix_demo_bookings').update({status:'New',converted_student_id:null}).eq('id',booking.id).eq('status','Done').select('id').maybeSingle();
     if(error||!saved){demoCC.message='Demo conversion was reversed, but the Wix booking could not be reset to New. Refresh and review the booking.';await loadDemoControlCentre();demoCC.selected=record.key;render();return;}
     Object.assign(booking,{status:'New',convertedStudentId:''});
   }
