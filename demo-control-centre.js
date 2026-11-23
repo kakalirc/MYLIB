@@ -286,7 +286,7 @@ async function demoCCUndoConvert(recordOrKey) {
 function demoCCSelectedDemo(record){
   if(!record)return null;
   if(record.type==='Knowledge Arena Guest')return record.linkedDemo||null;
-  if(record.type==='Wix Demo Booking')return record.raw.demoLogId?(data.demoLogs||[]).find(d=>d.id===record.raw.demoLogId)||null:null;
+  if(record.type==='Wix Demo Booking')return typeof wixConvertedDemoFor==='function'?wixConvertedDemoFor(record.raw):null;
   return (data.demoLogs||[]).find(d=>d.id===record.id)||null;
 }
 function renderDemoControlCentre() {
