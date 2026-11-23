@@ -7738,9 +7738,9 @@ function studentTypeBalanceLabel(studentId, subjectPool) {
     const balances = subjectPool.filter(subj =>
       data.subscriptions.some(p => p.studentId===studentId && p.subjectId===subj.id && p.type===type && ['Payment','TransferIn'].includes(p.kind))
     ).map(subj => studentRemaining(studentId, subj.id, type));
-    if (!balances.length) return type === 'Individual' ? 'I —' : 'G —';
+    if (!balances.length) return type === 'Individual' ? 'Individual —' : 'Group —';
     const balance = Math.min(...balances);
-    const shortType = type === 'Individual' ? 'I' : 'G';
+    const shortType = type === 'Individual' ? 'Individual' : 'Group';
     return `${shortType} ${balance<=0?'⚠ ':''}${balance}`;
   }).join(' | ');
 }
