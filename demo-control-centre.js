@@ -271,14 +271,14 @@ async function demoCCUndoConvert(recordOrKey) {
   if(!dl||dl.status!=='Converted'){demoCC.message='This enquiry has no converted Demo Register record to undo.';render();return;}
   if(demoBonusIsPaid(dl)){demoCC.message='The demo bonus has already been paid. Conversion cannot be undone.';render();return;}
   if(typeof undoDemoConvert!=='function'){demoCC.message='Undo Conversion is unavailable. Open Demo Register to reverse this conversion.';render();return;}
-  await undoDemoConvert(dl.id);
-  const fresh=(data.demoLogs||[]).find(d=>d.id===dl.id);
-  if(!fresh||fresh.status==='Converted'){demoCC.message='Conversion was not reversed. Refresh and review the Demo Register.';render();return;}
   const booking=record.type==='Wix Demo Booking'?record.raw:data.wixBookings.find(b=>b.demoLogId===dl.id);
+  demoLogMsg='';
+  if(!(await undoDemoConvert(dl.id))){
+    if(!demoLogMsg){demoCC.message='';render();return;} // Cancelled on the confirm box: nothing changed.
+    demoCC.message='Conversion was not reversed. '+demoLogMsg;render();return;
+  }
   if(booking){
-    const {data:saved,error}=await sb.from('wix_demo_bookings').update({status:'New',converted_student_id:null}).eq('id',booking.id).eq('status','Done').select('id').maybeSingle();
-    if(error||!saved){demoCC.message='Demo conversion was reversed, but the Wix booking could not be reset to New. Refresh and review the booking.';await loadDemoControlCentre();demoCC.selected=record.key;render();return;}
-    Object.assign(booking,{status:'New',convertedStudentId:''});
+    if(!(await wixReopenBookingAfterUndo(booking,dl))){demoCC.message='Demo conversion was reversed, but the Wix booking could not be reset to New. Refresh and review the booking.';await loadDemoControlCentre();demoCC.selected=record.key;render();return;}
   }
   demoCC.message='Conversion undone. The existing student and other subject enrolments were preserved. The paid booking can be scheduled with another teacher.';
   await loadDemoControlCentre();demoCC.selected=record.key;render();
