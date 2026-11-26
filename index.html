@@ -854,7 +854,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-26 07:35 IST'; // Terms · Privacy footer on every logged-in page + links in App Help
+const BUILD_TIMESTAMP = '2026-11-26 12:29 IST'; // Fee calculator: student's fee requests + Message under the card after Save
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -1906,6 +1906,11 @@ let calcMode = 'Offline';
 let calcClasses = '';
 let calcDate = todayStr;
 let calcMsg = '';
+let calcSavedStudentId = '';
+// Which list on the Fees page opened an Edit / Mark paid box ('calc' = the list under the Fee calculator), so the
+// box shows only there (both lists use the same input ids).
+let feeReqFormHost = '';
+function calcSavedFamilyKey() { return currentTab === 'fees' && calcSavedStudentId && calcSavedStudentId === calcStudentId && data.students.some(x => x.id === calcSavedStudentId) ? familyKeyOf(calcSavedStudentId) : null; }   // after Save as Fees Request: that student's fee requests show under the calculator
 // Prospect fee quote (admin Fees tab — no account/login needed for the prospect)
 let prospectName = '';
 let prospectMobile = '';
@@ -11267,9 +11272,11 @@ async function calculatorPushFeeRequest() {
   applyDiscountToLocal(local, row);
   data.subscriptions.push(local);
   const discErr = res.discountLost ? DISCOUNT_COLS_MSG : await repriceFamilyRequests(local.studentId);
+  calcSavedStudentId = calcStudentId;
   calcMsg = `Fee request for ₹${local.amountPaid.toFixed(2)} pushed for ${studentName(calcStudentId)}.` + (discErr ? ' ' + discErr : local.amountPaid < amount - 0.009 ? ` (${discountLabel(requestDiscountOf(local))})` : '');
   calcClasses = '';
   render();
+  setTimeout(() => { const el = document.getElementById('calcSavedRequests'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 100);
 }
 
 // Message box: "Short reminder" swaps the text (any edits are replaced); shows when the family was last reminded.
@@ -11657,6 +11664,7 @@ function pendingFeeRequestsByFamilyHtml() {
   const list = [...fams.values()].map(sid => ({ sid, reqs: familyPendingRequests(sid) }))
     .sort((a, b) => studentNameWithCode(a.reqs[0].studentId).localeCompare(studentNameWithCode(b.reqs[0].studentId)));
   const grand = reqs.reduce((a, r) => a + (r.amountPaid || 0), 0);
+  const calcFam = feeReqFormHost === 'calc' ? calcSavedFamilyKey() : null;   // its boxes are open under the Fee calculator
   return familySkippedHtml() + (feeReminderMsg ? `<div class="hint" style="color:var(--brick)">${esc(feeReminderMsg)}</div>` : '') + `<div class="hint" style="margin-bottom:6px">${reqs.length} request${reqs.length === 1 ? '' : 's'} from ${list.length} famil${list.length === 1 ? 'y' : 'ies'} · ₹${grand.toFixed(2)} in total. Brothers and sisters (same parent login or parent mobile) are shown together with one message.</div>
     <div class="row-form" style="margin:8px 0;align-items:center">
       <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" ${allSelected ? 'checked' : ''} onchange="selectAllPendingRequests(this.checked)"> Select all pending requests</label>
@@ -11666,6 +11674,7 @@ function pendingFeeRequestsByFamilyHtml() {
     <div class="table-scroll pending-fee-requests-scroll"><table class="pending-fee-requests-table no-stack">
       <tr class="pending-fee-head"><th>Select</th><th>Student</th><th>Subject</th><th>Type</th><th>Classes requested</th><th>Classes remaining</th><th>Amount</th><th>Requested date</th><th>Reference &amp; working</th></tr>
       ${list.map(f => {
+        const formsHere = !calcFam || familyKeyOf(f.sid) !== calcFam;
         const total = f.reqs.reduce((a, r) => a + (r.amountPaid || 0), 0);
         const kids = [...new Set(f.reqs.map(r => r.studentId))];
         const phones = familyPhones(f.sid);
@@ -11678,13 +11687,13 @@ function pendingFeeRequestsByFamilyHtml() {
           return mine.map(r => {
             const isEditing = editingRequestId === r.id;
             const subjectOptions = subjectsForStudent(r.studentId).map(s => `<option value="${s.id}" ${editRequestDraft.subjectId===s.id?'selected':''}>${esc(studentLabel(s))}</option>`).join('');
-            const editPanel = isEditing ? `<tr class="pending-fee-edit-row"><td colspan="9"><div style="margin:8px 0;padding:12px;border:1px solid var(--forest);border-radius:8px;background:rgba(60,94,66,0.06)"><div class="hint" style="margin-bottom:8px"><b>Edit pending fee request</b> — ${esc(studentNameWithCode(r.studentId))}</div>${editRequestMsg ? `<div class="hint" style="color:var(--brick)">${esc(editRequestMsg)}</div>` : ''}<div class="row-form" style="margin-bottom:0"><select onchange="editRequestDraftSet('subjectId', this.value)">${subjectOptions}</select><select onchange="editRequestDraftSet('type', this.value)">${TYPES.map(ty=>`<option value="${ty}" ${editRequestDraft.type===ty?'selected':''}>${ty}</option>`).join('')}</select><label>Classes <input type="number" id="editReqClasses_${r.id}" value="${editRequestDraft.classes}" min="0.5" step="0.5" style="width:80px" oninput="requestQuoteInput('edit','classes',this.value)"></label><label>Amount ₹ <input type="number" id="editReqAmount_${r.id}" value="${editRequestDraft.amountPaid}" min="0" step="any" style="width:100px" oninput="requestQuoteInput('edit','amount',this.value)"></label><label>Requested date <input type="date" id="editReqDate_${r.id}" value="${editRequestDraft.date}" onchange="editRequestDraft.date=this.value"></label><button class="btn-small btn-primary" onclick="saveRequestEdit('${r.id}')">Save</button><button class="btn-small" onclick="cancelEditRequest()">Cancel</button></div><div class="hint" id="editReqQuoteHint">${feeQuoteHintHtml(editRequestDraft, 'edit')}</div></div></td></tr>` : '';
+            const editPanel = isEditing && formsHere ? `<tr class="pending-fee-edit-row"><td colspan="9"><div style="margin:8px 0;padding:12px;border:1px solid var(--forest);border-radius:8px;background:rgba(60,94,66,0.06)"><div class="hint" style="margin-bottom:8px"><b>Edit pending fee request</b> — ${esc(studentNameWithCode(r.studentId))}</div>${editRequestMsg ? `<div class="hint" style="color:var(--brick)">${esc(editRequestMsg)}</div>` : ''}<div class="row-form" style="margin-bottom:0"><select onchange="editRequestDraftSet('subjectId', this.value)">${subjectOptions}</select><select onchange="editRequestDraftSet('type', this.value)">${TYPES.map(ty=>`<option value="${ty}" ${editRequestDraft.type===ty?'selected':''}>${ty}</option>`).join('')}</select><label>Classes <input type="number" id="editReqClasses_${r.id}" value="${editRequestDraft.classes}" min="0.5" step="0.5" style="width:80px" oninput="requestQuoteInput('edit','classes',this.value)"></label><label>Amount ₹ <input type="number" id="editReqAmount_${r.id}" value="${editRequestDraft.amountPaid}" min="0" step="any" style="width:100px" oninput="requestQuoteInput('edit','amount',this.value)"></label><label>Requested date <input type="date" id="editReqDate_${r.id}" value="${editRequestDraft.date}" onchange="editRequestDraft.date=this.value"></label><button class="btn-small btn-primary" onclick="saveRequestEdit('${r.id}')">Save</button><button class="btn-small" onclick="cancelEditRequest()">Cancel</button></div><div class="hint" id="editReqQuoteHint">${feeQuoteHintHtml(editRequestDraft, 'edit')}</div></div></td></tr>` : '';
             return `<tr class="pending-fee-request-row"><td data-label="Select"><input type="checkbox" aria-label="Select pending request for ${esc(studentNameWithCode(r.studentId))}" ${selectedPendingRequestIds.has(r.id) ? 'checked' : ''} onchange="togglePendingRequestSelection('${r.id}',this.checked)"></td><td data-label="Student">${esc(studentNameWithCode(r.studentId))}</td><td data-label="Subject">${esc(subjectName(r.subjectId))}</td><td data-label="Type">${r.type}</td><td data-label="Classes requested">${r.classes}</td><td data-label="Classes remaining"><b>${studentRemaining(r.studentId, r.subjectId, r.type)}</b></td><td data-label="Amount">${(r.amountPaid || 0).toFixed(2)}${requestDiscountHint(r)}</td><td data-label="Requested date"><div class="pending-request-date"><b>${esc(r.date || '—')}</b>${savedAtHtml(r.createdAt, r.date)}</div></td><td data-label="Reference &amp; working">${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${calcNoteHtml(r)}<div class="pending-request-actions">${markingPaidId === r.id ? '<span class="hint">Confirm below</span>' : `<button class="btn-small" onclick="startMarkPaid('${r.id}')">Mark paid</button><button class="btn-small" onclick="startEditRequest('${r.id}')">Edit</button><button class="icon-btn" title="Remove pending request" aria-label="Remove pending request" onclick="if(confirm('Remove this pending fee request? This cannot be undone.')) cancelFeeRequest('${r.id}')">✕</button>`}</div></td></tr>${editPanel}`;
           }).join('')
             + (kids.length > 1 ? `<tr class="pending-fee-subtotal-row"><td colspan="9"><span>Subtotal for ${esc((data.students.find(s => s.id === kid) || {}).name || '')}</span><b>₹${mine.reduce((a, r) => a + (r.amountPaid || 0), 0).toFixed(2)}</b></td></tr>` : '');
         }).join('');
         const single = f.reqs.find(r => r.id === markingPaidId);
-        const forms = (single ? markPaidFormHtml(single) : '') + markAllPaidFormHtml(f.sid);
+        const forms = formsHere ? (single ? markPaidFormHtml(single) : '') + markAllPaidFormHtml(f.sid) : '';
         return head + rows + (forms ? `<tr class="pending-fee-form-row"><td colspan="9">${forms}</td></tr>` : '');
       }).join('')}
     </table></div>`;
@@ -13365,6 +13374,83 @@ function copyProspectQuoteLog(id) {
   navigator.clipboard && navigator.clipboard.writeText(q.message);
 }
 
+// Pending fee requests of one student (with family total, Message, WhatsApp, Mark paid, Edit, Cancel).
+// Shared by Student Maintenance → Fees and the Fee calculator after Save as Fees Request.
+// inlineMessage: show the message box here (Student Maintenance); elsewhere it opens in the fee message pop-up.
+// showForms false: the Edit / Mark paid / Mark all paid boxes are open in the other list on the same page instead.
+function studentFeeRequestsListHtml(student, enrolledSubjects, inlineMessage, showForms = true) {
+  const pending = pendingFeeRequests(student.id);
+  const famPending = familyPendingRequests(student.id);
+  const sepHtml = billSeparatelyHtml(student);
+  const others = famPending.filter(r => r.studentId !== student.id);
+  const otherNames = [...new Set(others.map(r => (data.students.find(x => x.id === r.studentId) || {}).name).filter(Boolean))];
+  if (!famPending.length) return sepHtml + '<div class="empty">No pending fee requests.</div>';
+  const myTotal = pending.reduce((a, r) => a + (r.amountPaid || 0), 0), famTotal = famPending.reduce((a, r) => a + (r.amountPaid || 0), 0);
+  const showMsg = inlineMessage && feeMessageForRequestId && famPending.some(r => r.id === feeMessageForRequestId);
+  const header = sepHtml + `<div class="row-form" style="margin:6px 0">
+    <span><b>Total ₹${myTotal.toFixed(2)}</b>${others.length ? ` · with ${esc(otherNames.join(', '))} (same family): <b>₹${famTotal.toFixed(2)}</b>` : ''}</span>
+    <button class="btn-small" onclick="generateFeeMessageForRequest('${famPending[0].id}')">Message${others.length ? ' (family)' : ''}</button>
+    ${familyWaChips(student.id, familyFeeMessage(student.id))}
+    ${familyReminderHtml(student.id)}
+    ${famPending.length > 1 ? `<button class="btn-small btn-primary" onclick="startMarkAllPaid('${student.id}')">Mark all paid${others.length ? ' (family)' : ''}</button>` : ''}
+  </div>
+  ${showMsg ? `<div style="padding:8px 0">
+          ${feeMessageShortToggleHtml()}
+          <textarea id="feeMessageTextarea" rows="8" oninput="feeMessageDraft=this.value" style="width:100%;max-width:520px;font-family:inherit;font-size:14px;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box">${esc(feeMessageDraft)}</textarea>
+          <div class="row-form" style="margin-top:6px">
+            <button class="btn-small btn-primary" onclick="copyFeeMessage()">Copy</button>
+            ${familyWaChips(student.id, feeMessageDraft, true)}
+            <button class="btn-small" onclick="dismissFeeMessage()">Close</button>
+            ${aiOn()&&!aiFeeMsg.loading?'<button class="btn-small" style="background:var(--gold);border-color:var(--gold);color:#000" onclick="aiImproveFeeMessage()">✨ Improve</button>':aiOn()&&aiFeeMsg.loading?'<button class="btn-small" style="background:var(--gold);border-color:var(--gold);color:#000" disabled>Improving...</button>':""}
+            ${feeMessageCopyStatus ? `<span class="hint" style="color:${feeMessageCopyStatus==='Copied!'?'var(--forest)':'var(--brick)'}">${esc(feeMessageCopyStatus)}</span>` : ''}
+          </div>
+          <div class="hint">Parent mobile on file: <b>${esc(familyPhones(student.id).join(', ') || 'Not on file')}</b>${copyBtnHtml(familyPhones(student.id)[0])} — paste this message wherever you want to send it (WhatsApp, SMS, email).</div>
+        </div>` : ''}`;
+  if (!pending.length) return header + `<div class="empty">No pending fee requests for ${esc(student.name)}.</div>` + (showForms ? markAllPaidFormHtml(student.id) : '');
+  return header + `<div class="table-scroll"><table>
+    <tr><th>Subject</th><th>Type</th><th>Classes</th><th>Amount</th><th>Requested</th><th>Reference</th><th></th></tr>
+    ${pending.map(r => {
+      const isMarking = markingPaidId === r.id;
+      const isEditing = editingRequestId === r.id;
+      return `<tr>
+        <td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td>
+        <td>${(r.amountPaid||0).toFixed(2)}${requestDiscountHint(r)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td>
+        <td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${calcNoteHtml(r)}</td>
+        <td>
+          ${rejectPaymentMsg[r.id] ? `<div class="hint" style="color:var(--brick)">${esc(rejectPaymentMsg[r.id])}</div>` : ''}
+          ${isMarking ? `<span class="hint">Confirming payment — fill in the details below.</span>` : isEditing ? `<span class="hint">Editing — see below.</span>` : `
+            <button class="btn-small btn-primary" onclick="startMarkPaid('${r.id}')">Mark as Paid</button>
+            ${paymentInitiated(r) ? `<button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="rejectPayment('${r.id}')">Reject Payment</button>` : ''}
+            <button class="btn-small" onclick="startEditRequest('${r.id}')">Edit</button>
+            <button class="icon-btn" onclick="cancelFeeRequest('${r.id}')" title="Cancel request">✕</button>
+          `}
+        </td>
+      </tr>`;
+    }).join('')}
+  </table></div>
+  ${!showForms ? '' : pending.filter(r => r.id === editingRequestId).map(r => {
+    const d = editRequestDraft;
+    const editSubjectOptions = enrolledSubjects.map(s=>`<option value="${s.id}" ${d.subjectId===s.id?'selected':''}>${esc(studentLabel(s))}</option>`).join('');
+    return `
+  <div style="margin-top:10px;padding:12px;border:1px solid var(--forest);border-radius:8px;background:rgba(60,94,66,0.06)">
+    <div class="hint" style="margin-bottom:8px"><b>Edit fee request</b> — ${esc(subjectName(r.subjectId))}, ${r.type}</div>
+    ${editRequestMsg ? `<div class="hint" style="color:var(--brick)">${esc(editRequestMsg)}</div>` : ''}
+    <div class="row-form" style="margin-bottom:0">
+      <select onchange="editRequestDraftSet('subjectId', this.value)">${editSubjectOptions}</select>
+      <select onchange="editRequestDraftSet('type', this.value)">${TYPES.map(ty=>`<option value="${ty}" ${d.type===ty?'selected':''}>${ty}</option>`).join('')}</select>
+      <select onchange="editRequestDraftSet('mode', this.value)" title="Online/Offline — sets the Fee setup rate used for the amount">${RATE_MODES.map(md=>`<option value="${md}" ${(d.mode||'Offline')===md?'selected':''}>${md}</option>`).join('')}</select>
+      <label>Classes <input type="number" id="editReqClasses_${r.id}" value="${d.classes}" min="0.5" step="0.5" style="width:80px" oninput="requestQuoteInput('edit','classes',this.value)"></label>
+      <label>Amount <input type="number" id="editReqAmount_${r.id}" value="${d.amountPaid}" min="0" step="any" style="width:100px" oninput="requestQuoteInput('edit','amount',this.value)"></label>
+      <label>Date <input type="date" id="editReqDate_${r.id}" value="${d.date}" onchange="editRequestDraft.date=this.value"></label>
+      <button class="btn-small btn-primary" onclick="saveRequestEdit('${r.id}')">Save</button>
+      <button class="btn-small" onclick="cancelEditRequest()">Cancel</button>
+    </div>
+    <div class="hint" id="editReqQuoteHint">${feeQuoteHintHtml(d, 'edit')}</div>
+  </div>`;
+  }).join('')}
+  ${showForms ? pending.filter(r => r.id === markingPaidId).map(markPaidFormHtml).join('') : ''}
+  ${showForms ? markAllPaidFormHtml(student.id) : ''}`;
+}
 function pendingFeeRequests(studentId) {
   return data.subscriptions.filter(s=>s.studentId===studentId && s.kind==='Request')
     .slice().sort((a,b)=>(a.date||'').localeCompare(b.date||''));
@@ -16179,79 +16265,7 @@ function renderStudents() {
       </div>
       <div class="hint" id="reqQuoteHint">${feeQuoteHintHtml(requestDraft, 'new')}</div>
       <div id="reqCalcNote">${requestCalcHtml()}</div>`}
-      ${(() => {
-        const pending = pendingFeeRequests(student.id);
-        const famPending = familyPendingRequests(student.id);
-        const sepHtml = billSeparatelyHtml(student);
-        const others = famPending.filter(r => r.studentId !== student.id);
-        const otherNames = [...new Set(others.map(r => (data.students.find(x => x.id === r.studentId) || {}).name).filter(Boolean))];
-        if (!famPending.length) return sepHtml + '<div class="empty">No pending fee requests.</div>';
-        const myTotal = pending.reduce((a, r) => a + (r.amountPaid || 0), 0), famTotal = famPending.reduce((a, r) => a + (r.amountPaid || 0), 0);
-        const showMsg = feeMessageForRequestId && famPending.some(r => r.id === feeMessageForRequestId);
-        const header = sepHtml + `<div class="row-form" style="margin:6px 0">
-          <span><b>Total ₹${myTotal.toFixed(2)}</b>${others.length ? ` · with ${esc(otherNames.join(', '))} (same family): <b>₹${famTotal.toFixed(2)}</b>` : ''}</span>
-          <button class="btn-small" onclick="generateFeeMessageForRequest('${famPending[0].id}')">Message${others.length ? ' (family)' : ''}</button>
-          ${familyWaChips(student.id, familyFeeMessage(student.id))}
-          ${familyReminderHtml(student.id)}
-          ${famPending.length > 1 ? `<button class="btn-small btn-primary" onclick="startMarkAllPaid('${student.id}')">Mark all paid${others.length ? ' (family)' : ''}</button>` : ''}
-        </div>
-        ${showMsg ? `<div style="padding:8px 0">
-                ${feeMessageShortToggleHtml()}
-                <textarea id="feeMessageTextarea" rows="8" oninput="feeMessageDraft=this.value" style="width:100%;max-width:520px;font-family:inherit;font-size:14px;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box">${esc(feeMessageDraft)}</textarea>
-                <div class="row-form" style="margin-top:6px">
-                  <button class="btn-small btn-primary" onclick="copyFeeMessage()">Copy</button>
-                  ${familyWaChips(student.id, feeMessageDraft, true)}
-                  <button class="btn-small" onclick="dismissFeeMessage()">Close</button>
-                  ${aiOn()&&!aiFeeMsg.loading?'<button class="btn-small" style="background:var(--gold);border-color:var(--gold);color:#000" onclick="aiImproveFeeMessage()">✨ Improve</button>':aiOn()&&aiFeeMsg.loading?'<button class="btn-small" style="background:var(--gold);border-color:var(--gold);color:#000" disabled>Improving...</button>':""}
-                  ${feeMessageCopyStatus ? `<span class="hint" style="color:${feeMessageCopyStatus==='Copied!'?'var(--forest)':'var(--brick)'}">${esc(feeMessageCopyStatus)}</span>` : ''}
-                </div>
-                <div class="hint">Parent mobile on file: <b>${esc(familyPhones(student.id).join(', ') || 'Not on file')}</b>${copyBtnHtml(familyPhones(student.id)[0])} — paste this message wherever you want to send it (WhatsApp, SMS, email).</div>
-              </div>` : ''}`;
-        if (!pending.length) return header + `<div class="empty">No pending fee requests for ${esc(student.name)}.</div>` + markAllPaidFormHtml(student.id);
-        return header + `<div class="table-scroll"><table>
-          <tr><th>Subject</th><th>Type</th><th>Classes</th><th>Amount</th><th>Requested</th><th>Reference</th><th></th></tr>
-          ${pending.map(r => {
-            const isMarking = markingPaidId === r.id;
-            const isEditing = editingRequestId === r.id;
-            return `<tr>
-              <td>${esc(subjectName(r.subjectId))}</td><td>${r.type}</td><td>${r.classes}</td>
-              <td>${(r.amountPaid||0).toFixed(2)}${requestDiscountHint(r)}</td><td>${r.date||'—'}${savedAtHtml(r.createdAt, r.date)}</td>
-              <td>${r.paymentReference ? esc(r.paymentReference) : '<span class="hint">—</span>'}${calcNoteHtml(r)}</td>
-              <td>
-                ${rejectPaymentMsg[r.id] ? `<div class="hint" style="color:var(--brick)">${esc(rejectPaymentMsg[r.id])}</div>` : ''}
-                ${isMarking ? `<span class="hint">Confirming payment — fill in the details below.</span>` : isEditing ? `<span class="hint">Editing — see below.</span>` : `
-                  <button class="btn-small btn-primary" onclick="startMarkPaid('${r.id}')">Mark as Paid</button>
-                  ${paymentInitiated(r) ? `<button class="btn-small" style="color:var(--brick);border-color:var(--brick)" onclick="rejectPayment('${r.id}')">Reject Payment</button>` : ''}
-                  <button class="btn-small" onclick="startEditRequest('${r.id}')">Edit</button>
-                  <button class="icon-btn" onclick="cancelFeeRequest('${r.id}')" title="Cancel request">✕</button>
-                `}
-              </td>
-            </tr>`;
-          }).join('')}
-        </table></div>
-        ${pending.filter(r => r.id === editingRequestId).map(r => {
-          const d = editRequestDraft;
-          const editSubjectOptions = enrolledSubjects.map(s=>`<option value="${s.id}" ${d.subjectId===s.id?'selected':''}>${esc(studentLabel(s))}</option>`).join('');
-          return `
-        <div style="margin-top:10px;padding:12px;border:1px solid var(--forest);border-radius:8px;background:rgba(60,94,66,0.06)">
-          <div class="hint" style="margin-bottom:8px"><b>Edit fee request</b> — ${esc(subjectName(r.subjectId))}, ${r.type}</div>
-          ${editRequestMsg ? `<div class="hint" style="color:var(--brick)">${esc(editRequestMsg)}</div>` : ''}
-          <div class="row-form" style="margin-bottom:0">
-            <select onchange="editRequestDraftSet('subjectId', this.value)">${editSubjectOptions}</select>
-            <select onchange="editRequestDraftSet('type', this.value)">${TYPES.map(ty=>`<option value="${ty}" ${d.type===ty?'selected':''}>${ty}</option>`).join('')}</select>
-            <select onchange="editRequestDraftSet('mode', this.value)" title="Online/Offline — sets the Fee setup rate used for the amount">${RATE_MODES.map(md=>`<option value="${md}" ${(d.mode||'Offline')===md?'selected':''}>${md}</option>`).join('')}</select>
-            <label>Classes <input type="number" id="editReqClasses_${r.id}" value="${d.classes}" min="0.5" step="0.5" style="width:80px" oninput="requestQuoteInput('edit','classes',this.value)"></label>
-            <label>Amount <input type="number" id="editReqAmount_${r.id}" value="${d.amountPaid}" min="0" step="any" style="width:100px" oninput="requestQuoteInput('edit','amount',this.value)"></label>
-            <label>Date <input type="date" id="editReqDate_${r.id}" value="${d.date}" onchange="editRequestDraft.date=this.value"></label>
-            <button class="btn-small btn-primary" onclick="saveRequestEdit('${r.id}')">Save</button>
-            <button class="btn-small" onclick="cancelEditRequest()">Cancel</button>
-          </div>
-          <div class="hint" id="editReqQuoteHint">${feeQuoteHintHtml(d, 'edit')}</div>
-        </div>`;
-        }).join('')}
-        ${pending.filter(r => r.id === markingPaidId).map(markPaidFormHtml).join('')}
-        ${markAllPaidFormHtml(student.id)}`;
-      })()}
+      ${studentFeeRequestsListHtml(student, enrolledSubjects, true)}
 
       </div>
       <div class="student-section" style="background:#e8f8ee">
@@ -17267,7 +17281,7 @@ function renderFees() {
       </h2>
       ${rptPendingOpen ? `
       <div class="hint">Fee requests waiting to be marked Paid. These don't count toward any student's class balance yet.</div>
-      ${pendingRequestsHtml}
+      <div onpointerdown="feeReqFormHost=''" onfocusin="feeReqFormHost=''">${pendingRequestsHtml}</div>
       ${pendingRequestRows.length ? `<div class="row-form" style="margin-top:12px"><button class="btn-gold" onclick="exportPendingFeeRequests()">Export Pending fee requests report</button></div>` : ''}
       ` : `<div class="hint" style="color:var(--muted);font-size:12px">${pendingRequestRows.length ? `${pendingRequestRows.length} pending fee request${pendingRequestRows.length===1?'':'s'} — click to expand` : 'No pending fee requests — click to expand'}</div>`}
     </div>
@@ -17439,6 +17453,17 @@ function renderFees() {
         <button class="btn-primary" ${canPush?'':'disabled'} onclick="calculatorPushFeeRequest()">Save as Fees Request</button>
       </div>
     </div>
+    ${(() => {
+      const st = calcSavedStudentId && calcSavedStudentId === calcStudentId ? data.students.find(x => x.id === calcSavedStudentId) : null;
+      if (!st) return '';
+      return `<div class="card" id="calcSavedRequests" onpointerdown="feeReqFormHost='calc'" onfocusin="feeReqFormHost='calc'">
+      <h2>Fee requests · ${esc(studentNameWithCode(st.id))} <button class="help-btn" onclick="openHelp('fee-requests',event)">?</button></h2>
+      <div class="student-section" style="background:#e8f8ee">
+      ${studentFeeRequestsListHtml(st, byName(subjectsForStudent(st.id)), false, feeReqFormHost === 'calc')}
+      </div>
+      <div class="row-form" style="margin-top:8px"><button class="btn-small" onclick="studentMaintTab='fees'; setTab('students'); selectStudent('${st.id}')">Open ${esc(st.name)}'s Fees page</button></div>
+    </div>`;
+    })()}
 
   `;
 }
