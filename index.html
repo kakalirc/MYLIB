@@ -372,6 +372,11 @@ if (location.hostname !== 'app.libeducation.com') {
   .login-register-line a { color:var(--forest);font-weight:700;text-decoration:underline;text-underline-offset:3px; }
   .login-guest-link { display:inline-block;margin-top:14px;padding:10px 14px;border:1px solid var(--forest);border-radius:9px;background:rgba(60,94,66,.08);color:var(--forest);font-weight:700;font-size:13px;text-decoration:none; }
   .footer-note { text-align:center;font-size:11px;color:var(--muted);margin-top:20px;line-height:1.55;overflow-wrap:anywhere; }
+  /* Thin footer at the end of every logged-in page (not fixed, so it never covers buttons on phones). */
+  .app-footer { text-align:center;font-size:11.5px;color:var(--muted);padding:22px 12px 14px;line-height:1.6; }
+  .app-footer a { color:inherit;text-decoration:underline; }
+  .app-footer .sep { margin:0 6px; }
+  @media print { .app-footer { display:none !important; } }
   .footer-note #app-release-attribution { display:inline-block; margin:0 0 7px; padding:4px 9px; border:1px solid var(--line); border-radius:999px; background:rgba(60,94,66,.08); color:var(--forest); font-size:11px; font-weight:700; line-height:1.35; white-space:normal; overflow-wrap:anywhere; }
   .security-banner { background:rgba(166,67,46,.08);border:1px solid var(--brick);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:var(--ink); }
   .security-banner b { color:var(--brick); }
@@ -849,7 +854,7 @@ const APP_VERSION = '2026.11.1';
 const APP_LINK_LINES = ['Stable Release: https://app.libeducation.com', 'Latest Release: https://app.kakali.workers.dev/', 'LIB Education Website: https://www.libeducation.com/'];
 // Demo messages go to families who have no app login yet, so they carry only the website link.
 const WEBSITE_LINK_LINE = APP_LINK_LINES.find(l => /Website/.test(l)) || 'LIB Education Website: https://www.libeducation.com/';
-const BUILD_TIMESTAMP = '2026-11-23 22:45 IST'; // Undo Conversion fixes: paid payroll month blocks Undo, reopened booking unlinked from old demo
+const BUILD_TIMESTAMP = '2026-11-26 07:35 IST'; // Terms · Privacy footer on every logged-in page + links in App Help
 const SUPABASE_URL = 'https://kqkojscbaycolaioyarh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_q0TO3XyUaWHqrKSwpcm4Pw_q_sj-Hmq';
 const EMAIL_DOMAIN = 'lib-education.local';
@@ -12615,6 +12620,15 @@ function supportModalHtml() {
   </div>`;
 }
 
+// Same Terms / Privacy links as the login screen. Shown in the footer of every logged-in page and in App Help.
+const TERMS_URL = 'https://app.kakali.workers.dev/terms.html';
+const PRIVACY_URL = 'https://www.libeducation.com/privacypolicy';
+function legalLinksHtml() {
+  return `<a href="${TERMS_URL}" target="_blank" rel="noopener">Terms</a><span class="sep">·</span><a href="${PRIVACY_URL}" target="_blank" rel="noopener">Privacy</a>`;
+}
+function appFooterHtml() {
+  return `<footer class="app-footer no-print">${legalLinksHtml()}<span class="sep">·</span>© LIB Education</footer>`;
+}
 // The step-by-step PDF guide for each role (built from guides-src/), linked at the top of the Quick Guide.
 const HELP_GUIDE_PDF = { Admin: 'guide-admin.pdf', Teacher: 'guide-teacher.pdf', Student: 'guide-student.pdf', Parent: 'guide-parent.pdf' };
 function aiHelpPanelHtml() {
@@ -12638,6 +12652,7 @@ function aiHelpPanelHtml() {
       <button class="btn-small btn-primary" onclick="aiHelpSend()" ${aiHelp.loading?'disabled':''}>Ask</button>
       ${aiHelp.messages.length?`<button class="btn-small" onclick="aiHelp={...aiHelp,messages:[]};render()">Clear</button>`:''}
     </div>` : `<div class="hint">AI not configured — contact Admin to enable AI for interactive help.</div>`}
+    <div class="hint" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line);text-align:center;font-size:12px"><a href="${TERMS_URL}" target="_blank" rel="noopener" style="color:var(--forest)">Terms and Conditions</a> · <a href="${PRIVACY_URL}" target="_blank" rel="noopener" style="color:var(--forest)">Privacy Policy</a></div>
   </div>`;
 }
 
@@ -23628,6 +23643,7 @@ function renderPortalShell(bodyHtml) {
     ${currentRole === 'Teacher' || currentRole === 'Student' || currentRole === 'Parent' ? '' : changePasswordCardHtml()}
     ${currentRole === 'Teacher' || currentRole === 'Student' || currentRole === 'Parent' ? '' : bioSettingsCardHtml()}
     ${iosInstallHelpHtml()}
+    ${appFooterHtml()}
     ${helpPanelHtml()}
     ${aiHelpPanelHtml()}
     ${supportModalHtml()}
@@ -29711,6 +29727,7 @@ function render() {
         ${iosInstallHelpHtml()}
       </div>
     </div>
+    ${appFooterHtml()}
     ${feeMessageForRequestId && currentTab !== 'students' ? `<div class="modal-backdrop" onclick="dismissFeeMessage()"></div><div class="modal-box"><h3>Fee message</h3>${feeMessageShortToggleHtml()}<textarea id="feeMessageTextarea" rows="12" oninput="feeMessageDraft=this.value" style="width:100%;font-family:inherit;font-size:14px;padding:8px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box;resize:vertical">${esc(feeMessageDraft)}</textarea><div class="row-form" style="margin-top:8px"><button class="btn-small btn-primary" onclick="copyFeeMessage()">Copy</button>${familyWaChips((data.subscriptions.find(x=>x.id===feeMessageForRequestId)||{}).studentId||'', feeMessageDraft, true)} <button class="btn-small" onclick="dismissFeeMessage()">Close</button> ${feeMessageCopyStatus ? `<span class="hint" style="color:${feeMessageCopyStatus==='Copied!'?'var(--forest)':'var(--brick)'}">${esc(feeMessageCopyStatus)}</span>` : ''}</div></div>` : ''}
     ${helpPanelHtml()}
     ${aiHelpPanelHtml()}
